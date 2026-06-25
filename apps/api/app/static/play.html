@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LinguisPlay · 试玩</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, "Microsoft YaHei", sans-serif; background: #0d0d12; color: #e8e8ee; }
+  /* immersive background layer + readability vignette */
+  #bg { position: fixed; inset: 0; z-index: -2; background: linear-gradient(135deg,#15151c,#0d0d12); background-size: cover; background-position: center; transition: background-image .6s ease, background .6s ease; }
+  #bg::after { content: ""; position: fixed; inset: 0; z-index: -1; background: radial-gradient(ellipse at center, rgba(0,0,0,.15), rgba(0,0,0,.62)); }
+  /* fixed-height app so ONLY #chat scrolls — header + cast + goal stay pinned on top */
+  #app { max-width: 760px; margin: 0 auto; height: 100vh; height: 100dvh; display: flex; flex-direction: column; background: transparent; overflow: hidden; }
+  /* the non-play screens (login / story list / role) scroll on their own if tall */
+  #auth, #pick, #role { max-height: 100%; overflow-y: auto; }
+  header { flex: 0 0 auto; padding: 12px 16px; border-bottom: 1px solid #23232c44; display: flex; justify-content: space-between; align-items: center; gap: 8px; background: rgba(13,13,18,.55); backdrop-filter: blur(8px); z-index: 20; }
+  header b { font-size: 15px; }
+  .muted { color: #999; font-size: 12px; }
+  .card { background: #16161dee; border: 1px solid #23232c; border-radius: 12px; padding: 20px; margin: 24px; }
+  input, button, select { font: inherit; }
+  input { width: 100%; padding: 10px; margin: 6px 0; border-radius: 8px; border: 1px solid #333; background: #0d0d12; color: #eee; }
+  button { padding: 9px 14px; border: 0; border-radius: 8px; background: #5b6cff; color: #fff; cursor: pointer; font-weight: 600; }
+  button.ghost { background: #23232c; color: #bbb; }
+  button:disabled { opacity: .5; cursor: default; }
+  .iconbtn { background: transparent; padding: 4px 6px; font-size: 16px; }
+  #cast { flex: 0 0 auto; display: flex; gap: 8px; overflow-x: auto; padding: 8px 16px; border-bottom: 1px solid #23232c44; background: rgba(13,13,18,.45); }
+  .castitem { display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer; opacity: .6; min-width: 46px; }
+  .castitem.sel { opacity: 1; }
+  .castitem.sel .av { box-shadow: 0 0 0 2px #8ea2ff; }
+  .castitem small { font-size: 11px; color: #c9c9d4; white-space: nowrap; }
+  #chat { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .row { display: flex; gap: 8px; align-items: flex-end; max-width: 88%; }
+  .row.left { align-self: flex-start; }
+  .row.right { align-self: flex-end; flex-direction: row-reverse; }
+  .av { width: 34px; height: 34px; border-radius: 50%; flex: 0 0 34px; display: grid; place-items: center; font-size: 15px; font-weight: 700; color: #fff; box-shadow: 0 1px 4px #0006; }
+  .bubble { padding: 9px 13px; border-radius: 13px; line-height: 1.65; white-space: pre-wrap; }
+  .npc .bubble { background: #1c2030e6; border: 1px solid #2a3350; }
+  .who { color: #8ea2ff; font-size: 12px; margin-bottom: 3px; }
+  .me .bubble { background: #2a2350e6; border: 1px solid #3a3270; }
+  .desc { align-self: center; color: #c9c9d4; font-size: 13px; font-style: italic; text-align: center; max-width: 92%; text-shadow: 0 1px 3px #000a; padding: 2px 0; }
+  .think { align-self: flex-end; background: #20202ae6; color: #bbb; font-style: italic; padding: 9px 13px; border-radius: 13px; max-width: 88%; }
+  .typing .bubble { background: #1c2030e6; border: 1px solid #2a3350; color: #9fb0ff; }
+  .typing .bubble span { animation: blink 1.2s infinite; }
+  .typing .bubble span:nth-child(2){ animation-delay:.2s } .typing .bubble span:nth-child(3){ animation-delay:.4s }
+  @keyframes blink { 0%,60%,100%{opacity:.2} 30%{opacity:1} }
+  footer { flex: 0 0 auto; padding: 12px 16px; border-top: 1px solid #23232c44; display: flex; gap: 8px; align-items: center; background: rgba(13,13,18,.55); backdrop-filter: blur(8px); }
+  footer select { background: #0d0d12; color: #eee; border: 1px solid #333; border-radius: 8px; padding: 9px; }
+  footer input { margin: 0; }
+  #goalbar { flex: 0 0 auto; margin: 8px 16px 0; padding: 8px 12px; border-radius: 10px; background: #1a2030cc; border: 1px solid #2a3350; color: #d8e0ff; font-size: 13px; line-height: 1.5; }
+  #goalbar b { color: #ffd479; }
+  #suggest { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 4px; }
+  .chip { font-size: 12px; padding: 5px 10px; border-radius: 14px; background: #1c2030cc; border: 1px solid #2a3350; color: #9fb0ff; cursor: pointer; }
+  .chip:hover { background: #243056; }
+  #state { flex: 0 0 auto; font-size: 12px; color: #b6b6c2; padding: 6px 16px; border-top: 1px dashed #23232c66; background: rgba(13,13,18,.4); }
+  #state b { color: #8ea2ff; }
+  .hidden { display: none; }
+  a { color: #8ea2ff; cursor: pointer; }
+  /* ending card shown inline at the end of the chat */
+  .ending { align-self: center; max-width: 92%; margin: 18px 0 6px; padding: 18px 20px; border-radius: 14px;
+            text-align: center; background: #16161df2; border: 1px solid #2a3350; box-shadow: 0 6px 30px #000a; }
+  .ending .kind { font-size: 13px; letter-spacing: 2px; opacity: .85; }
+  .ending h2 { margin: 6px 0 8px; font-size: 22px; }
+  .ending p { color: #c9c9d4; line-height: 1.7; margin: 0 0 14px; }
+  .ending.true  { border-color: #4caf7d; } .ending.true  .kind { color: #6fe0a6; }
+  .ending.normal{ border-color: #5b6cff; } .ending.normal .kind { color: #9fb0ff; }
+  .ending.bad   { border-color: #c8643c; } .ending.bad   .kind { color: #ff9d6f; }
+  .ending.death { border-color: #b03a3a; } .ending.death .kind { color: #ff7a7a; }
+</style>
+</head>
+<body>
+<div id="bg"></div>
+<audio id="bgm" loop></audio>
+<audio id="sfx"></audio>
+<div id="app">
+  <header>
+    <b>LinguisPlay <span class="muted" style="font-weight:400">· AI 虚构内容</span></b>
+    <span style="display:flex; gap:8px; align-items:center">
+      <button id="soundBtn" class="iconbtn hidden" title="背景音乐开关" onclick="toggleSound()">🔊</button>
+      <button id="backBtn" class="ghost hidden" style="padding:5px 10px" onclick="backToPick()">← 剧本</button>
+      <span id="who" class="muted"></span>
+      <a id="logoutBtn" class="hidden" style="font-size:13px" onclick="doLogout()">退出</a>
+    </span>
+  </header>
+
+  <!-- login -->
+  <div id="auth" class="card">
+    <h3 style="margin-top:0">登录 / 注册</h3>
+    <input id="email" placeholder="email" value="player@demo.com" />
+    <input id="pw" type="password" placeholder="密码（≥8位）" value="player123" />
+    <div style="display:flex; gap:8px; margin-top:8px">
+      <button onclick="login()">登录</button>
+      <button class="ghost" onclick="signup()">注册（18+）</button>
+    </div>
+    <p id="authErr" style="color:#e66"></p>
+    <p class="muted">提示：直接点「注册」就能用上面的默认账号开玩。</p>
+    <p class="muted" style="border-top:1px solid #23232c; padding-top:10px; margin-top:14px; line-height:1.6">
+      ⚠️ 本产品所有剧情与角色对白均由 <b>AI 生成</b>，纯属虚构，不代表真实人物或事件，仅供 18 岁以上用户娱乐。<br>
+      如果你正经历情绪困扰或危机：中国大陆心理援助热线 <b>400-161-9995</b>；美国可拨打/发短信 <b>988</b>。
+    </p>
+  </div>
+
+  <!-- story picker -->
+  <div id="pick" class="card hidden">
+    <h3 style="margin-top:0">选择剧本</h3>
+    <div id="stories"></div>
+  </div>
+
+  <!-- role / mode picker -->
+  <div id="role" class="card hidden">
+    <div class="bar" style="justify-content:space-between"><h3 style="margin:0">选择玩法</h3><a onclick="backToStories()">← 换剧本</a></div>
+    <p class="muted" style="margin:6px 0 4px">扮演其中一个角色，亲自下场：</p>
+    <div id="roleChars"></div>
+    <p class="muted" style="border-top:1px solid #23232c; padding-top:12px; margin-top:12px">或者，当个隐形看客：</p>
+    <button style="width:100%" onclick="startRun(currentStoryId,'god',null)">👁 上帝模式 · 旁观（看角色们彼此互动）</button>
+  </div>
+
+  <!-- chat -->
+  <div id="play" class="hidden" style="flex:1; display:flex; flex-direction:column; min-height:0">
+    <div id="cast"></div>
+    <div id="goalbar" class="hidden"></div>
+    <div id="chat"></div>
+    <div id="suggest"></div>
+    <div id="state"></div>
+    <footer>
+      <select id="channel" onchange="updatePlaceholder()">
+        <option value="say">说</option>
+        <option value="do">做</option>
+        <option value="think">看/想</option>
+      </select>
+      <input id="msg" placeholder="说点什么…" onkeydown="if(event.key==='Enter')send()" />
+      <button id="sendBtn" onclick="send()">发送</button>
+    </footer>
+  </div>
+</div>
+
+<script>
+const API = "/api/v1";
+let runId = null, personaId = null, myName = "我";
+let soundOn = true, curBgmMood = null;
+let cast = [], target = null;  // target = character_id the player is addressing (null = auto)
+let currentStoryId = null, playMode = "character";
+
+const MOOD_GRAD = {
+  tense:    "linear-gradient(135deg,#2a0d12,#0d0d12)",
+  eerie:    "linear-gradient(135deg,#0c1a16,#0c0c18)",
+  warm:     "linear-gradient(135deg,#2a1d0d,#140d0a)",
+  romantic: "linear-gradient(135deg,#2a0d22,#140d18)",
+  sad:      "linear-gradient(135deg,#0d1626,#0c0c14)",
+  lonely:   "linear-gradient(135deg,#10131c,#0a0a0e)",
+  daily:    "linear-gradient(135deg,#15151c,#0d0d12)",
+  calm:     "linear-gradient(135deg,#101820,#0c0c12)",
+};
+
+async function j(path, opts={}) {
+  const r = await fetch(API + path, { credentials: "include", headers: {"Content-Type":"application/json"}, ...opts });
+  if (!r.ok) { const b = await r.json().catch(()=>({})); throw new Error(b.detail || r.status); }
+  return r.status === 204 ? null : r.json();
+}
+const show = (id) => document.getElementById(id).classList.remove("hidden");
+const hide = (id) => document.getElementById(id).classList.add("hidden");
+function escapeHtml(s){ return (s||"").replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+// ── auth ──────────────────────────────────────────────
+async function signup() {
+  try {
+    await j("/auth/signup", { method:"POST", body: JSON.stringify({ email: email.value, password: pw.value, dob: "1995-05-05", accepted_tos: true }) });
+    await afterAuth();
+  } catch(e){ authErr.textContent = e.message; }
+}
+async function login() {
+  try { await j("/auth/login", { method:"POST", body: JSON.stringify({ email: email.value, password: pw.value }) }); await afterAuth(); }
+  catch(e){ authErr.textContent = e.message; }
+}
+async function afterAuth() {
+  const me = await j("/me");
+  who.textContent = me.email;
+  hide("auth"); show("logoutBtn");
+  let masks = await j("/personas");
+  if (!masks.length) masks = [await j("/personas", { method:"POST", body: JSON.stringify({ name:"我", pronouns:"they" }) })];
+  const mask = masks.find(m=>m.is_default) || masks[0];
+  personaId = mask.id; myName = mask.name || "我";
+  const page = await j("/stories");
+  stories.innerHTML = "";
+  if (!page.items.length) { stories.innerHTML = "<p class='muted'>还没有已发布的剧本。</p>"; show("pick"); return; }
+  page.items.forEach(s => {
+    const div = document.createElement("div");
+    div.className = "card"; div.style.margin = "10px 0"; div.style.cursor = "pointer";
+    div.innerHTML = `<b>${escapeHtml(s.title)}</b><div class="muted" style="margin-top:4px">${escapeHtml(s.one_liner||"")}</div>`;
+    div.onclick = () => chooseRole(s.id);
+    stories.appendChild(div);
+  });
+  show("pick");
+}
+
+// ── role / mode selection ─────────────────────────────
+async function chooseRole(storyId) {
+  currentStoryId = storyId;
+  const story = await j(`/stories/${storyId}`);
+  const chars = (story.characters || []).filter(c => (c.presence || "present") !== "offstage");
+  roleChars.innerHTML = "";
+  chars.forEach(c => {
+    const b = document.createElement("button");
+    b.className = "ghost"; b.style.cssText = "width:100%; text-align:left; margin:4px 0";
+    b.innerHTML = `扮演 <b>${escapeHtml(c.name||"?")}</b>${c.is_lead?" · 主角":""}` +
+      (c.role ? `<span class="muted"> — ${escapeHtml(c.role)}</span>` : "");
+    b.onclick = () => startRun(storyId, "character", c.id, c.name);
+    roleChars.appendChild(b);
+  });
+  if (!chars.length) roleChars.innerHTML = "<p class='muted'>这个剧本还没有可扮演的角色。</p>";
+  hide("pick"); show("role");
+}
+function backToStories() { hide("role"); show("pick"); }
+
+// ── run lifecycle ─────────────────────────────────────
+async function startRun(storyId, mode="character", playerCharacterId=null, playerCharacterName=null) {
+  playMode = mode;
+  myName = (mode === "character" && playerCharacterName) ? playerCharacterName : "我";
+  const run = await j("/runs", { method:"POST", body: JSON.stringify({
+    story_id: storyId, persona_id: personaId, mode, player_character_id: playerCharacterId }) });
+  runId = run.id;
+  hide("role");
+  hide("pick"); show("play"); show("backBtn"); show("soundBtn");
+  resetEnded();
+  chat.innerHTML = ""; suggest.innerHTML = ""; state.innerHTML = "";
+  curBgmMood = null;
+  cast = run.cast || []; target = null; renderCast();
+  // god mode = director cues; 说/做/想 channel doesn't apply
+  channel.style.display = playMode === "god" ? "none" : "";
+  updatePlaceholder();
+  applyScene(run.state && run.state.scene);
+  const beats = await j(`/runs/${runId}/play`);
+  beats.forEach(renderBeat);
+  renderState(run.state);
+  // resuming an already-finished run: re-show its ending and keep input locked
+  if (run.state && run.state.ended) showEnding(run.state.ending);
+}
+function backToPick() { runId = null; stopBgm(); hide("play"); hide("backBtn"); hide("soundBtn"); show("pick"); }
+async function doLogout() {
+  try { await j("/auth/logout", { method:"POST" }); } catch(e){}
+  runId = null; stopBgm();
+  hide("play"); hide("pick"); hide("role"); hide("backBtn"); hide("soundBtn"); hide("logoutBtn");
+  show("auth");
+}
+
+// ── rendering ─────────────────────────────────────────
+function avatarColor(name){ let h=0; for(const c of (name||"?")) h=(h*31+c.charCodeAt(0))%360; return `hsl(${h},45%,42%)`; }
+function avatarEl(name){ const a=document.createElement("div"); a.className="av"; a.style.background=avatarColor(name); a.textContent=(name||"?").slice(0,1); return a; }
+
+function renderBeat(b) {
+  let node;
+  if (b.author === "player") {
+    if (b.type === "think") { node = document.createElement("div"); node.className = "beat think"; node.textContent = "（观察）" + b.text; }
+    else { node = makeRow("right", myName, b.text); }
+  } else if (b.type === "description") {
+    node = document.createElement("div"); node.className = "desc"; node.textContent = b.text;
+  } else {
+    node = makeRow("left", b.speaker_name || "", b.text, true);
+  }
+  chat.appendChild(node); chat.scrollTop = chat.scrollHeight;
+  return node;
+}
+function makeRow(side, name, text, withWho) {
+  const row = document.createElement("div"); row.className = "row " + side + (side==="left"?" npc":" me");
+  row.appendChild(avatarEl(name));
+  const bub = document.createElement("div"); bub.className = "bubble";
+  bub.innerHTML = (withWho ? `<div class="who">${escapeHtml(name)}</div>` : "") + escapeHtml(text);
+  row.appendChild(bub);
+  return row;
+}
+function renderCast() {
+  const el = document.getElementById("cast");
+  if (!cast.length) { el.classList.add("hidden"); return; }
+  el.classList.remove("hidden"); el.innerHTML = "";
+  const mk = (id, name) => {
+    const d = document.createElement("div");
+    d.className = "castitem" + (target === id ? " sel" : "");
+    const a = avatarEl(name); d.appendChild(a);
+    const s = document.createElement("small"); s.textContent = name; d.appendChild(s);
+    d.onclick = () => { target = (target === id ? null : id); renderCast(); updatePlaceholder(); };
+    return d;
+  };
+  el.appendChild(mk(null, "所有人"));
+  cast.forEach(c => el.appendChild(mk(c.id, c.name)));
+}
+function updateCast(next) {
+  if (!Array.isArray(next)) return;
+  const before = cast.map(c => c.id).join(",");
+  cast = next;
+  // if the person you were addressing just left the scene, fall back to "所有人"
+  if (target && !cast.some(c => c.id === target)) target = null;
+  if (before !== cast.map(c => c.id).join(",")) { renderCast(); updatePlaceholder(); }
+}
+function updatePlaceholder() {
+  const c = cast.find(x => x.id === target);
+  if (playMode === "god") {
+    msg.placeholder = c ? `把镜头给${c.name}…（引导这场戏）` : "给这场戏一个引导，如「让他们聊聊过去」（留空也能继续看）";
+    return;
+  }
+  if (channel && channel.value === "think") {
+    msg.placeholder = c ? `打量${c.name}…（看 TA 的神情/状态，可留空）` : "观察四周…（这是哪、什么情况，可留空）";
+    return;
+  }
+  msg.placeholder = c ? `单独对${c.name}说…` : "对所有人说…（点上方头像可单独对一个人说）";
+}
+
+function renderState(st) {
+  if (!st) return;
+  state.innerHTML = `第 <b>${st.act}</b> 幕 · 好感 <b>${st.affinity}</b> · 已解锁碎片 <b>${(st.unlocked_fragment_ids||[]).length}</b>`;
+  if (st.goal !== undefined) renderGoal(st.goal);
+}
+function renderGoal(goal) {
+  const el = document.getElementById("goalbar");
+  if (goal) { el.innerHTML = `🎯 <b>当前目标</b>：${escapeHtml(goal)}`; el.classList.remove("hidden"); }
+  else el.classList.add("hidden");
+}
+function renderSuggest(items) {
+  suggest.innerHTML = "";
+  (items||[]).forEach(t => {
+    const c = document.createElement("span"); c.className = "chip"; c.textContent = "💡 " + t;
+    c.onclick = () => { const isAct = t.startsWith("用「做」"); msg.value = isAct ? "" : t; if (isAct) channel.value = "do"; msg.focus(); };
+    suggest.appendChild(c);
+  });
+}
+
+// ── ending ────────────────────────────────────────────
+const KIND_LABEL = { true: "真结局", normal: "结局", bad: "坏结局", death: "你死了" };
+let ended = false;
+function showEnding(ending) {
+  if (!ending) return;
+  const kind = ending.kind || "normal";
+  const terminal = ending.terminal || kind === "death";
+  // Milestones (true/normal/bad reached by conditions) DON'T end the run — the
+  // narration is already shown inline as beats; keep the world open for exploration.
+  if (!terminal) return;
+  // Death is genuinely terminal: show the closing card and lock input.
+  ended = true;
+  const card = document.createElement("div");
+  card.className = "ending " + kind;
+  card.innerHTML = `<div class="kind">— ${KIND_LABEL[kind] || "结局"} —</div>`
+    + `<h2>${escapeHtml(ending.title || "")}</h2>`
+    + (ending.text ? `<p>${escapeHtml(ending.text)}</p>` : "");
+  const btn = document.createElement("button");
+  btn.textContent = "再玩一局 / 换个剧本"; btn.onclick = backToPick;
+  card.appendChild(btn);
+  chat.appendChild(card); chat.scrollTop = chat.scrollHeight;
+  msg.disabled = true; sendBtn.disabled = true; channel.disabled = true;
+  suggest.innerHTML = "";
+  msg.placeholder = "你已经死了";
+}
+function resetEnded() { ended = false; msg.disabled = false; channel.disabled = false; sendBtn.disabled = false; }
+
+// ── typing indicator ──────────────────────────────────
+let typingEl = null;
+function showTyping(name) {
+  typingEl = document.createElement("div"); typingEl.className = "row left typing";
+  typingEl.appendChild(avatarEl(name));
+  const b = document.createElement("div"); b.className = "bubble"; b.innerHTML = "<span>●</span><span>●</span><span>●</span>";
+  typingEl.appendChild(b); chat.appendChild(typingEl); chat.scrollTop = chat.scrollHeight;
+}
+function hideTyping(){ if (typingEl){ typingEl.remove(); typingEl = null; } }
+
+// ── typewriter / sequential beat playback ─────────────
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+function makeTypingRow(side, name) {
+  const row = document.createElement("div"); row.className = "row " + side + (side==="left"?" npc":" me");
+  row.appendChild(avatarEl(name));
+  const bub = document.createElement("div"); bub.className = "bubble";
+  const who = document.createElement("div"); who.className = "who"; who.textContent = name; bub.appendChild(who);
+  const txt = document.createElement("span"); bub.appendChild(txt);
+  row.appendChild(bub); chat.appendChild(row); chat.scrollTop = chat.scrollHeight;
+  return txt;
+}
+async function typeInto(el, text, ms=22) {
+  el.textContent = "";
+  for (const ch of (text||"")) {
+    el.textContent += ch;
+    chat.scrollTop = chat.scrollHeight;
+    // a touch of cadence: linger on punctuation so it reads like real typing
+    await sleep("，。！？…、—".includes(ch) ? ms*5 : ms);
+  }
+}
+// play one engine beat with a "typing…" pause then a typewriter reveal
+async function playBeat(b) {
+  if (b.author === "player") { renderBeat(b); return; }
+  if (b.type === "description") {
+    const node = document.createElement("div"); node.className = "desc"; chat.appendChild(node);
+    await typeInto(node, b.text, 16);   // narration types a bit faster
+  } else {
+    showTyping(b.speaker_name || "");
+    await sleep(450 + Math.random()*500);   // "thinking" beat before they speak
+    hideTyping();
+    const txt = makeTypingRow("left", b.speaker_name || "");
+    await typeInto(txt, b.text, 22);
+  }
+  chat.scrollTop = chat.scrollHeight;
+}
+
+// ── immersive scene (background / bgm / sfx) ──────────
+function applyScene(scene) {
+  if (!scene) return;
+  const mood = scene.mood || "daily";
+  bg.style.background = MOOD_GRAD[mood] || MOOD_GRAD.daily;
+  // try a real background image; if it loads, layer it on (else gradient stays)
+  if (scene.bg) {
+    const stem = scene.night ? scene.bg + "_night" : scene.bg;
+    const url = `/scene/bg/${stem}.jpg`;
+    const img = new Image();
+    img.onload = () => { bg.style.backgroundImage = `url(${url})`; };
+    img.onerror = () => { if (scene.night) { const f=new Image(); const u2=`/scene/bg/${scene.bg}.jpg`; f.onload=()=>bg.style.backgroundImage=`url(${u2})`; f.src=u2; } };
+    img.src = url;
+  }
+  // bgm by mood (loops). silent if file missing.
+  if (mood !== curBgmMood) {
+    curBgmMood = mood;
+    bgm.src = `/scene/bgm/${mood}.mp3`;
+    if (soundOn) bgm.play().catch(()=>{});
+  }
+  // one-shot sfx
+  if (scene.sfx) { sfx.src = `/scene/sfx/${scene.sfx}.mp3`; if (soundOn) sfx.play().catch(()=>{}); }
+}
+function toggleSound() {
+  soundOn = !soundOn;
+  soundBtn.textContent = soundOn ? "🔊" : "🔇";
+  if (soundOn) { bgm.play().catch(()=>{}); } else { bgm.pause(); }
+}
+function stopBgm(){ try { bgm.pause(); bgm.removeAttribute("src"); curBgmMood=null; } catch(e){} }
+
+// ── send turn (SSE) ───────────────────────────────────
+async function send() {
+  const text = msg.value.trim();
+  if (!runId || ended) return;
+  const canEmpty = playMode === "god" || channel.value === "think";  // observe/watch can be empty
+  if (!text && !canEmpty) return;
+  msg.value = ""; sendBtn.disabled = true; suggest.innerHTML = "";
+  if (text) {
+    if (playMode === "god") renderBeat({ author:"player", type:"description", text:"（旁观指引）"+text });
+    else renderBeat({ author:"player", type: channel.value==="think"?"think":"dialogue", text });
+  }
+  showTyping("");
+  // beats stream in AS the server computes each responder → play them one-by-one (typed)
+  // the moment they arrive, so the first character appears in ~2-3s, the rest follow.
+  playQ = []; playing = false; streamDone = false; firstBeat = true;
+  afterPlay = { suggest: null, ending: undefined };
+  try {
+    const r = await fetch(`${API}/runs/${runId}/play`, {
+      method:"POST", credentials:"include", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ input: text, channel: channel.value, target_character_id: target }) });
+    const reader = r.body.getReader(); const dec = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream:true });
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const line = buf.slice(0, idx).trim(); buf = buf.slice(idx+2);
+        if (!line.startsWith("data:")) continue;
+        const ev = JSON.parse(line.slice(5));
+        if (ev.event === "beat") { if (firstBeat){ hideTyping(); firstBeat=false; } playQ.push(ev.beat); pump(); }
+        else if (ev.event === "state") { renderState(ev.state); }
+        else if (ev.event === "scene") { applyScene(ev.scene); }
+        else if (ev.event === "cast") { updateCast(ev.cast); }
+        else if (ev.event === "goal") { renderGoal(ev.goal); }
+        else if (ev.event === "suggest") { afterPlay.suggest = ev.suggestions; }
+        else if (ev.event === "ending") { afterPlay.ending = ev.ending; }
+      }
+    }
+  } catch(e){ playQ.push({author:"engine",type:"description",text:"[出错] "+e.message}); pump(); }
+  hideTyping();
+  streamDone = true;
+  if (!playing) finishTurn();   // queue already drained (or nothing arrived)
+}
+// ── streaming beat queue: play arrivals one-by-one while more stream in ──
+let playQ = [], playing = false, streamDone = false, firstBeat = true, afterPlay = null;
+async function pump() {
+  if (playing) return; playing = true;
+  while (playQ.length) await playBeat(playQ.shift());
+  playing = false;
+  if (streamDone) finishTurn();
+}
+function finishTurn() {
+  if (afterPlay) {
+    if (afterPlay.suggest && !ended) renderSuggest(afterPlay.suggest);
+    if (afterPlay.ending !== undefined) showEnding(afterPlay.ending);
+    afterPlay = null;
+  }
+  sendBtn.disabled = false; msg.focus();
+}
+</script>
+</body>
+</html>

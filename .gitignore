@@ -1,0 +1,24 @@
+# secrets / env (NEVER commit — hold API keys & JWT secrets)
+.env
+.env.*
+*.env
+deploy/.env.production
+
+# python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+*.db
+*.sqlite*
+**/data/
+
+# node
+node_modules/
+dist/
+*.local
+
+# os / editor
+.DS_Store
+.idea/
+.vscode/

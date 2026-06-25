@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LinguisPlay · 剧本工坊</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, "Microsoft YaHei", sans-serif; background: #0d0d12; color: #e8e8ee; }
+  #app { max-width: 860px; margin: 0 auto; padding: 0 16px 60px; }
+  header { display: flex; justify-content: space-between; align-items: center; padding: 14px 0; border-bottom: 1px solid #23232c; position: sticky; top: 0; background: #0d0d12; z-index: 5; }
+  h1 { font-size: 17px; margin: 0; } h2 { font-size: 15px; margin: 22px 0 8px; color: #8ea2ff; border-bottom: 1px solid #23232c; padding-bottom: 5px; }
+  h3 { font-size: 13px; margin: 0 0 6px; color: #bbb; }
+  label { display: block; font-size: 12px; color: #999; margin: 8px 0 2px; }
+  input, textarea, select { width: 100%; padding: 8px; border-radius: 7px; border: 1px solid #333; background: #14141a; color: #eee; font: inherit; }
+  textarea { resize: vertical; min-height: 54px; }
+  button { padding: 8px 14px; border: 0; border-radius: 7px; background: #5b6cff; color: #fff; cursor: pointer; font-weight: 600; }
+  button.ghost { background: #23232c; color: #bbb; } button.sm { padding: 4px 9px; font-size: 12px; }
+  button.del { background: #3a1c1c; color: #e88; }
+  .card { background: #16161d; border: 1px solid #23232c; border-radius: 10px; padding: 14px; margin: 10px 0; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+  .chk { font-size: 12px; padding: 4px 8px; border-radius: 12px; border: 1px solid #2a3350; background: #14141a; color: #9fb0ff; cursor: pointer; }
+  .chk.on { background: #2a3356; }
+  .muted { color: #888; font-size: 12px; }
+  .hidden { display: none; }
+  .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .listitem { display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+  .tag { font-size: 11px; padding: 1px 7px; border-radius: 8px; background: #23232c; color: #aaa; }
+  a { color: #8ea2ff; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>📝 LinguisPlay 剧本工坊</h1>
+    <span class="bar"><span id="who" class="muted"></span><a href="/play">去试玩 →</a></span>
+  </header>
+
+  <!-- login -->
+  <div id="auth" class="card">
+    <h3>登录（作者）</h3>
+    <input id="email" placeholder="email" value="demo@linguisplay.app" />
+    <input id="pw" type="password" placeholder="密码" value="demo12345" style="margin-top:6px" />
+    <div class="bar" style="margin-top:8px"><button onclick="login()">登录</button><button class="ghost" onclick="signup()">注册</button></div>
+    <p id="authErr" style="color:#e66"></p>
+  </div>
+
+  <!-- story list -->
+  <div id="list" class="hidden">
+    <div class="bar" style="justify-content:space-between; margin-top:14px">
+      <h2 style="border:0; margin:0">我的剧本</h2>
+      <button onclick="newStory()">+ 新建剧本</button>
+    </div>
+    <div id="stories"></div>
+  </div>
+
+  <!-- editor -->
+  <div id="editor" class="hidden">
+    <div class="bar" style="justify-content:space-between; margin-top:12px">
+      <a onclick="backToList()">← 我的剧本</a>
+      <span class="bar">
+        <span id="saveMsg" class="muted"></span>
+        <button class="ghost" onclick="save(false)">保存草稿</button>
+        <button onclick="save(true)">保存并发布</button>
+      </span>
+    </div>
+
+    <h2>基本信息</h2>
+    <div class="card">
+      <label>标题</label><input id="f_title" oninput="story.title=this.value" />
+      <label>一句话简介（发现页卡片用）</label><input id="f_oneliner" oninput="story.one_liner=this.value" />
+      <label>剧情梗概</label><textarea id="f_synopsis" oninput="story.synopsis=this.value"></textarea>
+      <label>世界观 / 场景设定（开局旁白会用到）</label><textarea id="f_world" oninput="story.world_long=this.value"></textarea>
+      <div class="row2">
+        <div><label>题材标签（逗号分隔）</label><input id="f_tropes" oninput="story.trope_tags=this.value.split(/[,，]/).map(s=>s.trim()).filter(Boolean)" /></div>
+        <div><label>可见性</label><select id="f_vis" onchange="story.visibility=this.value"><option value="private">私密</option><option value="public">公开</option></select></div>
+      </div>
+    </div>
+
+    <h2>角色 <button class="sm" onclick="addChar()">+ 加角色</button></h2>
+    <div class="muted">主角（is_lead）是默认开口的人。每个角色可以挂不同的秘密。</div>
+    <div id="chars"></div>
+
+    <h2>幕 / 剧情事件 <button class="sm" onclick="addAct()">+ 加一幕</button></h2>
+    <div class="muted">进入新一幕时引擎会自动播该幕事件作为旁白，推动剧情。</div>
+    <div id="acts"></div>
+
+    <h2>秘密 / 门控碎片 <button class="sm" onclick="addSecret()">+ 加秘密</button></h2>
+    <div class="muted">核心玩法：秘密分层碎片，按「好感/章节/追问次数」解锁。retrieval_key 是给玩家追问时匹配的关键词（脱敏，别写剧透）。</div>
+    <div id="secrets"></div>
+
+    <h2>结局 <button class="sm" onclick="addEnding()">+ 加结局</button></h2>
+    <div class="muted">结局是<b>可达成的里程碑</b>，不是游戏结束——玩家在<b>最后一幕</b>按好感高低触发对应结局（取满足条件里最高级的：真＞普通＞坏），<b>之后仍能留在世界里继续探索、甚至养更高好感解锁更好的结局</b>。只有「死亡」是真正终结。死亡/坏结局也会在玩家做出致命举动时由 AI 当场触发。建议至少配一个「普通结局」兜底（好感≥0）。</div>
+    <div id="endings"></div>
+  </div>
+</div>
+
+<script>
+const API = "/api/v1";
+let story = blankStory();
+let secrets = [];
+function blankStory(){ return { id:null, title:"", one_liner:"", synopsis:"", world_long:"", trope_tags:[], visibility:"private", characters:[], acts:[], endings:[] }; }
+function gid(p){ return p + Math.random().toString(36).slice(2,8); }
+function esc(s){ return (s||"").replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+async function j(path, opts={}) {
+  const r = await fetch(API+path, { credentials:"include", headers:{"Content-Type":"application/json"}, ...opts });
+  if (!r.ok){ const b=await r.json().catch(()=>({})); throw new Error(b.detail||r.status); }
+  return r.status===204 ? null : r.json();
+}
+const show=id=>document.getElementById(id).classList.remove("hidden");
+const hide=id=>document.getElementById(id).classList.add("hidden");
+
+// ── auth ──
+async function login(){ try{ await j("/auth/login",{method:"POST",body:JSON.stringify({email:email.value,password:pw.value})}); afterAuth(); }catch(e){ authErr.textContent=e.message; } }
+async function signup(){ try{ await j("/auth/signup",{method:"POST",body:JSON.stringify({email:email.value,password:pw.value,dob:"1990-01-01",accepted_tos:true})}); afterAuth(); }catch(e){ authErr.textContent=e.message; } }
+async function afterAuth(){ const me=await j("/me"); who.textContent=me.email; hide("auth"); loadList(); }
+
+// ── story list ──
+async function loadList(){
+  const rows = await j("/me/stories");
+  stories.innerHTML = rows.length ? "" : "<p class='muted'>还没有剧本，点「新建剧本」开始。</p>";
+  rows.forEach(s=>{
+    const d=document.createElement("div"); d.className="card listitem";
+    const st = s.status==="published" ? `已发布 v${s.version}` : "草稿";
+    d.innerHTML = `<b>${esc(s.title||"未命名")}</b> <span class="bar"><span class="tag">${st}</span><span class="tag">${s.visibility==="public"?"公开":"私密"}</span></span>`;
+    d.onclick=()=>editStory(s.id);
+    stories.appendChild(d);
+  });
+  hide("editor"); show("list");
+}
+function backToList(){ loadList(); }
+
+function newStory(){ story=blankStory(); secrets=[]; openEditor(); }
+async function editStory(id){
+  story = await j(`/stories/${id}`);
+  story.trope_tags = story.trope_tags||[]; story.characters=story.characters||[]; story.acts=story.acts||[]; story.endings=story.endings||[];
+  secrets = await j(`/stories/${id}/secrets`);
+  openEditor();
+}
+function openEditor(){
+  hide("list"); show("editor"); saveMsg.textContent="";
+  f_title.value=story.title||""; f_oneliner.value=story.one_liner||""; f_synopsis.value=story.synopsis||"";
+  f_world.value=story.world_long||""; f_tropes.value=(story.trope_tags||[]).join(", "); f_vis.value=story.visibility||"private";
+  renderChars(); renderActs(); renderSecrets(); renderEndings();
+}
+
+// ── characters ──
+function addChar(){ story.characters.push({id:gid("c_"),name:"",is_lead:story.characters.length===0,persona_text:"",background:"",avatar_url:"",presence:"present",appears_from_act:0}); renderChars(); renderSecrets(); renderActs(); }
+function delChar(i){ story.characters.splice(i,1); renderChars(); renderSecrets(); renderActs(); }
+function setChar(i,k,v){ story.characters[i][k]=v; }
+function setCharNum(i,k,v){ story.characters[i][k]=parseInt(v||0); }
+function setLead(i){ story.characters.forEach((c,j)=>c.is_lead=(j===i)); renderChars(); }
+function renderChars(){
+  chars.innerHTML="";
+  story.characters.forEach((c,i)=>{
+    const d=document.createElement("div"); d.className="card";
+    d.innerHTML=`
+      <div class="bar" style="justify-content:space-between">
+        <label style="margin:0"><input type="radio" name="lead" ${c.is_lead?"checked":""} onclick="setLead(${i})" style="width:auto"> 主角</label>
+        <button class="sm del" onclick="delChar(${i})">删除</button>
+      </div>
+      <label>名字</label><input value="${esc(c.name)}" oninput="setChar(${i},'name',this.value)">
+      <label>人设（喂给 AI 演这个角色）</label><textarea oninput="setChar(${i},'persona_text',this.value)">${esc(c.persona_text)}</textarea>
+      <label>背景（可选）</label><input value="${esc(c.background||"")}" oninput="setChar(${i},'background',this.value)">
+      <div class="row2">
+        <div><label>在场状态</label><select onchange="setChar(${i},'presence',this.value)">
+          <option value="present" ${(c.presence||'present')==='present'?'selected':''}>在场·可对话</option>
+          <option value="offstage" ${c.presence==='offstage'?'selected':''}>幕后·不直接对话（鬼/缺席者，仅被提及/作怪）</option>
+        </select></div>
+        <div><label>第几幕后登场（0=一开始就在）</label><input type="number" value="${c.appears_from_act||0}" oninput="setCharNum(${i},'appears_from_act',this.value)"></div>
+      </div>`;
+    chars.appendChild(d);
+  });
+}
+
+// ── acts ──
+function addAct(){ story.acts.push({id:gid("a_"),index:story.acts.length+1,title:"",goal:"",events:[]}); renderActs(); }
+function delAct(i){ story.acts.splice(i,1); story.acts.forEach((a,j)=>a.index=j+1); renderActs(); }
+function setAct(i,k,v){ story.acts[i][k]=v; }
+function addEvent(ai){ story.acts[ai].events.push({id:gid("e_"),what_happens:"",who_character_ids:[]}); renderActs(); }
+function delEvent(ai,ei){ story.acts[ai].events.splice(ei,1); renderActs(); }
+function setEvent(ai,ei,k,v){ story.acts[ai].events[ei][k]=v; }
+function toggleWho(ai,ei,cid){ const a=story.acts[ai].events[ei].who_character_ids; const k=a.indexOf(cid); k<0?a.push(cid):a.splice(k,1); renderActs(); }
+function renderActs(){
+  acts.innerHTML="";
+  story.acts.forEach((a,i)=>{
+    const d=document.createElement("div"); d.className="card";
+    let evs="";
+    a.events.forEach((e,ei)=>{
+      const who = story.characters.map(c=>`<span class="chk ${e.who_character_ids.includes(c.id)?'on':''}" onclick="toggleWho(${i},${ei},'${c.id}')">${esc(c.name||'?')}</span>`).join("");
+      evs+=`<div style="margin:6px 0; padding:6px; border-left:2px solid #2a3350">
+        <textarea oninput="setEvent(${i},${ei},'what_happens',this.value)" placeholder="这一幕发生了什么（会作为旁白播出）">${esc(e.what_happens)}</textarea>
+        <div class="muted" style="margin-top:4px">涉及角色：</div><div class="chips">${who}</div>
+        <button class="sm del" style="margin-top:6px" onclick="delEvent(${i},${ei})">删事件</button></div>`;
+    });
+    d.innerHTML=`<div class="bar" style="justify-content:space-between"><h3>第 ${a.index} 幕</h3><button class="sm del" onclick="delAct(${i})">删这幕</button></div>
+      <label>幕标题</label><input value="${esc(a.title)}" oninput="setAct(${i},'title',this.value)">
+      <label>🎯 这一幕玩家的小目标（会作为指引显示给玩家）</label><input value="${esc(a.goal||"")}" oninput="setAct(${i},'goal',this.value)" placeholder="例：弄清楚停电的真正原因">
+      ${evs}<button class="sm ghost" style="margin-top:6px" onclick="addEvent(${i})">+ 加事件</button>`;
+    acts.appendChild(d);
+  });
+}
+
+// ── secrets ──
+function addSecret(){ secrets.push({character_id:(story.characters[0]||{}).id||"",title:"",sensitivity:"light",fragments:[]}); renderSecrets(); }
+function delSecret(i){ secrets.splice(i,1); renderSecrets(); }
+function setSecret(i,k,v){ secrets[i][k]=v; }
+function addFrag(si){ secrets[si].fragments.push({layer:secrets[si].fragments.length+1,content:"",retrieval_key:"",known_by_character_ids:[],unlock:{affinity_min:0,act_min:1,asks_min:1}}); renderSecrets(); }
+function delFrag(si,fi){ secrets[si].fragments.splice(fi,1); renderSecrets(); }
+function setFrag(si,fi,k,v){ secrets[si].fragments[fi][k]=v; }
+function setUnlock(si,fi,k,v){ secrets[si].fragments[fi].unlock[k]=parseInt(v||0); }
+function toggleKnown(si,fi,cid){ const a=secrets[si].fragments[fi].known_by_character_ids; const k=a.indexOf(cid); k<0?a.push(cid):a.splice(k,1); renderSecrets(); }
+function charOptions(sel){ return story.characters.map(c=>`<option value="${c.id}" ${c.id===sel?"selected":""}>${esc(c.name||'?')}</option>`).join(""); }
+function renderSecrets(){
+  secrets_el().innerHTML="";
+  secrets.forEach((s,i)=>{
+    const d=document.createElement("div"); d.className="card";
+    let frs="";
+    s.fragments.forEach((f,fi)=>{
+      const known = story.characters.map(c=>`<span class="chk ${f.known_by_character_ids.includes(c.id)?'on':''}" onclick="toggleKnown(${i},${fi},'${c.id}')">${esc(c.name||'?')}</span>`).join("");
+      frs+=`<div style="margin:8px 0; padding:8px; border-left:2px solid #3a3270">
+        <h3>第 ${f.layer} 层碎片</h3>
+        <label>内容（真相正文，解锁后才会被角色说出，绝不进向量库）</label><textarea oninput="setFrag(${i},${fi},'content',this.value)">${esc(f.content)}</textarea>
+        <label>retrieval_key（玩家追问时匹配的关键词，空格分隔，别写剧透）</label><input value="${esc(f.retrieval_key||"")}" oninput="setFrag(${i},${fi},'retrieval_key',this.value)">
+        <div class="muted" style="margin-top:4px">谁知道这条（known_by）：</div><div class="chips">${known}</div>
+        <label>解锁条件（全部满足才解锁）</label>
+        <div class="row3">
+          <div><span class="muted">好感≥</span><input type="number" value="${f.unlock.affinity_min||0}" oninput="setUnlock(${i},${fi},'affinity_min',this.value)"></div>
+          <div><span class="muted">第几幕≥</span><input type="number" value="${f.unlock.act_min||1}" oninput="setUnlock(${i},${fi},'act_min',this.value)"></div>
+          <div><span class="muted">追问≥</span><input type="number" value="${f.unlock.asks_min||0}" oninput="setUnlock(${i},${fi},'asks_min',this.value)"></div>
+        </div>
+        <button class="sm del" style="margin-top:6px" onclick="delFrag(${i},${fi})">删碎片</button></div>`;
+    });
+    d.innerHTML=`<div class="bar" style="justify-content:space-between"><h3>秘密 ${i+1}</h3><button class="sm del" onclick="delSecret(${i})">删秘密</button></div>
+      <div class="row2">
+        <div><label>属于哪个角色</label><select onchange="setSecret(${i},'character_id',this.value)">${charOptions(s.character_id)}</select></div>
+        <div><label>敏感度</label><select onchange="setSecret(${i},'sensitivity',this.value)">
+          <option value="light" ${s.sensitivity==='light'?'selected':''}>轻</option>
+          <option value="medium" ${s.sensitivity==='medium'?'selected':''}>中</option>
+          <option value="heavy" ${s.sensitivity==='heavy'?'selected':''}>重</option></select></div>
+      </div>
+      <label>秘密标题（话题标签，可作暗示，别写正文）</label><input value="${esc(s.title)}" oninput="setSecret(${i},'title',this.value)">
+      ${frs}<button class="sm ghost" style="margin-top:6px" onclick="addFrag(${i})">+ 加碎片层</button>`;
+    secrets_el().appendChild(d);
+  });
+}
+function secrets_el(){ return document.getElementById("secrets"); }
+
+// ── endings ──
+function addEnding(){ story.endings.push({id:gid("end_"),kind:"normal",title:"",text:"",condition:{affinity_min:0,act_min:0}}); renderEndings(); }
+function delEnding(i){ story.endings.splice(i,1); renderEndings(); }
+function setEnd(i,k,v){ story.endings[i][k]=v; }
+function setEndCond(i,k,v){ story.endings[i].condition[k]=parseInt(v||0); }
+function renderEndings(){
+  const el=document.getElementById("endings"); el.innerHTML="";
+  story.endings.forEach((e,i)=>{
+    const c=e.condition||{};
+    const opt=(v,t)=>`<option value="${v}" ${e.kind===v?"selected":""}>${t}</option>`;
+    const d=document.createElement("div"); d.className="card";
+    d.innerHTML=`<div class="bar" style="justify-content:space-between"><h3>结局 ${i+1}</h3><button class="sm del" onclick="delEnding(${i})">删结局</button></div>
+      <div class="row2">
+        <div><label>类型</label><select onchange="setEnd(${i},'kind',this.value)">
+          ${opt("true","真结局")}${opt("normal","普通结局")}${opt("bad","坏结局")}${opt("death","死亡结局")}</select></div>
+        <div><label>标题</label><input value="${esc(e.title)}" oninput="setEnd(${i},'title',this.value)"></div>
+      </div>
+      <label>结局旁白（玩家看到的收尾文字）</label><textarea oninput="setEnd(${i},'text',this.value)">${esc(e.text)}</textarea>
+      <label>触发条件（在最后一幕时，满足下面两项才算达成；好感越高越能拿到真结局）</label>
+      <div class="row2">
+        <div><span class="muted">好感≥</span><input type="number" value="${c.affinity_min||0}" oninput="setEndCond(${i},'affinity_min',this.value)"></div>
+        <div><span class="muted">第几幕≥（0=只在最后一幕）</span><input type="number" value="${c.act_min||0}" oninput="setEndCond(${i},'act_min',this.value)"></div>
+      </div>`;
+    el.appendChild(d);
+  });
+}
+
+// ── save / publish ──
+async function save(publish){
+  try{
+    saveMsg.textContent="保存中…";
+    const payload = { title:story.title, one_liner:story.one_liner, synopsis:story.synopsis, world_long:story.world_long,
+      trope_tags:story.trope_tags, visibility:story.visibility, characters:story.characters, acts:story.acts, endings:story.endings };
+    if (!story.id){ const res=await j("/stories",{method:"POST",body:JSON.stringify(payload)}); story.id=res.id; }
+    else { await j(`/stories/${story.id}`,{method:"PATCH",body:JSON.stringify(payload)}); }
+    // rewrite secrets: delete existing, recreate from the form
+    const existing = await j(`/stories/${story.id}/secrets`);
+    for (const e of existing) await j(`/stories/${story.id}/secrets/${e.id}`,{method:"DELETE"});
+    for (const s of secrets) await j(`/stories/${story.id}/secrets`,{method:"POST",body:JSON.stringify(s)});
+    if (publish){ const r=await j(`/stories/${story.id}/publish`,{method:"POST"}); saveMsg.textContent=`已发布 v${r.version} ✓`; }
+    else saveMsg.textContent="已保存草稿 ✓";
+  }catch(e){ saveMsg.textContent="出错: "+e.message; }
+}
+</script>
+</body>
+</html>

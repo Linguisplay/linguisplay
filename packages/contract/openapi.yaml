@@ -1,0 +1,575 @@
+openapi: 3.1.0
+info:
+  title: LinguisPlay API
+  version: 0.1.0-draft
+  description: >
+    Contract v0 — MVP scope per SCREENS.md (v1.1). Decoupled frontend/backend,
+    contract-first. Tabs = Discover / Chats / Me (Community deferred to P1).
+    Auth = email+password, httpOnly cookie session, DOB 18+ gate at signup.
+    AI replies stream via SSE. Gated RAG (unlock_schema) is enforced server-side
+    BEFORE semantic retrieval. This is a SKELETON: shapes are coherent enough to
+    mock (MSW) and implement against, fields will be refined in v0.x.
+servers:
+  - url: /api/v1
+
+tags:
+  - name: auth
+  - name: me
+  - name: personas
+  - name: stories
+  - name: runs
+  - name: play
+  - name: phone
+  - name: keywords
+  - name: reports
+  - name: billing
+  - name: admin
+  - name: community   # P1 — included as stub for forward-compat, not in first launch
+
+paths:
+  # ── /auth ────────────────────────────────────────────────
+  /auth/signup:
+    post:
+      tags: [auth]
+      summary: Register. Hard 18+ DOB gate + ToS/Privacy acceptance.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, dob, accepted_tos]
+              properties:
+                email: {type: string, format: email}
+                password: {type: string, minLength: 8}
+                dob: {type: string, format: date, description: "Server rejects if age < 18"}
+                accepted_tos: {type: boolean}
+      responses:
+        "201": {description: Created, content: {application/json: {schema: {$ref: "#/components/schemas/SessionUser"}}}}
+        "400": {$ref: "#/components/responses/Error"}
+        "422": {description: "Under 18 / ToS not accepted", content: {application/json: {schema: {$ref: "#/components/schemas/ErrorBody"}}}}
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Login, sets httpOnly session cookie.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object, required: [email, password], properties: {email: {type: string}, password: {type: string}}}}}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/SessionUser"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+  /auth/logout:
+    post: {tags: [auth], summary: Clear session, responses: {"204": {description: No Content}}}
+  /auth/reset:
+    post:
+      tags: [auth]
+      summary: Send password reset email.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [email], properties: {email: {type: string}}}}}}
+      responses: {"202": {description: Accepted (always, to avoid email enumeration)}}
+
+  # ── /me ──────────────────────────────────────────────────
+  /me:
+    get: {tags: [me], summary: Current user profile, security: [{cookieAuth: []}], responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Me"}}}}}}
+    patch:
+      tags: [me]
+      summary: Update display name / avatar.
+      security: [{cookieAuth: []}]
+      requestBody: {content: {application/json: {schema: {type: object, properties: {display_name: {type: string}, avatar_url: {type: string}}}}}}
+      responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Me"}}}}}
+  /me/settings:
+    get: {tags: [me], security: [{cookieAuth: []}], responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Settings"}}}}}}
+    patch:
+      tags: [me]
+      summary: Content level, notifications, etc.
+      security: [{cookieAuth: []}]
+      requestBody: {content: {application/json: {schema: {$ref: "#/components/schemas/Settings"}}}}
+      responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Settings"}}}}}
+  /me/content-level:
+    put:
+      tags: [me]
+      summary: Set content preference + trope quick-pick (A5 ContentSetup).
+      security: [{cookieAuth: []}]
+      requestBody: {content: {application/json: {schema: {type: object, properties: {content_level: {type: string, enum: [mild, moderate, mature]}, tropes: {type: array, items: {type: string}}}}}}}
+      responses: {"200": {description: OK}}
+  /me/blocks:
+    get: {tags: [me], summary: Blocked users list (Settings), security: [{cookieAuth: []}], responses: {"200": {description: OK, content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/BlockRelation"}}}}}}}
+
+  # ── /personas (玩家"面具") ─────────────────────────────────
+  /personas:
+    get: {tags: [personas], summary: My masks, security: [{cookieAuth: []}], responses: {"200": {description: OK, content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/Persona"}}}}}}}
+    post:
+      tags: [personas]
+      security: [{cookieAuth: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/PersonaInput"}}}}
+      responses: {"201": {description: Created, content: {application/json: {schema: {$ref: "#/components/schemas/Persona"}}}}}
+  /personas/{persona_id}:
+    parameters: [{$ref: "#/components/parameters/PersonaId"}]
+    get: {tags: [personas], security: [{cookieAuth: []}], responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Persona"}}}}, "404": {$ref: "#/components/responses/Error"}}}
+    patch: {tags: [personas], security: [{cookieAuth: []}], requestBody: {content: {application/json: {schema: {$ref: "#/components/schemas/PersonaInput"}}}}, responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Persona"}}}}}}
+    delete: {tags: [personas], security: [{cookieAuth: []}], responses: {"204": {description: No Content}}}
+  /personas/{persona_id}/set-default:
+    parameters: [{$ref: "#/components/parameters/PersonaId"}]
+    post: {tags: [personas], summary: Mark as default for Quick start, security: [{cookieAuth: []}], responses: {"200": {description: OK}}}
+
+  # ── /stories (作品：浏览 + 创作 + 发布快照) ──────────────────
+  /stories:
+    get:
+      tags: [stories]
+      summary: Discover feed. Public, published stories. Filter by trope tags.
+      parameters:
+        - {name: tags, in: query, schema: {type: array, items: {type: string}}, style: form, explode: true}
+        - {name: cursor, in: query, schema: {type: string}}
+      responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/StoryCardPage"}}}}}
+    post:
+      tags: [stories]
+      summary: Create a draft story (author).
+      security: [{cookieAuth: []}]
+      requestBody: {content: {application/json: {schema: {$ref: "#/components/schemas/StoryInput"}}}}
+      responses: {"201": {description: Created, content: {application/json: {schema: {$ref: "#/components/schemas/Story"}}}}}
+  /stories/{story_id}:
+    parameters: [{$ref: "#/components/parameters/StoryId"}]
+    get:
+      tags: [stories]
+      summary: StoryDetail. Public sees published snapshot; author sees working draft.
+      responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Story"}}}}, "404": {$ref: "#/components/responses/Error"}}
+    patch: {tags: [stories], summary: Edit draft (synopsis/characters/events/secrets/visibility), security: [{cookieAuth: []}], requestBody: {content: {application/json: {schema: {$ref: "#/components/schemas/StoryInput"}}}}, responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Story"}}}}}}
+    delete: {tags: [stories], security: [{cookieAuth: []}], responses: {"204": {description: No Content}}}
+  /stories/{story_id}/publish:
+    parameters: [{$ref: "#/components/parameters/StoryId"}]
+    post:
+      tags: [stories]
+      summary: >
+        Freeze current draft into an immutable snapshot version. In-progress runs
+        keep their pinned version; new runs bind to the latest. (M0 hard decision.)
+      security: [{cookieAuth: []}]
+      responses: {"200": {description: OK, content: {application/json: {schema: {type: object, properties: {story_id: {type: string}, version: {type: integer}}}}}}}
+  /stories/{story_id}/secrets:
+    parameters: [{$ref: "#/components/parameters/StoryId"}]
+    get: {tags: [stories], summary: Secrets grouped by character (F6), security: [{cookieAuth: []}], responses: {"200": {description: OK, content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/Secret"}}}}}}}
+    post: {tags: [stories], summary: Create secret (F7), security: [{cookieAuth: []}], requestBody: {content: {application/json: {schema: {$ref: "#/components/schemas/SecretInput"}}}}, responses: {"201": {description: Created, content: {application/json: {schema: {$ref: "#/components/schemas/Secret"}}}}}}
+  /stories/{story_id}/secrets/{secret_id}:
+    parameters: [{$ref: "#/components/parameters/StoryId"}, {name: secret_id, in: path, required: true, schema: {type: string}}]
+    patch: {tags: [stories], security: [{cookieAuth: []}], requestBody: {content: {application/json: {schema: {$ref: "#/components/schemas/SecretInput"}}}}, responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Secret"}}}}}}
+    delete: {tags: [stories], security: [{cookieAuth: []}], responses: {"204": {description: No Content}}}
+
+  # ── /runs (一局游玩：user + persona + story_version) ─────────
+  /runs:
+    get: {tags: [runs], summary: ChatsList — my active/recent runs, security: [{cookieAuth: []}], responses: {"200": {description: OK, content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/RunSummary"}}}}}}}
+    post:
+      tags: [runs]
+      summary: Start a run. Binds a persona (mask) + pins the story's current published version.
+      security: [{cookieAuth: []}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [story_id, persona_id], properties: {story_id: {type: string}, persona_id: {type: string}}}}}}
+      responses: {"201": {description: Created, content: {application/json: {schema: {$ref: "#/components/schemas/Run"}}}}}
+  /runs/{run_id}:
+    parameters: [{$ref: "#/components/parameters/RunId"}]
+    get: {tags: [runs], summary: Run state (act/affinity/flags/unlocked), security: [{cookieAuth: []}], responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Run"}}}}}}
+    delete: {tags: [runs], summary: Quit/abandon run, security: [{cookieAuth: []}], responses: {"204": {description: No Content}}}
+
+  # ── /runs/{id}/play (SSE 流式 + 危机检测中间件) ───────────────
+  /runs/{run_id}/play:
+    parameters: [{$ref: "#/components/parameters/RunId"}]
+    get:
+      tags: [play]
+      summary: Replay existing beats for this run (resume on open).
+      security: [{cookieAuth: []}]
+      responses: {"200": {description: OK, content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/Beat"}}}}}}
+    post:
+      tags: [play]
+      summary: >
+        Submit a player input. Response is text/event-stream (SSE). The engine runs:
+        gate fragments by run state → pgvector rank → compose prompt (known_by + guard)
+        → LLM → write side-effects (phone items, keywords, state, async hooks).
+        A crisis-detection middleware may interrupt with a non-overridable resource card.
+      security: [{cookieAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [input]
+              properties:
+                input: {type: string}
+                channel: {type: string, enum: [say, think, do], default: say, description: "三件套输入栏"}
+      responses:
+        "200":
+          description: SSE stream of events
+          content:
+            text/event-stream:
+              schema: {$ref: "#/components/schemas/SSEEnvelope"}
+
+  # ── /runs/{id}/phone/* (小手机；引擎写入，多为只读) ──────────
+  /runs/{run_id}/phone/messages:
+    parameters: [{$ref: "#/components/parameters/RunId"}]
+    get: {tags: [phone], summary: Message threads, security: [{cookieAuth: []}], responses: {"200": {description: OK, content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/MessageThread"}}}}}}}
+    post:
+      tags: [phone]
+      summary: Player sends a message (代发). NPC reply goes through the engine.
+      security: [{cookieAuth: []}]
+      requestBody: {content: {application/json: {schema: {type: object, required: [thread_id, text], properties: {thread_id: {type: string}, text: {type: string}}}}}}
+      responses: {"202": {description: "Accepted; reply arrives via engine / async hook"}}
+  /runs/{run_id}/phone/calls:
+    parameters: [{$ref: "#/components/parameters/RunId"}]
+    get: {tags: [phone], summary: Call log (read-only MVP), security: [{cookieAuth: []}], responses: {"200": {description: OK, content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/CallEntry"}}}}}}}
+  /runs/{run_id}/phone/mail:
+    parameters: [{$ref: "#/components/parameters/RunId"}]
+    get: {tags: [phone], security: [{cookieAuth: []}], responses: {"200": {description: OK, content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/MailItem"}}}}}}}
+  /runs/{run_id}/phone/calendar:
+    parameters: [{$ref: "#/components/parameters/RunId"}]
+    get: {tags: [phone], security: [{cookieAuth: []}], responses: {"200": {description: OK, content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/CalendarEvent"}}}}}}}
+  /runs/{run_id}/phone/notes:
+    parameters: [{$ref: "#/components/parameters/RunId"}]
+    get:
+      tags: [phone]
+      summary: >
+        Notes app = AI long-term core memory, ONLY unlocked cognition. Mirrors the
+        gate — flipping the phone never leaks un-unlocked secrets. Read-only.
+      security: [{cookieAuth: []}]
+      responses: {"200": {description: OK, content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/Note"}}}}}}
+  /runs/{run_id}/phone/pay:
+    parameters: [{$ref: "#/components/parameters/RunId"}]
+    get: {tags: [phone], summary: Venmo-style activity (read-only), security: [{cookieAuth: []}], responses: {"200": {description: OK, content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/PayEntry"}}}}}}}
+  /runs/{run_id}/phone/browser:
+    parameters: [{$ref: "#/components/parameters/RunId"}]
+    get: {tags: [phone], summary: Browser history grouped by day, security: [{cookieAuth: []}], responses: {"200": {description: OK, content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/BrowserEntry"}}}}}}}
+  /runs/{run_id}/phone/contacts:
+    parameters: [{$ref: "#/components/parameters/RunId"}]
+    get: {tags: [phone], summary: "Two-layer contact cards (objective chips + subjective note)", security: [{cookieAuth: []}], responses: {"200": {description: OK, content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/Contact"}}}}}}}
+
+  # ── /runs/{id}/keywords ──────────────────────────────────
+  /runs/{run_id}/keywords:
+    parameters: [{$ref: "#/components/parameters/RunId"}]
+    get: {tags: [keywords], summary: Collected keywords (Codex objective layer), security: [{cookieAuth: []}], responses: {"200": {description: OK, content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/Keyword"}}}}}}}
+  /runs/{run_id}/keywords/{keyword_id}/accept:
+    parameters: [{$ref: "#/components/parameters/RunId"}, {name: keyword_id, in: path, required: true, schema: {type: string}}]
+    post: {tags: [keywords], summary: Add suggested keyword to phone Keywords, security: [{cookieAuth: []}], responses: {"200": {description: OK}}}
+  /runs/{run_id}/keywords/{keyword_id}/skip:
+    parameters: [{$ref: "#/components/parameters/RunId"}, {name: keyword_id, in: path, required: true, schema: {type: string}}]
+    post: {tags: [keywords], security: [{cookieAuth: []}], responses: {"200": {description: OK}}}
+
+  # ── /reports (通用举报 + DMCA) ────────────────────────────
+  /reports:
+    post:
+      tags: [reports]
+      summary: Report content or user (story/post/comment/user) + DMCA entry.
+      security: [{cookieAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_type, target_id, reason]
+              properties:
+                target_type: {type: string, enum: [story, post, comment, user, dmca]}
+                target_id: {type: string}
+                reason: {type: string}
+                detail: {type: string}
+      responses: {"202": {description: Accepted}}
+
+  # ── /billing (Stripe 网页订阅) ────────────────────────────
+  /billing/checkout:
+    post:
+      tags: [billing]
+      summary: Create Stripe Checkout session for a tier.
+      security: [{cookieAuth: []}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [tier], properties: {tier: {type: string, enum: [plus_4_99, pro_14_99, max_29_99]}}}}}}
+      responses: {"200": {description: OK, content: {application/json: {schema: {type: object, properties: {checkout_url: {type: string}}}}}}}
+  /billing/portal:
+    post: {tags: [billing], summary: Stripe customer portal link, security: [{cookieAuth: []}], responses: {"200": {description: OK, content: {application/json: {schema: {type: object, properties: {portal_url: {type: string}}}}}}}}
+  /billing/webhook:
+    post: {tags: [billing], summary: "Stripe webhook (no auth; signature-verified)", responses: {"200": {description: OK}}}
+
+  # ── /admin (v0 运营，独立简易后台) ────────────────────────
+  /admin/reports:
+    get: {tags: [admin], summary: Report queue, security: [{cookieAuth: []}], responses: {"200": {description: OK}}}
+  /admin/takedown:
+    post: {tags: [admin], summary: Take down content, security: [{cookieAuth: []}], responses: {"200": {description: OK}}}
+
+  # ── /community (P1 — stub) ───────────────────────────────
+  /community/posts:
+    get: {tags: [community], summary: "P1. Community feed (deferred from MVP).", responses: {"501": {description: Not Implemented in v0}}}
+
+components:
+  securitySchemes:
+    cookieAuth: {type: apiKey, in: cookie, name: lp_session}
+
+  parameters:
+    PersonaId: {name: persona_id, in: path, required: true, schema: {type: string}}
+    StoryId: {name: story_id, in: path, required: true, schema: {type: string}}
+    RunId: {name: run_id, in: path, required: true, schema: {type: string}}
+
+  responses:
+    Error:
+      description: Error
+      content: {application/json: {schema: {$ref: "#/components/schemas/ErrorBody"}}}
+
+  schemas:
+    ErrorBody:
+      type: object
+      properties: {error: {type: string}, detail: {type: string}}
+
+    SessionUser:
+      type: object
+      properties: {id: {type: string}, email: {type: string}, display_name: {type: string}}
+
+    Me:
+      type: object
+      properties:
+        id: {type: string}
+        email: {type: string}
+        display_name: {type: string}
+        avatar_url: {type: string}
+        subscription_tier: {type: string, enum: [free, plus_4_99, pro_14_99, max_29_99]}
+
+    Settings:
+      type: object
+      properties:
+        content_level: {type: string, enum: [mild, moderate, mature]}
+        notifications_enabled: {type: boolean}
+        default_privacy_private: {type: boolean, default: true, description: "NA market: runs private by default"}
+
+    BlockRelation:
+      type: object
+      properties:
+        user_id: {type: string}
+        display_name: {type: string}
+        state: {type: string, enum: [mute, block, remove], description: "08_Social three-tier relationship"}
+
+    Persona:
+      description: A player "mask". Storage key for a run = (user, persona, story_version); masks are fully isolated.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        pronouns: {type: string, enum: [she, they, he, custom]}
+        pronouns_custom: {type: string}
+        tagline: {type: string}
+        background: {type: string, description: "Persona text fed to the engine"}
+        avatar_url: {type: string}
+        is_default: {type: boolean}
+    PersonaInput:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string}
+        pronouns: {type: string, enum: [she, they, he, custom]}
+        pronouns_custom: {type: string}
+        tagline: {type: string}
+        background: {type: string}
+        avatar_url: {type: string}
+
+    TropeTag: {type: string, description: "e.g. enemies_to_lovers, slow_burn, fake_dating, forced_proximity"}
+
+    StoryCard:
+      type: object
+      properties:
+        id: {type: string}
+        title: {type: string}
+        cover_url: {type: string}
+        one_liner: {type: string}
+        trope_tags: {type: array, items: {$ref: "#/components/schemas/TropeTag"}}
+    StoryCardPage:
+      type: object
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/StoryCard"}}
+        next_cursor: {type: string, nullable: true}
+
+    Story:
+      type: object
+      properties:
+        id: {type: string}
+        title: {type: string}
+        cover_url: {type: string}
+        synopsis: {type: string}
+        world_long: {type: string, description: "Long worldbuilding text"}
+        relations_overview: {type: string}
+        trope_tags: {type: array, items: {$ref: "#/components/schemas/TropeTag"}}
+        visibility: {type: string, enum: [private, public]}
+        status: {type: string, enum: [draft, published]}
+        version: {type: integer, description: "Published snapshot version; 0 = unpublished draft"}
+        characters: {type: array, items: {$ref: "#/components/schemas/Character"}}
+        acts: {type: array, items: {$ref: "#/components/schemas/Act"}}
+        completion: {type: number, description: "0..1 setup completeness"}
+    StoryInput:
+      type: object
+      properties:
+        title: {type: string}
+        cover_url: {type: string}
+        synopsis: {type: string}
+        world_long: {type: string}
+        relations_overview: {type: string}
+        trope_tags: {type: array, items: {$ref: "#/components/schemas/TropeTag"}}
+        visibility: {type: string, enum: [private, public]}
+        characters: {type: array, items: {$ref: "#/components/schemas/CharacterInput"}}
+        acts: {type: array, items: {$ref: "#/components/schemas/Act"}}
+
+    Character:
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        role: {type: string, description: "e.g. lead"}
+        is_lead: {type: boolean}
+        avatar_url: {type: string}
+        persona_text: {type: string, description: "Character persona for the engine"}
+        background: {type: string}
+        relations: {type: array, items: {type: object, properties: {character_id: {type: string}, note: {type: string}}}}
+        linked_event_ids: {type: array, items: {type: string}}
+    CharacterInput:
+      allOf: [{$ref: "#/components/schemas/Character"}]
+
+    Act:
+      type: object
+      properties:
+        id: {type: string}
+        index: {type: integer}
+        title: {type: string}
+        events: {type: array, items: {$ref: "#/components/schemas/StoryEvent"}}
+    StoryEvent:
+      type: object
+      properties:
+        id: {type: string}
+        what_happens: {type: string}
+        who_character_ids: {type: array, items: {type: string}}
+        linked_secret_ids: {type: array, items: {type: string}}
+
+    Secret:
+      description: A character secret, revealed via gated fragments (the core differentiator).
+      type: object
+      properties:
+        id: {type: string}
+        character_id: {type: string}
+        title: {type: string}
+        sensitivity: {type: string, enum: [light, medium, heavy], description: "How late it may surface"}
+        fragments: {type: array, items: {$ref: "#/components/schemas/Fragment"}}
+    SecretInput:
+      allOf: [{$ref: "#/components/schemas/Secret"}]
+
+    Fragment:
+      description: One layer of a secret. Gated server-side BEFORE pgvector retrieval.
+      type: object
+      properties:
+        id: {type: string}
+        layer: {type: integer, description: "Reveal order within the secret"}
+        content: {type: string, description: "Full text — NEVER embedded raw"}
+        retrieval_key: {type: string, description: "Sanitized key that IS embedded for pgvector"}
+        known_by_character_ids: {type: array, items: {type: string}}
+        unlock:
+          type: object
+          description: All conditions ANDed.
+          properties:
+            affinity_min: {type: integer}
+            act_min: {type: integer}
+            asks_min: {type: integer, description: "How many times player must probe"}
+            trigger_event_ids: {type: array, items: {type: string}}
+
+    RunSummary:
+      type: object
+      properties:
+        id: {type: string}
+        story_id: {type: string}
+        story_title: {type: string}
+        cover_url: {type: string}
+        persona_id: {type: string}
+        last_beat_preview: {type: string}
+        unread: {type: boolean, description: "Async hook: character messaged you"}
+        updated_at: {type: string, format: date-time}
+    RunState:
+      type: object
+      properties:
+        act: {type: integer}
+        affinity: {type: integer}
+        flags: {type: object, additionalProperties: true}
+        unlocked_fragment_ids: {type: array, items: {type: string}}
+    Run:
+      type: object
+      properties:
+        id: {type: string}
+        story_id: {type: string}
+        story_version: {type: integer}
+        persona_id: {type: string}
+        state: {$ref: "#/components/schemas/RunState"}
+        created_at: {type: string, format: date-time}
+
+    Beat:
+      description: One rendered turn segment. D1 has three layouts.
+      type: object
+      properties:
+        id: {type: string}
+        type: {type: string, enum: [description, think, dialogue]}
+        speaker_name: {type: string, description: "for dialogue"}
+        text: {type: string}
+    SSEEnvelope:
+      description: >
+        Shape of SSE 'data:' payloads. event names: token | beat | sideeffect | state | crisis | done.
+      type: object
+      properties:
+        event: {type: string, enum: [token, beat, sideeffect, state, crisis, done]}
+        token: {type: string, description: "incremental text (event=token)"}
+        beat: {$ref: "#/components/schemas/Beat"}
+        sideeffect:
+          type: object
+          description: Engine wrote a phone item / keyword (event=sideeffect)
+          properties:
+            kind: {type: string, enum: [message, call, mail, calendar, note, pay, browser, keyword]}
+            ref_id: {type: string}
+        state: {$ref: "#/components/schemas/RunState"}
+        crisis:
+          type: object
+          description: Non-overridable crisis resource card (event=crisis)
+          properties:
+            resource: {type: string, example: "988 Suicide & Crisis Lifeline"}
+            message: {type: string}
+
+    MessageThread:
+      type: object
+      properties:
+        id: {type: string}
+        contact_name: {type: string}
+        messages: {type: array, items: {$ref: "#/components/schemas/Message"}}
+    Message:
+      type: object
+      properties:
+        id: {type: string}
+        from: {type: string, enum: [player, npc]}
+        text: {type: string}
+        at: {type: string, format: date-time}
+
+    CallEntry:
+      type: object
+      properties: {id: {type: string}, direction: {type: string, enum: [in, out, missed]}, contact_name: {type: string}, duration_sec: {type: integer}, note: {type: string}, at: {type: string, format: date-time}}
+    MailItem:
+      type: object
+      properties: {id: {type: string}, from: {type: string}, subject: {type: string}, preview: {type: string}, body: {type: string}, unread: {type: boolean}, at: {type: string, format: date-time}}
+    CalendarEvent:
+      type: object
+      properties: {id: {type: string}, date: {type: string, format: date}, title: {type: string}, note: {type: string}}
+    Note:
+      type: object
+      description: Unlocked cognition only. Engine appends; read-only to player.
+      properties: {id: {type: string}, title: {type: string}, body: {type: string}, updated_at: {type: string, format: date-time}}
+    PayEntry:
+      type: object
+      properties: {id: {type: string}, from_name: {type: string}, to_name: {type: string}, memo: {type: string}, emoji: {type: string}, amount_hidden: {type: boolean, default: true}, at: {type: string, format: date-time}}
+    BrowserEntry:
+      type: object
+      properties: {id: {type: string}, day: {type: string, format: date}, title: {type: string}, url: {type: string}, snapshot_card: {type: string}}
+    Contact:
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        objective_chips: {type: array, items: {type: string}, description: "From his notes; may include +N locked"}
+        locked_count: {type: integer}
+        subjective_note: {type: string, description: "His note"}
+
+    Keyword:
+      type: object
+      properties:
+        id: {type: string}
+        chip: {type: string}
+        source_excerpt: {type: string}
+        at: {type: string, format: date-time}
+        status: {type: string, enum: [suggested, accepted, skipped]}
