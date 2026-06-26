@@ -142,6 +142,31 @@ ACTS = [
      ]},
 ]
 
+# Concrete physical places in the walled city — anchors the player's position so the model
+# describes real fixtures (not vague atmosphere) and keeps movement consistent.
+LOCATIONS = [
+    {"id": "loc_alley", "name": "城寨暗巷",
+     "detail": "终年不见天日的逼仄巷道，头顶电线与水管缠成一团，滴着不知名的水。墙面爬满霉斑和层层叠叠的招牌，"
+     "脚下污水横流，空气里混着潮气、油烟和铁锈味。两侧是密不透风的违建楼，窗口透出昏黄的灯。",
+     "exits": ["龙卷风的理发店", "巷口", "大牌档"]},
+    {"id": "loc_barber", "name": "龙卷风的理发店",
+     "detail": "一间窄小的旧式理发店，一张吱呀作响的转椅，墙上斑驳的镜子，剃刀和热毛巾搁在木台上。"
+     "这里是城寨的'客厅'，几个后生仔常围在门口的矮凳上抽烟、嬉闹。龙卷风多半就在椅子边。",
+     "exits": ["城寨暗巷"]},
+    {"id": "loc_mouth", "name": "巷口",
+     "detail": "城寨通向外界的一个隘口，光线在这里骤然亮起来。几步之外就是车水马龙的城外世界。"
+     "收地、寻衅的人，往往先堵在这里。",
+     "exits": ["城寨暗巷"]},
+    {"id": "loc_dai", "name": "大牌档",
+     "detail": "巷子里一处露天熟食档，几张油腻的折叠桌、长凳，炉火上大铁锅冒着热气。"
+     "四仔这类包打听最爱在这儿一边吃一边收风，城里城外的消息都从这桌流到那桌。",
+     "exits": ["城寨暗巷"]},
+    {"id": "loc_roof", "name": "天台",
+     "detail": "爬上锈蚀的铁梯才到的违建天台，是城寨少有能看见天的地方。晾衣绳横七竖八，水箱锈迹斑斑，"
+     "脚下是密密麻麻、几乎连成一片的楼顶。围城时，这里是俯瞰全局、也是退无可退的地方。",
+     "exits": ["城寨暗巷"]},
+]
+
 # (title, character_id, sensitivity, known_by, [fragments])
 # fragment = (fragment_id, layer, content, retrieval_key, unlock)
 # fragment_id is explicit + stable so acts' advance gates can reference it.
@@ -282,6 +307,7 @@ def main() -> None:
             characters=CHARACTERS,
             acts=ACTS,
             endings=ENDINGS,
+            locations=LOCATIONS,
             visibility="public",
         )
         db.add(story)

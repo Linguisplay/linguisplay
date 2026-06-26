@@ -50,6 +50,9 @@
   footer input { margin: 0; }
   #goalbar { flex: 0 0 auto; margin: 8px 16px 0; padding: 8px 12px; border-radius: 10px; background: #1a2030cc; border: 1px solid #2a3350; color: #d8e0ff; font-size: 13px; line-height: 1.5; }
   #goalbar b { color: #ffd479; }
+  #placebar { flex: 0 0 auto; margin: 6px 16px 0; padding: 7px 12px; border-radius: 10px; background: #18221bcc; border: 1px solid #2c4233; color: #cfe6d4; font-size: 12.5px; line-height: 1.5; }
+  #placebar b { color: #8fe0a6; }
+  #placebar .exits { color: #8aa092; }
   #clues { flex: 0 0 auto; margin: 6px 16px 0; padding: 8px 12px; border-radius: 10px; background: #161c2acc; border: 1px solid #2a3350; font-size: 12.5px; line-height: 1.7; }
   #clues .hd { color: #9fb0ff; font-weight: 600; }
   #clues .it { color: #c9c9d4; } #clues .it.done { color: #6fe0a6; }
@@ -122,6 +125,7 @@
   <!-- chat -->
   <div id="play" class="hidden" style="flex:1; display:flex; flex-direction:column; min-height:0">
     <div id="cast"></div>
+    <div id="placebar" class="hidden"></div>
     <div id="goalbar" class="hidden"></div>
     <div id="clues" class="hidden"></div>
     <div id="chat"></div>
@@ -314,6 +318,15 @@ function renderState(st) {
   state.innerHTML = `第 <b>${st.act}</b> 幕 · 好感 <b>${st.affinity}</b> · 已解锁碎片 <b>${(st.unlocked_fragment_ids||[]).length}</b>`;
   if (st.goal !== undefined) renderGoal(st.goal);
   if (st.progress !== undefined) renderProgress(st.progress);
+  if (st.location !== undefined) renderPlace(st.location);
+}
+function renderPlace(loc) {
+  const el = document.getElementById("placebar");
+  if (!loc || !loc.name) { el.classList.add("hidden"); return; }
+  const exits = (loc.exits||[]).filter(Boolean);
+  const ex = exits.length ? `　<span class="exits">→ 可去：${exits.map(escapeHtml).join("、")}</span>` : "";
+  el.innerHTML = `📍 <b>${escapeHtml(loc.name)}</b>${ex}`;
+  el.classList.remove("hidden");
 }
 function renderGoal(goal) {
   const el = document.getElementById("goalbar");
@@ -476,6 +489,7 @@ async function send() {
         else if (ev.event === "scene") { applyScene(ev.scene); }
         else if (ev.event === "cast") { updateCast(ev.cast); }
         else if (ev.event === "goal") { renderGoal(ev.goal); }
+        else if (ev.event === "place") { renderPlace(ev.location); }
         else if (ev.event === "progress") { renderProgress(ev.progress); }
         else if (ev.event === "suggest") { afterPlay.suggest = ev.suggestions; }
         else if (ev.event === "ending") { afterPlay.ending = ev.ending; }

@@ -41,7 +41,8 @@ def _ensure_columns() -> None:
     tables). Add new nullable/defaulted columns here until we adopt Alembic."""
     from sqlalchemy import inspect, text
 
-    wanted = {"stories": [("endings", "JSON DEFAULT '[]'"), ("world_facts", "TEXT")]}
+    wanted = {"stories": [("endings", "JSON DEFAULT '[]'"), ("world_facts", "TEXT"),
+                          ("locations", "JSON DEFAULT '[]'")]}
     insp = inspect(engine)
     with engine.begin() as conn:
         for table, cols in wanted.items():

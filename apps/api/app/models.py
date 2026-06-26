@@ -91,6 +91,10 @@ class Story(Base):
     # M1: characters/acts stored as JSON; promote to tables if M2 needs them queryable.
     characters: Mapped[list] = mapped_column(JSON, default=list)
     acts: Mapped[list] = mapped_column(JSON, default=list)
+    # Concrete physical places: [{id,name,detail,exits:[...]}]. Anchors the player's
+    # spatial position so descriptions stay grounded & consistent. Spoiler-safe. Optional
+    # (a story with none keeps the looser world_facts-only behavior).
+    locations: Mapped[list] = mapped_column(JSON, default=list)
     # Endings (true/normal/bad/death) with unlock conditions. JSON like characters/acts.
     endings: Mapped[list] = mapped_column(JSON, default=list)
 

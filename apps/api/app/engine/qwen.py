@@ -83,6 +83,13 @@ def _build_system(prompt: dict[str, Any]) -> str:
             block += "\n" + facts
         lines.append(block)
 
+    place = (prompt.get("place") or "").strip()
+    if place:
+        lines.append("")
+        lines.append("【当前所在·空间锚点】（玩家此刻就在这个具体地点，你的旁白必须扣住它来写——"
+                     "写这里实际存在的陈设、光线、声响、距离与可触及的物件，让人能凭文字想象出画面；"
+                     "不要把场景写得含糊或飘忽，也不要把不属于这里的东西搬进来）：\n" + place)
+
     memory = (prompt.get("memory") or "").strip()
     if memory:
         lines.append("")
@@ -157,6 +164,13 @@ def _build_system(prompt: dict[str, Any]) -> str:
         f"只有当此刻的情绪/剧情自然到了该进入下一章「{next_act}」时，才填「是」，否则填「否」。"
         if next_act
         else "本章已是最后一章，恒填「否」。"
+    )
+    # only ask for a 地点 line when the story actually has a spatial map to move within
+    has_map = bool((prompt.get("place") or "").strip())
+    move_line = (
+        "地点：（默认填「不变」。只有当玩家这一轮明确地走到了另一个地点、且那个地点确实是上面"
+        "「当前所在」里列出的可去通路之一时，才填那个目的地的名字；并且要在「旁白」里把移动过程"
+        "写出来。没有移动、或想去的地方根本不通，就填「不变」。绝不要凭空瞬移或编造新地点。）"
     )
     end_line = (
         "结局：（默认填「无」。「死亡」只有一种用法：玩家本人（你正在对话的这个人）"
@@ -265,6 +279,8 @@ def _build_system(prompt: dict[str, Any]) -> str:
             f"推进：（是/否。{advance_hint}）",
             end_line,
         ]
+        if has_map:
+            lines.append(move_line)
     return "\n".join(lines)
 
 
@@ -297,6 +313,9 @@ def _build_observe_system(prompt: dict[str, Any]) -> str:
         if facts:
             block += "\n" + facts
         lines.append(block)
+    place = (prompt.get("place") or "").strip()
+    if place:
+        lines.append("【当前所在·空间锚点】（描述四周时必须扣住这个具体地点的真实陈设，写得具体可感）：\n" + place)
     if scene_line:
         lines.append(scene_line)
     memory = (prompt.get("memory") or "").strip()
@@ -349,6 +368,10 @@ def _build_intro_system(prompt: dict[str, Any]) -> str:
     ]
     if world:
         lines.append(f"【世界观/场景设定】{world}")
+    place = (prompt.get("place") or "").strip()
+    if place:
+        lines.append("【开场所在·空间锚点】（开场就把玩家放在这个具体地点，照它的真实陈设来写，"
+                     "让画面立得住）：\n" + place)
     if act_events:
         lines.append(f"【开场正在发生】{act_events}")
     if cast:
@@ -394,6 +417,7 @@ def _parse_reply(text: str, speaker: str, channel: str = "say", group_mode: str 
     narration = dialogue = ""
     affinity_delta, advance = 0, False
     ending = None
+    location = None  # destination if the director reported the player moved
     will_respond = True  # group members may opt to stay silent via the 回应 marker
     for raw in text.splitlines():
         line = raw.strip()
@@ -411,6 +435,10 @@ def _parse_reply(text: str, speaker: str, channel: str = "say", group_mode: str 
                 affinity_delta = int(m.group())
         elif line.startswith("推进"):
             advance = ("是" in body) or ("true" in body.lower())
+        elif line.startswith("地点"):
+            # "不变"/"无"/empty → no move; otherwise the destination place name
+            if body and not any(k in body for k in ("不变", "无", "没有", "原地")):
+                location = body
         elif line.startswith("结局"):
             if "死亡" in body or "death" in body.lower():
                 ending = {"kind": "death", "reason": narration or body}
@@ -441,7 +469,8 @@ def _parse_reply(text: str, speaker: str, channel: str = "say", group_mode: str 
             beats.append({"type": "dialogue", "speaker_name": speaker, "text": dialogue})
     else:
         beats.append({"type": "dialogue", "speaker_name": speaker, "text": dialogue or text.strip()})
-    return {"beats": beats, "affinity_delta": affinity_delta, "advance_act": advance, "ending": ending}
+    return {"beats": beats, "affinity_delta": affinity_delta, "advance_act": advance,
+            "ending": ending, "location": location}
 
 
 def _build_summary_system() -> str:

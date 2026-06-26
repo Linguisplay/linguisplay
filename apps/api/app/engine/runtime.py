@@ -53,6 +53,7 @@ def default_state() -> dict[str, Any]:
         "memory": "",                   # rolling story digest (long-horizon memory, see below)
         "stuck": 0,                     # consecutive locked-act turns w/o new clue (hint escalation)
         "memory_covered": 0,            # how many history turns are already folded into `memory`
+        "location_id": None,            # the physical place the player is currently in (if authored)
     }
 
 
@@ -168,6 +169,71 @@ def _physical_roster(content: dict[str, Any], state: dict[str, Any], persona: di
             f"也不要让 TA 像普通人一样正常参与对话：{'、'.join(offstage)}。"
         )
     return "\n".join(lines)
+
+
+# ── Physical place (spatial anchor) ──────────────────────────────────────────
+# Stories MAY author a list of concrete locations. When they do, we track which place the
+# player is currently in and inject its concrete fixtures + exits into every prompt, so the
+# narration stays grounded ("you are in X, you can see/reach Y, you can go to Z") instead of
+# drifting through vague atmosphere or teleporting people around. Stories with no authored
+# locations keep the looser world_facts-only behavior (place block is simply omitted).
+def _locations(content: dict[str, Any]) -> list[dict[str, Any]]:
+    return (content.get("story") or {}).get("locations") or []
+
+
+def _location_by_id(content: dict[str, Any], lid: str | None) -> dict[str, Any] | None:
+    if not lid:
+        return None
+    for loc in _locations(content):
+        if loc.get("id") == lid:
+            return loc
+    return None
+
+
+def resolve_location(content: dict[str, Any], ref: str | None) -> dict[str, Any] | None:
+    """Match a free-text reference (an id, an exact name, or a name the model wrote) to an
+    authored location. Used to apply the director's 地点 movement marker safely — an
+    unrecognized place is ignored, so the model can never invent a room out of nowhere."""
+    if not ref:
+        return None
+    ref = ref.strip()
+    locs = _locations(content)
+    for loc in locs:  # exact id or name first
+        if loc.get("id") == ref or loc.get("name") == ref:
+            return loc
+    for loc in locs:  # then a lenient containment match on the name
+        name = loc.get("name") or ""
+        if name and (name in ref or ref in name):
+            return loc
+    return None
+
+
+def current_location(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
+    """Where the player is now. Defaults to the first authored location if unset."""
+    locs = _locations(content)
+    if not locs:
+        return None
+    return _location_by_id(content, state.get("location_id")) or locs[0]
+
+
+def _physical_place(content: dict[str, Any], state: dict[str, Any]) -> str:
+    """The 'you are here' block: this place's concrete fixtures + where you can go. Empty
+    when the story authored no locations."""
+    loc = current_location(content, state)
+    if not loc:
+        return ""
+    name = loc.get("name") or "此处"
+    parts = [f"此刻玩家所在的地点是【{name}】。"]
+    if loc.get("detail"):
+        parts.append(f"这里有：{loc['detail']}")
+    exits = [e for e in (loc.get("exits") or []) if e]
+    if exits:
+        parts.append(f"从这里可以去：{'、'.join(exits)}。")
+    parts.append(
+        "旁白只能描写这个地点里实际存在的东西，不要凭空添置别处的陈设；"
+        "玩家要移动到别处，必须经由上面列出的通路，且要把移动过程写出来，不能瞬移。"
+    )
+    return "".join(parts)
 
 
 def _char_by_id(content: dict[str, Any], cid: str | None) -> dict[str, Any] | None:
@@ -334,6 +400,10 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
     player_char = _char_by_id(content, pcid) if (mode == "character" and pcid) else None
     present = [c.get("name") for c in present_characters(content, 1)
               if c.get("name") and c.get("id") != pcid]
+    # pin the starting place so the player has a concrete spatial anchor from turn 1
+    start = current_location(content, state)
+    if start and start.get("id"):
+        state["location_id"] = start["id"]
     directed = llm.generate({
         "intro": True,
         "mode": mode,
@@ -342,6 +412,7 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
         "act": act1,
         "goal": act1.get("goal", ""),
         "cast": present,
+        "place": _physical_place(content, state),
     })
     beats = [b for b in directed.get("beats", []) if b.get("type") == "description"]
     return beats or [{"type": "description", "speaker_name": None, "text": opening_narration(content)}]
@@ -623,9 +694,11 @@ def run_turn_stream(
     #    character can only ever voice what IT is allowed to know — no cross-leak). Each
     #    responder's beats are YIELDED the moment they're computed → they stream out.
     next_act = current_act(content, old_act + 1)
+    place = _physical_place(content, state)   # concrete "you are here" anchor (empty if none)
     affinity_delta = 0
     advance = False
     model_ending = None
+    model_move = None  # the primary speaker may report the player moved to another place
 
     def emit(b: dict[str, Any]):
         all_beats.append(b)
@@ -648,6 +721,7 @@ def run_turn_stream(
             "memory": state.get("memory", ""),   # rolling digest of earlier acts
             "world_facts": (content.get("story") or {}).get("world_facts") or "",
             "roster": _physical_roster(content, state, persona),  # deterministic headcount
+            "place": place,                       # concrete current-location anchor (if authored)
             "scene": current_act(content, old_act),
             "next_act_title": (next_act or {}).get("title", "") if next_act else "",
             "cast": others,
@@ -673,6 +747,7 @@ def run_turn_stream(
             advance = True
         if is_primary:
             model_ending = directed.get("ending")  # only the addressed scene can end the run
+            model_move = directed.get("location")   # and may report a place change
 
     # think = OBSERVE/EXAMINE. No target → look at the surroundings (where am I, what's
     # going on). With a target → examine that person: a brief intro + their CURRENT state
@@ -689,6 +764,7 @@ def run_turn_stream(
             "world": (content.get("story") or {}).get("world_long", "") or "",
             "world_facts": (content.get("story") or {}).get("world_facts") or "",
             "roster": _physical_roster(content, state, persona),
+            "place": place,
             "history": history or [],
             "memory": state.get("memory", ""),   # rolling digest of earlier acts
             "cast": [c.get("name") for c in all_chars if c.get("name")],
@@ -717,6 +793,13 @@ def run_turn_stream(
         target = max(old_act + (1 if advance else 0), backstop)
         new_act = min(max_act, target) if max_act else target
     state["act"] = new_act
+
+    # 4a. apply a place change if the director reported the player moved (and we recognize
+    #     the destination — an unknown place is ignored so the model can't invent rooms).
+    if model_move:
+        dest = resolve_location(content, model_move)
+        if dest and dest.get("id"):
+            state["location_id"] = dest["id"]
 
     # 4b. update the stuck counter for NEXT turn: did THIS turn make headway on the gate?
     #     Progress = the act advanced, or a clue this act requires was newly unlocked. If so,
@@ -795,6 +878,7 @@ def run_turn_stream(
     state["scene"] = scene
     state["goal"] = current_goal(content, state["act"])  # small objective for the current act
     progress = act_progress(content, state, state["act"])  # clue checklist for the (new) act
+    location = current_location(content, state)  # where the player is now (None if no map)
 
     # suggestions steer toward what's close to unlocking for the primary speaker
     sugg_context = gating.build_context(primary_id, frags, state, newly_ids=newly) if primary else {}
@@ -811,6 +895,7 @@ def run_turn_stream(
         "cast": cast_for(content, state["act"], exclude_id=pcid if mode == "character" else None),
         "goal": state["goal"],
         "progress": progress,  # {items:[{label,done}], done, total} — the clue checklist
+        "location": location,  # {id,name,detail,exits} the player's current place (or None)
     })
 
 

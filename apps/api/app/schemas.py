@@ -111,6 +111,16 @@ class Act(BaseModel):
     events: list[StoryEvent] = []
 
 
+class Location(BaseModel):
+    """A concrete physical place in the story world. `detail` should name specific,
+    sensible fixtures/objects (not vague mood) so narration stays grounded; `exits` lists
+    the names of adjacent places the player can move to. Spoiler-safe."""
+    id: Optional[str] = None
+    name: str = ""
+    detail: str = ""  # concrete fixtures/props/layout/lighting at this place
+    exits: list[str] = []  # names of places reachable from here
+
+
 class EndingCondition(BaseModel):
     """All conditions ANDed. By default an ending is only eligible at the final act;
     set act_min to make it eligible earlier. required_fragment_ids must all be unlocked."""
@@ -141,6 +151,7 @@ class StoryInput(BaseModel):
     characters: Optional[list[Character]] = None
     acts: Optional[list[Act]] = None
     endings: Optional[list[Ending]] = None
+    locations: Optional[list[Location]] = None
 
 
 class Story(BaseModel):
@@ -159,6 +170,7 @@ class Story(BaseModel):
     characters: list[Character] = []
     acts: list[Act] = []
     endings: list[Ending] = []
+    locations: list[Location] = []
     completion: float = 0.0
 
 
@@ -228,6 +240,7 @@ class RunState(BaseModel):
     player_character_id: Optional[str] = None
     goal: str = ""  # the player's current small objective (this act)
     progress: Optional[dict[str, Any]] = None  # clue checklist {items, done, total}
+    location: Optional[dict[str, Any]] = None  # where the player is now {id,name,detail,exits}
 
 
 class Run(BaseModel):

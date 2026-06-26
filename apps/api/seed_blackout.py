@@ -101,6 +101,28 @@ ACTS = [
     ]},
 ]
 
+# Concrete physical places on this floor — anchors the player's position so the model
+# describes real fixtures instead of vague atmosphere, and can't teleport people around.
+LOCATIONS = [
+    {"id": "loc_office", "name": "开放工位区",
+     "detail": "一排排隔断工位，桌上还摊着没核完的报表和没喝完的速溶咖啡；天花板那盏唯一的应急灯忽明忽暗，"
+     "把人影拉得忽长忽短。墙上的电子钟停在 23:04。",
+     "exits": ["茶水间", "电梯厅", "配电间", "楼梯间"]},
+    {"id": "loc_pantry", "name": "茶水间",
+     "detail": "靠墙一台嗡嗡作响（此刻已停）的饮水机和微波炉，水池边水渍未干。最显眼的是那面齐顶的大镜子——"
+     "黑暗里，镜面像一汪深井，映出的人影总让人想多数一遍。",
+     "exits": ["开放工位区"]},
+    {"id": "loc_substation", "name": "配电间",
+     "detail": "狭小闷热，墙上是落满灰的总配电柜，刀闸冰凉。门本应虚掩，此刻却从外面被反锁，纹丝不动。",
+     "exits": ["开放工位区"]},
+    {"id": "loc_elevator", "name": "电梯厅",
+     "detail": "两部电梯都停在别层，指示灯全灭。安全门紧闭，从外反锁，推不动。地面光可鉴人，映着应急灯的残光。",
+     "exits": ["开放工位区"]},
+    {"id": "loc_stairs", "name": "楼梯间",
+     "detail": "消防楼梯口，绿色疏散指示牌还亮着微光。通往楼下的安全门同样被反锁，门缝里透不进一丝外面的光。",
+     "exits": ["开放工位区"]},
+]
+
 # (title, character_id, sensitivity, known_by, [fragments])
 # fragment = (fragment_id, layer, content, retrieval_key, unlock)
 # fragment_id is explicit + stable so acts' advance gates can reference it.
@@ -240,6 +262,7 @@ def main() -> None:
             characters=CHARACTERS,
             acts=ACTS,
             endings=ENDINGS,
+            locations=LOCATIONS,
             visibility="public",
         )
         db.add(story)

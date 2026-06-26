@@ -21,7 +21,10 @@ class LLM(Protocol):
           "ending": None | {kind: "death"|"bad", reason: str},
                                    # set ONLY when the player's action is fatal/terminal
                                    # (e.g. blows up the building) — the run then concludes
+          "location": None | str,  # destination place name IF the player moved this turn
+                                   # (only honored if it matches an authored location)
         }
+        Keys other than "beats" are optional; runtime reads them defensively with .get().
         """
         ...
 
