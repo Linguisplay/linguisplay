@@ -54,6 +54,7 @@ def default_state() -> dict[str, Any]:
         "stuck": 0,                     # consecutive locked-act turns w/o new clue (hint escalation)
         "memory_covered": 0,            # how many history turns are already folded into `memory`
         "location_id": None,            # the physical place the player is currently in (if authored)
+        "player_emotion": "",           # last read of the player's underlying emotion (EQ continuity)
     }
 
 
@@ -724,6 +725,8 @@ def run_turn_stream(
             "world_facts": (content.get("story") or {}).get("world_facts") or "",
             "roster": _physical_roster(content, state, persona),  # deterministic headcount
             "place": place,                       # concrete current-location anchor (if authored)
+            "eq_style": sp.get("eq_style", ""),   # how THIS character reads/expresses emotion
+            "player_emotion": state.get("player_emotion", ""),  # prior emotional read (continuity)
             "scene": current_act(content, old_act),
             "next_act_title": (next_act or {}).get("title", "") if next_act else "",
             "cast": others,
@@ -750,6 +753,9 @@ def run_turn_stream(
         if is_primary:
             model_ending = directed.get("ending")  # only the addressed scene can end the run
             model_move = directed.get("location")   # and may report a place change
+            emo = (directed.get("player_emotion") or "").strip()
+            if emo:
+                state["player_emotion"] = emo       # carry the emotional read into next turn
 
     # think = OBSERVE/EXAMINE. No target → look at the surroundings (where am I, what's
     # going on). With a target → examine that person: a brief intro + their CURRENT state

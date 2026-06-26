@@ -75,6 +75,9 @@ class Character(BaseModel):
     avatar_url: Optional[str] = None
     persona_text: Optional[str] = None
     background: Optional[str] = None
+    # how THIS character reads & expresses emotion (their EQ style) — so empathy stays
+    # in-character (a gruff character shows care differently than a warm one). Optional.
+    eq_style: Optional[str] = None
     relations: list[dict[str, Any]] = []
     linked_event_ids: list[str] = []
     # presence in the scene: "present" = a live, addressable participant; "offstage" =

@@ -78,6 +78,31 @@ def _build_system(prompt: dict[str, Any]) -> str:
             "但你只能以「" + speaker + "」的身份说话，绝不能替别人开口、更不能替别人说出他们的秘密。"
         )
 
+    # ── 情商：让角色真正"接住"对方，而不是机械应答 ──────────────────────
+    eq_style = (prompt.get("eq_style") or "").strip()
+    prior_emotion = (prompt.get("player_emotion") or "").strip()
+    lines.append("")
+    eq = [
+        "【情商·这是你最重要的本事】像一个真正会读人、会共情的人那样回应：",
+        "1) 读言外之意：先在心里揣摩对方这句话/这个举动【底下】真正的情绪和需求——是在试探、在逞强、"
+        "在掩饰难过、还是在期待你接住？你要回应那个底层的情绪，而不是只接字面意思。",
+        "2) 接住情绪、别套路：该共情就共情、该安慰就安慰、该追问就追问、该给情绪价值就给。"
+        "用此情此景里具体的、有温度的话，绝不要那种正确却干巴巴、放之四海皆可的模板回答。",
+        "3) 看场合、有分寸：读空气——对方认真或脆弱时别插科打诨，对方需要空间时别追着逼问，"
+        "对方递了台阶就顺势接住，对方不愿说就点到为止。你的语气、热度与距离都要随这一刻调整。",
+        "4) 记得情感线：记住之前这段关系里的情绪起伏——TA 上一刻的难过/愤怒/暖意、说过的心里话——"
+        "让这一句接得上那条线，像真把对方放在心上，而不是每句都从零开始。",
+    ]
+    if eq_style:
+        eq.append(f"5) 这一切都要用「{speaker}」自己的方式表达：{eq_style}。"
+                  "（冷的人有冷的体贴，糙的人有糙的在意——情商不等于嘴甜，而是真的看见了对方。）")
+    else:
+        eq.append("5) 这一切都要贴合「" + speaker + "」自己的性格——情商不等于嘴甜或讨好，"
+                  "而是真的看见了对方、并以符合自己身份的方式作出回应。")
+    if prior_emotion:
+        eq.append(f"【对方此前的情绪基调】{prior_emotion}。留意它的延续与变化，承接住，别像第一次见面。")
+    lines += eq
+
     lines.append("")
     lines.append(
         "【玩家的权限边界·铁律】玩家只能支配“他自己”这一个人的言行——他说什么、做出什么动作、朝哪使劲。"
@@ -292,7 +317,8 @@ def _build_system(prompt: dict[str, Any]) -> str:
             "你同时是这场戏的「导演」。严格按下面五行输出，不要多余内容："
             "其中「旁白」一行【必须写、不能省略、不能留空】——它是这个世界对玩家言行的回应。",
             f"旁白：（{narr_hint}）",
-            f"{speaker}：（角色这一轮要说的话，口语化、自然，2~4句）",
+            "情绪：（用三五个字点出对方此刻言行【底下】真正的情绪，例如：在逞强、在试探、强忍委屈、放下戒备、想被认可。你先读懂它，再决定怎么接）",
+            f"{speaker}：（角色这一轮要说的话，口语化、自然，2~4句；要接住上面读到的情绪）",
             "好感：（一个整数，-3 到 +5。对方敷衍/冒犯/答非所问→负；真诚、走心、戳中要害、给到情绪价值→正；普通对话→0或+1）",
             f"推进：（是/否。{advance_hint}）",
             end_line,
@@ -436,6 +462,7 @@ def _parse_reply(text: str, speaker: str, channel: str = "say", group_mode: str 
     affinity_delta, advance = 0, False
     ending = None
     location = None  # destination if the director reported the player moved
+    player_emotion = ""  # the model's read of the player's underlying emotion this turn
     will_respond = True  # group members may opt to stay silent via the 回应 marker
     for raw in text.splitlines():
         line = raw.strip()
@@ -457,6 +484,8 @@ def _parse_reply(text: str, speaker: str, channel: str = "say", group_mode: str 
             # "不变"/"无"/empty → no move; otherwise the destination place name
             if body and not any(k in body for k in ("不变", "无", "没有", "原地")):
                 location = body
+        elif line.startswith("情绪"):
+            player_emotion = body  # the read of the player's underlying emotion (continuity)
         elif line.startswith("结局"):
             if "死亡" in body or "death" in body.lower():
                 ending = {"kind": "death", "reason": narration or body}
@@ -488,7 +517,7 @@ def _parse_reply(text: str, speaker: str, channel: str = "say", group_mode: str 
     else:
         beats.append({"type": "dialogue", "speaker_name": speaker, "text": dialogue or text.strip()})
     return {"beats": beats, "affinity_delta": affinity_delta, "advance_act": advance,
-            "ending": ending, "location": location}
+            "ending": ending, "location": location, "player_emotion": player_emotion}
 
 
 def _build_summary_system() -> str:
@@ -501,8 +530,10 @@ def _build_summary_system() -> str:
         "- 已确立的事实绝不能丢失或篡改，除非新对话明确推翻了它；\n"
         "- 用简洁的要点记录：玩家是谁、做过/说过的关键事、已经查明的真相与线索、"
         "人物之间的关系与承诺、尚未解决的悬念；\n"
+        "- 【尤其要记住情感线】：人物之间的情绪起伏与转折、谁对谁动了什么心思、"
+        "说过的心里话、结下的情分或心结——这些是让角色'记得对方'、保持温度连贯的关键，不可丢；\n"
         "- 只记真正重要、对后续剧情有用的信息，闲聊和寒暄略去；\n"
-        "- 控制在 400 字以内。只输出备忘录本身，不要任何解释或开场白。"
+        "- 控制在 450 字以内。只输出备忘录本身，不要任何解释或开场白。"
     )
 
 
