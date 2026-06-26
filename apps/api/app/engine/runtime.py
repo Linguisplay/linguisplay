@@ -709,6 +709,12 @@ def run_turn_stream(
         all_beats.append(b)
         return ("beat", b)
 
+    # Group naturalness (SillyTavern-style): characters answer ONE AT A TIME and each later
+    # speaker is shown what the others ALREADY said THIS turn, so they genuinely react to one
+    # another (接话/附和/反驳) instead of being generated in parallel and talking past each
+    # other / echoing the same opener.
+    said_this_turn: list[dict[str, str]] = []
+
     for idx, sp in enumerate(responders):
         sp_id = sp.get("id")
         sp_name = sp.get("name") or "角色"
@@ -743,6 +749,8 @@ def run_turn_stream(
             "act_locked": act_locked,
             "needed_topics": needed_topics,
             "stuck_level": stuck_level,
+            # what the others have ALREADY said this turn → react, don't echo
+            "said_this_turn": list(said_this_turn),
         }
         directed = llm.generate(prompt)
         d_beats = directed.get("beats", [])
@@ -750,6 +758,10 @@ def run_turn_stream(
             # members contribute dialogue only (one shared narration from the primary)
             d_beats = [b for b in d_beats if b.get("type") == "dialogue"]
         for b in d_beats:
+            said_this_turn.append({
+                "speaker": b.get("speaker_name") or "旁白",
+                "text": b.get("text", ""),
+            })
             yield emit(b)
         affinity_delta += int(directed.get("affinity_delta", 0) or 0)
         if directed.get("advance_act"):

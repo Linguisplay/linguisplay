@@ -131,6 +131,23 @@ def _build_system(prompt: dict[str, Any]) -> str:
         eq.append(f"【对方此前的情绪基调】{prior_emotion}。留意它的延续与变化，承接住，别像第一次见面。")
     lines += eq
 
+    # group naturalness: show this speaker what others ALREADY said THIS turn so they react
+    # to it (接话/附和/反驳/补充) instead of repeating or talking past everyone.
+    said = prompt.get("said_this_turn") or []
+    if said:
+        convo = "\n".join(f"- {s.get('speaker','旁白')}：{s.get('text','')}" for s in said if s.get("text"))
+        if convo:
+            lines.append("")
+            lines.append(
+                "【就在刚刚这一轮，在你开口之前，现场已经发生了下面这些（按先后顺序）】：\n" + convo + "\n"
+                "你不是凭空开口——要像真实对话里轮到你那样【接住上面的话往下走】：\n"
+                "· 最好直接回应、接住上面【某一个具体的人】刚说的话（可以点名 TA），让对话真正你来我往地流动；\n"
+                "· 绝对不要复述大家都已经知道的处境或前提（比如把刚发生的事、刚才别人已经说过的判断又重说一遍）——"
+                "默认大家都听见了，你要做的是【往前推进】：给出你自己的新反应、新主张、新情绪或新信息；\n"
+                "· 绝对不要重复别人已经用过的意思或句式；如果你想说的别人已经说了，就换个角度、表个态、或干脆保持沉默，"
+                "不要为了说而说。"
+            )
+
     lines.append("")
     lines.append(
         "【玩家的权限边界·铁律】玩家只能支配“他自己”这一个人的言行——他说什么、做出什么动作、朝哪使劲。"

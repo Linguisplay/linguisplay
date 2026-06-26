@@ -56,6 +56,34 @@ def test_inter_character_eq_in_group_and_observer():
         assert "有来有往" in s and "各说各的" in s   # characters attune to each other, not monologue
 
 
+def test_group_speakers_see_what_others_said_this_turn():
+    # broadcast: 3 present chars all answer; each later speaker must be shown the prior
+    # speakers' THIS-turn lines so they react instead of talking past each other.
+    story = {"story": {"id": "s", "acts": [{"index": 1, "title": "a"}], "characters": [
+        {"id": "a", "name": "甲", "is_lead": True}, {"id": "b", "name": "乙"}, {"id": "c", "name": "丙"},
+    ]}, "secrets": []}
+    seen = []
+
+    class GroupLLM:
+        def generate(self, prompt):
+            if prompt.get("intro") or prompt.get("observe"):
+                return {"beats": [{"type": "description", "speaker_name": None, "text": "x"}],
+                        "affinity_delta": 0, "advance_act": False, "ending": None}
+            sp = prompt.get("speaker_name")
+            seen.append((sp, [s["speaker"] for s in (prompt.get("said_this_turn") or [])]))
+            beats = []
+            if prompt.get("group_mode") == "primary" or prompt.get("group_mode") is None:
+                beats.append({"type": "description", "speaker_name": None, "text": "众人看过来"})
+            beats.append({"type": "dialogue", "speaker_name": sp, "text": f"{sp}说话"})
+            return {"beats": beats, "affinity_delta": 0, "advance_act": False, "ending": None}
+
+    runtime.run_turn(story, runtime.default_state(), {"name": "我"}, "大家好", channel="say", llm=GroupLLM())
+    # first speaker sees nothing yet; later speakers see the accumulating transcript
+    assert seen[0][1] == []
+    assert "甲" in seen[1][1]                       # 2nd speaker sees the 1st's line
+    assert "甲" in seen[2][1] and "乙" in seen[2][1]  # 3rd sees both prior speakers
+
+
 def test_player_emotion_persists_across_turns():
     class EmoLLM:
         def generate(self, prompt):
