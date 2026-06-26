@@ -70,10 +70,12 @@ def default_state() -> dict[str, Any]:
 MEMORY_WINDOW = 8   # dialogue turns shown verbatim — MUST match qwen.py's history[-8:]
 MEMORY_BATCH = 6    # summarize only once this many turns have slid out of the window
 
-# Stuck-hint escalation: consecutive locked-act turns with no new required clue before
-# NPCs get more forthcoming (NUDGE), then before a direct narrator hint fires (PUSH).
-STUCK_NUDGE = 2
-STUCK_PUSH = 4
+# Stuck-hint escalation: consecutive locked-act turns with no new required clue. NUDGE =
+# NPCs get noticeably more forthcoming; PUSH = a direct narrator hint pointing at one topic;
+# SPELL = the narrator lays out the full remaining checklist + a concrete next step.
+STUCK_NUDGE = 1
+STUCK_PUSH = 2
+STUCK_SPELL = 4
 
 
 def _update_memory(state: dict[str, Any], history: list[dict[str, str]] | None, llm: LLM) -> None:
@@ -728,9 +730,17 @@ def run_turn_stream(
         state["stuck"] = 0 if made_progress else stuck_in + 1
     else:
         state["stuck"] = 0
-    if stuck_in + 1 >= STUCK_PUSH and state["stuck"] >= STUCK_PUSH and needed_topics:
+    if state["stuck"] >= STUCK_SPELL and needed_topics:
+        # really stuck — stop being coy: lay out everything still left to uncover, plus a
+        # concrete next move. Labels only; the locked bodies are never named.
+        todo = "、".join(f"「{t}」" for t in needed_topics)
         yield emit({"type": "description", "speaker_name": None,
-                    "text": f"（你停下来，理了理思路——也许，该从「{needed_topics[0]}」入手。）"})
+                    "text": f"（你定了定神，把已知的疑点在心里过了一遍。眼下还没弄明白的是：{todo}。"
+                            f"与其干等，不如主动开口去问、或者动手查一查——这一章的结，就卡在这上面。）"})
+    elif state["stuck"] >= STUCK_PUSH and needed_topics:
+        yield emit({"type": "description", "speaker_name": None,
+                    "text": f"（你停下来，理了理思路——眼下最该弄清的，是「{needed_topics[0]}」。"
+                            f"不妨直接去追问，或者留意周围有没有相关的破绽。）"})
 
     # 5. act-transition divider (after the replies, transitioning into the new act)
     if new_act > old_act:

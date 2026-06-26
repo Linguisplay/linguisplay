@@ -34,15 +34,17 @@ def test_stuck_counter_climbs_and_narrator_hint_fires():
     st = runtime.default_state()
     assert st["stuck"] == 0
     hint_seen_at = None
-    for turn in range(1, runtime.STUCK_PUSH + 2):
+    for turn in range(1, runtime.STUCK_SPELL + 2):
         out = _play(st)
         st = out["state"]
         assert st["act"] == 1, "gated act must stay locked while clue is unreachable"
         assert st["stuck"] == turn, "every clue-less locked turn bumps the counter"
-        if any("入手" in b.get("text", "") for b in out["beats"]):
+        # the narrator nudge names the missing topic by label, in a narrator (no-speaker) beat
+        if any(b.get("speaker_name") is None and "那本账" in b.get("text", "")
+               for b in out["beats"]):
             hint_seen_at = hint_seen_at or turn
-    # the narrator nudge should have fired by the time we hit the PUSH threshold
-    assert hint_seen_at is not None and hint_seen_at >= runtime.STUCK_PUSH
+    # the narrator nudge should have fired no later than the PUSH threshold
+    assert hint_seen_at is not None and hint_seen_at <= runtime.STUCK_PUSH
 
     # and it must steer by topic LABEL only — the locked body never leaks into any beat
     last = _play(st)
