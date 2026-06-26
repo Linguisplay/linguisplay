@@ -78,6 +78,9 @@ class Character(BaseModel):
     # how THIS character reads & expresses emotion (their EQ style) — so empathy stays
     # in-character (a gruff character shows care differently than a warm one). Optional.
     eq_style: Optional[str] = None
+    # auto-generated background knowledge ("智能增强"): a structured lore block the model
+    # can draw on for this character (IP setting, era, relations, signature details).
+    knowledge: Optional[str] = None
     relations: list[dict[str, Any]] = []
     linked_event_ids: list[str] = []
     # presence in the scene: "present" = a live, addressable participant; "offstage" =
@@ -150,6 +153,7 @@ class StoryInput(BaseModel):
     relations_overview: Optional[str] = None
     world_facts: Optional[str] = None
     trope_tags: Optional[list[str]] = None
+    mature: Optional[bool] = None
     visibility: Optional[Literal["private", "public"]] = None
     characters: Optional[list[Character]] = None
     acts: Optional[list[Act]] = None
@@ -167,6 +171,7 @@ class Story(BaseModel):
     relations_overview: Optional[str] = None
     world_facts: Optional[str] = None
     trope_tags: list[str] = []
+    mature: bool = False
     visibility: str = "private"
     status: str = "draft"
     version: int = 0

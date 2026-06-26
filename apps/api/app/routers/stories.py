@@ -44,6 +44,7 @@ def _to_story(s: StoryModel) -> Story:
         relations_overview=s.relations_overview,
         world_facts=s.world_facts,
         trope_tags=s.trope_tags or [],
+        mature=bool(s.mature),
         visibility=s.visibility,
         status=s.status,
         version=s.version,
@@ -196,6 +197,41 @@ def publish(story_id: str, user: User = Depends(current_user), db: Session = Dep
     s.status = "published"
     db.commit()
     return PublishResult(story_id=s.id, version=new_version)
+
+
+@router.post("/{story_id}/enrich")
+def enrich(story_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """智能增强: auto-generate a background-lore block for each character (detects IP /
+    fills in era & world knowledge) and store it on the story. If the story is already
+    published, the latest snapshot's content is refreshed so new runs pick it up.
+    Sourced from the model (no live web search until a search key is configured)."""
+    from ..engine.qwen import generate_knowledge
+
+    s = _own_story(story_id, user, db)
+    world = " ".join(filter(None, [s.world_long, s.synopsis, s.one_liner]))[:600]
+    chars = [dict(c) for c in (s.characters or [])]
+    enriched = 0
+    for c in chars:
+        profile = " ".join(filter(None, [c.get("role"), c.get("persona_text"), c.get("background")]))
+        kn = generate_knowledge(c.get("name", ""), profile, world)
+        if kn:
+            c["knowledge"] = kn
+            enriched += 1
+    s.characters = chars
+    # keep the published snapshot in sync so live runs see the new knowledge
+    if s.status == "published" and s.version:
+        snap = (
+            db.query(StorySnapshot)
+            .filter(StorySnapshot.story_id == s.id, StorySnapshot.version == s.version)
+            .first()
+        )
+        if snap:
+            content = dict(snap.content or {})
+            content["story"] = _to_story(s).model_dump()
+            content["story"]["version"] = s.version
+            snap.content = content
+    db.commit()
+    return {"story_id": s.id, "characters": len(chars), "enriched": enriched}
 
 
 # ── secrets ───────────────────────────────────────────────

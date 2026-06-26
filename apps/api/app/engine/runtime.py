@@ -55,6 +55,7 @@ def default_state() -> dict[str, Any]:
         "memory_covered": 0,            # how many history turns are already folded into `memory`
         "location_id": None,            # the physical place the player is currently in (if authored)
         "player_emotion": "",           # last read of the player's underlying emotion (EQ continuity)
+        "mature": False,                # 18+ run: engine may permit explicit adult content
     }
 
 
@@ -416,6 +417,7 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
         "goal": act1.get("goal", ""),
         "cast": present,
         "place": _physical_place(content, state),
+        "mature": bool(state.get("mature")),
     })
     beats = [b for b in directed.get("beats", []) if b.get("type") == "description"]
     return beats or [{"type": "description", "speaker_name": None, "text": opening_narration(content)}]
@@ -727,6 +729,8 @@ def run_turn_stream(
             "place": place,                       # concrete current-location anchor (if authored)
             "eq_style": sp.get("eq_style", ""),   # how THIS character reads/expresses emotion
             "player_emotion": state.get("player_emotion", ""),  # prior emotional read (continuity)
+            "knowledge": sp.get("knowledge", ""),  # 智能增强: this character's background lore
+            "mature": bool(state.get("mature")),   # 18+ run → adult content permitted
             "scene": current_act(content, old_act),
             "next_act_title": (next_act or {}).get("title", "") if next_act else "",
             "cast": others,
@@ -773,6 +777,8 @@ def run_turn_stream(
             "world_facts": (content.get("story") or {}).get("world_facts") or "",
             "roster": _physical_roster(content, state, persona),
             "place": place,
+            "knowledge": (observe_target or {}).get("knowledge", "") if observe_target else "",
+            "mature": bool(state.get("mature")),
             "history": history or [],
             "memory": state.get("memory", ""),   # rolling digest of earlier acts
             "cast": [c.get("name") for c in all_chars if c.get("name")],

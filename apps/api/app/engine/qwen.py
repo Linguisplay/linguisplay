@@ -20,6 +20,25 @@ _ANTI_ASSISTANT = (
     "你必须始终留在角色里：不要说自己是AI/助手/语言模型，不要解释规则，不要使用括号外的旁白说明。"
 )
 
+# 18+ permission block, appended only when the run is mature (story flagged 18+ and the
+# player is age-gated 18+ at signup). Mirrors the old persona R18 feature.
+_R18_BLOCK = (
+    "【成人内容许可·18禁模式】本剧情已开启成人模式，玩家为成年人：\n"
+    "- 可以描写、参与明确的成人/性爱/亲密内容，不必回避或淡化，也不必加道德说教或免责声明；\n"
+    "- 始终保持角色人设，用符合「{speaker}」性格与此刻情境的方式来表达，要有张力和代入感，"
+    "不要写成生硬的说明书；\n"
+    "- 唯一的铁律：绝对拒绝任何涉及未成年人的性内容。"
+)
+
+
+def _knowledge_block(prompt: dict[str, Any]) -> str:
+    """智能增强: a character's auto-generated background lore, offered as reference."""
+    kn = (prompt.get("knowledge") or "").strip()
+    if not kn:
+        return ""
+    return ("【背景知识·可自然引用】（这是关于你这个角色/这个世界的设定与资料，"
+            "扮演时可自然取用其中细节，但不要生硬罗列、也不要当成必须背诵的稿子）：\n" + kn)
+
 
 def _depth_anchor(prompt: dict[str, Any]) -> str:
     """A SHORT physical anchor restated right next to the user's turn (depth-0 injection).
@@ -141,6 +160,14 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append("【当前所在·空间锚点】（玩家此刻就在这个具体地点，你的旁白必须扣住它来写——"
                      "写这里实际存在的陈设、光线、声响、距离与可触及的物件，让人能凭文字想象出画面；"
                      "不要把场景写得含糊或飘忽，也不要把不属于这里的东西搬进来）：\n" + place)
+
+    kn = _knowledge_block(prompt)
+    if kn:
+        lines.append("")
+        lines.append(kn)
+    if prompt.get("mature"):
+        lines.append("")
+        lines.append(_R18_BLOCK.format(speaker=speaker))
 
     memory = (prompt.get("memory") or "").strip()
     if memory:
@@ -369,6 +396,11 @@ def _build_observe_system(prompt: dict[str, Any]) -> str:
     place = (prompt.get("place") or "").strip()
     if place:
         lines.append("【当前所在·空间锚点】（描述四周时必须扣住这个具体地点的真实陈设，写得具体可感）：\n" + place)
+    kn = _knowledge_block(prompt)
+    if kn:
+        lines.append(kn)
+    if prompt.get("mature"):
+        lines.append(_R18_BLOCK.format(speaker=(target or {}).get("name", "角色") if target else "旁白"))
     if scene_line:
         lines.append(scene_line)
     memory = (prompt.get("memory") or "").strip()
@@ -425,6 +457,8 @@ def _build_intro_system(prompt: dict[str, Any]) -> str:
     if place:
         lines.append("【开场所在·空间锚点】（开场就把玩家放在这个具体地点，照它的真实陈设来写，"
                      "让画面立得住）：\n" + place)
+    if prompt.get("mature"):
+        lines.append("（本剧情为成人向 18+，开场可带有相应的成熟基调，但开场无需直接写露骨内容。）")
     if act_events:
         lines.append(f"【开场正在发生】{act_events}")
     if cast:
@@ -544,6 +578,45 @@ def _build_summary_system() -> str:
         "- 只记真正重要、对后续剧情有用的信息，闲聊和寒暄略去；\n"
         "- 控制在 450 字以内。只输出备忘录本身，不要任何解释或开场白。"
     )
+
+
+def generate_knowledge(name: str, profile: str, world: str = "") -> str:
+    """智能增强: synthesize a structured background-lore block for a character.
+
+    Mirrors the old persona 'enrich' feature, but sourced from the model's own knowledge
+    (detects whether the character is from a known IP, then writes a structured block) —
+    no live web search (no Tavily key). Drop-in: swap in a real search step later. Returns
+    "" if there's no key / the call fails, so enrich degrades gracefully.
+    """
+    s = get_settings()
+    if not s.dashscope_api_key:
+        return ""
+    sys = (
+        "你在为一款互动小说游戏的 AI 角色整理【背景知识库】，供 AI 扮演时自然取用。\n"
+        "先判断这个角色是否出自已知 IP（游戏/动漫/影视/小说等）：\n"
+        "- 若是 IP 角色：依据该 IP 的设定整理；\n"
+        "- 若是原创角色：依据其身份/职业/时代/世界观，补充真实可信的背景知识。\n"
+        "整理成下面这种结构（每块 50~120 字，没有内容的块直接省略），只输出整理后的内容、不加解释：\n"
+        "【人物设定】身份、能力、外貌、口癖等核心设定\n"
+        "【世界背景】所处世界/时代的关键设定：地点、规则、氛围\n"
+        "【人际关系】与重要人物的关系与互动特点\n"
+        "【标志性细节】可自然融入对话的具体细节：物件、口头禅、习惯、事件\n"
+        "【剧情素材】可推进故事的背景冲突、悬念或文化典故"
+    )
+    user = f"角色名：{name}\n角色设定：{(profile or '')[:600]}\n所在故事/世界：{(world or '')[:400]}"
+    try:
+        resp = httpx.post(
+            DASHSCOPE_URL,
+            headers={"Authorization": f"Bearer {s.dashscope_api_key}", "Content-Type": "application/json"},
+            json={"model": s.llm_model,
+                  "messages": [{"role": "system", "content": sys}, {"role": "user", "content": user}],
+                  "max_tokens": 700, "temperature": 0.6},
+            timeout=40,
+        )
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"].strip()[:2500]
+    except Exception:
+        return ""
 
 
 class QwenLLM:

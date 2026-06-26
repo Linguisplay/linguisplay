@@ -143,6 +143,9 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
     state = {**runtime.default_state(), "scene": runtime.opening_scene(content),
              "mode": body.mode, "player_character_id": pcid}
     state["goal"] = runtime.current_goal(content, 1)
+    # 18+ permission pinned at run start (story is mature AND player is age-gated 18+ at
+    # signup). Stored on the run so the engine can permit adult content this playthrough.
+    state["mature"] = bool((content.get("story") or {}).get("mature"))
     run = RunModel(
         owner_id=user.id,
         story_id=story.id,

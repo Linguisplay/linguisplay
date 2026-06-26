@@ -78,6 +78,14 @@
         <div><label>题材标签（逗号分隔）</label><input id="f_tropes" oninput="story.trope_tags=this.value.split(/[,，]/).map(s=>s.trim()).filter(Boolean)" /></div>
         <div><label>可见性</label><select id="f_vis" onchange="story.visibility=this.value"><option value="private">私密</option><option value="public">公开</option></select></div>
       </div>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:8px;cursor:pointer">
+        <input type="checkbox" id="f_mature" onchange="story.mature=this.checked" style="width:auto" />
+        🔞 成人内容（18+）—— 开启后角色可参与明确成人情节（玩家已在注册时年龄门控）
+      </label>
+      <div style="margin-top:10px">
+        <button class="sm" type="button" onclick="enrich()">🔍 智能增强（为每个角色生成背景知识）</button>
+        <span id="enrichMsg" style="color:#8e8e93;font-size:12px;margin-left:8px"></span>
+      </div>
     </div>
 
     <h2>角色 <button class="sm" onclick="addChar()">+ 加角色</button></h2>
@@ -102,7 +110,7 @@
 const API = "/api/v1";
 let story = blankStory();
 let secrets = [];
-function blankStory(){ return { id:null, title:"", one_liner:"", synopsis:"", world_long:"", trope_tags:[], visibility:"private", characters:[], acts:[], endings:[] }; }
+function blankStory(){ return { id:null, title:"", one_liner:"", synopsis:"", world_long:"", trope_tags:[], visibility:"private", mature:false, characters:[], acts:[], endings:[] }; }
 function gid(p){ return p + Math.random().toString(36).slice(2,8); }
 function esc(s){ return (s||"").replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 async function j(path, opts={}) {
@@ -144,6 +152,7 @@ function openEditor(){
   hide("list"); show("editor"); saveMsg.textContent="";
   f_title.value=story.title||""; f_oneliner.value=story.one_liner||""; f_synopsis.value=story.synopsis||"";
   f_world.value=story.world_long||""; f_tropes.value=(story.trope_tags||[]).join(", "); f_vis.value=story.visibility||"private";
+  f_mature.checked=!!story.mature;
   renderChars(); renderActs(); renderSecrets(); renderEndings();
 }
 
@@ -286,12 +295,23 @@ function renderEndings(){
   });
 }
 
+// ── 智能增强 ──
+async function enrich(){
+  if (!story.id){ enrichMsg.textContent="请先保存草稿"; return; }
+  if (!(story.characters||[]).length){ enrichMsg.textContent="先加几个角色"; return; }
+  try{
+    enrichMsg.textContent="🔍 正在为角色生成背景知识（可能要十几秒）…";
+    const r = await j(`/stories/${story.id}/enrich`,{method:"POST"});
+    enrichMsg.textContent = `✓ 已为 ${r.enriched}/${r.characters} 个角色生成知识库（重新载入可见）`;
+  }catch(e){ enrichMsg.textContent = "⚠️ 增强失败：" + (e.message||e); }
+}
+
 // ── save / publish ──
 async function save(publish){
   try{
     saveMsg.textContent="保存中…";
     const payload = { title:story.title, one_liner:story.one_liner, synopsis:story.synopsis, world_long:story.world_long,
-      trope_tags:story.trope_tags, visibility:story.visibility, characters:story.characters, acts:story.acts, endings:story.endings };
+      trope_tags:story.trope_tags, visibility:story.visibility, mature:!!story.mature, characters:story.characters, acts:story.acts, endings:story.endings };
     if (!story.id){ const res=await j("/stories",{method:"POST",body:JSON.stringify(payload)}); story.id=res.id; }
     else { await j(`/stories/${story.id}`,{method:"PATCH",body:JSON.stringify(payload)}); }
     // rewrite secrets: delete existing, recreate from the form

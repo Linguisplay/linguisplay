@@ -98,6 +98,10 @@ class Story(Base):
     # Endings (true/normal/bad/death) with unlock conditions. JSON like characters/acts.
     endings: Mapped[list] = mapped_column(JSON, default=list)
 
+    # 18+ flag. When on, the engine permits explicit adult content (still refusing
+    # minors). Players are already age-gated 18+ at signup (DOB gate).
+    mature: Mapped[bool] = mapped_column(Boolean, default=False)
+
     visibility: Mapped[str] = mapped_column(String(16), default="private")
     status: Mapped[str] = mapped_column(String(16), default="draft")
     version: Mapped[int] = mapped_column(Integer, default=0)  # 0 = unpublished draft
