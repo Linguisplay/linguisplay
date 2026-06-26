@@ -177,9 +177,11 @@ function renderChars(){
 }
 
 // ── acts ──
-function addAct(){ story.acts.push({id:gid("a_"),index:story.acts.length+1,title:"",goal:"",events:[]}); renderActs(); }
+function addAct(){ story.acts.push({id:gid("a_"),index:story.acts.length+1,title:"",goal:"",advance:{required_fragment_ids:[],required_event_ids:[],affinity_min:0},events:[]}); renderActs(); }
 function delAct(i){ story.acts.splice(i,1); story.acts.forEach((a,j)=>a.index=j+1); renderActs(); }
 function setAct(i,k,v){ story.acts[i][k]=v; }
+function setAdvance(i,k,v){ if(!story.acts[i].advance) story.acts[i].advance={required_fragment_ids:[],required_event_ids:[],affinity_min:0}; story.acts[i].advance[k]=parseInt(v||0); }
+function toggleAdvEvent(i,eid){ const a=story.acts[i].advance||(story.acts[i].advance={required_fragment_ids:[],required_event_ids:[],affinity_min:0}); a.required_event_ids=a.required_event_ids||[]; const k=a.required_event_ids.indexOf(eid); k<0?a.required_event_ids.push(eid):a.required_event_ids.splice(k,1); renderActs(); }
 function addEvent(ai){ story.acts[ai].events.push({id:gid("e_"),what_happens:"",who_character_ids:[]}); renderActs(); }
 function delEvent(ai,ei){ story.acts[ai].events.splice(ei,1); renderActs(); }
 function setEvent(ai,ei,k,v){ story.acts[ai].events[ei][k]=v; }
@@ -199,7 +201,15 @@ function renderActs(){
     d.innerHTML=`<div class="bar" style="justify-content:space-between"><h3>第 ${a.index} 幕</h3><button class="sm del" onclick="delAct(${i})">删这幕</button></div>
       <label>幕标题</label><input value="${esc(a.title)}" oninput="setAct(${i},'title',this.value)">
       <label>🎯 这一幕玩家的小目标（会作为指引显示给玩家）</label><input value="${esc(a.goal||"")}" oninput="setAct(${i},'goal',this.value)" placeholder="例：弄清楚停电的真正原因">
-      ${evs}<button class="sm ghost" style="margin-top:6px" onclick="addEvent(${i})">+ 加事件</button>`;
+      ${evs}<button class="sm ghost" style="margin-top:6px" onclick="addEvent(${i})">+ 加事件</button>
+      <div style="margin-top:10px; padding:8px; border-left:2px solid #4a5; background:#10160f">
+        <h3 style="margin:0 0 4px">🔒 推进硬门控（满足才能进下一幕）</h3>
+        <div class="muted">程序判定、非 AI 拍脑袋。下面任一条件全满足才放行；都留空=用软推进兜底。</div>
+        <label>好感 ≥</label><input type="number" value="${(a.advance&&a.advance.affinity_min)||0}" oninput="setAdvance(${i},'affinity_min',this.value)">
+        <div class="muted" style="margin-top:6px">必须触发的剧情事件（勾选本幕事件）：</div>
+        <div class="chips">${a.events.map(e=>`<span class="chk ${((a.advance&&a.advance.required_event_ids)||[]).includes(e.id)?'on':''}" onclick="toggleAdvEvent(${i},'${e.id}')">${esc((e.what_happens||'事件').slice(0,12))}</span>`).join("")||"<span class='muted'>本幕暂无事件</span>"}</div>
+        <div class="muted" style="margin-top:6px">＊“必须挖到某个秘密”才放行的门控，目前请在种子脚本里配（工坊版即将支持）。</div>
+      </div>`;
     acts.appendChild(d);
   });
 }

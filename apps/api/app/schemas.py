@@ -92,11 +92,22 @@ class StoryEvent(BaseModel):
     linked_secret_ids: list[str] = []
 
 
+class AdvanceCondition(BaseModel):
+    """HARD gate for leaving this act → advancing to the next. ALL conditions must be
+    met (program-checked, not prompt-driven). If a list is empty / affinity_min 0, that
+    sub-condition is vacuously satisfied. An act with NO conditions falls back to soft
+    (model/affinity) advance for backward compatibility."""
+    required_fragment_ids: list[str] = []   # key info the player MUST have discovered
+    required_event_ids: list[str] = []      # plot events that MUST have fired
+    affinity_min: int = 0
+
+
 class Act(BaseModel):
     id: Optional[str] = None
     index: int = 0
     title: str = ""
     goal: str = ""  # the player's small objective during this act (shown as 🎯 guidance)
+    advance: AdvanceCondition = AdvanceCondition()  # hard requirements to leave this act
     events: list[StoryEvent] = []
 
 
@@ -124,6 +135,7 @@ class StoryInput(BaseModel):
     synopsis: Optional[str] = None
     world_long: Optional[str] = None
     relations_overview: Optional[str] = None
+    world_facts: Optional[str] = None
     trope_tags: Optional[list[str]] = None
     visibility: Optional[Literal["private", "public"]] = None
     characters: Optional[list[Character]] = None
@@ -139,6 +151,7 @@ class Story(BaseModel):
     synopsis: Optional[str] = None
     world_long: Optional[str] = None
     relations_overview: Optional[str] = None
+    world_facts: Optional[str] = None
     trope_tags: list[str] = []
     visibility: str = "private"
     status: str = "draft"
@@ -214,6 +227,7 @@ class RunState(BaseModel):
     mode: str = "character"
     player_character_id: Optional[str] = None
     goal: str = ""  # the player's current small objective (this act)
+    progress: Optional[dict[str, Any]] = None  # clue checklist {items, done, total}
 
 
 class Run(BaseModel):

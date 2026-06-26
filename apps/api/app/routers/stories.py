@@ -42,6 +42,7 @@ def _to_story(s: StoryModel) -> Story:
         synopsis=s.synopsis,
         world_long=s.world_long,
         relations_overview=s.relations_overview,
+        world_facts=s.world_facts,
         trope_tags=s.trope_tags or [],
         visibility=s.visibility,
         status=s.status,

@@ -45,6 +45,7 @@ def _to_run(r: RunModel) -> Run:
             mode=mode,
             player_character_id=pcid,
             goal=st.get("goal", "") or runtime.current_goal(r.pinned_content or {}, int(st.get("act", 1))),
+            progress=runtime.act_progress(r.pinned_content or {}, st, int(st.get("act", 1))),
         ),
         cast=cast,
         created_at=r.created_at,
@@ -274,6 +275,7 @@ def play(
                 yield _event({"event": "scene", "scene": final.get("scene")})
                 yield _event({"event": "cast", "cast": final.get("cast", [])})
                 yield _event({"event": "goal", "goal": final.get("goal", "")})
+                yield _event({"event": "progress", "progress": final.get("progress")})
                 yield _event({"event": "suggest", "suggestions": final.get("suggestions", [])})
                 if final.get("ending"):
                     yield _event({"event": "ending", "ending": final["ending"]})

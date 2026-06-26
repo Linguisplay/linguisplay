@@ -42,6 +42,13 @@ class MockLLM:
     """Deterministic stand-in. Reflects gate decisions so behavior is observable."""
 
     def generate(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        # rolling memory digest: deterministic concat (bounded) so tests stay reproducible.
+        if prompt.get("summarize"):
+            prior = prompt.get("prior_memory") or ""
+            lines = [l.get("content", "") for l in (prompt.get("new_lines") or [])]
+            digest = (prior + " " + " ".join(lines)).strip()
+            return {"memory": digest[-2000:]}
+
         # opening intro: narration only, deterministic.
         if prompt.get("intro"):
             pc = prompt.get("player_char")

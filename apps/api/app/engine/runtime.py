@@ -50,7 +50,46 @@ def default_state() -> dict[str, Any]:
         "achieved_endings": [],
         "mode": "character",            # "character" | "god" (invisible observer)
         "player_character_id": None,    # which character the player embodies (character mode)
+        "memory": "",                   # rolling story digest (long-horizon memory, see below)
+        "memory_covered": 0,            # how many history turns are already folded into `memory`
     }
+
+
+# ── Long-horizon memory ──────────────────────────────────────────────────────
+# The model is only shown the last MEMORY_WINDOW dialogue turns verbatim (qwen.py
+# slices history[-8:]). In a long, player-uploaded script that window forgets act 1
+# by act 5. So we keep a rolling digest: once enough turns have slid PAST the window,
+# they're compressed into `state["memory"]` (injected into the system prompt as stable
+# context). Net effect for long runs: recent turns in full + the whole arc in summary,
+# with per-turn tokens staying roughly constant instead of growing without bound.
+#
+# SECURITY: the digest is built only from `history` (player inputs + spoken dialogue),
+# which by construction contains only what characters have ALREADY revealed. Locked
+# fragment bodies never enter history, so they never enter the digest — the gate holds.
+MEMORY_WINDOW = 8   # dialogue turns shown verbatim — MUST match qwen.py's history[-8:]
+MEMORY_BATCH = 6    # summarize only once this many turns have slid out of the window
+
+
+def _update_memory(state: dict[str, Any], history: list[dict[str, str]] | None, llm: LLM) -> None:
+    """Fold turns that have slid out of the verbatim window into the rolling digest.
+
+    Cheap, and only fires every ~MEMORY_BATCH turns (not every turn). Mutates state in
+    place; degrades to leaving `memory` unchanged on any model failure."""
+    history = history or []
+    covered = int(state.get("memory_covered") or 0)
+    cutoff = max(0, len(history) - MEMORY_WINDOW)   # everything older than the window
+    if cutoff - covered < MEMORY_BATCH:
+        return                                       # not enough new material yet
+    new_lines = history[covered:cutoff]
+    prior = state.get("memory") or ""
+    try:
+        out = llm.generate({"summarize": True, "prior_memory": prior, "new_lines": new_lines})
+        digest = (out or {}).get("memory")
+    except Exception:
+        digest = None
+    if digest:
+        state["memory"] = digest
+        state["memory_covered"] = cutoff
 
 
 def _characters(content: dict[str, Any]) -> list[dict[str, Any]]:
@@ -88,6 +127,39 @@ def cast_for(content: dict[str, Any], act: int, exclude_id: str | None = None) -
         for c in present_characters(content, act)
         if c.get("id") != exclude_id
     ]
+
+
+def _physical_roster(content: dict[str, Any], state: dict[str, Any], persona: dict[str, Any]) -> str:
+    """Deterministic 'who is physically present right now', so the model never miscounts
+    nor writes the player out of the scene. General: derived purely from the roster +
+    presence flags, works for any story. Offstage/supernatural characters are listed
+    separately as NOT counted among the living."""
+    act = int(state.get("act", 1))
+    mode = state.get("mode") or "character"
+    pcid = state.get("player_character_id")
+    present = present_characters(content, act)
+    living = [c.get("name") for c in present if c.get("name") and c.get("id") != pcid]
+    # the player is a body in the scene (except in god/observer mode)
+    if mode == "god":
+        player_label = None
+    else:
+        pc = _char_by_id(content, pcid) if pcid else None
+        player_label = (pc.get("name") if pc else (persona or {}).get("name")) or "你"
+    names = ([f"{player_label}（你）"] if player_label else []) + living
+    offstage = [c.get("name") for c in _characters(content)
+                if (c.get("presence") or "present") == "offstage" and c.get("name")]
+    lines: list[str] = []
+    if names:
+        lines.append(
+            f"此刻这个场景里实际在场的人：{'、'.join(names)}——共 {len(names)} 人。"
+            "这个数字是确定的：不要数错、不要重算，也绝不要把“你”（玩家）自己漏掉或排除在外。"
+        )
+    if offstage:
+        lines.append(
+            f"以下并不是在场的活人，只会出现在镜中、暗处或传闻里——永远不要把 TA 算进在场人数，"
+            f"也不要让 TA 像普通人一样正常参与对话：{'、'.join(offstage)}。"
+        )
+    return "\n".join(lines)
 
 
 def _char_by_id(content: dict[str, Any], cid: str | None) -> dict[str, Any] | None:
@@ -164,6 +236,83 @@ def current_goal(content: dict[str, Any], act_index: int) -> str:
     """The player's small objective for this act (authored 🎯 guidance)."""
     a = current_act(content, act_index)
     return (a or {}).get("goal", "") if a else ""
+
+
+def _frag_title_map(content: dict[str, Any]) -> dict[str, str]:
+    """fragment_id → its secret's title (a sanitized topic label, never the body)."""
+    out: dict[str, str] = {}
+    for secret in content.get("secrets", []) or []:
+        title = secret.get("title", "")
+        for f in secret.get("fragments", []) or []:
+            if f.get("id"):
+                out[f["id"]] = title
+    return out
+
+
+def _event_label_map(content: dict[str, Any]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for act in (content.get("story") or {}).get("acts", []) or []:
+        for ev in act.get("events", []) or []:
+            if ev.get("id"):
+                out[ev["id"]] = ev.get("what_happens", "")
+    return out
+
+
+def _advance_cond(content: dict[str, Any], act_index: int) -> dict[str, Any]:
+    return (current_act(content, act_index) or {}).get("advance") or {}
+
+
+def act_has_gate(content: dict[str, Any], act_index: int) -> bool:
+    """True if this act authored any hard advance condition (else soft-advance fallback)."""
+    adv = _advance_cond(content, act_index)
+    return bool(adv.get("required_fragment_ids") or adv.get("required_event_ids")
+                or int(adv.get("affinity_min") or 0) > 0)
+
+
+def can_advance(content: dict[str, Any], state: dict[str, Any], act_index: int) -> bool:
+    """HARD gate (pure, program-checked): are ALL of this act's advance conditions met?
+
+    Required fragments must be unlocked (= the player actually dug that info out), required
+    events triggered, affinity at/above the floor. This is the security/structure twin of
+    gating.py — progression can't be talked past, only earned by discovery."""
+    adv = _advance_cond(content, act_index)
+    unlocked = set(state.get("unlocked_fragment_ids") or [])
+    triggered = set(state.get("triggered_event_ids") or [])
+    if not set(adv.get("required_fragment_ids") or []) <= unlocked:
+        return False
+    if not set(adv.get("required_event_ids") or []) <= triggered:
+        return False
+    if int(state.get("affinity", 0)) < int(adv.get("affinity_min") or 0):
+        return False
+    return True
+
+
+def act_progress(content: dict[str, Any], state: dict[str, Any], act_index: int) -> dict[str, Any]:
+    """A guidance checklist for the current act: which required clues are found (✓) vs
+    still missing (○). Labels are sanitized secret titles / authored event text — never
+    fragment bodies. Empty when the act has no hard gate."""
+    adv = _advance_cond(content, act_index)
+    unlocked = set(state.get("unlocked_fragment_ids") or [])
+    triggered = set(state.get("triggered_event_ids") or [])
+    ftitles = _frag_title_map(content)
+    elabels = _event_label_map(content)
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for fid in adv.get("required_fragment_ids") or []:
+        label = ftitles.get(fid, "线索")
+        if label in seen:
+            continue
+        seen.add(label)
+        items.append({"label": label, "done": fid in unlocked})
+    for eid in adv.get("required_event_ids") or []:
+        items.append({"label": elabels.get(eid, "关键进展"), "done": eid in triggered})
+    done = sum(1 for it in items if it["done"])
+    return {"items": items, "done": done, "total": len(items)}
+
+
+def _pending_topics(progress: dict[str, Any]) -> list[str]:
+    """Titles of still-missing required clues (for steering the player / characters)."""
+    return [it["label"] for it in progress.get("items", []) if not it["done"]]
 
 
 def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | None = None) -> list[dict[str, Any]]:
@@ -448,6 +597,12 @@ def run_turn_stream(
     # think only applies when the player actually embodies/voices someone (not in god mode)
     is_think = channel == "think" and not observer
 
+    # hard-gate guidance: is this act still locked, and what key info is still missing?
+    # (unlocks for THIS turn already applied above, so this reflects the current truth.)
+    progress0 = act_progress(content, state, old_act)
+    needed_topics = _pending_topics(progress0)
+    act_locked = act_has_gate(content, old_act) and not can_advance(content, state, old_act)
+
     # 3. the model is the DIRECTOR for each responder: per-speaker gated context (so a
     #    character can only ever voice what IT is allowed to know — no cross-leak). Each
     #    responder's beats are YIELDED the moment they're computed → they stream out.
@@ -474,6 +629,9 @@ def run_turn_stream(
             "channel": channel,
             "context": ctx,
             "history": history or [],
+            "memory": state.get("memory", ""),   # rolling digest of earlier acts
+            "world_facts": (content.get("story") or {}).get("world_facts") or "",
+            "roster": _physical_roster(content, state, persona),  # deterministic headcount
             "scene": current_act(content, old_act),
             "next_act_title": (next_act or {}).get("title", "") if next_act else "",
             "cast": others,
@@ -482,6 +640,9 @@ def run_turn_stream(
             # god mode: characters interact with EACH OTHER; player is an unseen director
             "observer": observer,
             "director_note": player_input if observer else None,
+            # hard-gate: act not yet cleared → don't resolve/jump; may steer toward these
+            "act_locked": act_locked,
+            "needed_topics": needed_topics,
         }
         directed = llm.generate(prompt)
         d_beats = directed.get("beats", [])
@@ -509,7 +670,10 @@ def run_turn_stream(
             "player_input": player_input,
             "scene": current_act(content, old_act),
             "world": (content.get("story") or {}).get("world_long", "") or "",
+            "world_facts": (content.get("story") or {}).get("world_facts") or "",
+            "roster": _physical_roster(content, state, persona),
             "history": history or [],
+            "memory": state.get("memory", ""),   # rolling digest of earlier acts
             "cast": [c.get("name") for c in all_chars if c.get("name")],
         })
         obs = [b for b in directed.get("beats", []) if b.get("type") == "description"]
@@ -522,12 +686,19 @@ def run_turn_stream(
 
     affinity_delta = 0 if is_think else max(-3, min(8, affinity_delta))
 
-    # 4. apply the director's judgement (this drives progression, tied to player input)
+    # 4. apply affinity, then decide progression. HARD GATE: if this act authored advance
+    #    conditions, it advances ONLY when can_advance() is satisfied (program-checked) —
+    #    the model's 推进 and affinity backstop can no longer talk past it. Acts with NO
+    #    authored conditions fall back to the old soft advance (model 推进 / affinity).
     state["affinity"] = max(0, int(state.get("affinity", 0)) + affinity_delta)
     max_act = _max_act_index(content)
-    backstop = 1 + state["affinity"] // 12  # safety net so a run never fully stalls
-    target = max(old_act + (1 if advance else 0), backstop)
-    new_act = min(max_act, target) if max_act else target
+    if act_has_gate(content, old_act):
+        new_act = (min(max_act, old_act + 1)
+                   if (max_act and can_advance(content, state, old_act)) else old_act)
+    else:
+        backstop = 1 + state["affinity"] // 12  # safety net so a soft run never fully stalls
+        target = max(old_act + (1 if advance else 0), backstop)
+        new_act = min(max_act, target) if max_act else target
     state["act"] = new_act
 
     # 5. act-transition divider (after the replies, transitioning into the new act)
@@ -570,12 +741,19 @@ def run_turn_stream(
                 yield emit({"type": "description", "speaker_name": None,
                             "text": "（你已抵达一种结局，但故事并未就此打住——你仍可以留在这个世界继续探索。）"})
 
+    # 6b. roll older turns into the long-horizon digest (every ~MEMORY_BATCH turns). Done
+    #     here — after the reply beats have already streamed — so it never delays what the
+    #     player sees; the refreshed digest takes effect on the next turn. history is the
+    #     PRIOR conversation (this turn's beats aren't in it yet), matching qwen's window.
+    _update_memory(state, history, llm)
+
     # 7. immersive scene (background / mood / sfx) from this turn's text
     scene = scene_mod.classify_scene(
         " ".join(b.get("text", "") for b in all_beats), default_bg=story_default_bg(content)
     )
     state["scene"] = scene
     state["goal"] = current_goal(content, state["act"])  # small objective for the current act
+    progress = act_progress(content, state, state["act"])  # clue checklist for the (new) act
 
     # suggestions steer toward what's close to unlocking for the primary speaker
     sugg_context = gating.build_context(primary_id, frags, state, newly_ids=newly) if primary else {}
@@ -591,6 +769,7 @@ def run_turn_stream(
         # mode the embodied character is not in the list (you don't address yourself)
         "cast": cast_for(content, state["act"], exclude_id=pcid if mode == "character" else None),
         "goal": state["goal"],
+        "progress": progress,  # {items:[{label,done}], done, total} — the clue checklist
     })
 
 

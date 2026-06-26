@@ -83,6 +83,9 @@ class Story(Base):
     synopsis: Mapped[str | None] = mapped_column(Text, nullable=True)
     world_long: Mapped[str | None] = mapped_column(Text, nullable=True)
     relations_overview: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Hard physical canon injected into EVERY prompt (spatial layout, props, fixed
+    # headcounts/invariants). Spoiler-safe: only observable facts, never locked secrets.
+    world_facts: Mapped[str | None] = mapped_column(Text, nullable=True)
     trope_tags: Mapped[list] = mapped_column(JSON, default=list)
 
     # M1: characters/acts stored as JSON; promote to tables if M2 needs them queryable.

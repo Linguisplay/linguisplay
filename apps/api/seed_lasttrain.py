@@ -36,10 +36,14 @@ CHARACTERS = [
 
 ACTS = [
     {"id": "a1", "index": 1, "title": "相遇", "goal": "找个话头，和靠窗的江野搭上话",
+     # HARD gate: can't leave act 1 until you find out he rides the loop, never getting off
+     "advance": {"required_fragment_ids": ["fr_terminus"]},
      "events": [
         {"id": "e_meet", "what_happens": "末班车空荡荡，你和江野是车厢里仅有的两个人，灯光昏黄。", "who_character_ids": ["jiang"]},
     ]},
     {"id": "a2", "index": 2, "title": "熟悉", "goal": "弄清楚他为什么夜夜都坐这趟车、到站却不下车",
+     # HARD gate: can't leave act 2 until you learn why he can't bear to go home
+     "advance": {"required_fragment_ids": ["fr_home"]},
      "events": [
         {"id": "e_again", "what_happens": "一连几个深夜，你们都在同一节车厢遇见。他开始会对你点头。", "who_character_ids": ["jiang"]},
         {"id": "e_terminus", "what_happens": "你发现到了终点站，江野没有下车，而是安静地坐着等车折返。", "who_character_ids": ["jiang"]},
@@ -51,23 +55,24 @@ ACTS = [
     ]},
 ]
 
-# (title, character_id, sensitivity, known_by, [(layer, content, retrieval_key, unlock)])
+# (title, character_id, sensitivity, known_by, [(fragment_id, layer, content, retrieval_key, unlock)])
+# fragment_id is explicit + stable so acts' advance gates can reference it.
 SECRETS = [
     ("终点站的秘密", "jiang", "light", ["jiang", "zhang"], [
-        (1, "其实江野并不是要去哪儿。他每晚都坐到终点站，然后又坐回来——这趟末班车的来回，才是他真正的目的地。",
+        ("fr_terminus", 1, "其实江野并不是要去哪儿。他每晚都坐到终点站，然后又坐回来——这趟末班车的来回，才是他真正的目的地。",
          "末班车 终点站 不下车 回家 坐到 折返 去哪",
          {"affinity_min": 0, "act_min": 1, "asks_min": 1}),
     ]),
     ("不敢回的家", "jiang", "medium", ["jiang"], [
-        (1, "他说，他睡不着。回到那个一个人的房子，灯一关，安静得让人发慌。坐在晃动的车厢里，反而能眯一会儿——好像还有人陪着。",
+        ("fr_home", 1, "他说，他睡不着。回到那个一个人的房子，灯一关，安静得让人发慌。坐在晃动的车厢里，反而能眯一会儿——好像还有人陪着。",
          "睡不着 失眠 家里 一个人 空 房子 为什么 晚上",
          {"affinity_min": 12, "act_min": 2, "asks_min": 2}),
     ]),
     ("那个一起坐车的人", "jiang", "heavy", ["jiang"], [
-        (1, "他承认，以前他不是一个人坐这趟车的。有个人，总坐在他旁边靠窗的位置，陪他从终点坐到起点，一路说着白天的事。",
+        ("fr_person1", 1, "他承认，以前他不是一个人坐这趟车的。有个人，总坐在他旁边靠窗的位置，陪他从终点坐到起点，一路说着白天的事。",
          "那个人 以前 旁边 靠窗 陪 一起 谁",
          {"affinity_min": 15, "act_min": 2, "asks_min": 2}),
-        (2, "一年前的这几天，那个人走了，再没回来。江野没法接受空着的那个座位，于是每晚都来坐这趟车——只要还坐着，就好像对方只是去了趟洗手间，马上就会回来坐下。他不是在等车，他是在等一个永远不会再上车的人。",
+        ("fr_person2", 2, "一年前的这几天，那个人走了，再没回来。江野没法接受空着的那个座位，于是每晚都来坐这趟车——只要还坐着，就好像对方只是去了趟洗手间，马上就会回来坐下。他不是在等车，他是在等一个永远不会再上车的人。",
          "一年前 走了 去世 离开 忌日 失去 等 真相 放不下",
          {"affinity_min": 20, "act_min": 3, "asks_min": 3}),
     ]),
@@ -132,8 +137,8 @@ def main() -> None:
         for title, char_id, sens, known_by, frags in SECRETS:
             sec = Secret(story_id=story.id, character_id=char_id, title=title, sensitivity=sens)
             sec.fragments = [
-                Fragment(layer=l, content=c, retrieval_key=r, known_by_character_ids=known_by, unlock=u)
-                for (l, c, r, u) in frags
+                Fragment(id=fid, layer=l, content=c, retrieval_key=r, known_by_character_ids=known_by, unlock=u)
+                for (fid, l, c, r, u) in frags
             ]
             db.add(sec)
         db.flush()

@@ -50,6 +50,9 @@
   footer input { margin: 0; }
   #goalbar { flex: 0 0 auto; margin: 8px 16px 0; padding: 8px 12px; border-radius: 10px; background: #1a2030cc; border: 1px solid #2a3350; color: #d8e0ff; font-size: 13px; line-height: 1.5; }
   #goalbar b { color: #ffd479; }
+  #clues { flex: 0 0 auto; margin: 6px 16px 0; padding: 8px 12px; border-radius: 10px; background: #161c2acc; border: 1px solid #2a3350; font-size: 12.5px; line-height: 1.7; }
+  #clues .hd { color: #9fb0ff; font-weight: 600; }
+  #clues .it { color: #c9c9d4; } #clues .it.done { color: #6fe0a6; }
   #suggest { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 4px; }
   .chip { font-size: 12px; padding: 5px 10px; border-radius: 14px; background: #1c2030cc; border: 1px solid #2a3350; color: #9fb0ff; cursor: pointer; }
   .chip:hover { background: #243056; }
@@ -120,6 +123,7 @@
   <div id="play" class="hidden" style="flex:1; display:flex; flex-direction:column; min-height:0">
     <div id="cast"></div>
     <div id="goalbar" class="hidden"></div>
+    <div id="clues" class="hidden"></div>
     <div id="chat"></div>
     <div id="suggest"></div>
     <div id="state"></div>
@@ -309,11 +313,21 @@ function renderState(st) {
   if (!st) return;
   state.innerHTML = `第 <b>${st.act}</b> 幕 · 好感 <b>${st.affinity}</b> · 已解锁碎片 <b>${(st.unlocked_fragment_ids||[]).length}</b>`;
   if (st.goal !== undefined) renderGoal(st.goal);
+  if (st.progress !== undefined) renderProgress(st.progress);
 }
 function renderGoal(goal) {
   const el = document.getElementById("goalbar");
   if (goal) { el.innerHTML = `🎯 <b>当前目标</b>：${escapeHtml(goal)}`; el.classList.remove("hidden"); }
   else el.classList.add("hidden");
+}
+function renderProgress(prog) {
+  const el = document.getElementById("clues");
+  if (!prog || !prog.total) { el.classList.add("hidden"); return; }
+  const rows = prog.items.map(it =>
+    `<span class="it ${it.done?'done':''}">${it.done?'✓':'○'} ${escapeHtml(it.label)}</span>`
+  ).join("　");
+  el.innerHTML = `<span class="hd">🔎 线索 ${prog.done}/${prog.total}</span>　${rows}`;
+  el.classList.remove("hidden");
 }
 function renderSuggest(items) {
   suggest.innerHTML = "";
@@ -462,6 +476,7 @@ async function send() {
         else if (ev.event === "scene") { applyScene(ev.scene); }
         else if (ev.event === "cast") { updateCast(ev.cast); }
         else if (ev.event === "goal") { renderGoal(ev.goal); }
+        else if (ev.event === "progress") { renderProgress(ev.progress); }
         else if (ev.event === "suggest") { afterPlay.suggest = ev.suggestions; }
         else if (ev.event === "ending") { afterPlay.ending = ev.ending; }
       }

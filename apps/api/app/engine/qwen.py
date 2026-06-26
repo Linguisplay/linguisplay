@@ -60,10 +60,55 @@ def _build_system(prompt: dict[str, Any]) -> str:
             "但你只能以「" + speaker + "」的身份说话，绝不能替别人开口、更不能替别人说出他们的秘密。"
         )
 
+    lines.append("")
+    lines.append(
+        "【玩家的权限边界·铁律】玩家只能支配“他自己”这一个人的言行——他说什么、做出什么动作、朝哪使劲。"
+        "至于这个动作在这个世界里到底成不成、会引出什么后果、在场每个人各自怎么反应、谁受伤谁躲开，"
+        "全部由你（导演）根据物理常识和在场人物各自的自主意志来裁定。"
+        "绝不能因为玩家‘嘴上说’了某个结果，那个结果就自动成真。"
+        "比如玩家宣称“我一刀杀光所有人”，你要演的是他挥刀的动作，以及在场每个活人此刻真实的反应"
+        "——惊退、夺刀、逃散、反抗、负伤、呼救——而不是顺着他这句话让所有人凭空就死。"
+        "一个普通人不可能靠一句话，就瞬间杀死好几个会躲、会跑、会还手的大活人。"
+    )
+
+    facts = (prompt.get("world_facts") or "").strip()
+    roster = (prompt.get("roster") or "").strip()
+    if facts or roster:
+        lines.append("")
+        block = "【世界设定·不可违背的事实】（这是这个故事的物理世界底稿，是确定的客观事实；" \
+                "你的旁白与台词必须与之一致，绝不能与之矛盾、也不要凭空改写或自圆其说成别的样子）："
+        if roster:
+            block += "\n" + roster
+        if facts:
+            block += "\n" + facts
+        lines.append(block)
+
+    memory = (prompt.get("memory") or "").strip()
+    if memory:
+        lines.append("")
+        lines.append(
+            "【故事备忘录·至此为止的来龙去脉】（这是更早发生过、但已滑出近期对话的剧情梗概，"
+            "用来保持长程记忆与前后一致；只当作你确实记得的过往，不要照搬复述）：\n" + memory
+        )
+
     if scene:
         scene_events = " ".join(e.get("what_happens", "") for e in (scene.get("events") or []))
         lines.append("")
         lines.append(f"【当前场景：第{scene.get('index','')}幕 {scene.get('title','')}】{scene_events}")
+
+    if prompt.get("act_locked"):
+        lines.append("")
+        lines.append(
+            "【本章未结束】当前推进条件还没满足：你绝不能在叙述里收尾、跳到下一章、或暗示事情已经了结，"
+            "把戏牢牢留在当前这一章。"
+        )
+        nt = prompt.get("needed_topics") or []
+        if nt:
+            lines.append(
+                "玩家还需要弄清这些，剧情才会推进：" + "、".join(nt) + "。"
+                "你可以自然地把话头往这些方向引、递个线头，但绝不能直接替玩家说破答案"
+                "（除非那正是下面允许你透露的内容）。"
+            )
 
     lines += [
         "",
@@ -98,9 +143,12 @@ def _build_system(prompt: dict[str, Any]) -> str:
         else "本章已是最后一章，恒填「否」。"
     )
     end_line = (
-        "结局：（默认填「无」。仅当对方刚才的举动在这个世界里是致命的或不可挽回的"
-        "（例如点燃煤气/跳楼/把楼炸了/激怒了不该惹的人而被杀），才填「死亡」或「坏结局」，"
-        "并务必在上面的「旁白」里把这个后果演出来、写完整。不要轻易判定结局，普通对话一律填「无」。）"
+        "结局：（默认填「无」。「死亡」只有一种用法：玩家本人（你正在对话的这个人）"
+        "在这一刻确实地、不可挽回地死了、或已必死无疑（例如他自己跳了楼、点燃了煤气、"
+        "或惹了能杀死他的对象而被反杀）。"
+        "玩家去攻击、伤害别人，【不算】「死亡」——那顶多把局面推向危险、或导向「坏结局」，"
+        "但只要玩家本人没死，就绝不能填「死亡」。判定要克制：普通对话、以及没得逞的举动，一律填「无」，"
+        "把真实后果放进「旁白」里演出来，而不是急着用结局收场。）"
     )
 
     if observer:
@@ -169,11 +217,33 @@ def _build_system(prompt: dict[str, Any]) -> str:
                 "不止你一个人听见。你是此刻最可能先开口接话的人——正常以「" + speaker +
                 "」的身份回应即可，旁白里可以带上其他人此刻的神态反应。"
             )
+        # This world has physics. Whether the player SPOKE or ACTED, the scene must
+        # visibly react — narration is the world's response, not optional flavor.
+        if channel == "do":
+            lines.append("")
+            lines.append(
+                f"【这是一个动作，不是台词】「{player_name}」刚才做的是一个【动作/行为】，而不是一句话。"
+                "请把场景当成一台有物理规则的引擎：这个动作会触碰到什么、推动什么、发出什么声响、"
+                "改变什么光线或位置、惊动在场的谁——都必须有【具体、即时、连锁】的后果。"
+                "先在「旁白」里把这个动作真正落地、把后果一步步演出来（东西被碰倒、门被推开、"
+                "灯被照亮、某人被吓得后退……），再决定角色要不要开口、说什么。"
+                "绝不能无视或淡化玩家做的事；动作若在物理上做不到、或会引出危险/致命后果，也要如实演出。"
+            )
+            narr_hint = (
+                f"4~6句，第三人称。先把「{player_name}」这个动作在场景里造成的【实际后果】"
+                "一步步写清楚——物体、声响、光线、空间位置、他人身体反应的连锁变化，"
+                "再带出在场角色的神情与反应。要有画面、有质感、有因果，绝不是空泛的氛围词。"
+            )
+        else:
+            narr_hint = (
+                "4~6句，第三人称，富有文学性——有画面感、有质感、有节奏。写出对方刚才这句话"
+                "在此刻激起的反应、神情、肢体动作、气氛与环境的微妙变化，而不只是干巴巴地交代信息。"
+            )
         lines += [
             "",
-            "你同时是这场戏的「导演」。严格按下面五行输出，不要多余内容：",
-            "旁白：（3~5句，第三人称，富有文学性——有画面感、有质感、有节奏。写出对方刚才这句话"
-            "（或这个动作）激起的反应、神情、气氛与环境的微妙变化，而不只是干巴巴地交代信息。）",
+            "你同时是这场戏的「导演」。严格按下面五行输出，不要多余内容："
+            "其中「旁白」一行【必须写、不能省略、不能留空】——它是这个世界对玩家言行的回应。",
+            f"旁白：（{narr_hint}）",
             f"{speaker}：（角色这一轮要说的话，口语化、自然，2~4句）",
             "好感：（一个整数，-3 到 +5。对方敷衍/冒犯/答非所问→负；真诚、走心、戳中要害、给到情绪价值→正；普通对话→0或+1）",
             f"推进：（是/否。{advance_hint}）",
@@ -201,8 +271,21 @@ def _build_observe_system(prompt: dict[str, Any]) -> str:
     ]
     if world:
         lines.append(f"【世界观/场景设定】{world}")
+    facts = (prompt.get("world_facts") or "").strip()
+    roster = (prompt.get("roster") or "").strip()
+    if facts or roster:
+        block = "【世界设定·不可违背的事实】（确定的客观事实，你的旁白必须与之一致，尤其是在场的人与人数，" \
+                "不要数错、不要把玩家自己漏掉）："
+        if roster:
+            block += "\n" + roster
+        if facts:
+            block += "\n" + facts
+        lines.append(block)
     if scene_line:
         lines.append(scene_line)
+    memory = (prompt.get("memory") or "").strip()
+    if memory:
+        lines.append(f"【至此为止的剧情梗概】（保持前后一致用，不要复述）：\n{memory}")
 
     if target:
         name = target.get("name") or "那个人"
@@ -336,8 +419,28 @@ def _parse_reply(text: str, speaker: str, channel: str = "say", group_mode: str 
         return {"beats": beats, "affinity_delta": affinity_delta, "advance_act": advance, "ending": None}
     if narration:
         beats.append({"type": "description", "speaker_name": None, "text": narration})
-    beats.append({"type": "dialogue", "speaker_name": speaker, "text": dialogue or text.strip()})
+        # Only add a dialogue beat if the character actually spoke. Do NOT fall back to the
+        # whole raw text here — that re-dumps the 旁白 line as garbage dialogue.
+        if dialogue:
+            beats.append({"type": "dialogue", "speaker_name": speaker, "text": dialogue})
+    else:
+        beats.append({"type": "dialogue", "speaker_name": speaker, "text": dialogue or text.strip()})
     return {"beats": beats, "affinity_delta": affinity_delta, "advance_act": advance, "ending": ending}
+
+
+def _build_summary_system() -> str:
+    """System prompt for the rolling memory digest. The model merges newly-elapsed turns
+    into the running account, keeping established facts and staying concise."""
+    return (
+        "你在为一局互动剧情维护一份【故事备忘录】，用来在长剧情里保持前后一致的长程记忆。\n"
+        "下面给你『已有备忘录』和『最近新发生的对话』。请把新发生的内容【合并】进备忘录，"
+        "输出更新后的【完整】备忘录：\n"
+        "- 已确立的事实绝不能丢失或篡改，除非新对话明确推翻了它；\n"
+        "- 用简洁的要点记录：玩家是谁、做过/说过的关键事、已经查明的真相与线索、"
+        "人物之间的关系与承诺、尚未解决的悬念；\n"
+        "- 只记真正重要、对后续剧情有用的信息，闲聊和寒暄略去；\n"
+        "- 控制在 400 字以内。只输出备忘录本身，不要任何解释或开场白。"
+    )
 
 
 class QwenLLM:
@@ -346,7 +449,37 @@ class QwenLLM:
         self._key = s.dashscope_api_key
         self._model = s.llm_model
 
+    def _summarize(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """Compress elapsed turns into the rolling digest (cheap model). Degrades to the
+        prior digest on any failure — memory just doesn't advance that turn, never 500s."""
+        prior = prompt.get("prior_memory") or ""
+        lines = prompt.get("new_lines") or []
+        convo = "\n".join(
+            ("玩家：" if l.get("role") == "user" else "角色：") + (l.get("content") or "")
+            for l in lines
+        )
+        user = f"== 已有备忘录 ==\n{prior or '（空，尚未建立）'}\n\n== 最近新发生的对话 ==\n{convo}"
+        try:
+            resp = httpx.post(
+                DASHSCOPE_URL,
+                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
+                json={
+                    "model": "qwen-turbo",  # cheap model — this is background compression
+                    "messages": [{"role": "system", "content": _build_summary_system()},
+                                 {"role": "user", "content": user}],
+                    "max_tokens": 600,
+                    "temperature": 0.3,
+                },
+                timeout=30,
+            )
+            resp.raise_for_status()
+            return {"memory": resp.json()["choices"][0]["message"]["content"].strip() or prior}
+        except Exception:
+            return {"memory": prior}
+
     def generate(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        if prompt.get("summarize"):
+            return self._summarize(prompt)
         speaker = prompt.get("speaker_name") or "角色"
         channel = prompt.get("channel") or "say"
         observe = bool(prompt.get("observe"))
