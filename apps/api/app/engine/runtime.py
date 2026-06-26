@@ -423,6 +423,41 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
     return beats or [{"type": "description", "speaker_name": None, "text": opening_narration(content)}]
 
 
+def build_act_transition(content: dict[str, Any], state: dict[str, Any], old_act: int,
+                          new_act: int, persona: dict[str, Any] | None = None,
+                          llm: LLM | None = None) -> list[dict[str, Any]]:
+    """Narration that carries the plot INTO a new act: the shift, the new situation, the
+    new goal. One LLM call (degrades to the act's authored events). Spoiler-safe."""
+    llm = llm or get_llm()
+    mode = state.get("mode") or "character"
+    pcid = state.get("player_character_id")
+    act = current_act(content, new_act) or {}
+    player_char = _char_by_id(content, pcid) if (mode == "character" and pcid) else None
+    present = [c.get("name") for c in present_characters(content, new_act)
+               if c.get("name") and c.get("id") != pcid]
+    prev = current_act(content, old_act) or {}
+    directed = llm.generate({
+        "transition": True,
+        "mode": mode,
+        "player_char": player_char,
+        "world": (content.get("story") or {}).get("world_long", "") or "",
+        "act": act,
+        "prev_title": prev.get("title", ""),
+        "goal": act.get("goal", ""),
+        "cast": present,
+        "place": _physical_place(content, state),
+        "memory": state.get("memory", ""),
+        "mature": bool(state.get("mature")),
+    })
+    beats = [b for b in directed.get("beats", []) if b.get("type") == "description"]
+    # fallback: at least state the new act's events so the transition still carries info
+    if not beats:
+        ev = " ".join(e.get("what_happens", "") for e in (act.get("events") or []))
+        if ev:
+            beats = [{"type": "description", "speaker_name": None, "text": ev}]
+    return beats
+
+
 _ENDING_PRIORITY = {"true": 3, "normal": 2, "bad": 1, "death": 0}
 _DEFAULT_ENDING_TITLE = {"death": "你死了", "bad": "坏结局", "normal": "结局", "true": "真结局"}
 
@@ -851,11 +886,14 @@ def run_turn_stream(
                     "text": f"（你停下来，理了理思路——眼下最该弄清的，是「{needed_topics[0]}」。"
                             f"不妨直接去追问，或者留意周围有没有相关的破绽。）"})
 
-    # 5. act-transition divider (after the replies, transitioning into the new act)
+    # 5. act transition: a divider, then a narration that actually carries the plot into
+    #    the new act (what's changed, the new situation, the new goal) — not just a title.
     if new_act > old_act:
         nxt = current_act(content, new_act) or {}
         yield emit({"type": "description", "speaker_name": None,
                     "text": f"—— 第{new_act}幕 · {nxt.get('title', '')} ——"})
+        for b in build_act_transition(content, state, old_act, new_act, persona, llm):
+            yield emit(b)
 
     # 6. ending check. Authored endings are MILESTONES (true/normal/bad) — reaching one
     #    shows its narration but the open world keeps going, so the player can explore on

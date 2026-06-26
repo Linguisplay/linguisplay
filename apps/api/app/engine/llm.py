@@ -61,6 +61,14 @@ class MockLLM:
             return {"beats": [{"type": "description", "speaker_name": None, "text": text}],
                     "affinity_delta": 0, "advance_act": False, "ending": None}
 
+        # act transition: narration only, deterministic.
+        if prompt.get("transition"):
+            act = prompt.get("act") or {}
+            goal = prompt.get("goal") or ""
+            text = f"局面转入第{act.get('index','')}幕《{act.get('title','')}》。" + (f"目标：{goal}" if goal else "")
+            return {"beats": [{"type": "description", "speaker_name": None, "text": text}],
+                    "affinity_delta": 0, "advance_act": False, "ending": None}
+
         # observe/examine (想): narration only, deterministic.
         if prompt.get("observe"):
             tgt = prompt.get("observe_target")

@@ -515,6 +515,57 @@ def _build_intro_system(prompt: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _build_transition_system(prompt: dict[str, Any]) -> str:
+    """Narration that opens a NEW act mid-run: marks the shift, lays out what's happening
+    now, and surfaces the new goal — so entering a chapter actually advances the plot,
+    not just shows a divider. Detailed, 2nd-person, spoiler-safe (no secrets passed in)."""
+    mode = prompt.get("mode") or "character"
+    pc = prompt.get("player_char")
+    world = prompt.get("world") or ""
+    act = prompt.get("act") or {}
+    title = act.get("title") or ""
+    index = act.get("index") or ""
+    goal = prompt.get("goal") or ""
+    cast = prompt.get("cast") or []
+    act_events = " ".join(e.get("what_happens", "") for e in (act.get("events") or []))
+    prev_title = prompt.get("prev_title") or ""
+
+    lines = [
+        "你是这个互动故事的旁白。故事刚刚翻入新的一幕，请写一段【承上启下】的过场旁白，"
+        "用中文，文笔有质感，但更要【具体、详尽、可感】——玩家看不到画面，时间/地点/局势的变化都要靠文字交代清楚。",
+        _ANTI_ASSISTANT,
+    ]
+    if world:
+        lines.append(f"【世界观/场景设定】{world}")
+    place = (prompt.get("place") or "").strip()
+    if place:
+        lines.append("【当前所在·空间锚点】（照这个具体地点的真实陈设来写）：\n" + place)
+    memory = (prompt.get("memory") or "").strip()
+    if memory:
+        lines.append(f"【前情梗概】（用来承接前文，不要逐句复述）：\n{memory}")
+    if prompt.get("mature"):
+        lines.append("（本剧情为成人向 18+，过场可带相应基调。）")
+    if act_events:
+        lines.append(f"【这一幕正在发生】{act_events}")
+    if cast:
+        lines.append(f"【此刻在场的人】{('、'.join(cast))}")
+
+    who = "旁观的众人" if mode == "god" else "你"
+    lines += [
+        "",
+        f"现在进入第{index}幕《{title}》" + (f"（上一幕是《{prev_title}》）" if prev_title else "") + "。",
+        f"请写 4~7 句过场旁白，用第二人称称呼{who}：先承接前一幕的余波、交代时间/情势的推移，"
+        "再【具体地把这一幕此刻的新局面铺开】——发生了什么变化、眼前是什么处境、在场的人此刻什么状态。"
+        "要让玩家清楚地感到剧情向前走了一步，而不是原地换了块标题牌。",
+        "【铁律】只写客观可见可感的处境与变化，绝不剧透任何尚未揭开的秘密或真相（你也不知道那些）。",
+    ]
+    if goal:
+        lines.append(f"最后用单独一句话、自然地点出这一幕的新目标：『{goal}』。")
+    lines.append("")
+    lines.append("直接输出这段过场旁白文字本身，不要任何前缀、标签或解释。")
+    return "\n".join(lines)
+
+
 def _parse_reply(text: str, speaker: str, channel: str = "say", group_mode: str | None = None) -> dict:
     """Parse the director's 旁白/角色/好感/推进 reply into beats + state deltas.
     Lenient: missing markers degrade to all-dialogue, neutral deltas."""
@@ -745,23 +796,26 @@ class QwenLLM:
         channel = prompt.get("channel") or "say"
         observe = bool(prompt.get("observe"))
         intro = bool(prompt.get("intro"))
-        narrate = observe or intro  # narration-only, single description beat
-        system = _build_intro_system(prompt) if intro else (
-            _build_observe_system(prompt) if observe else _build_system(prompt))
+        transition = bool(prompt.get("transition"))
+        narrate = observe or intro or transition  # narration-only, description beat(s)
+        system = (_build_intro_system(prompt) if intro else
+                  _build_transition_system(prompt) if transition else
+                  _build_observe_system(prompt) if observe else _build_system(prompt))
         player_input = prompt.get("player_input", "")
         history = prompt.get("history") or []
 
         messages = [{"role": "system", "content": system}]
-        if not intro:
+        if not intro and not transition:
             messages += history[-8:]  # recent turns for continuity / current situation
-        # observe/intro is a one-off narration; nudge with a neutral cue
-        cue = "（开场）" if intro else ("（观察四周）" if not prompt.get("observe_target") else "（打量这个人）")
+        # observe/intro/transition is a one-off narration; nudge with a neutral cue
+        cue = ("（开场）" if intro else "（进入新的一幕）" if transition else
+               "（观察四周）" if not prompt.get("observe_target") else "（打量这个人）")
         user_content = player_input or cue
         # DEPTH INJECTION (SillyTavern @Depth trick): besides the full world_facts/place in
         # the system prompt (which history pushes far from the generation point), restate a
         # SHORT physical anchor right next to the user's turn. Adjacency makes the model
         # adhere far better — fixes the "drifts/contradicts the physical world" problem.
-        if not intro:
+        if not intro and not transition:
             anchor = _depth_anchor(prompt)
             if anchor:
                 user_content = f"{user_content}\n\n{anchor}"
