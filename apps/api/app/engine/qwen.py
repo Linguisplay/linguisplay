@@ -21,6 +21,24 @@ _ANTI_ASSISTANT = (
 )
 
 
+def _depth_anchor(prompt: dict[str, Any]) -> str:
+    """A SHORT physical anchor restated right next to the user's turn (depth-0 injection).
+    Pulls the current-place line + the deterministic headcount line — the two facts the
+    model most often drifts on — so they sit adjacent to generation, not buried up in the
+    system prompt. Returns "" when there's nothing physical to anchor."""
+    bits: list[str] = []
+    place = (prompt.get("place") or "").strip()
+    if place:
+        # keep only the concrete locator sentence (first line), drop the long instructions
+        bits.append(place.split("\n", 1)[0].strip())
+    roster = (prompt.get("roster") or "").strip()
+    if roster:
+        bits.append(roster.split("\n", 1)[0].strip())  # the "此刻在场…共N人" headcount sentence
+    if not bits:
+        return ""
+    return "［现场速记·务必扣住，别写得与之矛盾］" + " ".join(bits)
+
+
 def _build_system(prompt: dict[str, Any]) -> str:
     speaker = prompt.get("speaker_name") or "角色"
     persona_text = prompt.get("speaker_persona") or ""
@@ -540,7 +558,16 @@ class QwenLLM:
             messages += history[-8:]  # recent turns for continuity / current situation
         # observe/intro is a one-off narration; nudge with a neutral cue
         cue = "（开场）" if intro else ("（观察四周）" if not prompt.get("observe_target") else "（打量这个人）")
-        messages.append({"role": "user", "content": player_input or cue})
+        user_content = player_input or cue
+        # DEPTH INJECTION (SillyTavern @Depth trick): besides the full world_facts/place in
+        # the system prompt (which history pushes far from the generation point), restate a
+        # SHORT physical anchor right next to the user's turn. Adjacency makes the model
+        # adhere far better — fixes the "drifts/contradicts the physical world" problem.
+        if not intro:
+            anchor = _depth_anchor(prompt)
+            if anchor:
+                user_content = f"{user_content}\n\n{anchor}"
+        messages.append({"role": "user", "content": user_content})
 
         try:
             resp = httpx.post(

@@ -223,17 +223,19 @@ def _physical_place(content: dict[str, Any], state: dict[str, Any]) -> str:
     if not loc:
         return ""
     name = loc.get("name") or "此处"
-    parts = [f"此刻玩家所在的地点是【{name}】。"]
+    # line 1 = the concrete locator (place + fixtures + exits) — this is what the depth
+    # anchor reuses, so keep it self-contained and grounded. line 2 = the meta-instruction.
+    concrete = f"此刻玩家所在的地点是【{name}】。"
     if loc.get("detail"):
-        parts.append(f"这里有：{loc['detail']}")
+        concrete += f"这里有：{loc['detail']}"
     exits = [e for e in (loc.get("exits") or []) if e]
     if exits:
-        parts.append(f"从这里可以去：{'、'.join(exits)}。")
-    parts.append(
+        concrete += f"　从这里可以去：{'、'.join(exits)}。"
+    instruction = (
         "旁白只能描写这个地点里实际存在的东西，不要凭空添置别处的陈设；"
         "玩家要移动到别处，必须经由上面列出的通路，且要把移动过程写出来，不能瞬移。"
     )
-    return "".join(parts)
+    return concrete + "\n" + instruction
 
 
 def _char_by_id(content: dict[str, Any], cid: str | None) -> dict[str, Any] | None:

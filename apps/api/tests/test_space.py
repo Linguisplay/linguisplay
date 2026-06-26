@@ -75,3 +75,15 @@ def test_director_move_applies_only_for_known_place():
 def test_no_location_story_returns_none():
     out = runtime.run_turn(NOMAP, runtime.default_state(), {"name": "我"}, "你好", channel="say")
     assert out["location"] is None
+
+
+def test_depth_anchor_is_short_and_grounded():
+    from app.engine import qwen
+    place = runtime._physical_place(MAP, {**runtime.default_state(), "location_id": "study"})
+    roster = "此刻这个场景里实际在场的人：我（你）、Mara——共 2 人。不要数错。"
+    anchor = qwen._depth_anchor({"place": place, "roster": roster})
+    assert "书房" in anchor          # the current place is restated near the user turn
+    assert "共 2 人" in anchor        # and the deterministic headcount
+    assert "\n" not in anchor         # it's a short one-liner, not the whole block
+    # nothing physical → no anchor
+    assert qwen._depth_anchor({}) == ""
