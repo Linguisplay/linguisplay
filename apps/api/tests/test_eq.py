@@ -38,7 +38,7 @@ def test_eq_style_and_prior_emotion_injected_into_prompt():
         "eq_style": "话少眼神重，体贴从不挂嘴上",
         "player_emotion": "强忍委屈",
     })
-    assert "情商" in sys                       # the EQ guidance block is present
+    assert "情绪敏感" in sys                    # the EQ / emotional-sensitivity block is present
     assert "话少眼神重" in sys                  # this character's own EQ style is used
     assert "强忍委屈" in sys                    # prior emotional read carried in for continuity
 
