@@ -51,6 +51,7 @@ def default_state() -> dict[str, Any]:
         "mode": "character",            # "character" | "god" (invisible observer)
         "player_character_id": None,    # which character the player embodies (character mode)
         "memory": "",                   # rolling story digest (long-horizon memory, see below)
+        "stuck": 0,                     # consecutive locked-act turns w/o new clue (hint escalation)
         "memory_covered": 0,            # how many history turns are already folded into `memory`
     }
 
@@ -68,6 +69,11 @@ def default_state() -> dict[str, Any]:
 # fragment bodies never enter history, so they never enter the digest — the gate holds.
 MEMORY_WINDOW = 8   # dialogue turns shown verbatim — MUST match qwen.py's history[-8:]
 MEMORY_BATCH = 6    # summarize only once this many turns have slid out of the window
+
+# Stuck-hint escalation: consecutive locked-act turns with no new required clue before
+# NPCs get more forthcoming (NUDGE), then before a direct narrator hint fires (PUSH).
+STUCK_NUDGE = 2
+STUCK_PUSH = 4
 
 
 def _update_memory(state: dict[str, Any], history: list[dict[str, str]] | None, llm: LLM) -> None:
@@ -603,6 +609,14 @@ def run_turn_stream(
     needed_topics = _pending_topics(progress0)
     act_locked = act_has_gate(content, old_act) and not can_advance(content, state, old_act)
 
+    # stuck-hint escalation: how many consecutive PRIOR turns the player has been on this
+    # gated act without uncovering a new required clue. The longer they spin, the more
+    # forthcoming the NPCs' guidance becomes (and at the top tier a narrator nudge fires).
+    # Only meaningful while the act is locked and there's still something to find.
+    stuck_in = int(state.get("stuck", 0) or 0) if (act_locked and needed_topics) else 0
+    stuck_level = 1 if stuck_in >= STUCK_NUDGE else 0
+    stuck_level = 2 if stuck_in >= STUCK_PUSH else stuck_level
+
     # 3. the model is the DIRECTOR for each responder: per-speaker gated context (so a
     #    character can only ever voice what IT is allowed to know — no cross-leak). Each
     #    responder's beats are YIELDED the moment they're computed → they stream out.
@@ -643,6 +657,7 @@ def run_turn_stream(
             # hard-gate: act not yet cleared → don't resolve/jump; may steer toward these
             "act_locked": act_locked,
             "needed_topics": needed_topics,
+            "stuck_level": stuck_level,
         }
         directed = llm.generate(prompt)
         d_beats = directed.get("beats", [])
@@ -700,6 +715,22 @@ def run_turn_stream(
         target = max(old_act + (1 if advance else 0), backstop)
         new_act = min(max_act, target) if max_act else target
     state["act"] = new_act
+
+    # 4b. update the stuck counter for NEXT turn: did THIS turn make headway on the gate?
+    #     Progress = the act advanced, or a clue this act requires was newly unlocked. If so,
+    #     reset; otherwise (still locked, still missing clues) increment. At the top tier a
+    #     narrator nudge fires this turn, openly pointing at one thing left to investigate
+    #     (the topic label only — never the locked body).
+    still_locked = act_has_gate(content, new_act) and not can_advance(content, state, new_act)
+    if new_act == old_act and still_locked:
+        req = set(_advance_cond(content, old_act).get("required_fragment_ids") or [])
+        made_progress = bool(req & set(newly))
+        state["stuck"] = 0 if made_progress else stuck_in + 1
+    else:
+        state["stuck"] = 0
+    if stuck_in + 1 >= STUCK_PUSH and state["stuck"] >= STUCK_PUSH and needed_topics:
+        yield emit({"type": "description", "speaker_name": None,
+                    "text": f"（你停下来，理了理思路——也许，该从「{needed_topics[0]}」入手。）"})
 
     # 5. act-transition divider (after the replies, transitioning into the new act)
     if new_act > old_act:

@@ -104,11 +104,27 @@ def _build_system(prompt: dict[str, Any]) -> str:
         )
         nt = prompt.get("needed_topics") or []
         if nt:
-            lines.append(
-                "玩家还需要弄清这些，剧情才会推进：" + "、".join(nt) + "。"
-                "你可以自然地把话头往这些方向引、递个线头，但绝不能直接替玩家说破答案"
-                "（除非那正是下面允许你透露的内容）。"
-            )
+            stuck = int(prompt.get("stuck_level", 0) or 0)
+            if stuck >= 2:
+                # player has been spinning their wheels — be much more forthcoming with
+                # guidance: openly point at WHERE to look / WHAT to ask, just don't hand
+                # over the locked answer itself.
+                lines.append(
+                    "玩家已经卡了好几轮、明显没头绪，剧情还需要他弄清：" + "、".join(nt) + "。"
+                    "请你主动、明确地把他往这些方向推——可以直接建议他去问谁、去查什么、去注意哪处反常，"
+                    "把线头递得足够明显，让他知道下一步该往哪挖；但仍然不能直接替他说破那个被锁住的答案本身。"
+                )
+            elif stuck >= 1:
+                lines.append(
+                    "玩家似乎有点卡住，剧情还需要他弄清：" + "、".join(nt) + "。"
+                    "请比平时更主动地把话头往这些方向引、把线头递得更清楚一些，但仍不要直接说破答案。"
+                )
+            else:
+                lines.append(
+                    "玩家还需要弄清这些，剧情才会推进：" + "、".join(nt) + "。"
+                    "你可以自然地把话头往这些方向引、递个线头，但绝不能直接替玩家说破答案"
+                    "（除非那正是下面允许你透露的内容）。"
+                )
 
     lines += [
         "",
