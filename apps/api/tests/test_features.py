@@ -7,6 +7,17 @@ injected as reference. Both are off by default and shape the live qwen prompt on
 from app.engine import qwen, runtime
 
 
+def test_autonomy_block_and_agenda_in_prompt():
+    base = {"speaker_name": "龙卷风", "speaker_persona": "话事人", "persona": {"name": "我"},
+            "channel": "say", "context": {}}
+    sys = qwen._build_system(base)
+    assert "独立的人" in sys and "不是工具人" in sys      # autonomy directive always present
+    assert "独一无二的声音" in sys                         # distinct-voice instruction present
+    # an authored agenda is injected as the character's own goal
+    sys2 = qwen._build_system({**base, "agenda": "守住城寨那条门路"})
+    assert "守住城寨那条门路" in sys2
+
+
 def test_r18_block_only_when_mature():
     base = {"speaker_name": "A", "speaker_persona": "p", "persona": {"name": "我"},
             "channel": "say", "context": {}}

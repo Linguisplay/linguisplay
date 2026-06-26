@@ -769,6 +769,7 @@ def run_turn_stream(
             "roster": _physical_roster(content, state, persona),  # deterministic headcount
             "place": place,                       # concrete current-location anchor (if authored)
             "eq_style": sp.get("eq_style", ""),   # how THIS character reads/expresses emotion
+            "agenda": sp.get("agenda", ""),       # this character's OWN goal/will (autonomy)
             "player_emotion": state.get("player_emotion", ""),  # prior emotional read (continuity)
             "knowledge": sp.get("knowledge", ""),  # 智能增强: this character's background lore
             "mature": bool(state.get("mature")),   # 18+ run → adult content permitted

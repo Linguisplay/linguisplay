@@ -78,6 +78,9 @@ class Character(BaseModel):
     # how THIS character reads & expresses emotion (their EQ style) — so empathy stays
     # in-character (a gruff character shows care differently than a warm one). Optional.
     eq_style: Optional[str] = None
+    # this character's OWN goal/agenda/stance in the story — what THEY are after,
+    # independent of the player. Drives autonomous, self-interested behavior. Optional.
+    agenda: Optional[str] = None
     # auto-generated background knowledge ("智能增强"): a structured lore block the model
     # can draw on for this character (IP setting, era, relations, signature details).
     knowledge: Optional[str] = None
