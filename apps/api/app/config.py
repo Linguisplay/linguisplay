@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     llm_model: str = "qwen-max"
     dashscope_api_key: str = ""
 
+    # 智能增强: when set, character enrichment grounds itself in live web search
+    # (Tavily) instead of the model's own knowledge.
+    tavily_api_key: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

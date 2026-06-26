@@ -580,22 +580,63 @@ def _build_summary_system() -> str:
     )
 
 
-def generate_knowledge(name: str, profile: str, world: str = "") -> str:
-    """智能增强: synthesize a structured background-lore block for a character.
+def _qwen_chat(system: str, user: str, max_tokens: int = 700, temperature: float = 0.6) -> str:
+    """One-shot qwen call returning text (or "" on failure). Shared by enrich helpers."""
+    s = get_settings()
+    if not s.dashscope_api_key:
+        return ""
+    try:
+        resp = httpx.post(
+            DASHSCOPE_URL,
+            headers={"Authorization": f"Bearer {s.dashscope_api_key}", "Content-Type": "application/json"},
+            json={"model": s.llm_model,
+                  "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                  "max_tokens": max_tokens, "temperature": temperature},
+            timeout=40,
+        )
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"].strip()
+    except Exception:
+        return ""
 
-    Mirrors the old persona 'enrich' feature, but sourced from the model's own knowledge
-    (detects whether the character is from a known IP, then writes a structured block) —
-    no live web search (no Tavily key). Drop-in: swap in a real search step later. Returns
-    "" if there's no key / the call fails, so enrich degrades gracefully.
+
+def _tavily_search(query: str, max_results: int = 2) -> str:
+    """Live web search via Tavily. Returns concatenated result snippets (or "")."""
+    s = get_settings()
+    if not s.tavily_api_key:
+        return ""
+    try:
+        resp = httpx.post(
+            "https://api.tavily.com/search",
+            json={"api_key": s.tavily_api_key, "query": query,
+                  "max_results": max_results, "search_depth": "basic"},
+            timeout=20,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        parts = [r.get("content", "") for r in data.get("results", []) if r.get("content")]
+        if data.get("answer"):
+            parts.insert(0, data["answer"])
+        return "\n".join(parts).strip()
+    except Exception:
+        return ""
+
+
+def generate_knowledge(name: str, profile: str, world: str = "") -> str:
+    """智能增强: build a structured background-lore block for a character.
+
+    With a Tavily key: detect IP + generate dimensional queries → live web search → LLM
+    synthesizes the real results into a structured block (the faithful persona 'enrich').
+    Without Tavily: falls back to the model's own knowledge. Returns "" on any failure so
+    enrich degrades gracefully.
     """
     s = get_settings()
     if not s.dashscope_api_key:
         return ""
-    sys = (
-        "你在为一款互动小说游戏的 AI 角色整理【背景知识库】，供 AI 扮演时自然取用。\n"
-        "先判断这个角色是否出自已知 IP（游戏/动漫/影视/小说等）：\n"
-        "- 若是 IP 角色：依据该 IP 的设定整理；\n"
-        "- 若是原创角色：依据其身份/职业/时代/世界观，补充真实可信的背景知识。\n"
+    profile = (profile or "")[:600]
+    combined = f"角色名：{name}\n角色设定：{profile}\n所在故事/世界：{(world or '')[:400]}"
+
+    synth_fmt = (
         "整理成下面这种结构（每块 50~120 字，没有内容的块直接省略），只输出整理后的内容、不加解释：\n"
         "【人物设定】身份、能力、外貌、口癖等核心设定\n"
         "【世界背景】所处世界/时代的关键设定：地点、规则、氛围\n"
@@ -603,20 +644,47 @@ def generate_knowledge(name: str, profile: str, world: str = "") -> str:
         "【标志性细节】可自然融入对话的具体细节：物件、口头禅、习惯、事件\n"
         "【剧情素材】可推进故事的背景冲突、悬念或文化典故"
     )
-    user = f"角色名：{name}\n角色设定：{(profile or '')[:600]}\n所在故事/世界：{(world or '')[:400]}"
-    try:
-        resp = httpx.post(
-            DASHSCOPE_URL,
-            headers={"Authorization": f"Bearer {s.dashscope_api_key}", "Content-Type": "application/json"},
-            json={"model": s.llm_model,
-                  "messages": [{"role": "system", "content": sys}, {"role": "user", "content": user}],
-                  "max_tokens": 700, "temperature": 0.6},
-            timeout=40,
+
+    # ── path A: live web search (Tavily) → ground synthesis in real results ──
+    if s.tavily_api_key:
+        import json as _json
+        import re as _re
+
+        dim = _qwen_chat(
+            "你在为互动小说的 AI 角色做资料搜集。判断该角色是否出自已知 IP（游戏/动漫/影视/小说等），"
+            "再生成 4~5 条用于网络搜索的查询词：IP角色覆盖①官方设定/能力/口癖 ②世界观背景 ③人物关系 ④标志场景；"
+            "原创角色覆盖①身份/职业的真实背景 ②时代/地域文化 ③性格行为特征 ④剧情相关历史社会背景。"
+            '只输出 JSON：{"is_ip":true/false,"ip_name":"","queries":["...","..."]}',
+            combined, max_tokens=200, temperature=0.3,
         )
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"].strip()[:2500]
-    except Exception:
-        return ""
+        queries: list[str] = []
+        if dim:
+            try:
+                d = _json.loads(_re.sub(r"^```(?:json)?\s*|\s*```$", "", dim.strip()))
+                queries = [q.strip() for q in d.get("queries", []) if q.strip()][:5]
+            except Exception:
+                queries = [q.strip() for q in dim.replace("，", ",").split(",") if q.strip()][:4]
+        raw = "\n\n".join(
+            f"[{q}]\n{r}" for q in queries if (r := _tavily_search(q, 2))
+        )[:4000]
+        if raw.strip():
+            out = _qwen_chat(
+                f"你在为互动小说游戏的 AI 角色「{name}」整理【背景知识库】，供扮演时自然取用。"
+                f"下面是从网络搜集的原始资料，请提炼成简洁、实用的结构化知识，剔除无关内容。\n" + synth_fmt,
+                f"原始资料：\n{raw}", max_tokens=800,
+            )
+            if out:
+                return out[:2500]
+        # search yielded nothing usable → fall through to model-only
+
+    # ── path B: model's own knowledge (no Tavily, or search empty) ──
+    return _qwen_chat(
+        "你在为一款互动小说游戏的 AI 角色整理【背景知识库】，供 AI 扮演时自然取用。\n"
+        "先判断这个角色是否出自已知 IP（游戏/动漫/影视/小说等）：\n"
+        "- 若是 IP 角色：依据该 IP 的设定整理；\n"
+        "- 若是原创角色：依据其身份/职业/时代/世界观，补充真实可信的背景知识。\n" + synth_fmt,
+        combined, max_tokens=700,
+    )[:2500]
 
 
 class QwenLLM:
