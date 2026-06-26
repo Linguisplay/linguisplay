@@ -43,6 +43,19 @@ def test_eq_style_and_prior_emotion_injected_into_prompt():
     assert "强忍委屈" in sys                    # prior emotional read carried in for continuity
 
 
+def test_inter_character_eq_in_group_and_observer():
+    base = {"speaker_name": "蓝信一", "speaker_persona": "城寨四子", "persona": {"name": "蔡妍"},
+            "channel": "say", "context": {}, "cast": ["龙卷风", "十二少"]}
+    # one-on-one: EQ aimed at 对方 (the player), no inter-character clause
+    solo = qwen._build_system(base)
+    assert "有来有往" not in solo
+    # broadcast member + god/observer: EQ aimed at reading the OTHER characters
+    member = qwen._build_system({**base, "group_mode": "member"})
+    obs = qwen._build_system({**base, "observer": True})
+    for s in (member, obs):
+        assert "有来有往" in s and "各说各的" in s   # characters attune to each other, not monologue
+
+
 def test_player_emotion_persists_across_turns():
     class EmoLLM:
         def generate(self, prompt):
