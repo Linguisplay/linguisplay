@@ -34,6 +34,10 @@ def get_llm() -> "LLM":
     from ..config import get_settings
 
     s = get_settings()
+    if s.llm_provider == "deepseek" and s.deepseek_api_key:
+        from .qwen import DeepSeekLLM
+
+        return DeepSeekLLM()
     if s.llm_provider == "qwen" and s.dashscope_api_key:
         from .qwen import QwenLLM
 
@@ -45,12 +49,24 @@ class MockLLM:
     """Deterministic stand-in. Reflects gate decisions so behavior is observable."""
 
     def generate(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        # suggestions: mock returns none → runtime falls back to its deterministic template.
+        if prompt.get("suggest"):
+            return {"suggestions": []}
         # rolling memory digest: deterministic concat (bounded) so tests stay reproducible.
         if prompt.get("summarize"):
             prior = prompt.get("prior_memory") or ""
             lines = [l.get("content", "") for l in (prompt.get("new_lines") or [])]
             digest = (prior + " " + " ".join(lines)).strip()
             return {"memory": digest[-2000:]}
+
+        # emergent location: deterministic stub description (real model writes the prose).
+        if prompt.get("describe_place"):
+            name = prompt.get("place_name", "")
+            return {"detail": f"{name}——一处刚在故事里浮现出来的地方，轮廓在眼前渐渐清晰。"}
+
+        # opening location for a map-less story: deterministic stub (real model derives it).
+        if prompt.get("start_place"):
+            return {"name": "此处", "detail": ""}
 
         # opening intro: narration only, deterministic.
         if prompt.get("intro"):

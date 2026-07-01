@@ -15,6 +15,7 @@ import httpx
 from ..config import get_settings
 
 DASHSCOPE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
 
 _ANTI_ASSISTANT = (
     "你必须始终留在角色里：不要说自己是AI/助手/语言模型，不要解释规则，不要使用括号外的旁白说明。"
@@ -116,6 +117,24 @@ def _build_system(prompt: dict[str, Any]) -> str:
                     "会为此权衡、试探、争取，而不是把它抛在脑后只顾着回应对方。")
     lines += auto
 
+    # ── 逻辑与连贯：让角色像一个会推理、记得住、前后一致的人（治"缺乏逻辑"的根） ──
+    lines.append("")
+    lines.append(
+        "【保持逻辑与连贯·这是底线】你说的每句话都要经得起推敲，像个真正会动脑子的人：\n"
+        f"· 顺着【刚刚发生的事】和对方这一句往下接，直接回应它本身——别答非所问、别绕回早说过的话题、别把对方没提的事硬塞进来。\n"
+        "· 和【之前已经发生的、你自己说过和做过的】保持一致，绝不自相矛盾（不要刚冷脸又突然交心、刚说不认识又熟络起来）；"
+        "拿不准、或记不清的事，就含糊带过或反问一句，绝不要凭空编一个细节出来。\n"
+        f"· 只用「{speaker}」这个人【真该知道的】去推理和说话：你的来历、身份、立场、眼下的处境、在场发生的事——"
+        "合情合理地往下想；该你知道的就自然用上，你根本不可能知道的别脱口而出，也别明明清楚却装傻。\n"
+        "· 主动一点：有疑就问、有意图就推进，顺着你自己的目的去试探、去带话题，而不是干等对方开口才挤出一句。"
+    )
+
+    # current relationship MODE toward the player (flows over time; shapes how you treat them)
+    rel_pb = (prompt.get("relationship_playbook") or "").strip()
+    if rel_pb:
+        lines.append("")
+        lines.append(rel_pb)
+
     # ── 情商：让角色真正"接住"对方，而不是机械应答 ──────────────────────
     # 对象随场景切换：单聊面对玩家；群戏/旁观模式里，角色是在跟【彼此】互动，
     # 情商要用在读懂、接住在场其他角色的情绪上——AI 之间也要有来有往，才自然。
@@ -156,6 +175,41 @@ def _build_system(prompt: dict[str, Any]) -> str:
     if prior_emotion and not inter_char:
         eq.append(f"【对方此前的情绪基调】{prior_emotion}。留意它的延续与变化，承接住，别像第一次见面。")
     lines += eq
+
+    # ── 台词手艺：让每一句话都像真人说的、像好剧本里的，而不是干巴巴的应答 ──────
+    # 这是从中文对话写作规范蒸馏出的硬规则——治"台词太差/发飘/谁说都一样"的根。
+    lines.append("")
+    lines.append(
+        "【台词手艺·把话写活】你说的每一句台词都要经得起推敲，不是随口应答：\n"
+        "· 每句话都得干活：要么推动情节、要么揭示你是谁、要么制造冲突或张力、要么给到情绪——"
+        "占上一样。删掉客套寒暄、和复述大家都知道的废话。\n"
+        "· 短，像人话：真人说话不写论文，也常常不把话说完——可以打断、迟疑、半句咽回去、"
+        "用「嗯」「算了」「你懂的」一带而过。别端着、别绕长句。\n"
+        "· 留潜台词：别把心情直接说出来。生气的人说「没事，我挺好的」；在乎一个人，嘴上偏要损 TA。"
+        "话里有话、表里不一，比直白更有戏——让玩家自己品出弦外之音。\n"
+        "· 用动作和停顿代替形容词：不要写「他愤怒地说」，写「他攥紧了拳头，‘……你再说一遍。’」。"
+        "动作甚至可以和台词相反（嘴上答应、眼神躲开），反而揭出真相。该沉默时就沉默——"
+        "不答、岔开话题、拿起杯子又放下，往往比开口更重。\n"
+        "· 有来有往的权力感：谁追问、谁回避、谁打断、谁用沉默施压——顺着此刻你和对方的地位、"
+        "关系来，别一律平铺直叙地有问必答。\n"
+        f"· 声音只属于你：口头禅、句式、用词、节奏都要让人一句就听出是「{speaker}」说的，"
+        "绝不能和别的角色撞成一个腔调，更不能说成那种放之四海皆可的通用台词。"
+    )
+
+    # ── 去AI味·硬约束：避开机器写作的高频指纹（中文网文去AI味禁用表 + 通用结构指纹） ──
+    lines.append("")
+    lines.append(
+        "【去AI味·硬规则】旁白和台词都要像人写的，避开这些一眼假的机器腔：\n"
+        "· 标点：不要用破折号（——／—）、也不要用省略号「……」来做停顿；改成句号、逗号、短句断开。\n"
+        "· 禁用这些套路化的表情/心理写法：「嘴角勾起一抹（一个）……的弧度」「笑没到眼底／笑意只浮在嘴角」"
+        "「眼中（眼底）闪过一丝……」「心中（心头）涌起一股……」「X，却带着一种说不出的Y」——"
+        "一律改成具体、当下的小动作白描（他垂下眼、把烟摁灭、没接话、手指顿了一下）。\n"
+        "· 不要用「不是A，而是B」这种句式，直接把 B 说出来。\n"
+        "· 少用「仿佛／宛如／犹如……一般」的万能比喻；真要比喻就用接地气的。\n"
+        "· 同一个动作或情绪别掰成三段反复渲染（先发生、再感受、再身体反应）——一个细节到位就够。\n"
+        f"· 同一个神态/口头禅别在一段里反复使用（比如「似笑非笑」），「{speaker}」的反应要有变化。\n"
+        "· 结尾不要升华、不要感叹、不要「他没想到，更大的风暴即将来临」式预告——用动作或一句话收住。"
+    )
 
     # group naturalness: show this speaker what others ALREADY said THIS turn so they react
     # to it (接话/附和/反驳/补充) instead of repeating or talking past everyone.
@@ -202,7 +256,10 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append("")
         lines.append("【当前所在·空间锚点】（玩家此刻就在这个具体地点，你的旁白必须扣住它来写——"
                      "写这里实际存在的陈设、光线、声响、距离与可触及的物件，让人能凭文字想象出画面；"
-                     "不要把场景写得含糊或飘忽，也不要把不属于这里的东西搬进来）：\n" + place)
+                     "不要把场景写得含糊或飘忽，也不要把不属于这里的东西搬进来。"
+                     "【移动规则】你可以主动提出带玩家去另一个【可去通路】里的地点（用下面的「带去」标记），"
+                     "但旁白只写到你起身、招手、相邀为止——绝不要替玩家写出他已经跟你到了那里；"
+                     "系统会先征求玩家同意，玩家点头后才真正过去）：\n" + place)
 
     kn = _knowledge_block(prompt)
     if kn:
@@ -263,8 +320,9 @@ def _build_system(prompt: dict[str, Any]) -> str:
 
     if new_reveal:
         lines.append("")
-        lines.append("【此刻刚刚被撬开的真相】——把它写成：正是因为对方刚才这句话（的逼问/真诚/戳中），"
-                     "你才终于松口说出来。要有“破防”的情绪转折，别平铺直叙：")
+        lines.append("【这一轮你必须把下面这条信息亲口说出来·不可回避】——对方刚才的话（逼问/真诚/戳中）"
+                     "让你终于松口。你这一轮的 speech 里【必须】用你自己的口吻、清清楚楚地把它讲给对方听，"
+                     "可以带点情绪/破防/不情愿，但【内容必须明确传达】，绝不能只暗示、只确认有这回事、或岔开话题：")
         for r in new_reveal:
             lines.append(f"- {r['content']}")
     elif reveal:
@@ -277,22 +335,17 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append("")
         lines.append("【可以隐隐暗示、但绝不能挑明的话题】：" + "、".join(hints))
 
-    if has_hidden:
+    # only steer toward deflection when there's NOTHING to reveal this turn — otherwise the
+    # "evade probing" instinct fights the reveal above and the character clams up.
+    if has_hidden and not new_reveal:
         lines.append("")
-        lines.append("【对方可能在试探你还不愿说的事】：自然地回避、岔开话题，既不承认也不否认，更不要编造。")
+        lines.append("【对方可能在试探你还【不该】说的事（不含上面那条）】：自然地回避、岔开话题，既不承认也不否认，更不要编造。")
 
     next_act = prompt.get("next_act_title") or ""
     advance_hint = (
         f"只有当此刻的情绪/剧情自然到了该进入下一章「{next_act}」时，才填「是」，否则填「否」。"
         if next_act
         else "本章已是最后一章，恒填「否」。"
-    )
-    # only ask for a 地点 line when the story actually has a spatial map to move within
-    has_map = bool((prompt.get("place") or "").strip())
-    move_line = (
-        "地点：（默认填「不变」。只有当玩家这一轮明确地走到了另一个地点、且那个地点确实是上面"
-        "「当前所在」里列出的可去通路之一时，才填那个目的地的名字；并且要在「旁白」里把移动过程"
-        "写出来。没有移动、或想去的地方根本不通，就填「不变」。绝不要凭空瞬移或编造新地点。）"
     )
     end_line = (
         "结局：（默认填「无」。「死亡」只有一种用法：玩家本人（你正在对话的这个人）"
@@ -303,6 +356,9 @@ def _build_system(prompt: dict[str, Any]) -> str:
         "把真实后果放进「旁白」里演出来，而不是急着用结局收场。）"
     )
 
+    # context-specific writing guidance (kept), THEN a strict JSON output spec. JSON puts
+    # narration and speech in SEPARATE fields, so the program never has to guess which is
+    # which from prose — this is the robust fix for "台词/旁白混淆" and "假台词".
     if observer:
         others_txt = "、".join(cast) if cast else "在场的其他人"
         if director_note:
@@ -310,101 +366,154 @@ def _build_system(prompt: dict[str, Any]) -> str:
             lines.append(
                 f"【旁观者的画外引导（来自观众，角色听不见，但你要顺着这个方向自然演出）】：{director_note}"
             )
+        lines.append("")
         if group_mode == "member":
-            lines += [
-                "",
-                f"你是此刻在场的其中一人。请以「{speaker}」的身份，对「{others_txt}」刚才的话语或举动做出"
-                "自然的回应/互动（是对他们说，不是对观众说）。若此刻你不会搭话也可保持沉默。",
-                "严格按下面格式输出，不要写旁白：",
-                "回应：（是/否。你这一轮是否要开口）",
-                f"{speaker}：（若开口，写你对在场其他人说的话，1~3句，口语自然；沉默则留空）",
-                "好感：（整数 -3~+5：本场人物关系是更靠近了还是更疏远了）",
-                f"推进：（是/否。{advance_hint}）",
-            ]
+            lines.append(f"你是此刻在场的其中一人。以「{speaker}」的身份，对「{others_txt}」刚才的话或举动"
+                         "做出自然回应（对他们说，不是对观众说）；此刻不想搭话就保持沉默（speech 留空）。")
         else:
-            lines += [
-                "",
-                f"你同时是这场戏的「导演」。让「{speaker}」与「{others_txt}」之间发生一段自然的互动。"
-                "严格按下面五行输出，不要多余内容：",
-                "旁白：（3~5句，第三人称，富有文学性。铺陈此刻两人/众人之间的气氛、神态、距离与张力。）",
-                f"{speaker}：（「{speaker}」对在场其他人说的话，口语化、自然，2~4句）",
-                "好感：（整数 -3~+5：这一刻在场人物之间的关系是更靠近还是更疏远）",
-                f"推进：（是/否。{advance_hint}）",
-                end_line,
-            ]
+            lines.append(f"你同时是这场戏的「导演」，让「{speaker}」与「{others_txt}」自然互动。"
+                         "narration 铺陈众人此刻的气氛神态距离，speech 是你对他们说出口的话。")
     elif channel == "think":
-        # The player is thinking to themselves — the character can't hear, so it must
-        # NOT speak. Only the narrator responds: longer, literary, inward-and-around.
-        lines += [
-            "",
-            f"【注意】「{player_name}」此刻只是在心里默想，并没有说出口——「{speaker}」听不见、"
-            "也绝不能对此开口回应或表现出听见了。这一轮只有旁白说话。",
-            "你同时是这场戏的「导演」。严格按下面四行输出，不要写角色台词，不要多余内容：",
-            "旁白：（3~5句，第三人称，富有文学性与画面感。细腻地写出“我”此刻内心的思绪起伏、"
-            "身体的感官，以及周遭环境、光线、声音、气味的微妙变化。让这段独白本身就有质感。）",
-            "好感：（填 0——对方并不知道你在想什么）",
-            f"推进：（是/否。{advance_hint}）",
-            end_line,
-        ]
+        lines.append("")
+        lines.append(f"【注意】「{player_name}」此刻只是在心里默想，没有说出口——「{speaker}」听不见，"
+                     "绝不能回应或表现出听见了。这一轮只有 narration（speech 必须留空）。")
     elif group_mode == "member":
-        # The player addressed the whole room (no specific target). This character is one
-        # of several present and may choose to speak OR stay silent. No narration here —
-        # the primary responder writes the shared narration.
-        lines += [
-            "",
-            f"【群体场景】「{player_name}」并没有特别针对谁，而是对着在场所有人说话（或自言自语地"
-            "说出了口），你也听见了。请以「{0}」的身份，决定这一刻你会不会搭话——"
-            "如果你此刻不会开口、懒得理、或不愿回答，完全可以保持沉默。".format(speaker),
-            "严格按下面格式输出，不要写旁白：",
-            "回应：（是/否。你这一轮是否要开口说话）",
-            f"{speaker}：（若开口，写你要说的话，口语化、自然，1~3句；若沉默则此行留空）",
-            "好感：（整数 -3 到 +5；保持沉默就填 0）",
-            f"推进：（是/否。{advance_hint}）",
-        ]
+        lines.append("")
+        lines.append(f"【群体场景】「{player_name}」对着在场所有人说话，你也听见了。以「{speaker}」的身份决定"
+                     "你这一刻会不会搭话——不想开口、懒得理、不愿答，就保持沉默（speech 留空）。这一轮你不写 narration。")
     else:
         if group_mode == "primary":
             lines.append("")
-            lines.append(
-                f"【群体场景】「{player_name}」是对着在场所有人说话（或自言自语地说出了口），"
-                "不止你一个人听见。你是此刻最可能先开口接话的人——正常以「" + speaker +
-                "」的身份回应即可，旁白里可以带上其他人此刻的神态反应。"
-            )
-        # This world has physics. Whether the player SPOKE or ACTED, the scene must
-        # visibly react — narration is the world's response, not optional flavor.
+            lines.append(f"【群体场景】「{player_name}」对着在场所有人说话，不止你一个人听见。你是此刻最可能"
+                         f"先接话的人，以「{speaker}」的身份回应；narration 里可带上其他人此刻的神态反应。")
         if channel == "do":
             lines.append("")
             lines.append(
-                f"【这是一个动作，不是台词】「{player_name}」刚才做的是一个【动作/行为】，而不是一句话。"
-                "请把场景当成一台有物理规则的引擎：这个动作会触碰到什么、推动什么、发出什么声响、"
-                "改变什么光线或位置、惊动在场的谁——都必须有【具体、即时、连锁】的后果。"
-                "先在「旁白」里把这个动作真正落地、把后果一步步演出来（东西被碰倒、门被推开、"
-                "灯被照亮、某人被吓得后退……），再决定角色要不要开口、说什么。"
-                "绝不能无视或淡化玩家做的事；动作若在物理上做不到、或会引出危险/致命后果，也要如实演出。"
-            )
-            narr_hint = (
-                f"4~6句，第三人称。先把「{player_name}」这个动作在场景里造成的【实际后果】"
-                "一步步写清楚——物体、声响、光线、空间位置、他人身体反应的连锁变化，"
-                "再带出在场角色的神情与反应。要有画面、有质感、有因果，绝不是空泛的氛围词。"
-            )
-        else:
-            narr_hint = (
-                "4~6句，第三人称，富有文学性——有画面感、有质感、有节奏。写出对方刚才这句话"
-                "在此刻激起的反应、神情、肢体动作、气氛与环境的微妙变化，而不只是干巴巴地交代信息。"
-            )
-        lines += [
-            "",
-            "你同时是这场戏的「导演」。严格按下面五行输出，不要多余内容："
-            "其中「旁白」一行【必须写、不能省略、不能留空】——它是这个世界对玩家言行的回应。",
-            f"旁白：（{narr_hint}）",
-            "情绪：（用三五个字点出对方此刻言行【底下】真正的情绪，例如：在逞强、在试探、强忍委屈、放下戒备、想被认可。你先读懂它，再决定怎么接）",
-            f"{speaker}：（角色这一轮要说的话，口语化、自然，2~4句；要接住上面读到的情绪）",
-            "好感：（一个整数，-3 到 +5。对方敷衍/冒犯/答非所问→负；真诚、走心、戳中要害、给到情绪价值→正；普通对话→0或+1）",
-            f"推进：（是/否。{advance_hint}）",
-            end_line,
-        ]
-        if has_map:
-            lines.append(move_line)
+                f"【这是一个动作，不是台词】「{player_name}」做的是一个【动作/行为】。把场景当成有物理规则的引擎："
+                "narration 里要把这个动作的【具体、即时、连锁后果】一步步演出来（碰到什么、什么声响、光线位置变化、"
+                "惊动了谁、谁如何反应），绝不能无视或淡化；做不到或会致命也要如实演出。speech 可留空（只用动作神态回应）。")
+
+    lines.append("")
+    # OUTPUT is delivered via the render_turn TOOL (function calling) — narration & speech go
+    # into SEPARATE tool arguments, so they can't be mixed. The tool's field descriptions
+    # carry the per-field rules; here we just point at it.
+    lines.append("【输出方式】通过调用 render_turn 工具来输出这一轮："
+                 "把第三人称旁白填进 narration，把角色【说出口】的原话填进 speech，其余填对应字段。"
+                 "不要在工具之外写任何正文。")
     return "\n".join(lines)
+
+
+def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
+                 group_mode: str | None, channel: str, advance_hint: str) -> dict[str, Any]:
+    """The render_turn function-calling schema. Fields vary by context; narration & speech
+    are ALWAYS separate parameters → the model physically cannot merge them."""
+    is_member = group_mode == "member"
+    is_think = channel == "think"
+    has_map = bool((prompt.get("place") or "").strip())
+    props: dict[str, Any] = {}
+    required: list[str] = []
+    # REASONING SCAFFOLD (Layer 3): a private "think before you speak" field the model fills
+    # FIRST and the engine discards. Forcing it to name who's actually present + what it truly
+    # knows, before writing, makes the turn logically tighter and curbs hallucinated
+    # entrances / leaks. Kept terse so it doesn't bloat DeepSeek.
+    if not is_member and not is_think:
+        props["logic_check"] = {"type": "string", "description":
+                                "动笔前先私下核对（这段不展示给玩家，一句话即可）：此刻在场的只有谁；"
+                                "你这个说话人真正知道什么、哪些还不能说破。确保接下来不把不在场的人写进场景、"
+                                "不替玩家做决定、不说出你其实并不知道的事。"}
+        required.append("logic_check")
+    if not is_member:
+        if is_think:
+            nd = f"第三人称旁白：细腻写出玩家此刻的内心思绪、身体感官、周遭环境的微妙变化；用第三人称，不要用「我」。这一轮没有台词。"
+        elif channel == "do":
+            nd = f"第三人称旁白：先把玩家那个动作造成的具体、连锁的后果一步步演出来，再带出在场角色神态；用「{speaker}」的名字称呼自己，绝不用「我」，绝不在这里写任何说出口的台词。"
+        elif observer:
+            nd = f"第三人称旁白：铺陈在场众人此刻的神态、气氛、互动；用名字称呼，不用「我」，不在这里写台词。"
+        else:
+            nd = f"第三人称旁白：此刻的神态、动作、环境与气氛；用「{speaker}」的名字称呼自己，绝不用「我」，绝不在这里写任何说出口的台词。"
+        props["narration"] = {"type": "string", "description": nd}
+        required.append("narration")
+    if not is_think:
+        if is_member:
+            sd = "你这一刻对在场众人说出口的原话（第一人称，1~3句）；不想搭话就填空字符串"
+        elif channel == "do":
+            sd = "你这一轮亲口说出的原话（第一人称）；只用动作神态回应、不开口就填空字符串"
+        elif observer:
+            sd = f"「{speaker}」对在场其他人说出口的原话（第一人称，2~4句）"
+        else:
+            sd = "你这一轮亲口说出的原话（第一人称，2~4句，自然口语）；你正被直接搭话，必须开口，哪怕冷淡敷衍也用话说出来，不要留空"
+        props["speech"] = {"type": "string", "description": sd}
+        required.append("speech")
+    if not observer and not is_member and not is_think:
+        props["emotion"] = {"type": "string", "description": "三五个字点出对方此刻言行底下真正的情绪"}
+    props["affinity"] = {"type": "integer", "description":
+                         ("本场人物关系更近(正)/更疏(负)" if observer else
+                          "0(对方不知道你在想什么)" if is_think else
+                          "这一句对你们关系的影响，范围-3~5：真诚/走心/戳中你/给情绪价值→+2或+3；"
+                          "正常有来有往、聊得下去、关系有点进展→【+1】；敷衍/冒犯/答非所问/惹你→负(-1~-3)；"
+                          "只有完全冷场、毫无意义的一句才填0。别一律给0，普通但顺畅的交流就该给+1")}
+    required.append("affinity")
+    if not observer and not is_member and not is_think:
+        props["romance"] = {"type": "integer", "description": "默认0；仅当对方调情/示好/制造暧昧/情话且你被触动才给正分，范围-2~5，恋爱线"}
+    props["advance"] = {"type": "boolean", "description": advance_hint}
+    required.append("advance")
+    if has_map and not is_member and not is_think:
+        props["move_invite"] = {"type": "string", "description": "若你这一轮在剧情里提出、或答应和玩家一起去某个地方，就填那个地点名——可以是地图上【可去通路】里已有的地点，也可以是你们对话中自然提到、此刻该去的一个新地点(旁白只写到你起身相邀、还没出发，别写玩家已到)；不想去就填空字符串"}
+    if not observer and not is_member and not is_think:
+        props["ending"] = {"type": "string", "description": "默认空字符串；只有玩家本人此刻被你弄死填 death，走到不可挽回的坏结局填 bad"}
+    return {"type": "function", "function": {
+        "name": "render_turn", "description": "输出这一轮的内容，旁白与台词分开放在不同字段",
+        "parameters": {"type": "object", "properties": props, "required": required}}}
+
+
+def _output_spec(prompt: dict[str, Any], speaker: str, observer: bool,
+                 group_mode: str | None, channel: str, advance_hint: str) -> str:
+    """Output contract = ONE natural Chinese-fiction passage where every spoken line is in
+    「」 quotes, plus a few metadata lines. The engine then splits narration (outside 「」)
+    from speech (inside 「」) DETERMINISTICALLY — which plays to DeepSeek's prose strength
+    and never degenerates the way response_format=json_object does."""
+    is_member = group_mode == "member"
+    is_think = channel == "think"
+    has_map = bool((prompt.get("place") or "").strip())
+    L: list[str] = []
+    if is_think:
+        L.append(f"【这一轮怎么写】写一段第三人称的内心独白式旁白（3~5句），细腻写出「{player_namesafe(prompt)}」"
+                 "此刻的思绪、身体感官、周遭环境光线声音气味的微妙变化。这一轮【没有任何台词，绝不要出现「」对白】。")
+    elif is_member:
+        L.append(f"【这一轮怎么写】只写「{speaker}」这一刻对在场众人【说出口】的话，用「」引号括起来"
+                 "（例：「哎哟，你们慢着点。」）。如果你这一刻不想搭话，就只回一个字：无。不要写旁白、不要写动作。")
+    else:
+        if channel == "do":
+            lead = ("写成一段自然的第三人称中文小说叙事（3~6句）：先把玩家那个【动作】造成的具体、连锁的后果"
+                    "一步步演出来（碰到什么、什么声响、谁怎么反应），再带出在场角色的神态。")
+            speech_rule = "你这一轮如果开口，每句台词都用「」括进叙事里；只用动作神态回应、不说话也可以。"
+        elif observer:
+            lead = "写成一段自然的第三人称中文小说叙事（2~5句），铺陈在场众人此刻的互动、气氛与神态。"
+            speech_rule = f"「{speaker}」对其他人说出口的每句话都用「」括进叙事里。"
+        else:
+            lead = "写成一段自然的第三人称中文小说叙事（2~5句），写出对方这句话此刻激起的神态、动作、气氛。"
+            speech_rule = ("你【被直接搭话，必须开口】：把你说出口的每一句话都用「」括进这段叙事里"
+                           "（例：蓝信一歪头，「哎哟，新来的。」他把烟摁灭）；哪怕冷淡、敷衍、拒答，也要有带「」的台词。")
+        L.append(f"【这一轮怎么写】{lead}用第三人称、用「{speaker}」的名字称呼自己，绝不用「我」。{speech_rule}"
+                 "【铁律】凡是说出口的话都必须在「」里；「」之外只写动作、神态、环境，绝不放台词。")
+    # metadata lines (parsed deterministically by prefix; kept minimal)
+    meta = ["然后另起新行，逐行给出（每项一行，照抄项目名）："]
+    if not is_think and not is_member:
+        meta.append("情绪：对方此刻言行底下真正的情绪，三五个字")
+    meta.append("好感：一个整数 -3~5（" + ("填0" if is_think else "对方敷衍冒犯→负，走心戳中→正，普通→0或1") + "）")
+    if not observer and not is_member and not is_think:
+        meta.append("心动：一个整数 -2~5，默认0（仅当对方在调情/示好/制造暧昧/情话、且你被触动才给正分，这是恋爱线）")
+    meta.append(f"推进：是 或 否（{advance_hint}）")
+    if has_map and not is_member and not is_think:
+        meta.append("带去：若你这一轮想带玩家一起去另一个【可去通路】里的地点，填那地点名（叙事里只写到你起身相邀，别写玩家已到）；否则填 无")
+    if not observer and not is_member and not is_think:
+        meta.append("结局：默认 无；只有玩家本人此刻被你弄死才填 死亡，走到不可挽回的坏结局填 坏")
+    L.append("\n".join(meta))
+    return "\n".join(L)
+
+
+def player_namesafe(prompt: dict[str, Any]) -> str:
+    return (prompt.get("persona") or {}).get("name") or "玩家"
 
 
 def _build_observe_system(prompt: dict[str, Any]) -> str:
@@ -572,9 +681,18 @@ def _build_transition_system(prompt: dict[str, Any]) -> str:
     if prompt.get("mature"):
         lines.append("（本剧情为成人向 18+，过场可带相应基调。）")
     if act_events:
-        lines.append(f"【这一幕正在发生】{act_events}")
+        lines.append(f"【这一幕正在发生(整座城寨的大势,不一定都在玩家眼前)】{act_events}")
+    place_set = bool(place)
     if cast:
-        lines.append(f"【此刻在场的人】{('、'.join(cast))}")
+        lines.append(f"【玩家此刻所在地、真正在场的人】只有:{('、'.join(cast))}。")
+    else:
+        lines.append("【玩家此刻身边没有其他人】,这段过场里不要凭空塞人进来。")
+    if place_set:
+        lines.append(
+            "【铁律·从玩家当前位置的视角写】过场只写玩家【此刻所在地】看得见听得到的:"
+            "上面『真正在场的人』之外的角色,绝不能出现在这个房间里、也不能直接跟玩家对话;"
+            "他们那边的事(比如别处有人上门、起了冲突)只能作为【远处的消息、声响、传闻】隐隐传到玩家这里。"
+            "绝不要因为翻了新的一幕,就把一堆不在场的人硬拉到玩家面前。")
 
     who = "旁观的众人" if mode == "god" else "你"
     lines += [
@@ -592,69 +710,265 @@ def _build_transition_system(prompt: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _strip_quotes(s: str) -> str:
+    """Trim wrapping/stray quote chars from a spoken line (the UI re-adds 「」)."""
+    s = (s or "").strip()
+    while s and s[0] in "「『“\"'" and s[-1] in "」』”\"'":
+        s = s[1:-1].strip()
+    return s
+
+
+def _beats_from(narration: str, speech: str, speaker: str, channel: str,
+                group_mode: str | None, will_respond: bool = True) -> list[dict]:
+    """Build beats from already-separated narration + speech (the JSON path's job is done by
+    the model's fields; here we just shape beats). think = narration only; member = speech only."""
+    narration = (narration or "").strip()
+    speech = _strip_quotes(speech)
+    if channel == "think":
+        return [{"type": "description", "speaker_name": None, "text": narration}] if narration else []
+    if group_mode == "member":
+        if not will_respond or not speech:
+            return []
+        return [{"type": "dialogue", "speaker_name": speaker, "text": speech}]
+    beats: list[dict] = []
+    if narration:
+        beats.append({"type": "description", "speaker_name": None, "text": narration})
+    if speech:
+        beats.append({"type": "dialogue", "speaker_name": speaker, "text": speech})
+    return beats
+
+
+def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
+                     group_mode: str | None = None) -> dict | None:
+    """Parse a render_turn tool call's JSON arguments → result dict. narration & speech come
+    from SEPARATE fields, so beats are unambiguous. Returns None if the args won't parse."""
+    import json
+    try:
+        d = json.loads(args_json or "")
+    except Exception:
+        return None
+    if not isinstance(d, dict):
+        return None
+
+    def _i(v, lo, hi):
+        try:
+            return max(lo, min(hi, int(v)))
+        except Exception:
+            return 0
+
+    speech = str(d.get("speech") or "")
+    narration = str(d.get("narration") or "")
+    is_think = channel == "think"
+    will = bool(speech.strip())
+    beats = _beats_from(narration, speech, speaker, channel, group_mode, will_respond=will)
+    mv = str(d.get("move_invite") or "").strip()
+    if mv in ("", "无", "不变", "没有", "原地"):
+        mv = None
+    end_raw = str(d.get("ending") or "").strip().lower()
+    ending = None
+    if "death" in end_raw or "死" in end_raw:
+        ending = {"kind": "death", "reason": narration or speech}
+    elif "bad" in end_raw or "坏" in end_raw:
+        ending = {"kind": "bad", "reason": narration or speech}
+    return {
+        "beats": beats,
+        "affinity_delta": 0 if is_think else _i(d.get("affinity"), -3, 8),
+        "romance_delta": 0 if is_think else _i(d.get("romance"), -3, 6),
+        "advance_act": bool(d.get("advance")),
+        "ending": ending,
+        "move_invite": mv,
+        "player_emotion": str(d.get("emotion") or "").strip(),
+    }
+
+
 def _parse_reply(text: str, speaker: str, channel: str = "say", group_mode: str | None = None) -> dict:
-    """Parse the director's 旁白/角色/好感/推进 reply into beats + state deltas.
-    Lenient: missing markers degrade to all-dialogue, neutral deltas."""
+    """Parse the model's reply: ONE prose passage (every spoken line wrapped in 「」) plus a
+    few metadata lines. Narration (outside 「」) and speech (inside 「」) are split
+    DETERMINISTICALLY by quotes — so it's impossible to confuse the two, no matter how the
+    model phrases the prose. Plays to DeepSeek's prose strength (JSON mode degenerates)."""
+    import re
+    affinity_delta = romance_delta = 0
+    advance = False
+    ending = None
+    move_invite = None
+    player_emotion = ""
+    will_respond = True
+    prose_lines: list[str] = []
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        body = line.split("：", 1)[-1].split(":", 1)[-1].strip()
+        if line.startswith("好感"):
+            m = re.search(r"-?\d+", body); affinity_delta = int(m.group()) if m else 0
+        elif line.startswith("心动"):
+            m = re.search(r"-?\d+", body); romance_delta = int(m.group()) if m else 0
+        elif line.startswith("推进"):
+            advance = ("是" in body) or ("true" in body.lower())
+        elif line.startswith("情绪"):
+            player_emotion = body
+        elif line.startswith("回应"):
+            will_respond = not ("否" in body or "no" in body.lower() or "沉默" in body)
+        elif line.startswith("带去"):
+            if body and not any(k in body for k in ("无", "不变", "没有", "原地")):
+                move_invite = body
+        elif line.startswith("结局"):
+            if "死" in body or "death" in body.lower():
+                ending = {"kind": "death", "reason": body}
+            elif "坏" in body or "bad" in body.lower():
+                ending = {"kind": "bad", "reason": body}
+        else:  # everything else is the prose passage (strip an optional 正文/旁白/叙事 label)
+            prose_lines.append(re.sub(r"^(正文|旁白|叙事)[：:]\s*", "", line))
+    prose = "\n".join(prose_lines).strip()
+    narration, speech = _separate_speech(prose, "")  # 「」 inside → speech, rest → narration
+    is_think = channel == "think"
+    # NOTE: deliberately NO "treat unquoted prose as speech" fallback — that turned pure
+    # third-person narration into fake dialogue bubbles. A dialogue beat may ONLY come from
+    # text the model actually put inside 「」. No quotes → it's narration, full stop.
+    will = (bool(speech) if group_mode == "member" else will_respond)
+    beats = _beats_from(narration, speech, speaker, channel, group_mode, will_respond=will)
+    if not beats and not is_think and group_mode != "member" and prose:
+        beats = [{"type": "description", "speaker_name": None, "text": prose}]  # never drop content
+    return {
+        "beats": beats,
+        "affinity_delta": 0 if is_think else max(-3, min(8, affinity_delta)),
+        "romance_delta": 0 if is_think else max(-3, min(6, romance_delta)),
+        "advance_act": advance,
+        "ending": ending,
+        "move_invite": move_invite,
+        "player_emotion": player_emotion,
+    }
+
+
+def _parse_marker_reply_DEPRECATED(text: str, speaker: str, channel: str = "say", group_mode: str | None = None) -> dict:
+    """[unused] legacy 旁白/角色 marker parser — superseded by the prose+quote parser above."""
     narration = dialogue = ""
     affinity_delta, advance = 0, False
+    romance_delta = 0  # 恋爱线 delta (independent of 好感)
     ending = None
-    location = None  # destination if the director reported the player moved
+    move_invite = None  # a character's request to LEAD the player to another place (needs the player's OK)
     player_emotion = ""  # the model's read of the player's underlying emotion this turn
     will_respond = True  # group members may opt to stay silent via the 回应 marker
+    import re
+    # `cur` tracks which multi-line field is currently open, so a 旁白 / 台词 that spans
+    # several lines keeps appending to the RIGHT field instead of leaking across. A line
+    # is dialogue ONLY if it's explicitly prefixed with the speaker's name — narration that
+    # merely contains a colon (e.g. quoted speech inside prose) no longer hijacks dialogue.
+    cur = None  # "narration" | "dialogue" | None
     for raw in text.splitlines():
         line = raw.strip()
         if not line:
             continue
         body = line.split("：", 1)[-1].split(":", 1)[-1].strip()
         if line.startswith("旁白"):
-            narration = body
+            narration = body; cur = "narration"
         elif line.startswith("回应"):
-            will_respond = not ("否" in body or "no" in body.lower() or "沉默" in body)
+            will_respond = not ("否" in body or "no" in body.lower() or "沉默" in body); cur = None
         elif line.startswith("好感"):
-            import re
             m = re.search(r"-?\d+", body)
             if m:
                 affinity_delta = int(m.group())
+            cur = None
+        elif line.startswith("心动"):
+            m = re.search(r"-?\d+", body)
+            if m:
+                romance_delta = int(m.group())
+            cur = None
         elif line.startswith("推进"):
-            advance = ("是" in body) or ("true" in body.lower())
-        elif line.startswith("地点"):
-            # "不变"/"无"/empty → no move; otherwise the destination place name
-            if body and not any(k in body for k in ("不变", "无", "没有", "原地")):
-                location = body
+            advance = ("是" in body) or ("true" in body.lower()); cur = None
+        elif line.startswith("带去"):
+            # "无"/empty → no invite; otherwise the place the character wants to lead the
+            # player to (surfaced as a confirm prompt; never auto-applied)
+            if body and not any(k in body for k in ("无", "不变", "没有", "原地")):
+                move_invite = body
+            cur = None
         elif line.startswith("情绪"):
-            player_emotion = body  # the read of the player's underlying emotion (continuity)
+            player_emotion = body; cur = None  # read of the player's underlying emotion
         elif line.startswith("结局"):
             if "死亡" in body or "death" in body.lower():
                 ending = {"kind": "death", "reason": narration or body}
             elif "坏" in body or "bad" in body.lower():
                 ending = {"kind": "bad", "reason": narration or body}
-            # 「无」/空 → no ending
-        elif line.startswith(speaker) or "：" in line or ":" in line:
-            dialogue = body
-        elif not dialogue:
-            dialogue = line
+            cur = None  # 「无」/空 → no ending
+        elif line.startswith(speaker):
+            dialogue = body; cur = "dialogue"
+        elif cur == "narration":
+            narration = (narration + "\n" + line) if narration else line  # continuation
+        elif cur == "dialogue":
+            dialogue = (dialogue + "\n" + line) if dialogue else line      # continuation
+        elif not dialogue and not narration:
+            dialogue = line  # ultra-fallback: an unlabeled reply with no markers at all
     beats: list[dict] = []
     if channel == "think":
         # Inner monologue: narration only, the character does not speak. Fall back to the
         # whole reply as narration if the model didn't use the 旁白 marker.
         beats.append({"type": "description", "speaker_name": None, "text": narration or text.strip()})
         return {"beats": beats, "affinity_delta": 0, "advance_act": advance, "ending": ending}
+    # DETERMINISTIC SEPARATION — don't trust the model's marker discipline. Re-split by
+    # QUOTES: spoken words live inside 「」/“”/"" → dialogue; everything else → narration.
+    # Guarantees a dialogue beat is pure speech and the narration beat pure description.
+    clean_narr, speech = _separate_speech(narration, dialogue)
+
     if group_mode == "member":
         # A present character chose silence (or produced no line) → contribute nothing.
-        if not will_respond or not dialogue:
+        # Members only contribute speech (the primary owns the shared narration).
+        if not will_respond or not speech:
             return {"beats": [], "affinity_delta": 0, "advance_act": advance, "ending": None}
-        beats.append({"type": "dialogue", "speaker_name": speaker, "text": dialogue})
-        return {"beats": beats, "affinity_delta": affinity_delta, "advance_act": advance, "ending": None}
-    if narration:
-        beats.append({"type": "description", "speaker_name": None, "text": narration})
-        # Only add a dialogue beat if the character actually spoke. Do NOT fall back to the
-        # whole raw text here — that re-dumps the 旁白 line as garbage dialogue.
-        if dialogue:
-            beats.append({"type": "dialogue", "speaker_name": speaker, "text": dialogue})
-    else:
-        beats.append({"type": "dialogue", "speaker_name": speaker, "text": dialogue or text.strip()})
+        return {"beats": [{"type": "dialogue", "speaker_name": speaker, "text": speech}],
+                "affinity_delta": affinity_delta, "advance_act": advance,
+                "ending": None, "romance_delta": romance_delta}
+    if clean_narr:
+        beats.append({"type": "description", "speaker_name": None, "text": clean_narr})
+    if speech:
+        beats.append({"type": "dialogue", "speaker_name": speaker, "text": speech})
+    if not beats:  # model produced something unparseable → show it as narration, never lose it
+        beats.append({"type": "description", "speaker_name": None, "text": text.strip()})
     return {"beats": beats, "affinity_delta": affinity_delta, "advance_act": advance,
-            "ending": ending, "location": location, "player_emotion": player_emotion}
+            "ending": ending, "move_invite": move_invite, "player_emotion": player_emotion,
+            "romance_delta": romance_delta}
+
+
+def _separate_speech(narration: str, dialogue: str) -> tuple[str, str]:
+    """Split prose into (narration, speech) by QUOTES — model-independent. Quoted spans
+    (「」 “” "" 『』) are words spoken aloud → speech; all unquoted prose → narration.
+    The 角色 line with no quotes is treated as spoken (but parenthetical stage directions
+    are pulled into narration); quotes embedded in the 旁白 line are pulled OUT into speech.
+    Returned speech is quote-free (the UI adds its own 「」)."""
+    import re
+    QUOTE = r'[「“"『]([^」”"』]*?)[」”"』]'
+    PAREN = r'[（(][^）)]*[）)]'
+    speech_parts: list[str] = []
+    narr_parts: list[str] = []
+
+    d = (dialogue or "").strip()
+    if d:
+        quoted = [s.strip() for s in re.findall(QUOTE, d) if s.strip()]
+        if quoted:
+            speech_parts += quoted
+            leftover = re.sub(QUOTE, "", d).strip()
+            if re.sub(r'[\s，。、：:—\-－—　]', "", leftover):  # meaningful leftover → narration
+                narr_parts.append(leftover)
+        else:
+            # no quotes: the 角色 line IS the spoken words; lift out (stage directions) to narration
+            for p in re.findall(r'[（(]([^）)]*)[）)]', d):
+                if p.strip():
+                    narr_parts.append(p.strip())
+            spoken = re.sub(PAREN, "", d).strip()
+            if spoken:
+                speech_parts.append(spoken)
+
+    n = (narration or "").strip()
+    if n:
+        quoted = [s.strip() for s in re.findall(QUOTE, n) if s.strip()]
+        if quoted:  # model embedded the spoken line inside narration → pull it out
+            speech_parts += quoted
+            n = re.sub(QUOTE, "", n).strip()
+        if n:
+            narr_parts.insert(0, n)  # narration leads
+
+    clean_narr = re.sub(r'\s{2,}', " ", " ".join(p for p in narr_parts if p)).strip()
+    speech = " ".join(s for s in speech_parts if s).strip()
+    return clean_narr, speech
 
 
 def _build_summary_system() -> str:
@@ -692,6 +1006,61 @@ def _qwen_chat(system: str, user: str, max_tokens: int = 700, temperature: float
         return resp.json()["choices"][0]["message"]["content"].strip()
     except Exception:
         return ""
+
+
+DASHSCOPE_T2I_URL = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis"
+DASHSCOPE_TASK_URL = "https://dashscope.aliyuncs.com/api/v1/tasks/"
+
+
+def generate_image(prompt: str, size: str = "1280*720",
+                   model: str = "wanx2.1-t2i-turbo", timeout_s: int = 120) -> bytes | None:
+    """Text-to-image via DashScope 通义万相 (async): submit a task, poll until it finishes,
+    then download the image bytes. Returns None on any failure. Runs OFFLINE (background
+    enrichment), never in the play request path — generation takes ~10-30s per image."""
+    import time
+
+    s = get_settings()
+    if not s.dashscope_api_key:
+        return None
+    auth = {"Authorization": f"Bearer {s.dashscope_api_key}"}
+    try:
+        sub = httpx.post(
+            DASHSCOPE_T2I_URL,
+            headers={**auth, "Content-Type": "application/json", "X-DashScope-Async": "enable"},
+            json={"model": model, "input": {"prompt": prompt[:780]},
+                  "parameters": {"size": size, "n": 1}},
+            timeout=30,
+        )
+        sub.raise_for_status()
+        task_id = sub.json()["output"]["task_id"]
+    except Exception:
+        return None
+    img_url = None
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        time.sleep(3)
+        try:
+            r = httpx.get(DASHSCOPE_TASK_URL + task_id, headers=auth, timeout=30)
+            r.raise_for_status()
+            out = r.json().get("output", {})
+            status = out.get("task_status")
+            if status == "SUCCEEDED":
+                results = out.get("results") or []
+                if results and results[0].get("url"):
+                    img_url = results[0]["url"]
+                break
+            if status in ("FAILED", "CANCELED", "UNKNOWN"):
+                break
+        except Exception:
+            continue
+    if not img_url:
+        return None
+    try:
+        img = httpx.get(img_url, timeout=60)
+        img.raise_for_status()
+        return img.content
+    except Exception:
+        return None
 
 
 def _tavily_search(query: str, max_results: int = 2) -> str:
@@ -782,10 +1151,15 @@ def generate_knowledge(name: str, profile: str, world: str = "") -> str:
 
 
 class QwenLLM:
+    # endpoint / key / models — overridden by sibling providers (e.g. DeepSeekLLM). The
+    # whole prompt-building + parsing pipeline above is provider-agnostic; only the chat
+    # HTTP target differs, so an OpenAI-compatible provider just swaps these three.
     def __init__(self) -> None:
         s = get_settings()
+        self._url = DASHSCOPE_URL
         self._key = s.dashscope_api_key
         self._model = s.llm_model
+        self._summary_model = "qwen-turbo"  # cheap model for background memory compression
 
     def _summarize(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """Compress elapsed turns into the rolling digest (cheap model). Degrades to the
@@ -799,10 +1173,10 @@ class QwenLLM:
         user = f"== 已有备忘录 ==\n{prior or '（空，尚未建立）'}\n\n== 最近新发生的对话 ==\n{convo}"
         try:
             resp = httpx.post(
-                DASHSCOPE_URL,
+                self._url,
                 headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
                 json={
-                    "model": "qwen-turbo",  # cheap model — this is background compression
+                    "model": self._summary_model,  # cheap model — background compression
                     "messages": [{"role": "system", "content": _build_summary_system()},
                                  {"role": "user", "content": user}],
                     "max_tokens": 600,
@@ -815,9 +1189,119 @@ class QwenLLM:
         except Exception:
             return {"memory": prior}
 
+    def _suggest(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """3 short, CONTEXT-aware "what could I do next" hints, drawn from what just happened
+        + the current situation. Cheap call; degrades to {} so runtime can fall back."""
+        ctx = prompt.get("sugg") or {}
+        pc = (ctx.get("player_name") or "").strip()
+        pc_desc = (ctx.get("player_desc") or "").strip()
+        who = f"「{pc}」（{pc_desc}）" if pc and pc_desc else (f"「{pc}」" if pc else "你扮演的主角")
+        sys = (
+            f"你在为一个互动剧情游戏生成【下一步行动建议】。玩家扮演的是 {who}。"
+            "★铁律：每一条建议都必须站在玩家扮演的这个角色的视角、用这个角色的身份和口吻写——"
+            "是这个角色接下来会亲口说的一句话、或会亲手做的一个动作，用第一人称（我…）。"
+            "绝不能写成旁观者、系统或别的角色对主角发出的外部指令。"
+            "对比：外部命令口吻“去问对方昨晚的事”“上前查看”是错的；"
+            "主角亲口/亲手的“你昨晚究竟去了哪？”“让我走近看看”才是对的。"
+            "只输出 3 条，每行一条，不要编号、不要解释。每条都要：紧扣刚发生的对话与此刻处境、"
+            "具体可操作、贴合这个角色的性格与说话方式、尽量精炼（十来个字最好，最多一句话说完）。"
+            "不要剧透隐藏真相，只点方向。"
+        )
+        u = (
+            f"你（{pc or '主角'}）刚才对{ctx.get('speaker','对方')}说：{ctx.get('player_input','')}\n"
+            f"{ctx.get('speaker','对方')}回应：{ctx.get('reply','')}\n"
+            f"此刻在场：{ '、'.join(ctx.get('present') or []) or '只有你'}\n"
+            f"可以去的地方：{ '、'.join(ctx.get('exits') or []) or '暂无'}\n"
+            f"这一章你还想弄清：{ '、'.join(ctx.get('topics') or []) or '随你探索'}\n"
+            f"你和{ctx.get('speaker','对方')}此刻的关系：{ctx.get('relation','普通')}"
+        )
+        try:
+            resp = httpx.post(
+                self._url,
+                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
+                json={"model": self._model, "messages": [{"role": "system", "content": sys},
+                      {"role": "user", "content": u}], "max_tokens": 160, "temperature": 0.8},
+                timeout=20,
+            )
+            resp.raise_for_status()
+            txt = resp.json()["choices"][0]["message"]["content"].strip()
+        except Exception:
+            return {"suggestions": []}
+        import re
+        out = []
+        for ln in txt.splitlines():
+            ln = re.sub(r"^\s*[-*\d.、。)）]+\s*", "", ln).strip().strip("「」\"'")
+            if not ln:
+                continue
+            # keep chips short, but NEVER chop mid-word: trim at the last sentence punctuation
+            # within range, and only hard-cut (with …) as a last resort.
+            if len(ln) > 24:
+                cut = max((ln.rfind(p, 8, 24) for p in "？！。?!…，,"), default=-1)
+                ln = ln[:cut + 1] if cut >= 8 else ln[:24] + "…"
+            out.append(ln)
+        return {"suggestions": out[:3]}
+
+    def _describe_place(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """Concrete, people-free description for an EMERGENT location (a place that came up in
+        play and the player agreed to go to). Grounds it in the world + where they came from."""
+        name = (prompt.get("place_name") or "").strip()
+        world = (prompt.get("world") or "").replace("\n", " ")[:400]
+        frm = (prompt.get("from_place") or "").strip()
+        sys = ("你在为一个互动剧情游戏即时生成一个新地点的环境描写。只写这个地点里此刻实际能看到的"
+               "具体陈设、光线、声响、气味，30~60字，一段话，第三人称、有画面感、贴合世界观；"
+               "画面里不要出现任何人物，不要台词，不要解释或标题。")
+        u = f"世界观：{world or '（未知）'}\n新地点名称：{name}\n玩家刚从「{frm or '别处'}」走过来。\n只输出这段环境描写。"
+        try:
+            resp = httpx.post(
+                self._url,
+                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
+                json={"model": self._model, "messages": [{"role": "system", "content": sys},
+                      {"role": "user", "content": u}], "max_tokens": 200, "temperature": 0.85},
+                timeout=25,
+            )
+            resp.raise_for_status()
+            return {"detail": (resp.json()["choices"][0]["message"]["content"] or "").strip()}
+        except Exception:
+            return {"detail": ""}
+
+    def _start_place(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """The OPENING location for a story that authored no map — so every run has a place to
+        stand and can grow a map from there. Returns {name, detail} derived from world + act 1."""
+        world = (prompt.get("world") or "").replace("\n", " ")[:400]
+        setting = (prompt.get("setting") or "").replace("\n", " ")[:300]
+        sys = ("你在为一个互动剧情游戏确定【开场所在地】。根据世界观和开场情节，给出玩家一开始身处的"
+               "具体地点。只输出两行：第一行是这个地点的名字（4~12字，具体，如「末班地铁车厢」「城郊废弃教堂」）；"
+               "第二行是30~50字的环境描写（此刻能看到的陈设、光线、声响、气味，第三人称，不要出现人物或台词）。"
+               "不要解释、不要编号、不要多余的行。")
+        u = f"世界观：{world or '（未知）'}\n开场情节：{setting or '（未知）'}\n输出开场地点（两行）。"
+        try:
+            resp = httpx.post(
+                self._url,
+                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
+                json={"model": self._model, "messages": [{"role": "system", "content": sys},
+                      {"role": "user", "content": u}], "max_tokens": 160, "temperature": 0.8},
+                timeout=25,
+            )
+            resp.raise_for_status()
+            txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+        except Exception:
+            return {"name": "", "detail": ""}
+        import re
+        lines = [re.sub(r"^\s*[-*\d.、。)）：:]+\s*", "", l).strip().strip("「」\"'")
+                 for l in txt.splitlines() if l.strip()]
+        name = lines[0][:16] if lines else ""
+        detail = " ".join(lines[1:])[:120] if len(lines) > 1 else ""
+        return {"name": name, "detail": detail}
+
     def generate(self, prompt: dict[str, Any]) -> dict[str, Any]:
         if prompt.get("summarize"):
             return self._summarize(prompt)
+        if prompt.get("suggest"):
+            return self._suggest(prompt)
+        if prompt.get("describe_place"):
+            return self._describe_place(prompt)
+        if prompt.get("start_place"):
+            return self._start_place(prompt)
         speaker = prompt.get("speaker_name") or "角色"
         channel = prompt.get("channel") or "say"
         observe = bool(prompt.get("observe"))
@@ -832,7 +1316,7 @@ class QwenLLM:
 
         messages = [{"role": "system", "content": system}]
         if not intro and not transition:
-            messages += history[-8:]  # recent turns for continuity / current situation
+            messages += history[-14:]  # recent turns for continuity (matches MEMORY_WINDOW)
         # observe/intro/transition is a one-off narration; nudge with a neutral cue
         cue = ("（开场）" if intro else "（进入新的一幕）" if transition else
                "（观察四周）" if not prompt.get("observe_target") else "（打量这个人）")
@@ -846,22 +1330,48 @@ class QwenLLM:
             if anchor:
                 user_content = f"{user_content}\n\n{anchor}"
         messages.append({"role": "user", "content": user_content})
+        # GROUP TURNS: put what others ALREADY said THIS turn into the message stream as
+        # assistant turns (not just the system prompt) so this speaker CONTINUES the
+        # conversation instead of re-answering the player from scratch (which caused verbatim
+        # echo between co-present characters).
+        for s in (prompt.get("said_this_turn") or []):
+            if s.get("text"):
+                sp = s.get("speaker") or "旁白"
+                messages.append({"role": "assistant", "content": f"{sp}：{s['text']}"})
+        # a logic-guard regeneration passes a targeted correction (what broke last attempt)
+        corr = prompt.get("logic_correction")
+        if corr:
+            messages.append({"role": "system", "content": corr})
 
+        body = {
+            "model": self._model,
+            "messages": messages,
+            "max_tokens": 600,
+            "temperature": 0.85,
+            "presence_penalty": 0.3,
+        }
+        # CHARACTER turns use FUNCTION CALLING (render_turn): narration & speech go into
+        # separate tool args → the model physically can't merge them. This is the definitive
+        # fix for "台词/旁白混在一起" (marker/json/prose all had failure modes). Narration-only
+        # turns (observe/intro/transition) stay plain prose.
+        group_mode = prompt.get("group_mode")
+        if not narrate:
+            nt = prompt.get("next_act_title")
+            advance_hint = (f"本幕目标已达成、可进入下一幕《{nt}》时填 true，否则 false" if nt
+                            else "本章已是最后一章，填 false")
+            body["tools"] = [_render_tool(prompt, speaker, observe, group_mode, channel, advance_hint)]
+            body["tool_choice"] = {"type": "function", "function": {"name": "render_turn"}}
         try:
             resp = httpx.post(
-                DASHSCOPE_URL,
+                self._url,
                 headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
-                json={
-                    "model": self._model,
-                    "messages": messages,
-                    "max_tokens": 400,
-                    "temperature": 0.9,
-                    "presence_penalty": 0.6,
-                },
+                json=body,
                 timeout=40,
             )
             resp.raise_for_status()
-            text = resp.json()["choices"][0]["message"]["content"].strip()
+            msg = resp.json()["choices"][0]["message"]
+            text = (msg.get("content") or "").strip()
+            tool_calls = msg.get("tool_calls") or []
         except Exception as e:  # network / auth / quota — degrade, never 500 the turn
             if narrate:
                 return {"beats": [{"type": "description", "speaker_name": None,
@@ -877,4 +1387,24 @@ class QwenLLM:
         if narrate:
             return {"beats": [{"type": "description", "speaker_name": None, "text": text}],
                     "affinity_delta": 0, "advance_act": False, "ending": None}
-        return _parse_reply(text, speaker, channel, prompt.get("group_mode"))
+        # parse the render_turn tool call (separate narration/speech fields)
+        if tool_calls:
+            args = ((tool_calls[0] or {}).get("function") or {}).get("arguments")
+            parsed = _parse_tool_args(args, speaker, channel, group_mode)
+            if parsed is not None:
+                return parsed
+        # fallback (tool missing / unparseable): prose+quote parser on any free text
+        return _parse_reply(text, speaker, channel, group_mode)
+
+
+class DeepSeekLLM(QwenLLM):
+    """DeepSeek (api.deepseek.com) — OpenAI-compatible, so it reuses the entire QwenLLM
+    pipeline (prompt building, depth anchor, parsing, memory summary) and only points the
+    HTTP calls at DeepSeek's endpoint. Cheaper + stronger prose/台词 than qwen-max."""
+
+    def __init__(self) -> None:
+        s = get_settings()
+        self._url = DEEPSEEK_URL
+        self._key = s.deepseek_api_key
+        self._model = s.deepseek_model or "deepseek-chat"
+        self._summary_model = self._model  # DeepSeek has no cheap tier; reuse the chat model

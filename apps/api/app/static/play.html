@@ -37,9 +37,13 @@
   .av { width: 34px; height: 34px; border-radius: 50%; flex: 0 0 34px; display: grid; place-items: center; font-size: 15px; font-weight: 700; color: #fff; box-shadow: 0 1px 4px #0006; }
   .bubble { padding: 9px 13px; border-radius: 13px; line-height: 1.65; white-space: pre-wrap; }
   .npc .bubble { background: #1c2030e6; border: 1px solid #2a3350; }
-  .who { color: #8ea2ff; font-size: 12px; margin-bottom: 3px; }
+  .who { color: #8ea2ff; font-size: 12.5px; font-weight: 700; margin-bottom: 3px; }
+  .npc .bubble .said { color: #eaf0ff; }   /* spoken words stand out as speech */
+  .said::before { content: "「"; color: #8ea2ff; }
+  .said::after  { content: "」"; color: #8ea2ff; }   /* quotes via CSS → always present on BOTH render paths */
   .me .bubble { background: #2a2350e6; border: 1px solid #3a3270; }
-  .desc { align-self: center; color: #c9c9d4; font-size: 13px; font-style: italic; text-align: center; max-width: 92%; text-shadow: 0 1px 3px #000a; padding: 2px 0; }
+  /* narration = a clearly different "stage" band: centered, dim, boxed — never looks like a speech bubble */
+  .desc { align-self: center; color: #b9c0d0; font-size: 12.5px; font-style: italic; text-align: center; max-width: 90%; line-height: 1.6; padding: 7px 14px; background: rgba(10,11,16,.58); border-radius: 12px; border: 1px dashed #ffffff1f; }
   .think { align-self: flex-end; background: #20202ae6; color: #bbb; font-style: italic; padding: 9px 13px; border-radius: 13px; max-width: 88%; }
   .typing .bubble { background: #1c2030e6; border: 1px solid #2a3350; color: #9fb0ff; }
   .typing .bubble span { animation: blink 1.2s infinite; }
@@ -50,9 +54,29 @@
   footer input { margin: 0; }
   #goalbar { flex: 0 0 auto; margin: 8px 16px 0; padding: 8px 12px; border-radius: 10px; background: #1a2030cc; border: 1px solid #2a3350; color: #d8e0ff; font-size: 13px; line-height: 1.5; }
   #goalbar b { color: #ffd479; }
+  #hintbar { flex: 0 0 auto; margin: 6px 16px 0; padding: 7px 12px; border-radius: 10px; background: #2a2410cc; border: 1px solid #4a3d18; color: #ecd9a6; font-size: 12.5px; line-height: 1.5; }
+  #hintbar b { color: #ffd479; }
+  #moveask { flex: 0 0 auto; margin: 6px 16px; padding: 9px 12px; border-radius: 10px; background: #14241fdd; border: 1px solid #2f5a45; color: #cfe6d4; font-size: 13px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  #moveask b { color: #8fe0a6; }
+  #moveask button { font-size: 12.5px; border-radius: 8px; padding: 4px 12px; cursor: pointer; border: 1px solid #3a4a40; }
+  #moveask .go { background: #2a6b3e; border-color: #3c8a52; color: #eafff0; }
+  #moveask .stay { background: #2a2d36; color: #c9c9d4; }
   #placebar { flex: 0 0 auto; margin: 6px 16px 0; padding: 7px 12px; border-radius: 10px; background: #18221bcc; border: 1px solid #2c4233; color: #cfe6d4; font-size: 12.5px; line-height: 1.5; }
   #placebar b { color: #8fe0a6; }
   #placebar .exits { color: #8aa092; }
+  #placebar .exit { cursor: pointer; text-decoration: underline dotted; padding: 0 1px; }
+  #placebar .exit:hover { color: #bdf0c9; }
+  /* relationship tag + follow control under each in-scene character */
+  .castitem .rel { font-size: 10px; padding: 0 4px; border-radius: 6px; line-height: 1.5; white-space: nowrap; }
+  .rel-stranger { color:#9aa0ad; background:#2a2d36; } .rel-peer { color:#cfd6e6; background:#2b3142; }
+  .rel-friend { color:#8fe0a6; background:#1d3326; } .rel-flirt { color:#ffb3d1; background:#3a2230; }
+  .rel-lover { color:#ff8fb0; background:#45202f; } .rel-enemy { color:#ff9a8f; background:#3a201d; }
+  .rel-elder, .rel-junior { color:#e6d39a; background:#332d1d; }
+  .castitem .follow { font-size:10px; cursor:pointer; border:1px solid #3a4060; background:#1a1f30; color:#aeb8e0; border-radius:7px; padding:1px 6px; white-space:nowrap; }
+  .castitem .follow.on { background:#243a28; border-color:#3c6b45; color:#8fe0a6; }
+  .castitem .follow.locked { opacity:.5; }
+  .castitem .core { font-size:10px; color:#ffd479; }
+  .castitem .nextrel { font-size:9.5px; color:#8a93a8; white-space:nowrap; line-height:1.3; }
   #clues { flex: 0 0 auto; margin: 6px 16px 0; padding: 8px 12px; border-radius: 10px; background: #161c2acc; border: 1px solid #2a3350; font-size: 12.5px; line-height: 1.7; }
   #clues .hd { color: #9fb0ff; font-weight: 600; }
   #clues .it { color: #c9c9d4; } #clues .it.done { color: #6fe0a6; }
@@ -115,7 +139,7 @@
 
   <!-- role / mode picker -->
   <div id="role" class="card hidden">
-    <div class="bar" style="justify-content:space-between"><h3 style="margin:0">选择玩法</h3><a onclick="backToStories()">← 换剧本</a></div>
+    <div class="bar" style="justify-content:space-between"><h3 style="margin:0">选择玩法</h3><span class="bar"><a onclick="editCurrentStory()">✏️ 编辑这个剧本</a><a onclick="backToStories()">← 换剧本</a></span></div>
     <p class="muted" style="margin:6px 0 4px">扮演其中一个角色，亲自下场：</p>
     <div id="roleChars"></div>
     <p class="muted" style="border-top:1px solid #23232c; padding-top:12px; margin-top:12px">或者，当个隐形看客：</p>
@@ -127,9 +151,11 @@
     <div id="cast"></div>
     <div id="placebar" class="hidden"></div>
     <div id="goalbar" class="hidden"></div>
+    <div id="hintbar" class="hidden"></div>
     <div id="clues" class="hidden"></div>
     <div id="chat"></div>
     <div id="suggest"></div>
+    <div id="moveask" class="hidden"></div>
     <div id="state"></div>
     <footer>
       <select id="channel" onchange="updatePlaceholder()">
@@ -147,7 +173,9 @@
 const API = "/api/v1";
 let runId = null, personaId = null, myName = "我";
 let soundOn = true, curBgmMood = null;
+let curScene = null, curLocId = null;  // for backdrop: last scene + current place id
 let cast = [], target = null;  // target = character_id the player is addressing (null = auto)
+let relations = {}, following = [];  // {cid:{mode,mode_name,romance,...}} ; ids traveling with you
 let currentStoryId = null, playMode = "character";
 
 const MOOD_GRAD = {
@@ -206,7 +234,10 @@ async function afterAuth() {
 async function chooseRole(storyId) {
   currentStoryId = storyId;
   const story = await j(`/stories/${storyId}`);
-  const chars = (story.characters || []).filter(c => (c.presence || "present") !== "offstage");
+  const all = (story.characters || []).filter(c => (c.presence || "present") !== "offstage");
+  // only author-designated playable roles; if the story flags none, fall back to all (legacy)
+  const flagged = all.filter(c => c.playable);
+  const chars = flagged.length ? flagged : all;
   roleChars.innerHTML = "";
   chars.forEach(c => {
     const b = document.createElement("button");
@@ -220,6 +251,7 @@ async function chooseRole(storyId) {
   hide("pick"); show("role");
 }
 function backToStories() { hide("role"); show("pick"); }
+function editCurrentStory() { if (currentStoryId) location.href = `/studio?story=${currentStoryId}`; }
 
 // ── run lifecycle ─────────────────────────────────────
 async function startRun(storyId, mode="character", playerCharacterId=null, playerCharacterName=null) {
@@ -232,8 +264,12 @@ async function startRun(storyId, mode="character", playerCharacterId=null, playe
   hide("pick"); show("play"); show("backBtn"); show("soundBtn");
   resetEnded();
   chat.innerHTML = ""; suggest.innerHTML = ""; state.innerHTML = "";
-  curBgmMood = null;
-  cast = run.cast || []; target = null; renderCast();
+  curBgmMood = null; curScene = null; curLocId = null;
+  target = null;
+  cast = (run.state && run.state.here) || run.cast || [];
+  relations = (run.state && run.state.relations) || {};
+  following = (run.state && run.state.following) || [];
+  renderCast();
   // god mode = director cues; 说/做/想 channel doesn't apply
   channel.style.display = playMode === "god" ? "none" : "";
   updatePlaceholder();
@@ -264,41 +300,126 @@ function renderBeat(b) {
   } else if (b.type === "description") {
     node = document.createElement("div"); node.className = "desc"; node.textContent = b.text;
   } else {
-    node = makeRow("left", b.speaker_name || "", b.text, true);
+    node = makeRow("left", b.speaker_name || "", b.text, true, true);
   }
   chat.appendChild(node); chat.scrollTop = chat.scrollHeight;
   return node;
 }
-function makeRow(side, name, text, withWho) {
+// `spoken` = wrap the text in 「」 and style it as speech, so a dialogue bubble is
+// unmistakably "words said out loud" vs the narration band.
+function makeRow(side, name, text, withWho, spoken) {
   const row = document.createElement("div"); row.className = "row " + side + (side==="left"?" npc":" me");
   row.appendChild(avatarEl(name));
   const bub = document.createElement("div"); bub.className = "bubble";
-  bub.innerHTML = (withWho ? `<div class="who">${escapeHtml(name)}</div>` : "") + escapeHtml(text);
+  const body = spoken ? `<span class="said">${escapeHtml(text)}</span>` : escapeHtml(text);
+  bub.innerHTML = (withWho ? `<div class="who">${escapeHtml(name)}</div>` : "") + body;
   row.appendChild(bub);
   return row;
 }
+const MODE_CLASS = { "陌生人":"stranger","同级":"peer","朋友":"friend","暧昧对象":"flirt","恋人":"lover","敌人":"enemy","长辈":"elder","小辈":"junior" };
 function renderCast() {
   const el = document.getElementById("cast");
-  if (!cast.length) { el.classList.add("hidden"); return; }
+  if (!cast.length && playMode !== "god") { el.classList.add("hidden"); return; }
   el.classList.remove("hidden"); el.innerHTML = "";
-  const mk = (id, name) => {
+  // the "所有人" / broadcast pseudo-target
+  const all = document.createElement("div");
+  all.className = "castitem" + (target === null ? " sel" : "");
+  all.appendChild(avatarEl("所有人"));
+  const as = document.createElement("small"); as.textContent = "所有人"; all.appendChild(as);
+  all.onclick = () => { target = null; renderCast(); updatePlaceholder(); };
+  el.appendChild(all);
+
+  cast.forEach(c => {
     const d = document.createElement("div");
-    d.className = "castitem" + (target === id ? " sel" : "");
-    const a = avatarEl(name); d.appendChild(a);
-    const s = document.createElement("small"); s.textContent = name; d.appendChild(s);
-    d.onclick = () => { target = (target === id ? null : id); renderCast(); updatePlaceholder(); };
-    return d;
-  };
-  el.appendChild(mk(null, "所有人"));
-  cast.forEach(c => el.appendChild(mk(c.id, c.name)));
+    d.className = "castitem" + (target === c.id ? " sel" : "");
+    d.appendChild(avatarEl(c.name));
+    const s = document.createElement("small"); s.textContent = c.name; d.appendChild(s);
+    // relationship tag (skip the lead — the spine character has no flowing mode)
+    const rel = relations[c.id];
+    if (rel && rel.mode_name && !c.is_lead) {
+      const t = document.createElement("span");
+      t.className = "rel rel-" + (MODE_CLASS[rel.mode_name] || "stranger");
+      t.textContent = rel.mode_name + ((rel.romance|0) >= 25 ? " ♥" : "");
+      d.appendChild(t);
+      // proximity hook: "差X→朋友" — the daily "one more step" pull
+      if (rel.next && rel.next.name) {
+        const nx = document.createElement("span"); nx.className = "nextrel";
+        nx.textContent = `差${rel.next.to_next}→${rel.next.name}`;
+        d.appendChild(nx);
+      }
+    }
+    // follow control (the lead is always with you; others can be invited / dismissed)
+    if (c.is_lead) {
+      const core = document.createElement("span"); core.className = "core"; core.textContent = "核心";
+      d.appendChild(core);
+    } else if (playMode !== "god") {
+      const on = following.includes(c.id);
+      const canFollow = on || c.can_follow !== false;  // needs 好感 to invite (unless already along)
+      const b = document.createElement("span");
+      b.className = "follow" + (on ? " on" : "") + (canFollow ? "" : " locked");
+      b.textContent = on ? "🚶同行中" : (canFollow ? "邀同行" : "🔒邀同行");
+      b.title = canFollow ? "" : "关系还不够近，多聊聊再请 TA 同行";
+      b.onclick = (e) => { e.stopPropagation(); toggleFollow(c.id, !on); };
+      d.appendChild(b);
+    }
+    d.onclick = () => { target = (target === c.id ? null : c.id); renderCast(); updatePlaceholder(); };
+    el.appendChild(d);
+  });
 }
 function updateCast(next) {
   if (!Array.isArray(next)) return;
-  const before = cast.map(c => c.id).join(",");
   cast = next;
-  // if the person you were addressing just left the scene, fall back to "所有人"
   if (target && !cast.some(c => c.id === target)) target = null;
-  if (before !== cast.map(c => c.id).join(",")) { renderCast(); updatePlaceholder(); }
+  renderCast(); updatePlaceholder();
+}
+// apply a Run object's state to the scene UI (used by move / follow responses)
+function applyRunUpdate(run) {
+  const st = run && run.state || {};
+  cast = st.here || run.cast || [];
+  relations = st.relations || {};
+  following = st.following || [];
+  if (target && !cast.some(c => c.id === target)) target = null;
+  renderCast(); updatePlaceholder();
+  if (st.location !== undefined) renderPlace(st.location);
+}
+async function moveTo(name) {
+  if (!runId || ended) return;
+  try {
+    const run = await j(`/runs/${runId}/move`, { method:"POST", body: JSON.stringify({ location: name }) });
+    applyRunUpdate(run);
+    const who = following.length ? `（你带着同行的人来到了 ${name}。）` : `（你来到了 ${name}。）`;
+    renderBeat({ author:"engine", type:"description", text: who });
+  } catch(e) { renderBeat({ author:"engine", type:"description", text:`（${e.message}）` }); }
+}
+async function toggleFollow(id, want) {
+  if (!runId || ended) return;
+  try {
+    const run = await j(`/runs/${runId}/follow`, { method:"POST", body: JSON.stringify({ character_id: id, follow: want }) });
+    applyRunUpdate(run);
+  } catch(e) { renderBeat({ author:"engine", type:"description", text:`（${e.message}）` }); }
+}
+// a character asked to lead the player elsewhere → confirm before moving
+function renderMoveAsk(req) {
+  const el = document.getElementById("moveask");
+  if (!req || ended) { el.classList.add("hidden"); el.innerHTML = ""; return; }
+  el.innerHTML = "";
+  const t = document.createElement("span");
+  const tail = req.generate ? "（一处新的去处，去了才知道是什么样）" : "";
+  t.innerHTML = `🚪 <b>${escapeHtml(req.by_name||"对方")}</b> 想带你去 <b>${escapeHtml(req.to_name||"")}</b>${tail}`;
+  const go = document.createElement("button"); go.className = "go"; go.textContent = `跟 TA 去`;
+  go.onclick = () => acceptMove(req);
+  const stay = document.createElement("button"); stay.className = "stay"; stay.textContent = "留下";
+  stay.onclick = () => { renderMoveAsk(null); renderBeat({ author:"engine", type:"description", text:`（你没有动，留在了原地。）` }); };
+  el.append(t, go, stay); el.classList.remove("hidden");
+}
+async function acceptMove(req) {
+  renderMoveAsk(null);
+  if (!runId || ended) return;
+  try {
+    const run = await j(`/runs/${runId}/move`, { method:"POST", body: JSON.stringify({ location: req.to || req.to_name, with_character_id: req.by_id, generate: !!req.generate }) });
+    applyRunUpdate(run);
+    renderBeat({ author:"engine", type:"description", text:`（你跟着${req.by_name||"对方"}来到了 ${req.to_name}。）` });
+  } catch(e) { renderBeat({ author:"engine", type:"description", text:`（${e.message}）` }); }
 }
 function updatePlaceholder() {
   const c = cast.find(x => x.id === target);
@@ -321,16 +442,33 @@ function renderState(st) {
   if (st.location !== undefined) renderPlace(st.location);
 }
 function renderPlace(loc) {
+  // track the current place so the background can use its AI-generated image
+  const newLocId = (loc && loc.id) || null;
+  if (newLocId !== curLocId) { curLocId = newLocId; paintBackground(); }
   const el = document.getElementById("placebar");
   if (!loc || !loc.name) { el.classList.add("hidden"); return; }
   const exits = (loc.exits||[]).filter(Boolean);
-  const ex = exits.length ? `　<span class="exits">→ 可去：${exits.map(escapeHtml).join("、")}</span>` : "";
-  el.innerHTML = `📍 <b>${escapeHtml(loc.name)}</b>${ex}`;
+  el.innerHTML = `📍 <b>${escapeHtml(loc.name)}</b>`;
+  if (exits.length) {
+    const wrap = document.createElement("span"); wrap.className = "exits"; wrap.append("　→ 可去：");
+    exits.forEach((name, i) => {
+      if (i) wrap.append("、");
+      const a = document.createElement("span"); a.className = "exit"; a.textContent = name;
+      a.onclick = () => moveTo(name);
+      wrap.appendChild(a);
+    });
+    el.appendChild(wrap);
+  }
   el.classList.remove("hidden");
 }
 function renderGoal(goal) {
   const el = document.getElementById("goalbar");
   if (goal) { el.innerHTML = `🎯 <b>当前目标</b>：${escapeHtml(goal)}`; el.classList.remove("hidden"); }
+  else el.classList.add("hidden");
+}
+function renderHint(hint) {
+  const el = document.getElementById("hintbar");
+  if (hint) { el.innerHTML = `💡 <b>线索</b>：${escapeHtml(hint)}`; el.classList.remove("hidden"); }
   else el.classList.add("hidden");
 }
 function renderProgress(prog) {
@@ -395,7 +533,8 @@ function makeTypingRow(side, name) {
   row.appendChild(avatarEl(name));
   const bub = document.createElement("div"); bub.className = "bubble";
   const who = document.createElement("div"); who.className = "who"; who.textContent = name; bub.appendChild(who);
-  const txt = document.createElement("span"); bub.appendChild(txt);
+  // .said → CSS adds the 「」 quotes, so streamed speech looks identical to replayed speech
+  const txt = document.createElement("span"); if (side === "left") txt.className = "said"; bub.appendChild(txt);
   row.appendChild(bub); chat.appendChild(row); chat.scrollTop = chat.scrollHeight;
   return txt;
 }
@@ -427,17 +566,9 @@ async function playBeat(b) {
 // ── immersive scene (background / bgm / sfx) ──────────
 function applyScene(scene) {
   if (!scene) return;
+  curScene = scene;
   const mood = scene.mood || "daily";
-  bg.style.background = MOOD_GRAD[mood] || MOOD_GRAD.daily;
-  // try a real background image; if it loads, layer it on (else gradient stays)
-  if (scene.bg) {
-    const stem = scene.night ? scene.bg + "_night" : scene.bg;
-    const url = `/scene/bg/${stem}.jpg`;
-    const img = new Image();
-    img.onload = () => { bg.style.backgroundImage = `url(${url})`; };
-    img.onerror = () => { if (scene.night) { const f=new Image(); const u2=`/scene/bg/${scene.bg}.jpg`; f.onload=()=>bg.style.backgroundImage=`url(${u2})`; f.src=u2; } };
-    img.src = url;
-  }
+  paintBackground();
   // bgm by mood (loops). silent if file missing.
   if (mood !== curBgmMood) {
     curBgmMood = mood;
@@ -446,6 +577,32 @@ function applyScene(scene) {
   }
   // one-shot sfx
   if (scene.sfx) { sfx.src = `/scene/sfx/${scene.sfx}.mp3`; if (soundOn) sfx.play().catch(()=>{}); }
+}
+// Paint the backdrop. Priority: AI-generated per-LOCATION image (consistent for a place) →
+// keyword/preset image from the scene classifier → mood gradient. Each step degrades to the
+// next if the image 404s, so missing art is never a hard failure.
+function paintBackground() {
+  const scene = curScene || {};
+  const mood = scene.mood || "daily";
+  bg.style.background = MOOD_GRAD[mood] || MOOD_GRAD.daily;  // gradient base, always set
+  if (curLocId) {
+    const locUrl = `/scene/bg/${curLocId}.jpg`;
+    const im = new Image();
+    im.onload = () => { bg.style.backgroundImage = `url(${locUrl})`; };
+    im.onerror = () => paintKeywordBg(scene);  // no AI image for this place → fall back
+    im.src = locUrl;
+  } else {
+    paintKeywordBg(scene);
+  }
+}
+function paintKeywordBg(scene) {
+  if (!scene || !scene.bg) return;  // gradient stays
+  const stem = scene.night ? scene.bg + "_night" : scene.bg;
+  const url = `/scene/bg/${stem}.jpg`;
+  const img = new Image();
+  img.onload = () => { bg.style.backgroundImage = `url(${url})`; };
+  img.onerror = () => { if (scene.night) { const f=new Image(); const u2=`/scene/bg/${scene.bg}.jpg`; f.onload=()=>bg.style.backgroundImage=`url(${u2})`; f.src=u2; } };
+  img.src = url;
 }
 function toggleSound() {
   soundOn = !soundOn;
@@ -469,7 +626,8 @@ async function send() {
   // beats stream in AS the server computes each responder → play them one-by-one (typed)
   // the moment they arrive, so the first character appears in ~2-3s, the rest follow.
   playQ = []; playing = false; streamDone = false; firstBeat = true;
-  afterPlay = { suggest: null, ending: undefined };
+  afterPlay = { suggest: null, ending: undefined, moveReq: null };
+  renderMoveAsk(null);  // clear any prior pending move prompt
   try {
     const r = await fetch(`${API}/runs/${runId}/play`, {
       method:"POST", credentials:"include", headers:{"Content-Type":"application/json"},
@@ -488,9 +646,12 @@ async function send() {
         else if (ev.event === "state") { renderState(ev.state); }
         else if (ev.event === "scene") { applyScene(ev.scene); }
         else if (ev.event === "cast") { updateCast(ev.cast); }
+        else if (ev.event === "here") { relations = ev.relations || {}; following = ev.following || []; updateCast(ev.here || []); }
         else if (ev.event === "goal") { renderGoal(ev.goal); }
         else if (ev.event === "place") { renderPlace(ev.location); }
         else if (ev.event === "progress") { renderProgress(ev.progress); }
+        else if (ev.event === "hint") { renderHint(ev.hint); }
+        else if (ev.event === "move_request") { afterPlay.moveReq = ev.move_request; }
         else if (ev.event === "suggest") { afterPlay.suggest = ev.suggestions; }
         else if (ev.event === "ending") { afterPlay.ending = ev.ending; }
       }
@@ -511,6 +672,7 @@ async function pump() {
 function finishTurn() {
   if (afterPlay) {
     if (afterPlay.suggest && !ended) renderSuggest(afterPlay.suggest);
+    if (afterPlay.moveReq && !ended) renderMoveAsk(afterPlay.moveReq);
     if (afterPlay.ending !== undefined) showEnding(afterPlay.ending);
     afterPlay = null;
   }

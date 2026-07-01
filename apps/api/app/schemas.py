@@ -81,6 +81,20 @@ class Character(BaseModel):
     # this character's OWN goal/agenda/stance in the story — what THEY are after,
     # independent of the player. Drives autonomous, self-interested behavior. Optional.
     agenda: Optional[str] = None
+    # relationship mode toward the player: the starting archetype (e.g. "陌生人"/"长辈"/
+    # "暧昧对象") and which archetypes it may FLOW into. Empty allowed = any. See
+    # engine/relationships.py for the library.
+    relation_default: Optional[str] = None
+    relation_allowed: list[str] = []
+    # the place this character is normally found (a Location id). The player only meets them
+    # by being at this location (or after inviting them to follow). Empty/unset = ubiquitous:
+    # present in every scene of their act (backward-compatible old behavior).
+    home_location_id: Optional[str] = None
+    # whether the player may EMBODY this character (character mode). The story is authored
+    # from the protagonist's POV, so antagonists/late-arrivals usually aren't playable —
+    # picking them breaks the plot. If NO character in a story is flagged playable, the
+    # engine falls back to "any present character" (legacy behavior, no regression).
+    playable: bool = False
     # auto-generated background knowledge ("智能增强"): a structured lore block the model
     # can draw on for this character (IP setting, era, relations, signature details).
     knowledge: Optional[str] = None
@@ -120,6 +134,15 @@ class Act(BaseModel):
     events: list[StoryEvent] = []
 
 
+class LocationUnlock(BaseModel):
+    """When this place becomes reachable. ALL conditions ANDed. Empty = available from the
+    start. Lets a place stay hidden until the player has learned it exists THIS act (e.g.
+    a rooftop only the trusted are shown), instead of every exit being open from turn one."""
+    act_min: int = 0
+    affinity_min: int = 0
+    required_fragment_ids: list[str] = []  # info the player must have uncovered first
+
+
 class Location(BaseModel):
     """A concrete physical place in the story world. `detail` should name specific,
     sensible fixtures/objects (not vague mood) so narration stays grounded; `exits` lists
@@ -128,6 +151,7 @@ class Location(BaseModel):
     name: str = ""
     detail: str = ""  # concrete fixtures/props/layout/lighting at this place
     exits: list[str] = []  # names of places reachable from here
+    unlock: LocationUnlock = LocationUnlock()  # gate: appears only once these are met
 
 
 class EndingCondition(BaseModel):
@@ -252,6 +276,9 @@ class RunState(BaseModel):
     goal: str = ""  # the player's current small objective (this act)
     progress: Optional[dict[str, Any]] = None  # clue checklist {items, done, total}
     location: Optional[dict[str, Any]] = None  # where the player is now {id,name,detail,exits}
+    relations: dict[str, Any] = {}  # {char_id:{mode,mode_name,closeness,romance}} toward player
+    following: list[str] = []  # character ids currently traveling WITH the player
+    here: list[dict[str, Any]] = []  # characters in the player's CURRENT scene [{id,name,...}]
 
 
 class Run(BaseModel):
@@ -296,3 +323,18 @@ class PlayIn(BaseModel):
     input: str
     channel: Literal["say", "think", "do"] = "say"
     target_character_id: Optional[str] = None  # who the player is addressing (optional)
+
+
+class MoveIn(BaseModel):
+    # destination location: an id or a name (matched leniently against authored locations)
+    location: str
+    # if a character is leading the player there (accepted a 带去 invite), they travel along
+    with_character_id: Optional[str] = None
+    # True = this place is NOT on the authored map yet; it emerged in play and should be
+    # generated on the fly (name → concrete detail), wired in, and moved to.
+    generate: bool = False
+
+
+class FollowIn(BaseModel):
+    character_id: str
+    follow: bool = True  # True = invite to travel with you; False = part ways

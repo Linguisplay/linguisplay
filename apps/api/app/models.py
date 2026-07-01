@@ -207,6 +207,10 @@ class Beat(Base):
     text: Mapped[str] = mapped_column(Text, default="")
     # 'player' for the player's own input echoed back, else 'engine'
     author: Mapped[str] = mapped_column(String(16), default="engine")
+    # character ids PRESENT when this beat happened → gives each character a per-witness view
+    # of history (they only "remember" scenes they were in). None on legacy beats = witnessed
+    # by everyone (backward-compatible, no isolation for old runs).
+    present_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 

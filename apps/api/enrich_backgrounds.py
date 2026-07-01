@@ -1,0 +1,92 @@
+"""Generate an AI background image for each LOCATION of a story (通义万相 / DashScope),
+and cache it as a static file the play UI loads by location id.
+
+One image per place (not per turn) → cheap, consistent, no in-play latency. Idempotent:
+skips a location whose image already exists (so re-running / re-seeding won't clobber or
+re-spend). Pass --force to regenerate.
+
+Run ON THE SERVER (needs DASHSCOPE_API_KEY in .env, reachable from China):
+    cd /opt/linguisplay/apps/api && set -a && . .env && set +a && \
+        ./.venv/bin/python enrich_backgrounds.py "九龙城寨·龙头"
+
+Output: app/static/scene/bg/<location_id>.jpg  →  served at /scene/bg/<location_id>.jpg
+(location ids already carry their own prefix, e.g. loc_alley → loc_alley.jpg)
+"""
+
+import os
+import sys
+from pathlib import Path
+
+os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///./dev.db")
+os.environ.setdefault("JWT_SECRET", "dev")
+
+from app.db import SessionLocal  # noqa: E402
+from app.engine.qwen import generate_image  # noqa: E402
+from app.models import Story, StorySnapshot  # noqa: E402
+
+BG_DIR = Path(__file__).parent / "app" / "static" / "scene" / "bg"
+
+
+def build_prompt(loc: dict, world: str) -> str:
+    """A cinematic, people-free establishing shot of the place, grounded in its authored
+    fixtures + the story's world/era."""
+    name = (loc.get("name") or "").strip()
+    detail = (loc.get("detail") or "").strip()
+    era = (world or "").strip().replace("\n", " ")[:140]
+    return (
+        f"{era} 场景：{name}。{detail} "
+        "电影感写实场景概念图，强烈氛围与光影，景深，潮湿质感，霓虹与暖黄灯光交织，"
+        "电影级调色，横构图宽幅；空镜，画面里没有任何人物，没有文字、字幕或水印。"
+    )
+
+
+def locations_of(db, title: str) -> tuple[list[dict], str]:
+    story = db.query(Story).filter(Story.title == title).first()
+    if not story:
+        return [], ""
+    snap = (
+        db.query(StorySnapshot)
+        .filter(StorySnapshot.story_id == story.id)
+        .order_by(StorySnapshot.version.desc())
+        .first()
+    )
+    content_story = (snap.content.get("story") if snap else None) or {}
+    locs = content_story.get("locations") or story.locations or []
+    world = content_story.get("world_long") or story.world_long or ""
+    return locs, world
+
+
+def main() -> None:
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    force = "--force" in sys.argv
+    title = args[0] if args else "九龙城寨·龙头"
+
+    db = SessionLocal()
+    try:
+        locs, world = locations_of(db, title)
+        if not locs:
+            print(f"no locations found for 《{title}》")
+            return
+        BG_DIR.mkdir(parents=True, exist_ok=True)
+        print(f"《{title}》 has {len(locs)} locations → generating backgrounds…")
+        for loc in locs:
+            lid = loc.get("id")
+            if not lid:
+                continue
+            out = BG_DIR / f"{lid}.jpg"  # lid already carries its own prefix (e.g. loc_alley)
+            if out.exists() and not force:
+                print(f"  skip {lid} ({loc.get('name')}) — already exists")
+                continue
+            print(f"  generating {lid} ({loc.get('name')})… ", end="", flush=True)
+            data = generate_image(build_prompt(loc, world))
+            if data:
+                out.write_bytes(data)
+                print(f"OK ({len(data)//1024} KB)")
+            else:
+                print("FAILED (no image returned)")
+    finally:
+        db.close()
+
+
+if __name__ == "__main__":
+    main()

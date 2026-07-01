@@ -53,14 +53,19 @@ def root():
     return RedirectResponse(url="/play")
 
 
+# the play/studio HTML changes often during dev — serve it with no-cache so the browser
+# ALWAYS fetches the latest (no more "I deployed a UI fix but you still see the old page").
+_NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"}
+
+
 @app.get("/play", include_in_schema=False)
 def play_page():
-    return FileResponse(os.path.join(_STATIC, "play.html"))
+    return FileResponse(os.path.join(_STATIC, "play.html"), headers=_NO_CACHE)
 
 
 @app.get("/studio", include_in_schema=False)
 def studio_page():
-    return FileResponse(os.path.join(_STATIC, "studio.html"))
+    return FileResponse(os.path.join(_STATIC, "studio.html"), headers=_NO_CACHE)
 
 
 # Scene assets (background images / BGM / SFX). Drop files here per SCENE_ASSETS.md;

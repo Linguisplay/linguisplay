@@ -124,7 +124,14 @@ const hide=id=>document.getElementById(id).classList.add("hidden");
 // ── auth ──
 async function login(){ try{ await j("/auth/login",{method:"POST",body:JSON.stringify({email:email.value,password:pw.value})}); afterAuth(); }catch(e){ authErr.textContent=e.message; } }
 async function signup(){ try{ await j("/auth/signup",{method:"POST",body:JSON.stringify({email:email.value,password:pw.value,dob:"1990-01-01",accepted_tos:true})}); afterAuth(); }catch(e){ authErr.textContent=e.message; } }
-async function afterAuth(){ const me=await j("/me"); who.textContent=me.email; hide("auth"); loadList(); }
+async function afterAuth(){
+  const me=await j("/me"); who.textContent=me.email; hide("auth");
+  const wanted=new URLSearchParams(location.search).get("story");
+  if(wanted){ try{ await editStory(wanted); return; }catch(e){ /* fall back to list */ } }
+  loadList();
+}
+// already logged in (shared lp_session cookie from /play)? jump straight in.
+afterAuth().catch(()=>{ show("auth"); });
 
 // ── story list ──
 async function loadList(){

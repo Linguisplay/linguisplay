@@ -15,15 +15,23 @@ class Settings(BaseSettings):
     cookie_secure: bool = False
     web_origin: str = "http://localhost:5173"
 
-    # LLM. provider = "mock" (deterministic, default — keeps tests reproducible)
-    # or "qwen" (DashScope OpenAI-compatible endpoint).
+    # LLM. provider = "mock" (deterministic, default — keeps tests reproducible),
+    # "qwen" (DashScope OpenAI-compatible endpoint), or "deepseek" (api.deepseek.com,
+    # OpenAI-compatible — cheaper + stronger prose/台词, the primary provider).
     llm_provider: str = "mock"
     llm_model: str = "qwen-max"
     dashscope_api_key: str = ""
+    deepseek_api_key: str = ""
+    deepseek_model: str = "deepseek-chat"
 
     # 智能增强: when set, character enrichment grounds itself in live web search
     # (Tavily) instead of the model's own knowledge.
     tavily_api_key: str = ""
+
+    # Logic backstop: after the addressed character's turn is generated, a deterministic guard
+    # verifies it against the live scene (no absent character walks in, no locked secret leaks)
+    # and regenerates once if broken. On by default; set LOGIC_GUARD=0 to disable.
+    logic_guard: bool = True
 
 
 @lru_cache
