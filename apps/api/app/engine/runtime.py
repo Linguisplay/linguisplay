@@ -1011,6 +1011,19 @@ def _match_candidates(cands: list[dict[str, Any]], judged, key: str) -> set:
     return got
 
 
+def _titles_for_fragments(content: dict[str, Any], frag_ids) -> list[str]:
+    """The sanitized titles of the secrets owning these fragments (unique, ordered)."""
+    idset = set(frag_ids or [])
+    seen, out = set(), []
+    for sec in content.get("secrets", []) or []:
+        if any(f.get("id") in idset for f in sec.get("fragments", []) or []):
+            t = (sec.get("title") or "").strip()
+            if t and t not in seen:
+                seen.add(t)
+                out.append(t)
+    return out
+
+
 def _secret_has_newly(content: dict[str, Any], sid, newly) -> bool:
     """Did any of this secret's fragments unlock THIS turn?"""
     newset = set(newly or [])
@@ -1121,6 +1134,13 @@ def run_turn_stream(
     # judgment candidates for the primary director call (titles/labels only, never bodies)
     probe_cands = _probe_candidates(content, state)
     event_cands = _event_candidates(content, state, old_act)
+
+    # THRESHOLD MOMENTS (阈值时刻演出): structured events the UI celebrates — a truth
+    # clicking into place, a relationship tier-up, a new act, an ending milestone.
+    moments: list[dict[str, Any]] = []
+    rel_deltas: dict[str, dict[str, int]] = {}   # per-char ♥ movement this turn (UI float)
+    for t in _titles_for_fragments(content, newly):
+        moments.append({"kind": "unlock", "title": t})
 
     # responder selection. With an explicit @target → just that character. With NO target
     # (and not an inner thought) the player is addressing the WHOLE room — every present
@@ -1303,9 +1323,16 @@ def run_turn_stream(
                 old_scores, this_delta, int(directed.get("romance_delta", 0) or 0), tun,
             )
             mode_after = relationships.derive_mode(sp, rel_all[sp_id], tun)
+            dc = int(rel_all[sp_id].get("closeness", 0)) - int(old_scores.get("closeness", 0))
+            dr = int(rel_all[sp_id].get("romance", 0)) - int(old_scores.get("romance", 0))
+            if dc or dr:
+                rel_deltas[sp_id] = {"name": sp_name, "closeness": dc, "romance": dr}
             # CELEBRATE a tier-up (陌生→朋友→暧昧→恋人): the "高潮=阈值被跨过" moment, made
             # visible — a strong reward + come-back hook. Only on an UPGRADE, never a downgrade.
             if mode_after != mode_before and _RANK.get(mode_after, 0) > _RANK.get(mode_before, 0):
+                moments.append({"kind": "rel_up", "character_id": sp_id, "name": sp_name,
+                                "mode": mode_after,
+                                "mode_name": relationships.name_of(mode_after)})
                 yield emit({"type": "description", "speaker_name": None,
                             "text": f"💗（你感觉到，和{sp_name}的关系又近了一层——现在你们是"
                                     f"「{relationships.name_of(mode_after)}」了。）"})
@@ -1423,6 +1450,7 @@ def run_turn_stream(
     #    the new act (what's changed, the new situation, the new goal) — not just a title.
     if new_act > old_act:
         nxt = current_act(content, new_act) or {}
+        moments.append({"kind": "act", "index": new_act, "title": nxt.get("title", "")})
         yield emit({"type": "description", "speaker_name": None,
                     "text": f"—— 第{new_act}幕 · {nxt.get('title', '')} ——"})
         for b in build_act_transition(content, state, old_act, new_act, persona, llm):
@@ -1464,6 +1492,8 @@ def run_turn_stream(
                 "normal": "—— 达成结局 ——",
             }.get(kind, "—— 达成结局 ——")
             title = candidate.get("title") or ""
+            moments.append({"kind": "ending", "ending_kind": kind, "title": title,
+                            "terminal": terminal})
             yield emit({"type": "description", "speaker_name": None,
                         "text": f"{head}  {title}".strip()})
             if candidate.get("text"):
@@ -1536,6 +1566,8 @@ def run_turn_stream(
         "goal": state["goal"],
         "progress": progress,  # {items:[{label,done}], done, total} — the clue checklist
         "hint": hint,          # persistent stuck-hint for the top bar ("" = not stuck / hide)
+        "moments": moments,    # threshold moments this turn (UI celebration banners)
+        "rel_deltas": rel_deltas,  # per-char ♥ movement this turn (UI floating chips)
         "location": location,  # {id,name,detail,exits} the player's current place (or None)
         "move_request": move_request,  # {to,to_name,by_id,by_name} a char wants to lead you there (confirm)
         "relations": relations_summary(content, state),  # {cid:{mode,mode_name,...}} toward player

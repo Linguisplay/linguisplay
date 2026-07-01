@@ -97,6 +97,18 @@
   .ending.normal{ border-color: #5b6cff; } .ending.normal .kind { color: #9fb0ff; }
   .ending.bad   { border-color: #c8643c; } .ending.bad   .kind { color: #ff9d6f; }
   .ending.death { border-color: #b03a3a; } .ending.death .kind { color: #ff7a7a; }
+#toasts { position:fixed; top:16%; left:50%; transform:translateX(-50%); z-index:60;
+  display:flex; flex-direction:column; gap:8px; align-items:center; pointer-events:none; }
+.toast { padding:9px 18px; border-radius:20px; font-size:14px; color:#fff;
+  background:rgba(20,22,30,.92); border:1px solid rgba(255,255,255,.18);
+  box-shadow:0 6px 24px rgba(0,0,0,.45); animation:toastin .45s ease; max-width:82vw; }
+.toast.out { opacity:0; transform:translateY(-8px); transition:all .55s ease; }
+.toast.t-unlock { border-color:#e8c66c; color:#ffe9b0; }
+.toast.t-rel { border-color:#ff8fb3; color:#ffd3e0; }
+.toast.t-act { border-color:#8fb7ff; color:#d7e5ff; }
+.toast.t-end { border-color:#c9a5ff; color:#ecdcff; }
+.toast.t-delta { font-size:13px; opacity:.95; }
+@keyframes toastin { from { opacity:0; transform:translateY(10px) scale(.96); } to { opacity:1; } }
 </style>
 </head>
 <body>
@@ -633,7 +645,7 @@ async function send() {
   // beats stream in AS the server computes each responder → play them one-by-one (typed)
   // the moment they arrive, so the first character appears in ~2-3s, the rest follow.
   playQ = []; playing = false; streamDone = false; firstBeat = true;
-  afterPlay = { suggest: null, ending: undefined, moveReq: null };
+  afterPlay = { suggest: null, ending: undefined, moveReq: null, moments: null, relDeltas: null };
   renderMoveAsk(null);  // clear any prior pending move prompt
   try {
     const r = await fetch(`${API}/runs/${runId}/play`, {
@@ -658,6 +670,7 @@ async function send() {
         else if (ev.event === "place") { renderPlace(ev.location); }
         else if (ev.event === "progress") { renderProgress(ev.progress); }
         else if (ev.event === "hint") { renderHint(ev.hint); }
+        else if (ev.event === "moments") { afterPlay.moments = ev.moments; afterPlay.relDeltas = ev.rel_deltas; }
         else if (ev.event === "move_request") { afterPlay.moveReq = ev.move_request; }
         else if (ev.event === "suggest") { afterPlay.suggest = ev.suggestions; }
         else if (ev.event === "ending") { afterPlay.ending = ev.ending; }
@@ -676,8 +689,48 @@ async function pump() {
   playing = false;
   if (streamDone) finishTurn();
 }
+// 阈值时刻演出: celebration toasts for threshold moments (new truth / relationship
+// tier-up / new act / ending milestone) + floating ♥ deltas. Staggered, self-dismissing.
+function toastWrap() {
+  let w = document.getElementById("toasts");
+  if (!w) {
+    w = document.createElement("div"); w.id = "toasts";
+    document.body.appendChild(w);
+  }
+  return w;
+}
+function pushToast(html, cls, delay) {
+  setTimeout(() => {
+    const t = document.createElement("div");
+    t.className = "toast " + (cls || "");
+    t.innerHTML = html;
+    toastWrap().appendChild(t);
+    setTimeout(() => { t.classList.add("out"); setTimeout(() => t.remove(), 600); }, 3800);
+  }, delay || 0);
+}
+function showMoments(moments, relDeltas) {
+  let i = 0;
+  for (const m of moments) {
+    if (m.kind === "unlock") pushToast(`🔓 真相拼上一块：「${m.title}」`, "t-unlock", i++ * 650);
+    else if (m.kind === "rel_up") pushToast(`💗 你和 ${m.name} 成了「${m.mode_name}」`, "t-rel", i++ * 650);
+    else if (m.kind === "act") pushToast(`📖 进入第${m.index}幕${m.title ? " · " + m.title : ""}`, "t-act", i++ * 650);
+    else if (m.kind === "ending" && !m.terminal) pushToast(`🏆 达成结局：「${m.title || m.ending_kind}」`, "t-end", i++ * 650);
+  }
+  const bits = [];
+  for (const cid in relDeltas) {
+    const d = relDeltas[cid];
+    const parts = [];
+    if (d.closeness) parts.push(`♥${d.closeness > 0 ? "+" : ""}${d.closeness}`);
+    if (d.romance) parts.push(`💓${d.romance > 0 ? "+" : ""}${d.romance}`);
+    if (parts.length) bits.push(`${d.name} ${parts.join(" ")}`);
+  }
+  if (bits.length) pushToast(bits.join(" ／ "), "t-delta", i * 650);
+}
+
 function finishTurn() {
   if (afterPlay) {
+    if ((afterPlay.moments && afterPlay.moments.length) || (afterPlay.relDeltas && Object.keys(afterPlay.relDeltas).length))
+      showMoments(afterPlay.moments || [], afterPlay.relDeltas || {});
     if (afterPlay.suggest && !ended) renderSuggest(afterPlay.suggest);
     if (afterPlay.moveReq && !ended) renderMoveAsk(afterPlay.moveReq);
     if (afterPlay.ending !== undefined) showEnding(afterPlay.ending);

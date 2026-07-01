@@ -314,6 +314,9 @@ def play(
                 yield _event({"event": "here", "here": final.get("here", []),
                               "relations": final.get("relations", {}),
                               "following": final.get("following", [])})
+                if final.get("moments") or final.get("rel_deltas"):
+                    yield _event({"event": "moments", "moments": final.get("moments", []),
+                                  "rel_deltas": final.get("rel_deltas", {})})
                 yield _event({"event": "goal", "goal": final.get("goal", "")})
                 yield _event({"event": "progress", "progress": final.get("progress")})
                 yield _event({"event": "hint", "hint": final.get("hint", "")})
