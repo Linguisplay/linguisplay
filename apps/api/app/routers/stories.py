@@ -52,6 +52,7 @@ def _to_story(s: StoryModel) -> Story:
         acts=s.acts or [],
         endings=s.endings or [],
         locations=s.locations or [],
+        tuning=s.tuning or {},
         completion=_completion(s),
     )
 
@@ -120,12 +121,14 @@ def create_story(
     data.pop("acts", None)
     data.pop("endings", None)
     data.pop("locations", None)
+    data.pop("tuning", None)
     s = StoryModel(
         owner_id=user.id,
         characters=[c.model_dump() for c in (body.characters or [])],
         acts=[a.model_dump() for a in (body.acts or [])],
         endings=[e.model_dump() for e in (body.endings or [])],
         locations=[l.model_dump() for l in (body.locations or [])],
+        tuning=body.tuning or {},
         **data,
     )
     db.add(s)
@@ -168,6 +171,8 @@ def update_story(
         s.endings = [e if isinstance(e, dict) else e.model_dump() for e in data.pop("endings")]
     if "locations" in data:
         s.locations = [l if isinstance(l, dict) else l.model_dump() for l in data.pop("locations")]
+    if "tuning" in data:
+        s.tuning = data.pop("tuning") or {}
     for k, v in data.items():
         setattr(s, k, v)
     db.commit()

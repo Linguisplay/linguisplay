@@ -169,17 +169,28 @@ def _clamp(v: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, v))
 
 
-def apply_deltas(scores: dict[str, int], closeness_delta: int, romance_delta: int) -> dict[str, int]:
+def _tv(tuning: dict | None, key: str, default: int) -> int:
+    """A tuning value: the story's authored override if valid, else the engine default."""
+    try:
+        return int((tuning or {}).get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def apply_deltas(scores: dict[str, int], closeness_delta: int, romance_delta: int,
+                 tuning: dict | None = None) -> dict[str, int]:
     """Apply per-turn deltas, clamped per-step and to range, so flow stays gradual."""
-    cd = _clamp(int(closeness_delta or 0), *CLOSE_STEP)
-    rd = _clamp(int(romance_delta or 0), *ROM_STEP)
+    cd = _clamp(int(closeness_delta or 0),
+                _tv(tuning, "close_step_min", CLOSE_STEP[0]), _tv(tuning, "close_step_max", CLOSE_STEP[1]))
+    rd = _clamp(int(romance_delta or 0),
+                _tv(tuning, "rom_step_min", ROM_STEP[0]), _tv(tuning, "rom_step_max", ROM_STEP[1]))
     return {
         "closeness": _clamp(int(scores.get("closeness", START_CLOSENESS)) + cd, CLOSE_MIN, CLOSE_MAX),
         "romance": _clamp(int(scores.get("romance", START_ROMANCE)) + rd, ROM_MIN, ROM_MAX),
     }
 
 
-def derive_mode(char: dict[str, Any], scores: dict[str, int]) -> str:
+def derive_mode(char: dict[str, Any], scores: dict[str, int], tuning: dict | None = None) -> str:
     """Map (亲近, 心动) + the character's authored base/allowed set → current mode.
     恋爱 is gated on 心动 (a separate track); enemy on low 亲近; otherwise the authored
     base holds until 亲近 warms it to 朋友."""
@@ -191,13 +202,13 @@ def derive_mode(char: dict[str, Any], scores: dict[str, int]) -> str:
     def ok(m: str) -> bool:
         return m in allowed
 
-    if r >= LOVER_T and c >= LOVER_CLOSE_MIN and ok("lover"):
+    if r >= _tv(tuning, "lover_t", LOVER_T) and c >= _tv(tuning, "lover_close_min", LOVER_CLOSE_MIN) and ok("lover"):
         return "lover"
-    if r >= FLIRT_T and ok("flirt"):
+    if r >= _tv(tuning, "flirt_t", FLIRT_T) and ok("flirt"):
         return "flirt"
-    if c <= ENEMY_T and ok("enemy"):
+    if c <= _tv(tuning, "enemy_t", ENEMY_T) and ok("enemy"):
         return "enemy"
-    if c >= FRIEND_T and ok("friend") and base not in ("elder", "junior"):
+    if c >= _tv(tuning, "friend_t", FRIEND_T) and ok("friend") and base not in ("elder", "junior"):
         # warm a peer/stranger into a friend; keep an authored 长辈/小辈 hierarchy intact
         return "friend"
     return base
@@ -209,47 +220,50 @@ def derive_mode(char: dict[str, Any], scores: dict[str, int]) -> str:
 FOLLOW_MIN_CLOSENESS = 25
 
 
-def can_follow(char: dict[str, Any], scores: dict[str, int]) -> bool:
+def can_follow(char: dict[str, Any], scores: dict[str, int], tuning: dict | None = None) -> bool:
     """Will this character agree to travel with the player? Needs warmth (closeness ≥ floor,
     or already friend/暧昧/恋人); an enemy always refuses."""
-    mode = derive_mode(char, scores)
+    mode = derive_mode(char, scores, tuning)
     if mode == "enemy":
         return False
     if mode in ("friend", "flirt", "lover"):
         return True
-    return int(scores.get("closeness", START_CLOSENESS)) >= FOLLOW_MIN_CLOSENESS
+    return int(scores.get("closeness", START_CLOSENESS)) >= _tv(tuning, "follow_min_closeness", FOLLOW_MIN_CLOSENESS)
 
 
-def next_tier(char: dict[str, Any], scores: dict[str, int]) -> dict[str, Any] | None:
+def next_tier(char: dict[str, Any], scores: dict[str, int], tuning: dict | None = None) -> dict[str, Any] | None:
     """The nearest DESIRABLE relationship upgrade this character can still reach, and how
     far off it is — drives the "差一点就到暧昧了" daily-return pull. None if already at the
     top of what's allowed (or only a downgrade like enemy is near)."""
+    friend_t = _tv(tuning, "friend_t", FRIEND_T)
+    flirt_t = _tv(tuning, "flirt_t", FLIRT_T)
+    lover_t = _tv(tuning, "lover_t", LOVER_T)
     allowed = set(allowed_modes(char))
-    mode = derive_mode(char, scores)
+    mode = derive_mode(char, scores, tuning)
     c = int(scores.get("closeness", START_CLOSENESS))
     r = int(scores.get("romance", START_ROMANCE))
     # become FRIENDS first (the natural, non-presumptuous first step) before surfacing a
     # romance step — unless romance is already climbing on its own.
-    if "friend" in allowed and mode in ("stranger", "peer") and c < FRIEND_T and r < FLIRT_T:
-        return {"name": "朋友", "to_next": max(1, FRIEND_T - c)}
+    if "friend" in allowed and mode in ("stranger", "peer") and c < friend_t and r < flirt_t:
+        return {"name": "朋友", "to_next": max(1, friend_t - c)}
     cands: list[tuple[int, str]] = []
-    if "flirt" in allowed and mode in ("stranger", "peer", "friend") and r < FLIRT_T:
-        cands.append((FLIRT_T - r, "暧昧对象"))
-    if "lover" in allowed and mode == "flirt" and r < LOVER_T:
-        cands.append((LOVER_T - r, "恋人"))
-    if "friend" in allowed and mode in ("stranger", "peer") and c < FRIEND_T:
-        cands.append((FRIEND_T - c, "朋友"))
+    if "flirt" in allowed and mode in ("stranger", "peer", "friend") and r < flirt_t:
+        cands.append((flirt_t - r, "暧昧对象"))
+    if "lover" in allowed and mode == "flirt" and r < lover_t:
+        cands.append((lover_t - r, "恋人"))
+    if "friend" in allowed and mode in ("stranger", "peer") and c < friend_t:
+        cands.append((friend_t - c, "朋友"))
     if not cands:
         return None
     rem, name = min(cands)
     return {"name": name, "to_next": max(1, int(rem))}
 
 
-def state_for(char: dict[str, Any], scores: dict[str, int]) -> dict[str, Any]:
+def state_for(char: dict[str, Any], scores: dict[str, int], tuning: dict | None = None) -> dict[str, Any]:
     """A small summary for the UI / API: current mode + its name + the raw scores + the
     nearest reachable upgrade (the daily 'one more step' hook)."""
-    mode = derive_mode(char, scores)
+    mode = derive_mode(char, scores, tuning)
     return {"mode": mode, "mode_name": name_of(mode),
             "closeness": int(scores.get("closeness", START_CLOSENESS)),
             "romance": int(scores.get("romance", START_ROMANCE)),
-            "next": next_tier(char, scores)}
+            "next": next_tier(char, scores, tuning)}

@@ -97,6 +97,9 @@ class Story(Base):
     locations: Mapped[list] = mapped_column(JSON, default=list)
     # Endings (true/normal/bad/death) with unlock conditions. JSON like characters/acts.
     endings: Mapped[list] = mapped_column(JSON, default=list)
+    # Per-story pacing/balance knob overrides (see engine/runtime.DEFAULT_TUNING and
+    # docs/tuning.md). Empty = engine defaults.
+    tuning: Mapped[dict] = mapped_column(JSON, default=dict)
 
     # 18+ flag. When on, the engine permits explicit adult content (still refusing
     # minors). Players are already age-gated 18+ at signup (DOB gate).

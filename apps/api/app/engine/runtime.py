@@ -89,6 +89,35 @@ STUCK_NUDGE = 1
 STUCK_PUSH = 2
 STUCK_SPELL = 4
 
+# Every pacing/balance knob, overridable PER STORY via story.tuning (a horror script and a
+# romance script want different rhythms). Values here are the engine defaults — the module
+# constants above stay the single source for them. See docs/tuning.md for the knob table.
+DEFAULT_TUNING = {
+    "affinity_clamp_min": -3,   # per-turn floor on summed 好感 delta
+    "affinity_clamp_max": 8,    # per-turn ceiling on summed 好感 delta
+    "act_backstop_div": 12,     # soft acts: act floor = 1 + affinity // this
+    "stuck_nudge": STUCK_NUDGE,
+    "stuck_push": STUCK_PUSH,
+    "stuck_spell": STUCK_SPELL,
+    # relationship thresholds (see engine/relationships.py)
+    "friend_t": 40, "enemy_t": -15, "flirt_t": 25, "lover_t": 60, "lover_close_min": 35,
+    "follow_min_closeness": 25,
+    "close_step_min": -6, "close_step_max": 8, "rom_step_min": -4, "rom_step_max": 6,
+}
+
+
+def tuning_for(content: dict[str, Any]) -> dict[str, int]:
+    """The effective knob set for this story: engine defaults overlaid with the story's
+    authored `tuning` overrides (unknown keys and non-numeric values are ignored)."""
+    t = dict(DEFAULT_TUNING)
+    for k, v in ((content.get("story") or {}).get("tuning") or {}).items():
+        if k in t:
+            try:
+                t[k] = int(v)
+            except (TypeError, ValueError):
+                pass
+    return t
+
 
 def history_for(beat_log: list[dict[str, Any]] | None, char_id: str | None) -> list[dict[str, str]]:
     """A character's PERSONAL view of the conversation: only the beats they witnessed (were
@@ -445,9 +474,10 @@ def set_follow(content: dict[str, Any], state: dict[str, Any],
     if follow:
         rel_all = state.get("rel") or {}
         scores = rel_all.get(char_id) or relationships.new_scores()
-        if not relationships.can_follow(char, scores):
+        tun = tuning_for(content)
+        if not relationships.can_follow(char, scores, tun):
             state["following"] = following
-            mode = relationships.derive_mode(char, scores)
+            mode = relationships.derive_mode(char, scores, tun)
             reason = (f"{name}对你满是戒备，不会跟你走。" if mode == "enemy"
                       else f"你和{name}还没熟到那份上——先多聊聊、把关系处近点，TA 才愿意跟你走。")
             return {"ok": False, "following": following, "name": name, "reason": reason}
@@ -866,7 +896,7 @@ def _smart_suggestions(llm, all_beats, player_input, primary, content, state, lo
                if c.get("name") and c.get("id") != pcid and c.get("id") != primary.get("id")]
     exits = (location or {}).get("exits") or []
     rels = state.get("rel") or {}
-    rel_name = relationships.name_of(relationships.derive_mode(primary, rels.get(primary.get("id")) or relationships.new_scores()))
+    rel_name = relationships.name_of(relationships.derive_mode(primary, rels.get(primary.get("id")) or relationships.new_scores(), tuning_for(content)))
     # the ROLE the player embodies — every suggestion must be spoken/acted from this POV.
     pc = _char_by_id(content, pcid) if pcid else None
     player_name = (pc or {}).get("name") or ""
@@ -1133,9 +1163,10 @@ def run_turn_stream(
     # gated act without uncovering a new required clue. The longer they spin, the more
     # forthcoming the NPCs' guidance becomes (and at the top tier a narrator nudge fires).
     # Only meaningful while the act is locked and there's still something to find.
+    tun = tuning_for(content)
     stuck_in = int(state.get("stuck", 0) or 0) if (act_locked and needed_topics) else 0
-    stuck_level = 1 if stuck_in >= STUCK_NUDGE else 0
-    stuck_level = 2 if stuck_in >= STUCK_PUSH else stuck_level
+    stuck_level = 1 if stuck_in >= tun["stuck_nudge"] else 0
+    stuck_level = 2 if stuck_in >= tun["stuck_push"] else stuck_level
 
     # 3. the model is the DIRECTOR for each responder: per-speaker gated context (so a
     #    character can only ever voice what IT is allowed to know — no cross-leak). Each
@@ -1169,7 +1200,7 @@ def run_turn_stream(
         ctx = gating.build_context(sp_id, frags, state, newly_ids=newly)
         rel_scores = rel_all.get(sp_id) or relationships.new_scores()
         rel_playbook = relationships.playbook_block(
-            relationships.derive_mode(sp, rel_scores), mature=bool(state.get("mature"))) if rel_active else ""
+            relationships.derive_mode(sp, rel_scores, tun), mature=bool(state.get("mature"))) if rel_active else ""
         others = [c.get("name") for c in all_chars if c.get("id") != sp_id and c.get("name")]
         is_primary = idx == 0
         # each character only recalls what THEY witnessed + their OWN private digest — no
@@ -1241,11 +1272,11 @@ def run_turn_stream(
         # gradually (clamped) so next turn this character treats the player accordingly.
         if rel_active and sp_id and sp_id != pcid:
             old_scores = rel_all.get(sp_id) or relationships.new_scores()
-            mode_before = relationships.derive_mode(sp, old_scores)
+            mode_before = relationships.derive_mode(sp, old_scores, tun)
             rel_all[sp_id] = relationships.apply_deltas(
-                old_scores, this_delta, int(directed.get("romance_delta", 0) or 0),
+                old_scores, this_delta, int(directed.get("romance_delta", 0) or 0), tun,
             )
-            mode_after = relationships.derive_mode(sp, rel_all[sp_id])
+            mode_after = relationships.derive_mode(sp, rel_all[sp_id], tun)
             # CELEBRATE a tier-up (陌生→朋友→暧昧→恋人): the "高潮=阈值被跨过" moment, made
             # visible — a strong reward + come-back hook. Only on an UPGRADE, never a downgrade.
             if mode_after != mode_before and _RANK.get(mode_after, 0) > _RANK.get(mode_before, 0):
@@ -1320,7 +1351,8 @@ def run_turn_stream(
             yield emit(b)
         affinity_delta = 0
 
-    affinity_delta = 0 if is_think else max(-3, min(8, affinity_delta))
+    affinity_delta = 0 if is_think else max(tun["affinity_clamp_min"],
+                                            min(tun["affinity_clamp_max"], affinity_delta))
 
     # 4. apply affinity, then decide progression. HARD GATE: if this act authored advance
     #    conditions, it advances ONLY when can_advance() is satisfied (program-checked) —
@@ -1332,7 +1364,7 @@ def run_turn_stream(
         new_act = (min(max_act, old_act + 1)
                    if (max_act and can_advance(content, state, old_act)) else old_act)
     else:
-        backstop = 1 + state["affinity"] // 12  # safety net so a soft run never fully stalls
+        backstop = 1 + state["affinity"] // tun["act_backstop_div"]  # soft-run stall safety net
         target = max(old_act + (1 if advance else 0), backstop)
         new_act = min(max_act, target) if max_act else target
     state["act"] = new_act
@@ -1355,10 +1387,10 @@ def run_turn_stream(
     # stuck hint: surfaced as a PERSISTENT top-bar string (not a chat beat), so it doesn't
     # spam the conversation. Labels only — the locked bodies are never named.
     hint = ""
-    if state["stuck"] >= STUCK_SPELL and needed_topics:
+    if state["stuck"] >= tun["stuck_spell"] and needed_topics:
         todo = "、".join(f"「{t}」" for t in needed_topics)
         hint = f"还没弄明白的是：{todo}。别干等——主动开口去问，或动手查一查，这一章的结就卡在这上面。"
-    elif state["stuck"] >= STUCK_PUSH and needed_topics:
+    elif state["stuck"] >= tun["stuck_push"] and needed_topics:
         hint = f"眼下最该弄清的，是「{needed_topics[0]}」。不妨直接追问，或留意周围相关的破绽。"
 
     # 5. act transition: a divider, then a narration that actually carries the plot into
@@ -1491,6 +1523,7 @@ def scene_cast(content: dict[str, Any], state: dict[str, Any],
     you right now" — drives the on-screen roster + follow buttons."""
     following = set(state.get("following") or [])
     rel_all = state.get("rel") or {}
+    tun = tuning_for(content)
     out = []
     for c in scene_characters(content, state):
         if c.get("id") == exclude_id:
@@ -1499,7 +1532,7 @@ def scene_cast(content: dict[str, Any], state: dict[str, Any],
         out.append({"id": c.get("id"), "name": c.get("name"),
                     "is_lead": c.get("is_lead", False), "avatar_url": c.get("avatar_url"),
                     "following": c.get("id") in following,
-                    "can_follow": relationships.can_follow(c, scores)})  # 好感够不够请动
+                    "can_follow": relationships.can_follow(c, scores, tun)})  # 好感够不够请动
     return out
 
 
@@ -1510,12 +1543,13 @@ def relations_summary(content: dict[str, Any], state: dict[str, Any]) -> dict[st
         return {}
     pcid = state.get("player_character_id")
     rel_all = state.get("rel") or {}
+    tun = tuning_for(content)
     out: dict[str, Any] = {}
     for c in scene_characters(content, state):
         cid = c.get("id")
         if not cid or cid == pcid:
             continue
-        out[cid] = relationships.state_for(c, rel_all.get(cid) or relationships.new_scores())
+        out[cid] = relationships.state_for(c, rel_all.get(cid) or relationships.new_scores(), tun)
     return out
 
 

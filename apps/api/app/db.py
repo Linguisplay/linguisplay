@@ -42,7 +42,8 @@ def _ensure_columns() -> None:
     from sqlalchemy import inspect, text
 
     wanted = {"stories": [("endings", "JSON DEFAULT '[]'"), ("world_facts", "TEXT"),
-                          ("locations", "JSON DEFAULT '[]'"), ("mature", "INTEGER DEFAULT 0")],
+                          ("locations", "JSON DEFAULT '[]'"), ("mature", "INTEGER DEFAULT 0"),
+                          ("tuning", "JSON DEFAULT '{}'")],
               "beats": [("present_ids", "JSON")]}
     insp = inspect(engine)
     with engine.begin() as conn:

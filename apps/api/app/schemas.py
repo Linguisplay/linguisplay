@@ -186,6 +186,7 @@ class StoryInput(BaseModel):
     acts: Optional[list[Act]] = None
     endings: Optional[list[Ending]] = None
     locations: Optional[list[Location]] = None
+    tuning: Optional[dict] = None  # pacing/balance knob overrides (docs/tuning.md)
 
 
 class Story(BaseModel):
@@ -206,6 +207,7 @@ class Story(BaseModel):
     acts: list[Act] = []
     endings: list[Ending] = []
     locations: list[Location] = []
+    tuning: dict = {}
     completion: float = 0.0
 
 
