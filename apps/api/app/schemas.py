@@ -125,6 +125,25 @@ class AdvanceCondition(BaseModel):
     affinity_min: int = 0
 
 
+class ChoiceOption(BaseModel):
+    """One selectable answer at a key-moment decision. Picking it applies its effects
+    deterministically, then the label is played as the player's own words/action."""
+    id: str = ""
+    label: str = ""                      # what the player says/does by picking this
+    flag: Optional[str] = None           # set state.flags[flag] = True (endings can gate on it)
+    affinity_delta: int = 0              # global 好感 effect
+    character_id: Optional[str] = None   # optional target for the relationship deltas below
+    closeness_delta: int = 0
+    romance_delta: int = 0
+
+
+class ActChoice(BaseModel):
+    """An explicit VN-style decision presented when this act begins (关键节点抉择).
+    Answered at most once per run; free input stays available alongside it."""
+    prompt: str = ""
+    options: list[ChoiceOption] = []
+
+
 class Act(BaseModel):
     id: Optional[str] = None
     index: int = 0
@@ -132,6 +151,7 @@ class Act(BaseModel):
     goal: str = ""  # the player's small objective during this act (shown as 🎯 guidance)
     advance: AdvanceCondition = AdvanceCondition()  # hard requirements to leave this act
     events: list[StoryEvent] = []
+    choice: Optional[ActChoice] = None  # key-moment explicit decision on entering this act
 
 
 class LocationUnlock(BaseModel):
@@ -281,6 +301,7 @@ class RunState(BaseModel):
     relations: dict[str, Any] = {}  # {char_id:{mode,mode_name,closeness,romance}} toward player
     following: list[str] = []  # character ids currently traveling WITH the player
     here: list[dict[str, Any]] = []  # characters in the player's CURRENT scene [{id,name,...}]
+    pending_choice: Optional[dict[str, Any]] = None  # an unanswered key-moment decision
 
 
 class Run(BaseModel):
@@ -340,3 +361,7 @@ class MoveIn(BaseModel):
 class FollowIn(BaseModel):
     character_id: str
     follow: bool = True  # True = invite to travel with you; False = part ways
+
+
+class ChooseIn(BaseModel):
+    option_id: str  # the picked ChoiceOption.id of the run's pending choice

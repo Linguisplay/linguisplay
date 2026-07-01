@@ -61,6 +61,11 @@
   #moveask button { font-size: 12.5px; border-radius: 8px; padding: 4px 12px; cursor: pointer; border: 1px solid #3a4a40; }
   #moveask .go { background: #2a6b3e; border-color: #3c8a52; color: #eafff0; }
   #moveask .stay { background: #2a2d36; color: #c9c9d4; }
+  #choiceask { flex: 0 0 auto; margin: 6px 16px; padding: 11px 14px; border-radius: 12px; background: #221a2edd; border: 1px solid #4a3a66; color: #e2d7f2; font-size: 13.5px; }
+  #choiceask .q { font-weight: 700; color: #cfa8ff; margin-bottom: 8px; }
+  #choiceask .opts { display: flex; flex-direction: column; gap: 6px; }
+  #choiceask button { text-align: left; font-size: 13px; border-radius: 9px; padding: 8px 12px; cursor: pointer; background: #2c2340; border: 1px solid #4a3a66; color: #e8ddf8; }
+  #choiceask button:hover { background: #3a2d54; }
   #placebar { flex: 0 0 auto; margin: 6px 16px 0; padding: 7px 12px; border-radius: 10px; background: #18221bcc; border: 1px solid #2c4233; color: #cfe6d4; font-size: 12.5px; line-height: 1.5; }
   #placebar b { color: #8fe0a6; }
   #placebar .exits { color: #8aa092; }
@@ -168,6 +173,7 @@
     <div id="chat"></div>
     <div id="suggest"></div>
     <div id="moveask" class="hidden"></div>
+    <div id="choiceask" class="hidden"></div>
     <div id="state"></div>
     <footer>
       <select id="channel" onchange="updatePlaceholder()">
@@ -289,6 +295,7 @@ async function startRun(storyId, mode="character", playerCharacterId=null, playe
   const beats = await j(`/runs/${runId}/play`);
   beats.forEach(renderBeat);
   renderState(run.state);
+  renderChoiceAsk(run.state && run.state.pending_choice);
   // resuming an already-finished run: re-show its ending and keep input locked
   if (run.state && run.state.ended) showEnding(run.state.ending);
 }
@@ -438,6 +445,31 @@ async function acceptMove(req) {
     const run = await j(`/runs/${runId}/move`, { method:"POST", body: JSON.stringify({ location: req.to || req.to_name, with_character_id: req.by_id, generate: !!req.generate }) });
     applyRunUpdate(run);
     renderBeat({ author:"engine", type:"description", text:`（你跟着${req.by_name||"对方"}来到了 ${req.to_name}。）` });
+  } catch(e) { renderBeat({ author:"engine", type:"description", text:`（${e.message}）` }); }
+}
+// 关键节点抉择 (VN choice): an authored decision card. Picking applies its effects
+// server-side, then the label is sent as the player's own line so the cast reacts to it.
+function renderChoiceAsk(ch) {
+  const el = document.getElementById("choiceask");
+  if (!ch || ended) { el.classList.add("hidden"); el.innerHTML = ""; return; }
+  el.innerHTML = "";
+  const q = document.createElement("div"); q.className = "q";
+  q.textContent = `⚖️ ${ch.prompt}`;
+  const wrap = document.createElement("div"); wrap.className = "opts";
+  for (const o of (ch.options || [])) {
+    const b = document.createElement("button");
+    b.textContent = o.label;
+    b.onclick = () => pickChoice(o.id);
+    wrap.appendChild(b);
+  }
+  el.append(q, wrap); el.classList.remove("hidden");
+}
+async function pickChoice(optionId) {
+  if (!runId || ended) return;
+  renderChoiceAsk(null);
+  try {
+    const res = await j(`/runs/${runId}/choose`, { method:"POST", body: JSON.stringify({ option_id: optionId }) });
+    if (res.label) { msg.value = res.label; await send(); }  // the pick becomes the player's own line
   } catch(e) { renderBeat({ author:"engine", type:"description", text:`（${e.message}）` }); }
 }
 function updatePlaceholder() {
@@ -645,7 +677,7 @@ async function send() {
   // beats stream in AS the server computes each responder → play them one-by-one (typed)
   // the moment they arrive, so the first character appears in ~2-3s, the rest follow.
   playQ = []; playing = false; streamDone = false; firstBeat = true;
-  afterPlay = { suggest: null, ending: undefined, moveReq: null, moments: null, relDeltas: null };
+  afterPlay = { suggest: null, ending: undefined, moveReq: null, moments: null, relDeltas: null, choice: null };
   renderMoveAsk(null);  // clear any prior pending move prompt
   try {
     const r = await fetch(`${API}/runs/${runId}/play`, {
@@ -671,6 +703,7 @@ async function send() {
         else if (ev.event === "progress") { renderProgress(ev.progress); }
         else if (ev.event === "hint") { renderHint(ev.hint); }
         else if (ev.event === "moments") { afterPlay.moments = ev.moments; afterPlay.relDeltas = ev.rel_deltas; }
+        else if (ev.event === "choice") { afterPlay.choice = ev.choice; }
         else if (ev.event === "move_request") { afterPlay.moveReq = ev.move_request; }
         else if (ev.event === "suggest") { afterPlay.suggest = ev.suggestions; }
         else if (ev.event === "ending") { afterPlay.ending = ev.ending; }
@@ -731,6 +764,7 @@ function finishTurn() {
   if (afterPlay) {
     if ((afterPlay.moments && afterPlay.moments.length) || (afterPlay.relDeltas && Object.keys(afterPlay.relDeltas).length))
       showMoments(afterPlay.moments || [], afterPlay.relDeltas || {});
+    if (afterPlay.choice && !ended) renderChoiceAsk(afterPlay.choice);
     if (afterPlay.suggest && !ended) renderSuggest(afterPlay.suggest);
     if (afterPlay.moveReq && !ended) renderMoveAsk(afterPlay.moveReq);
     if (afterPlay.ending !== undefined) showEnding(afterPlay.ending);

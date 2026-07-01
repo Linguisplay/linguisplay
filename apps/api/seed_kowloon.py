@@ -221,7 +221,20 @@ ACTS = [
      "events": [
         {"id": "e_siege", "what_happens": "大老板的人马封死了城寨所有出口。龙卷风没退半步，守在理发店门前，城寨上下第一次为同一件事拧成一股绳。", "who_character_ids": ["cyclone"]},
         {"id": "e_choice", "what_happens": "对讲机在你怀里震动，是收网的指令。而身边，是这些天把你当自己人的兄弟。你只剩一个选择。", "who_character_ids": []},
-     ]},
+     ],
+     # 关键节点抉择：进入围城之夜时直接把选择摆上台面。真结局 gated on sided_city。
+     "choice": {
+        "prompt": "对讲机在怀里震动——收网的指令到了。这一夜，你站在哪一边？",
+        "options": [
+            {"id": "side_city", "label": "把对讲机摁灭，和城寨的人站在一起",
+             "flag": "sided_city", "affinity_delta": 3,
+             "character_id": "cyclone", "closeness_delta": 6},
+            {"id": "side_force", "label": "握紧对讲机，按章办事，准备收网",
+             "flag": "sided_force", "affinity_delta": -3},
+            {"id": "stall", "label": "先不回应，把对讲机塞回怀里，再看看局势",
+             "flag": "stalled"},
+        ],
+     }},
 ]
 
 # Concrete physical places in the walled city — anchors the player's position so the model
@@ -360,7 +373,8 @@ ENDINGS = [
              "天亮时大老板的人退了，龙卷风没说什么，只是替你在那本谁也看不见的册子上，添了一个新名字——"
              "从今往后，你也是城寨的人。这座不见天日的城，第一次让你觉得，像个家。",
      "condition": {"affinity_min": 24, "act_min": 0,
-                   "required_fragment_ids": ["fr_idsecret3", "fr_seen_through"]}},
+                   "required_fragment_ids": ["fr_idsecret3", "fr_seen_through"],
+                   "required_flags": {"sided_city": True}}},
     {"id": "end_normal", "kind": "normal", "title": "围城之后",
      "text": "你没有按下收网，也没有真正留下。围城过后，你交了一份语焉不详的报告，请调离了这案子。"
              "城寨照旧在暗巷里喘着气，龙卷风照旧守着他的理发店。你再没回去过，只是每逢下雨，"

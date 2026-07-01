@@ -47,6 +47,8 @@ def default_state() -> dict[str, Any]:
         "act": 1,
         "affinity": 0,
         "flags": {},
+        "choices": {},                  # answered key-moment decisions: {key: option_id}
+        "pending_choice": None,         # an authored decision awaiting the player's pick
         "unlocked_fragment_ids": [],
         "asks": {},
         "triggered_event_ids": [],
@@ -1024,6 +1026,65 @@ def _titles_for_fragments(content: dict[str, Any], frag_ids) -> list[str]:
     return out
 
 
+def _choice_options(act_dict: dict[str, Any]) -> list[dict[str, Any]]:
+    """The act's valid choice options with STABLE ids (authored id or positional)."""
+    ch = (act_dict or {}).get("choice") or {}
+    out = []
+    for i, o in enumerate(ch.get("options") or []):
+        if (o.get("label") or "").strip():
+            out.append({**o, "id": (o.get("id") or "").strip() or f"opt{i}"})
+    return out
+
+
+def choice_for_act(content: dict[str, Any], state: dict[str, Any], act: int) -> dict[str, Any] | None:
+    """The act's authored key-moment decision (VN 抉择), if any and not yet answered.
+    Player-facing shape: prompt + option ids/labels only (effects stay server-side)."""
+    a = current_act(content, act) or {}
+    ch = a.get("choice") or {}
+    opts = _choice_options(a)
+    if not (ch.get("prompt") or "").strip() or not opts:
+        return None
+    key = f"act{a.get('index', act)}"
+    if key in (state.get("choices") or {}):
+        return None
+    return {"key": key, "act": int(a.get("index", act) or act), "prompt": ch["prompt"].strip(),
+            "options": [{"id": o["id"], "label": o["label"]} for o in opts]}
+
+
+def apply_choice(content: dict[str, Any], state: dict[str, Any], option_id: str) -> dict[str, Any]:
+    """Resolve the pending decision: apply its deterministic effects (flag → endings can
+    gate on it; global 好感; optional per-character relationship deltas), record the answer,
+    clear the pending state. The picked label is returned so the caller can play it as the
+    player's own words/action. Raises ValueError when nothing pends / option unknown."""
+    pending = state.get("pending_choice") or {}
+    if not pending:
+        raise ValueError("no pending choice")
+    a = current_act(content, int(pending.get("act") or state.get("act", 1) or 1)) or {}
+    picked = next((o for o in _choice_options(a) if o["id"] == option_id), None)
+    if picked is None:
+        raise ValueError("unknown option")
+    tun = tuning_for(content)
+    if picked.get("flag"):
+        flags = dict(state.get("flags") or {})
+        flags[str(picked["flag"])] = True
+        state["flags"] = flags
+    ad = int(picked.get("affinity_delta") or 0)
+    if ad:
+        state["affinity"] = max(0, int(state.get("affinity", 0)) + ad)
+    cid = picked.get("character_id")
+    cd = int(picked.get("closeness_delta") or 0)
+    rd = int(picked.get("romance_delta") or 0)
+    if cid and (cd or rd):
+        rel_all = state.setdefault("rel", {})
+        rel_all[cid] = relationships.apply_deltas(
+            rel_all.get(cid) or relationships.new_scores(), cd, rd, tun)
+    answered = dict(state.get("choices") or {})
+    answered[pending.get("key") or f"act{state.get('act', 1)}"] = option_id
+    state["choices"] = answered
+    state["pending_choice"] = None
+    return {"label": picked.get("label") or "", "flag": picked.get("flag")}
+
+
 def _secret_has_newly(content: dict[str, Any], sid, newly) -> bool:
     """Did any of this secret's fragments unlock THIS turn?"""
     newset = set(newly or [])
@@ -1451,6 +1512,9 @@ def run_turn_stream(
     if new_act > old_act:
         nxt = current_act(content, new_act) or {}
         moments.append({"kind": "act", "index": new_act, "title": nxt.get("title", "")})
+        nc = choice_for_act(content, state, new_act)
+        if nc:
+            state["pending_choice"] = nc
         yield emit({"type": "description", "speaker_name": None,
                     "text": f"—— 第{new_act}幕 · {nxt.get('title', '')} ——"})
         for b in build_act_transition(content, state, old_act, new_act, persona, llm):
@@ -1567,6 +1631,7 @@ def run_turn_stream(
         "progress": progress,  # {items:[{label,done}], done, total} — the clue checklist
         "hint": hint,          # persistent stuck-hint for the top bar ("" = not stuck / hide)
         "moments": moments,    # threshold moments this turn (UI celebration banners)
+        "pending_choice": state.get("pending_choice"),  # unanswered key-moment decision
         "rel_deltas": rel_deltas,  # per-char ♥ movement this turn (UI floating chips)
         "location": location,  # {id,name,detail,exits} the player's current place (or None)
         "move_request": move_request,  # {to,to_name,by_id,by_name} a char wants to lead you there (confirm)

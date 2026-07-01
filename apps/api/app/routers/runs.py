@@ -15,7 +15,7 @@ from ..models import Persona as PersonaModel
 from ..models import Run as RunModel
 from ..models import Story as StoryModel
 from ..models import StorySnapshot, User
-from ..schemas import Beat, FollowIn, MoveIn, PlayIn, Run, RunCreate, RunState, RunSummary
+from ..schemas import Beat, ChooseIn, FollowIn, MoveIn, PlayIn, Run, RunCreate, RunState, RunSummary
 from .stories import _to_secret, _to_story
 
 router = APIRouter(prefix="/runs", tags=["runs"])
@@ -54,6 +54,7 @@ def _to_run(r: RunModel) -> Run:
             following=list(st.get("following") or []),
             here=runtime.scene_cast(r.pinned_content or {}, st,
                                     exclude_id=pcid if mode == "character" else None),
+            pending_choice=st.get("pending_choice"),
         ),
         cast=cast,
         created_at=r.created_at,
@@ -162,6 +163,8 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
     # anchor / movement / emergent locations) works for ALL stories — map-less ones get a
     # starting place synthesized from their opening setting.
     runtime.ensure_start_location(content, state)
+    # an authored key-moment decision on act 1 greets the player at the door
+    state["pending_choice"] = runtime.choice_for_act(content, state, 1)
     run = RunModel(
         owner_id=user.id,
         story_id=story.id,
@@ -321,6 +324,8 @@ def play(
                 yield _event({"event": "progress", "progress": final.get("progress")})
                 yield _event({"event": "hint", "hint": final.get("hint", "")})
                 yield _event({"event": "place", "location": final.get("location")})
+                if final.get("pending_choice"):
+                    yield _event({"event": "choice", "choice": final["pending_choice"]})
                 if final.get("move_request"):
                     yield _event({"event": "move_request", "move_request": final["move_request"]})
                 yield _event({"event": "suggest", "suggestions": final.get("suggestions", [])})
@@ -377,6 +382,25 @@ def move(run_id: str, body: MoveIn, user: User = Depends(current_user), db: Sess
     db.commit()
     db.refresh(r)
     return _to_run(r)
+
+
+@router.post("/{run_id}/choose")
+def choose(run_id: str, body: ChooseIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Answer the run's pending key-moment decision (VN 抉择). Effects are applied
+    deterministically (flag / 好感 / relationship deltas); the picked label is returned so
+    the client plays it as the player's own next line — the cast then reacts to it."""
+    r = _own_run(run_id, user, db)
+    if (r.state or {}).get("ended"):
+        raise HTTPException(409, "这局已经结束了")
+    st = dict(r.state or {})
+    try:
+        res = runtime.apply_choice(r.pinned_content or {}, st, body.option_id)
+    except ValueError as e:
+        raise HTTPException(400, {"no pending choice": "现在没有待决定的抉择",
+                                  "unknown option": "没有这个选项"}.get(str(e), "不行"))
+    r.state = st
+    db.commit()
+    return {"label": res.get("label", ""), "flag": res.get("flag")}
 
 
 @router.post("/{run_id}/leave", status_code=204)
