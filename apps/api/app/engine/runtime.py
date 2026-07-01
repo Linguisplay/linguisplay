@@ -924,7 +924,9 @@ def _detect_asks(content: dict[str, Any], player_input: str) -> list[str]:
 
 
 def _apply_event_triggers(content: dict[str, Any], state: dict, player_input: str) -> None:
-    """PLACEHOLDER: fire a story event when the player's words overlap its keywords."""
+    """PROVISIONAL pass: fire a story event when the player's words overlap its keywords.
+    The primary director call then judges which events truly occurred (occurred_events);
+    keyword guesses it denies are rolled back — see the reconciliation in run_turn_stream."""
     triggered = set(state.get("triggered_event_ids") or [])
     for act in (content.get("story") or {}).get("acts", []) or []:
         for ev in act.get("events", []) or []:
@@ -933,6 +935,57 @@ def _apply_event_triggers(content: dict[str, Any], state: dict, player_input: st
             if eid and eid not in triggered and _contains_any(player_input, kws):
                 triggered.add(eid)
     state["triggered_event_ids"] = sorted(triggered)
+
+
+def _probe_candidates(content: dict[str, Any], state: dict) -> list[dict[str, Any]]:
+    """Ask-judgment candidates for the director call: secrets that still hold locked
+    fragments, as (id, sanitized title) — titles only, never bodies."""
+    unlocked = set(state.get("unlocked_fragment_ids") or [])
+    out = []
+    for s in content.get("secrets", []) or []:
+        title = (s.get("title") or "").strip()
+        frags = s.get("fragments", []) or []
+        if title and any(f.get("id") not in unlocked for f in frags):
+            out.append({"id": s.get("id"), "title": title})
+    return out
+
+
+def _event_candidates(content: dict[str, Any], state: dict, act: int) -> list[dict[str, Any]]:
+    """Event-judgment candidates: the current act's not-yet-triggered events, as
+    (id, label). Labels come from what_happens, which the progress checklist already
+    shows the player — spoiler-consistent."""
+    triggered = set(state.get("triggered_event_ids") or [])
+    out = []
+    for ev in (current_act(content, act) or {}).get("events", []) or []:
+        eid = ev.get("id")
+        label = (ev.get("what_happens") or "").strip()
+        if eid and eid not in triggered and label:
+            out.append({"id": eid, "label": label[:40]})
+    return out
+
+
+def _match_candidates(cands: list[dict[str, Any]], judged, key: str) -> set:
+    """Map the model's copied-back titles/labels to candidate ids (lenient: exact or
+    containment either way, so a slightly trimmed copy still matches)."""
+    got = set()
+    for j in judged or []:
+        jn = str(j).strip()
+        if not jn:
+            continue
+        for c in cands:
+            t = c.get(key) or ""
+            if t and (t == jn or t in jn or jn in t):
+                got.add(c["id"])
+    return got
+
+
+def _secret_has_newly(content: dict[str, Any], sid, newly) -> bool:
+    """Did any of this secret's fragments unlock THIS turn?"""
+    newset = set(newly or [])
+    for s in content.get("secrets", []) or []:
+        if s.get("id") == sid:
+            return any(f.get("id") in newset for f in s.get("fragments", []) or [])
+    return False
 
 
 def run_turn(
@@ -985,16 +1038,21 @@ def run_turn_stream(
     # newly open up (so a new exit never just silently appears — "莫名其妙解锁" fix)
     locs_before = {l.get("id") for l in _locations(content) if location_available(content, state, l)}
 
-    # 1. probing → asks counters (per secret); also note which characters are probed
+    # 1. probing → asks counters (per secret); also note which characters are probed.
+    #    Keyword hits are PROVISIONAL (they keep same-turn reveals working) — the primary
+    #    director call judges what the player truly probed, and we reconcile after it.
     asks = dict(state.get("asks") or {})
     probed_secret_ids = _detect_asks(content, player_input)
     for sid in probed_secret_ids:
         asks[sid] = asks.get(sid, 0) + 1
     state["asks"] = asks
+    provisional_asks = list(probed_secret_ids)
     sec_char = _secret_char_map(content)
     probed_char_ids = [sec_char.get(sid) for sid in probed_secret_ids if sec_char.get(sid)]
 
+    _ev_before = set(state.get("triggered_event_ids") or [])
     _apply_event_triggers(content, state, player_input)
+    provisional_events = set(state.get("triggered_event_ids") or []) - _ev_before
 
     # 2. gate on the CURRENT state (asks updated; affinity not yet changed this turn).
     #    asks-driven reveals surface THIS turn so the director can voice them; affinity-
@@ -1005,6 +1063,10 @@ def run_turn_stream(
     state["unlocked_fragment_ids"] = sorted(
         set(state.get("unlocked_fragment_ids") or []) | set(newly)
     )
+
+    # judgment candidates for the primary director call (titles/labels only, never bodies)
+    probe_cands = _probe_candidates(content, state)
+    event_cands = _event_candidates(content, state, old_act)
 
     # responder selection. With an explicit @target → just that character. With NO target
     # (and not an inner thought) the player is addressing the WHOLE room — every present
@@ -1145,6 +1207,10 @@ def run_turn_stream(
             "act_locked": act_locked,
             "needed_topics": needed_topics,
             "stuck_level": stuck_level,
+            # ask/event judgment: the primary states what the player truly probed and which
+            # story events actually happened this turn (keyword hits above are provisional)
+            "probe_candidates": probe_cands if is_primary else [],
+            "event_candidates": event_cands if is_primary else [],
             # what the others have ALREADY said this turn → react, don't echo
             "said_this_turn": list(said_this_turn),
         }
@@ -1197,6 +1263,30 @@ def run_turn_stream(
             emo = (directed.get("player_emotion") or "").strip()
             if emo:
                 state["player_emotion"] = emo       # carry the emotional read into next turn
+            # RECONCILE ask/event judgment (root fix for keyword-stuffing). When the model
+            # supplies a judgment it becomes the truth: a provisional keyword ask it rejects
+            # is rolled back (unless it already unlocked something — unlocks stay sticky),
+            # and a genuine probe the keywords missed is counted (its reveal lands next
+            # turn, same one-turn lag as affinity reveals). No judgment (mock/prose
+            # fallback) → the keyword result stands, so tests stay deterministic.
+            judged = directed.get("probed")
+            if judged is not None:
+                judged_ids = _match_candidates(probe_cands, judged, "title")
+                for sid in provisional_asks:
+                    if sid not in judged_ids and asks.get(sid, 0) > 0 \
+                            and not _secret_has_newly(content, sid, newly):
+                        asks[sid] -= 1
+                for sid in judged_ids:
+                    if sid not in provisional_asks:
+                        asks[sid] = asks.get(sid, 0) + 1
+                state["asks"] = asks
+            occurred = directed.get("occurred")
+            if occurred is not None:
+                ev_ids = _match_candidates(event_cands, occurred, "label")
+                trig = set(state.get("triggered_event_ids") or [])
+                trig -= (provisional_events - ev_ids)  # roll back denied keyword guesses
+                trig |= ev_ids
+                state["triggered_event_ids"] = sorted(trig)
 
     # think = OBSERVE/EXAMINE. No target → look at the surroundings (where am I, what's
     # going on). With a target → examine that person: a brief intro + their CURRENT state

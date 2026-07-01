@@ -461,6 +461,25 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
         props["move_invite"] = {"type": "string", "description": "若你这一轮在剧情里提出、或答应和玩家一起去某个地方，就填那个地点名——可以是地图上【可去通路】里已有的地点，也可以是你们对话中自然提到、此刻该去的一个新地点(旁白只写到你起身相邀、还没出发，别写玩家已到)；不想去就填空字符串"}
     if not observer and not is_member and not is_think:
         props["ending"] = {"type": "string", "description": "默认空字符串；只有玩家本人此刻被你弄死填 death，走到不可挽回的坏结局填 bad"}
+    # ask/event JUDGMENT (anti keyword-stuffing): the model — not substring matching —
+    # decides what the player genuinely probed and which authored events truly happened.
+    # Candidates are sanitized titles/labels only; the engine reconciles afterwards.
+    topics = [str(c.get("title") or "").strip()
+              for c in (prompt.get("probe_candidates") or []) if str(c.get("title") or "").strip()]
+    if topics and not is_member and not is_think:
+        props["probed_topics"] = {"type": "array", "items": {"type": "string"}, "description":
+                                  "玩家这一句真正在追问/打听/试探的话题（认真求证、逼问、套话才算；"
+                                  "只是顺嘴带过词语不算）。只能从这些话题里选并原样抄写："
+                                  + "；".join(topics) + "。没有则填空数组[]"}
+        required.append("probed_topics")
+    ev_labels = [str(c.get("label") or "").strip()
+                 for c in (prompt.get("event_candidates") or []) if str(c.get("label") or "").strip()]
+    if ev_labels and not is_member and not is_think:
+        props["occurred_events"] = {"type": "array", "items": {"type": "string"}, "description":
+                                    "这一轮剧情中【确实发生了】的剧本事件（真的在场景里发生才算；"
+                                    "只被提及、计划或猜测不算）。只能从这些里选并原样抄写："
+                                    + "；".join(ev_labels) + "。没有则填空数组[]"}
+        required.append("occurred_events")
     return {"type": "function", "function": {
         "name": "render_turn", "description": "输出这一轮的内容，旁白与台词分开放在不同字段",
         "parameters": {"type": "object", "properties": props, "required": required}}}
@@ -770,7 +789,7 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
         ending = {"kind": "death", "reason": narration or speech}
     elif "bad" in end_raw or "坏" in end_raw:
         ending = {"kind": "bad", "reason": narration or speech}
-    return {
+    out = {
         "beats": beats,
         "affinity_delta": 0 if is_think else _i(d.get("affinity"), -3, 8),
         "romance_delta": 0 if is_think else _i(d.get("romance"), -3, 6),
@@ -779,6 +798,13 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
         "move_invite": mv,
         "player_emotion": str(d.get("emotion") or "").strip(),
     }
+    # ask/event judgment: only surface the keys the model actually answered — an absent
+    # key means "no judgment" and the engine keeps its provisional keyword result.
+    if "probed_topics" in d:
+        out["probed"] = [str(x).strip() for x in (d.get("probed_topics") or []) if str(x).strip()]
+    if "occurred_events" in d:
+        out["occurred"] = [str(x).strip() for x in (d.get("occurred_events") or []) if str(x).strip()]
+    return out
 
 
 def _parse_reply(text: str, speaker: str, channel: str = "say", group_mode: str | None = None) -> dict:
