@@ -1,5 +1,6 @@
 import copy
 import json
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -235,6 +236,19 @@ def play(
                  "speaker_name": b.speaker_name, "present_ids": b.present_ids}
                 for b in r.beats]
 
+    # RETURN detection (回归问候): the player has been away long enough that this turn is a
+    # comeback → the primary speaker greets them and picks up the last thread. Only counts
+    # once a real conversation exists (some player beat on record).
+    returning = False
+    if r.beats and any(b.author == "player" for b in r.beats):
+        last_at = r.beats[-1].created_at
+        if last_at is not None:
+            now = datetime.now(timezone.utc)
+            if last_at.tzinfo is None:
+                now = now.replace(tzinfo=None)
+            gap_h = runtime.tuning_for(content).get("return_gap_hours", 6)
+            returning = (now - last_at).total_seconds() > gap_h * 3600
+
     # 1. persist the player's own turn. In character mode the player speaks AS the chosen
     #    character; in god mode the input is an unseen director's cue (no speaker).
     mode = st.get("mode", "character")
@@ -275,6 +289,7 @@ def play(
                 content=content, state=state0, persona=persona_dict,
                 player_input=body.input, channel=body.channel,
                 beat_log=beat_log, target_character_id=body.target_character_id,
+                returning=returning,
             ):
                 if kind == "beat":
                     eb = BeatModel(
@@ -359,6 +374,30 @@ def move(run_id: str, body: MoveIn, user: User = Depends(current_user), db: Sess
     db.commit()
     db.refresh(r)
     return _to_run(r)
+
+
+@router.post("/{run_id}/leave", status_code=204)
+def leave(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """悬念离场: the player is leaving mid-run (page hide / back button beacon). Append ONE
+    cliffhanger narration so the run's last beat is an unfinished hook that pulls them back.
+    Idempotent per leave point — repeated beacons with no new turns add nothing."""
+    r = _own_run(run_id, user, db)
+    st = dict(r.state or {})
+    if st.get("ended") or not r.beats:
+        return
+    if int(st.get("parting_seq") or -1) == len(r.beats):
+        return  # the last beat is already this leave's hook
+    if not any(b.author == "player" for b in r.beats):
+        return  # no conversation yet — nothing to hang a hook on
+    persona = db.get(PersonaModel, r.persona_id)
+    content = r.pinned_content or {}
+    present_ids = [c.get("id") for c in runtime.scene_characters(content, st) if c.get("id")]
+    for b in runtime.build_parting_hook(content, st, _persona_dict(persona) if persona else {}):
+        db.add(BeatModel(run_id=r.id, seq=r.beats[-1].seq + 1, type="description",
+                         speaker_name=None, text=b.get("text", ""), author="engine",
+                         present_ids=present_ids))
+    r.state = {**st, "parting_seq": len(r.beats) + 1}
+    db.commit()
 
 
 @router.post("/{run_id}/follow", response_model=Run)

@@ -103,6 +103,8 @@ DEFAULT_TUNING = {
     "friend_t": 40, "enemy_t": -15, "flirt_t": 25, "lover_t": 60, "lover_close_min": 35,
     "follow_min_closeness": 25,
     "close_step_min": -6, "close_step_max": 8, "rom_step_min": -4, "rom_step_max": 6,
+    # hours away after which the next turn counts as a RETURN (角色接起上次的话头)
+    "return_gap_hours": 6,
 }
 
 
@@ -1018,6 +1020,27 @@ def _secret_has_newly(content: dict[str, Any], sid, newly) -> bool:
     return False
 
 
+def build_parting_hook(content: dict[str, Any], state: dict[str, Any],
+                       persona: dict[str, Any], llm: LLM | None = None) -> list[dict[str, Any]]:
+    """悬念离场: ONE cliffhanger narration emitted when the player leaves mid-run — the last
+    thing they see on return, pulling them back in. Spoiler-safe (topic labels only)."""
+    llm = llm or get_llm()
+    act = int(state.get("act", 1) or 1)
+    topics = _pending_topics(act_progress(content, state, act))
+    here = [c.get("name") for c in scene_characters(content, state) if c.get("name")]
+    loc = current_location(content, state) or {}
+    out = llm.generate({"parting": True, "persona": persona,
+                        "place": loc.get("name") or "", "cast": here,
+                        "topics": topics[:2], "scene": current_act(content, act)}) or {}
+    beats = [b for b in (out.get("beats") or [])
+             if b.get("type") == "description" and (b.get("text") or "").strip()]
+    if not beats:
+        hint = f"关于「{topics[0]}」的话" if topics else "有句话"
+        beats = [{"type": "description", "speaker_name": None,
+                  "text": f"（你起身离开。身后有人欲言又止——{hint}，似乎还没说完。）"}]
+    return beats[:1]
+
+
 def run_turn(
     content: dict[str, Any],
     state: dict[str, Any],
@@ -1056,6 +1079,7 @@ def run_turn_stream(
     history: list[dict[str, str]] | None = None,
     target_character_id: str | None = None,
     beat_log: list[dict[str, Any]] | None = None,
+    returning: bool = False,
 ):
     """Advance one turn as a GENERATOR. Yields ('beat', beat) for each beat the moment
     it's computed (so responders stream out one by one), then a final ('final', result)
@@ -1242,6 +1266,8 @@ def run_turn_stream(
             # story events actually happened this turn (keyword hits above are provisional)
             "probe_candidates": probe_cands if is_primary else [],
             "event_candidates": event_cands if is_primary else [],
+            # the player came back after a while away → greet them and pick up the thread
+            "returning": bool(returning) if is_primary else False,
             # what the others have ALREADY said this turn → react, don't echo
             "said_this_turn": list(said_this_turn),
         }

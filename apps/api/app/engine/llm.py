@@ -68,6 +68,14 @@ class MockLLM:
         if prompt.get("start_place"):
             return {"name": "此处", "detail": ""}
 
+        # parting cliffhanger (悬念离场): narration only, deterministic.
+        if prompt.get("parting"):
+            topics = prompt.get("topics") or []
+            hint = f"关于「{topics[0]}」的话" if topics else "有句话"
+            return {"beats": [{"type": "description", "speaker_name": None,
+                               "text": f"（你起身离开。身后有人欲言又止——{hint}，似乎还没说完。）"}],
+                    "affinity_delta": 0, "advance_act": False, "ending": None}
+
         # opening intro: narration only, deterministic.
         if prompt.get("intro"):
             pc = prompt.get("player_char")

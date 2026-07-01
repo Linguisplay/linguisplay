@@ -282,6 +282,14 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append("")
         lines.append(f"【当前场景：第{scene.get('index','')}幕 {scene.get('title','')}】{scene_events}")
 
+    if prompt.get("returning"):
+        lines.append("")
+        lines.append(
+            "【对方回来了】对方隔了一段时间才回来。这一轮开口时，先用你自己的方式自然地表示你注意到"
+            "TA 回来了（可以是一句话、一个动作、一个神情，贴合你们现在的关系），并主动接起上次没聊完"
+            "的最要紧的那个话头（从你的记忆和之前的对话里挑），别装作无事发生，也别客套寒暄一大段。"
+        )
+
     if prompt.get("act_locked"):
         lines.append("")
         lines.append(
@@ -1290,6 +1298,36 @@ class QwenLLM:
         except Exception:
             return {"detail": ""}
 
+    def _parting(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """悬念离场: ONE cliffhanger narration when the player leaves mid-run — an unfinished
+        beat that pulls them back. Spoiler-safe: may point at a topic LABEL, never content."""
+        cast = "、".join(prompt.get("cast") or []) or "有人"
+        place = prompt.get("place") or ""
+        topics = [t for t in (prompt.get("topics") or []) if t]
+        tline = f"可以点到「{topics[0]}」这个话头（只许提名字，绝不许透露内容），" if topics else ""
+        sys = ("你在为一个互动剧情游戏写【玩家暂时离开】时的收尾旁白。写1~2句第三人称旁白，"
+               "留一个让人惦记的钩子：在场的某人欲言又止、一个反常的细节此刻才被注意到、"
+               f"或一句没说完的话。{tline}要具体可感，不要总结、不要抒情空话、不要预告。"
+               "只输出旁白本身。")
+        u = f"地点：{place or '（未知）'}\n在场的人：{cast}\n玩家此刻起身离开。写那1~2句收尾旁白。"
+        try:
+            resp = httpx.post(
+                self._url,
+                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
+                json={"model": self._model, "messages": [{"role": "system", "content": sys},
+                      {"role": "user", "content": u}], "max_tokens": 160, "temperature": 0.9},
+                timeout=25,
+            )
+            resp.raise_for_status()
+            txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+        except Exception:
+            txt = ""
+        if not txt:
+            hint = f"关于「{topics[0]}」的话" if topics else "有句话"
+            txt = f"（你起身离开。身后有人欲言又止——{hint}，似乎还没说完。）"
+        return {"beats": [{"type": "description", "speaker_name": None, "text": txt}],
+                "affinity_delta": 0, "advance_act": False, "ending": None}
+
     def _start_place(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """The OPENING location for a story that authored no map — so every run has a place to
         stand and can grow a map from there. Returns {name, detail} derived from world + act 1."""
@@ -1328,6 +1366,8 @@ class QwenLLM:
             return self._describe_place(prompt)
         if prompt.get("start_place"):
             return self._start_place(prompt)
+        if prompt.get("parting"):
+            return self._parting(prompt)
         speaker = prompt.get("speaker_name") or "角色"
         channel = prompt.get("channel") or "say"
         observe = bool(prompt.get("observe"))

@@ -280,8 +280,15 @@ async function startRun(storyId, mode="character", playerCharacterId=null, playe
   // resuming an already-finished run: re-show its ending and keep input locked
   if (run.state && run.state.ended) showEnding(run.state.ending);
 }
-function backToPick() { runId = null; stopBgm(); hide("play"); hide("backBtn"); hide("soundBtn"); show("pick"); }
+// 悬念离场: tell the server we're leaving so it appends ONE cliffhanger beat — the
+// unfinished hook is the last thing we see when we come back.
+function sendLeave() { if (runId) { try { navigator.sendBeacon(`/runs/${runId}/leave`); } catch (e) {} } }
+window.addEventListener("pagehide", sendLeave);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") sendLeave(); });
+
+function backToPick() { sendLeave(); runId = null; stopBgm(); hide("play"); hide("backBtn"); hide("soundBtn"); show("pick"); }
 async function doLogout() {
+  sendLeave();  // must fire while the session cookie is still valid
   try { await j("/auth/logout", { method:"POST" }); } catch(e){}
   runId = null; stopBgm();
   hide("play"); hide("pick"); hide("role"); hide("backBtn"); hide("soundBtn"); hide("logoutBtn");
