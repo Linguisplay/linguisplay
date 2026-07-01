@@ -1085,6 +1085,38 @@ def apply_choice(content: dict[str, Any], state: dict[str, Any], option_id: str)
     return {"label": picked.get("label") or "", "flag": picked.get("flag")}
 
 
+def journal(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+    """The player's reviewable dossier (线索档案 + 结局图鉴). Discovery made tangible:
+    - secrets the player has STARTED uncovering, with their unlocked fragments' full text
+      and a count of layers still locked (locked bodies never leave the server; untouched
+      secrets aren't listed at all — only a global remaining count)
+    - the ending gallery: achieved milestones by title, the rest as ？？？ slots
+    - the key decisions already made."""
+    unlocked = set(state.get("unlocked_fragment_ids") or [])
+    story = content.get("story") or {}
+    chars = {c.get("id"): c.get("name") for c in story.get("characters", []) or []}
+    secrets, untouched = [], 0
+    for sec in content.get("secrets", []) or []:
+        frags = sec.get("fragments", []) or []
+        got = [f for f in frags if f.get("id") in unlocked]
+        if not got:
+            untouched += 1
+            continue
+        secrets.append({
+            "title": (sec.get("title") or "").strip(),
+            "character": chars.get(sec.get("character_id")) or "",
+            "unlocked": [(f.get("content") or "").strip() for f in got],
+            "locked_count": len(frags) - len(got),
+        })
+    achieved = set(state.get("achieved_endings") or [])
+    endings = [{"kind": e.get("kind", "normal"),
+                "achieved": e.get("id") in achieved,
+                "title": (e.get("title") or "") if e.get("id") in achieved else None}
+               for e in story.get("endings", []) or []]
+    return {"secrets": secrets, "secrets_untouched": untouched, "endings": endings,
+            "choices": dict(state.get("choices") or {})}
+
+
 def _secret_has_newly(content: dict[str, Any], sid, newly) -> bool:
     """Did any of this secret's fragments unlock THIS turn?"""
     newset = set(newly or [])

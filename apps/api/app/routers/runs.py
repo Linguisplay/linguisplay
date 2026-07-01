@@ -384,6 +384,14 @@ def move(run_id: str, body: MoveIn, user: User = Depends(current_user), db: Sess
     return _to_run(r)
 
 
+@router.get("/{run_id}/journal")
+def get_journal(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """The run's dossier: unlocked truths (full text), layers still locked (counts only),
+    the ending gallery (achieved vs ？？？), decisions made. Locked bodies never leave."""
+    r = _own_run(run_id, user, db)
+    return runtime.journal(r.pinned_content or {}, r.state or {})
+
+
 @router.post("/{run_id}/choose")
 def choose(run_id: str, body: ChooseIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     """Answer the run's pending key-moment decision (VN 抉择). Effects are applied

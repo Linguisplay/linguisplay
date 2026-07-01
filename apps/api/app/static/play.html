@@ -114,6 +114,19 @@
 .toast.t-end { border-color:#c9a5ff; color:#ecdcff; }
 .toast.t-delta { font-size:13px; opacity:.95; }
 @keyframes toastin { from { opacity:0; transform:translateY(10px) scale(.96); } to { opacity:1; } }
+#journal { position:fixed; inset:0; z-index:70; background:rgba(0,0,0,.55); display:grid; place-items:center; }
+#journal .jcard { width:min(560px, 92vw); max-height:80vh; overflow-y:auto; background:#14141c; border:1px solid #34344a; border-radius:14px; padding:16px 18px; box-shadow:0 12px 48px rgba(0,0,0,.6); }
+#journal .jbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+#journal .jh { color:#8ea2ff; font-weight:700; font-size:13px; margin:14px 0 6px; border-bottom:1px dashed #2a3350; padding-bottom:4px; }
+#journal .jsec { margin-bottom:10px; }
+#journal .jtitle { color:#ffe9b0; font-size:13.5px; font-weight:600; margin-bottom:4px; }
+#journal .jwho { color:#8a93a8; font-weight:400; font-size:12px; }
+#journal .jfrag { color:#cfd4e2; font-size:13px; line-height:1.7; padding:6px 10px; background:#1a1c28; border-radius:8px; border:1px solid #262a3c; margin:4px 0; }
+#journal .jlocked { color:#7b8296; font-size:12px; font-style:italic; margin:4px 0; }
+#journal .jempty { color:#7b8296; font-size:12.5px; font-style:italic; }
+#journal .jends { display:flex; flex-direction:column; gap:5px; }
+#journal .jend { font-size:13px; color:#7b8296; padding:6px 10px; border-radius:8px; background:#181a24; border:1px solid #232635; }
+#journal .jend.got { color:#ecdcff; border-color:#4a3a66; background:#1e1930; }
 </style>
 </head>
 <body>
@@ -124,6 +137,7 @@
   <header>
     <b>LinguisPlay <span class="muted" style="font-weight:400">· AI 虚构内容</span></b>
     <span style="display:flex; gap:8px; align-items:center">
+      <button id="journalBtn" class="iconbtn hidden" title="档案：已揭开的真相与结局图鉴" onclick="openJournal()">📔</button>
       <button id="soundBtn" class="iconbtn hidden" title="背景音乐开关" onclick="toggleSound()">🔊</button>
       <button id="backBtn" class="ghost hidden" style="padding:5px 10px" onclick="backToPick()">← 剧本</button>
       <span id="who" class="muted"></span>
@@ -279,7 +293,7 @@ async function startRun(storyId, mode="character", playerCharacterId=null, playe
     story_id: storyId, persona_id: personaId, mode, player_character_id: playerCharacterId }) });
   runId = run.id;
   hide("role");
-  hide("pick"); show("play"); show("backBtn"); show("soundBtn");
+  hide("pick"); show("play"); show("backBtn"); show("soundBtn"); show("journalBtn");
   resetEnded();
   chat.innerHTML = ""; suggest.innerHTML = ""; state.innerHTML = "";
   curBgmMood = null; curScene = null; curLocId = null;
@@ -305,12 +319,12 @@ function sendLeave() { if (runId) { try { navigator.sendBeacon(`/runs/${runId}/l
 window.addEventListener("pagehide", sendLeave);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") sendLeave(); });
 
-function backToPick() { sendLeave(); runId = null; stopBgm(); hide("play"); hide("backBtn"); hide("soundBtn"); show("pick"); }
+function backToPick() { sendLeave(); runId = null; stopBgm(); hide("play"); hide("backBtn"); hide("soundBtn"); hide("journalBtn"); show("pick"); }
 async function doLogout() {
   sendLeave();  // must fire while the session cookie is still valid
   try { await j("/auth/logout", { method:"POST" }); } catch(e){}
   runId = null; stopBgm();
-  hide("play"); hide("pick"); hide("role"); hide("backBtn"); hide("soundBtn"); hide("logoutBtn");
+  hide("play"); hide("pick"); hide("role"); hide("backBtn"); hide("soundBtn"); hide("journalBtn"); hide("logoutBtn");
   show("auth");
 }
 
@@ -471,6 +485,36 @@ async function pickChoice(optionId) {
     const res = await j(`/runs/${runId}/choose`, { method:"POST", body: JSON.stringify({ option_id: optionId }) });
     if (res.label) { msg.value = res.label; await send(); }  // the pick becomes the player's own line
   } catch(e) { renderBeat({ author:"engine", type:"description", text:`（${e.message}）` }); }
+}
+// 📔 dossier: unlocked truths + ending gallery + decisions — Discovery made reviewable.
+async function openJournal() {
+  if (!runId) return;
+  let jd;
+  try { jd = await j(`/runs/${runId}/journal`); }
+  catch (e) { return; }
+  let ov = document.getElementById("journal");
+  if (!ov) {
+    ov = document.createElement("div"); ov.id = "journal";
+    ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+    document.body.appendChild(ov);
+  }
+  const secs = (jd.secrets || []).map(sec => {
+    const layers = sec.unlocked.map(u => `<div class="jfrag">${escapeHtml(u)}</div>`).join("");
+    const left = sec.locked_count > 0 ? `<div class="jlocked">…还有 ${sec.locked_count} 层没有揭开</div>` : "";
+    const who = sec.character ? `<span class="jwho">（${escapeHtml(sec.character)}）</span>` : "";
+    return `<div class="jsec"><div class="jtitle">🔓 ${escapeHtml(sec.title)}${who}</div>${layers}${left}</div>`;
+  }).join("") || `<div class="jempty">还没有揭开任何真相。</div>`;
+  const more = jd.secrets_untouched > 0 ? `<div class="jlocked">这故事里还藏着 ${jd.secrets_untouched} 个你尚未触及的秘密…</div>` : "";
+  const KIND = { true: "真结局", normal: "结局", bad: "坏结局", death: "死亡" };
+  const ends = (jd.endings || []).map(e =>
+    e.achieved ? `<div class="jend got">🏆 ${KIND[e.kind] || "结局"} · ${escapeHtml(e.title || "")}</div>`
+               : `<div class="jend">🔒 ${KIND[e.kind] || "结局"} · ？？？</div>`
+  ).join("") || `<div class="jempty">这个剧本没有作者预设的结局。</div>`;
+  ov.innerHTML = `<div class="jcard" onclick="event.stopPropagation()">
+    <div class="jbar"><b>📔 档案</b><button class="ghost" onclick="document.getElementById('journal').remove()">关闭</button></div>
+    <div class="jh">已揭开的真相</div>${secs}${more}
+    <div class="jh">结局图鉴</div><div class="jends">${ends}</div>
+  </div>`;
 }
 function updatePlaceholder() {
   const c = cast.find(x => x.id === target);
