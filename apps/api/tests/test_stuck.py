@@ -30,7 +30,8 @@ def _play(state):
     return runtime.run_turn(STUCK, state, {"name": "我"}, "随便聊聊天气", channel="say")
 
 
-def test_stuck_counter_climbs_and_narrator_hint_fires():
+def test_stuck_counter_climbs_and_hint_fires():
+    # the stuck hint is now a PERSISTENT top-bar string (out["hint"]), not a chat beat
     st = runtime.default_state()
     assert st["stuck"] == 0
     hint_seen_at = None
@@ -39,16 +40,16 @@ def test_stuck_counter_climbs_and_narrator_hint_fires():
         st = out["state"]
         assert st["act"] == 1, "gated act must stay locked while clue is unreachable"
         assert st["stuck"] == turn, "every clue-less locked turn bumps the counter"
-        # the narrator nudge names the missing topic by label, in a narrator (no-speaker) beat
-        if any(b.get("speaker_name") is None and "那本账" in b.get("text", "")
-               for b in out["beats"]):
+        # the hint names the missing topic by label
+        if "那本账" in (out.get("hint") or ""):
             hint_seen_at = hint_seen_at or turn
-    # the narrator nudge should have fired no later than the PUSH threshold
+    # the hint should have fired no later than the PUSH threshold
     assert hint_seen_at is not None and hint_seen_at <= runtime.STUCK_PUSH
 
-    # and it must steer by topic LABEL only — the locked body never leaks into any beat
+    # and it must steer by topic LABEL only — the locked body never leaks anywhere
     last = _play(st)
     assert "BODY_SECRET" not in " ".join(b.get("text", "") for b in last["beats"])
+    assert "BODY_SECRET" not in (last.get("hint") or "")
 
 
 def test_progress_resets_the_counter():

@@ -55,7 +55,9 @@ def test_mature_defaults_off_and_flows_through_run():
 
     class SpyLLM:
         def generate(self, prompt):
-            if not (prompt.get("intro") or prompt.get("observe")):
+            # only speaker prompts carry the flag (auxiliary calls like the
+            # suggestions prompt have no speaker_name and would overwrite it)
+            if prompt.get("speaker_name"):
                 captured["mature"] = prompt.get("mature")
             return {"beats": [{"type": "dialogue", "speaker_name": prompt.get("speaker_name"), "text": "."}],
                     "affinity_delta": 0, "advance_act": False, "ending": None}

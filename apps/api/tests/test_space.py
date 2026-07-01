@@ -48,28 +48,36 @@ def test_resolve_location_matches_name_or_id_else_none():
     assert runtime.resolve_location(MAP, "天台") is None                      # unknown → ignored
 
 
-def test_director_move_applies_only_for_known_place():
+def test_director_move_is_a_confirmable_request_not_a_teleport():
+    """The model can only PROPOSE a move (move_invite) — the player stays put until they
+    confirm (apply_move, the /move endpoint). An off-map destination becomes an emergent
+    generate-on-accept offer, never a silent teleport."""
     class MoverLLM:
         def __init__(self, dest):
             self.dest = dest
 
         def generate(self, prompt):
-            if prompt.get("intro") or prompt.get("observe"):
+            if prompt.get("intro") or prompt.get("observe") or prompt.get("suggest"):
                 return {"beats": [{"type": "description", "speaker_name": None, "text": "x"}],
                         "affinity_delta": 0, "advance_act": False, "ending": None}
             return {"beats": [{"type": "dialogue", "speaker_name": prompt.get("speaker_name"), "text": "嗯"}],
-                    "affinity_delta": 0, "advance_act": False, "ending": None, "location": self.dest}
+                    "affinity_delta": 0, "advance_act": False, "ending": None, "move_invite": self.dest}
 
-    # a recognized destination moves the player
+    # a known, connected destination → a confirm request; NOT moved yet
     st = runtime.default_state()
     out = runtime.run_turn(MAP, st, {"name": "我"}, "去书房", channel="do", llm=MoverLLM("书房"))
-    assert out["state"]["location_id"] == "study"
-    assert out["location"]["id"] == "study"
+    assert out["state"]["location_id"] in (None, "hall")   # unmoved until the player confirms
+    assert out["move_request"] and out["move_request"]["to"] == "study"
+    # confirming actually moves
+    dest = runtime.apply_move(MAP, out["state"], "书房")
+    assert dest["id"] == "study" and out["state"]["location_id"] == "study"
 
-    # an unknown destination is ignored — position unchanged
+    # an off-map destination → offered as an EMERGENT place (generate on accept), no teleport
     st2 = {**runtime.default_state(), "location_id": "hall"}
     out2 = runtime.run_turn(MAP, st2, {"name": "我"}, "去天台", channel="do", llm=MoverLLM("天台"))
     assert out2["state"]["location_id"] == "hall"
+    assert out2["move_request"] and out2["move_request"].get("generate") is True
+    assert out2["move_request"]["to"] is None and out2["move_request"]["to_name"] == "天台"
 
 
 def test_no_location_story_returns_none():

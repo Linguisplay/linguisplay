@@ -7,10 +7,10 @@ from app.engine import qwen, runtime
 
 
 def test_emotion_line_parsed_not_leaked_as_dialogue():
+    # prose+quotes format: speech lives inside 「」, metadata on prefixed lines
     reply = "\n".join([
-        "旁白：他顿了顿，目光柔和下来。",
+        "他顿了顿，目光柔和下来。「别怕，有我在呢。」",
         "情绪：在逞强，其实想被安慰",
-        "老周：别怕，有我在呢。",
         "好感：+2",
         "推进：否",
         "结局：无",
@@ -24,7 +24,7 @@ def test_emotion_line_parsed_not_leaked_as_dialogue():
 
 
 def test_missing_emotion_line_is_neutral():
-    out = qwen._parse_reply("旁白：风停了。\n老周：嗯。\n好感：0\n推进：否", "老周")
+    out = qwen._parse_reply("风停了。「嗯。」\n好感：0\n推进：否", "老周")
     assert out["player_emotion"] == ""
 
 
@@ -47,8 +47,10 @@ def test_inter_character_eq_in_group_and_observer():
     base = {"speaker_name": "蓝信一", "speaker_persona": "城寨四子", "persona": {"name": "蔡妍"},
             "channel": "say", "context": {}, "cast": ["龙卷风", "十二少"]}
     # one-on-one: EQ aimed at 对方 (the player), no inter-character clause
+    # ("有来有往" now also appears in always-on blocks like 台词手艺, so the
+    # discriminator for the inter-character clause is "各说各的")
     solo = qwen._build_system(base)
-    assert "有来有往" not in solo
+    assert "各说各的" not in solo
     # broadcast member + god/observer: EQ aimed at reading the OTHER characters
     member = qwen._build_system({**base, "group_mode": "member"})
     obs = qwen._build_system({**base, "observer": True})
