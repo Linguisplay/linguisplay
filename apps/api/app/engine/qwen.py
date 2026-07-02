@@ -354,7 +354,9 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
         required.append("narration")
     if not is_think:
         if is_member:
-            sd = "你这一刻对在场众人说出口的原话（第一人称，1~3句）；不想搭话就填空字符串"
+            pl_name = (prompt.get("persona") or {}).get("name") or "对方"
+            sd = (f"「{speaker}」自己这一刻说出口的原话（第一人称，1~3句）。只能是你自己的话——"
+                  f"别人问{pl_name}的问题由{pl_name}自己答，绝不替TA作答；不想搭话就填空字符串")
         elif channel == "do":
             sd = "你这一轮亲口说出的原话（第一人称）；只用动作神态回应、不开口就填空字符串"
         elif observer:
@@ -1307,10 +1309,22 @@ class QwenLLM:
         # assistant turns (not just the system prompt) so this speaker CONTINUES the
         # conversation instead of re-answering the player from scratch (which caused verbatim
         # echo between co-present characters).
+        said_appended = False
         for s in (prompt.get("said_this_turn") or []):
             if s.get("text"):
                 sp = s.get("speaker") or "旁白"
                 messages.append({"role": "assistant", "content": f"{sp}：{s['text']}"})
+                said_appended = True
+        if said_appended:
+            # RE-ANCHOR whose turn it is. Without this, generation continues the assistant
+            # chain conversationally — e.g. the primary just asked the PLAYER a question, so
+            # the "natural next line" is the player's ANSWER, and a member speaks it as if
+            # it were their own (the 十二少-answers-for-the-player bug). A closing user-role
+            # cue breaks that continuation: the model now responds to the cue AS ITSELF.
+            pl = (prompt.get("persona") or {}).get("name") or "对方"
+            messages.append({"role": "user", "content":
+                             f"（该你了：只以「{speaker}」自己的身份接话。上面若有人向{pl}发问，"
+                             f"要由{pl}自己来答——你绝不能替{pl}作答。不想搭话就保持沉默。）"})
         # a logic-guard regeneration passes a targeted correction (what broke last attempt)
         corr = prompt.get("logic_correction")
         if corr:
