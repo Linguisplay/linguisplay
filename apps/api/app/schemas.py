@@ -81,6 +81,8 @@ class Character(BaseModel):
     # this character's OWN goal/agenda/stance in the story — what THEY are after,
     # independent of the player. Drives autonomous, self-interested behavior. Optional.
     agenda: Optional[str] = None
+    # 🎒 starting pocket items when the player EMBODIES this character: [{name, detail}]
+    items: list[dict[str, Any]] = []
     # 作息表: where this character is per act — [{from_act, location_id}], last entry with
     # from_act <= current act wins; falls back to home_location_id. Makes the world move.
     schedule: list[dict[str, Any]] = []
@@ -328,6 +330,8 @@ class RunState(BaseModel):
     pending_choice: Optional[dict[str, Any]] = None  # an unanswered key-moment decision
     player_character_name: Optional[str] = None  # name of the embodied character (character mode)
     pressure: int = 0                    # ⚠️ story pressure meter value (0~100)
+    identity: Optional[str] = None       # 🎖 the player's current 身份 (None = as authored)
+    inventory: list[dict[str, Any]] = [] # 🎒 pocket items [{name, detail?}]
     pressure_name: Optional[str] = None  # the meter's authored name (None = story runs none)
 
 

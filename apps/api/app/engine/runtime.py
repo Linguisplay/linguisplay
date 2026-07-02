@@ -54,6 +54,11 @@ def default_state() -> dict[str, Any]:
         "pressure": 0,                  # ⚠️ story pressure meter (暴露值/灵异度), 0~100
         "world_pulse": 0,               # 🌊 quiet turns since the world last moved by itself
         "turns_in_act": 0,              # pacing: turns spent in the current act
+        "dead_character_ids": [],       # ☠️ killed characters: never appear again, remembered
+        "identity": None,               # 🎖 the player's CURRENT 身份/职务 (None = as authored)
+        "identity_log": [],             # [{act, text}] — how the identity evolved
+        "inventory": [],                # 🎒 pocket: [{name, detail?}] carried items
+        "stashes": {},                  # {location_id: [{name,...}]} items left somewhere
         "pending_choice": None,         # an authored decision awaiting the player's pick
         "unlocked_fragment_ids": [],
         "asks": {},
@@ -119,6 +124,7 @@ DEFAULT_TUNING = {
     "close_taper_den": 130,     # per-char 亲近 gain taper denominator (relationships.py)
     "rom_taper_den": 110,       # per-char 心动 gain taper denominator
     "min_turns_per_act": 6,     # soft acts: no advance (model OR backstop) before this many turns
+    "max_new_characters": 4,    # 👋 emergent mid-story characters a run may accumulate
     "world_event_every": 4,     # 🌊 after this many quiet turns an authored act event fires itself (0 = off)
 }
 
@@ -220,8 +226,14 @@ def _is_present(c: dict[str, Any], act: int) -> bool:
     return int(act) >= int(c.get("appears_from_act") or 0)
 
 
-def present_characters(content: dict[str, Any], act: int) -> list[dict[str, Any]]:
-    return [c for c in _characters(content) if _is_present(c, act)]
+def present_characters(content: dict[str, Any], act: int,
+                       dead: set | None = None) -> list[dict[str, Any]]:
+    dead = dead or set()
+    return [c for c in _characters(content) if _is_present(c, act) and c.get("id") not in dead]
+
+
+def _dead_ids(state: dict[str, Any]) -> set:
+    return set(state.get("dead_character_ids") or [])
 
 
 def char_home(c: dict[str, Any], act: int) -> str | None:
@@ -262,7 +274,8 @@ def scene_characters(content: dict[str, Any], state: dict[str, Any]) -> list[dic
     # resolve the effective location (None → the opening/first place, as current_location does)
     cur = current_location(content, state)
     cur_id = cur.get("id") if cur else state.get("location_id")
-    return [c for c in present_characters(content, act) if _is_here(c, state, cur_id)]
+    return [c for c in present_characters(content, act, _dead_ids(state))
+            if _is_here(c, state, cur_id)]
 
 
 def playable_roles(content: dict[str, Any]) -> list[dict[str, Any]]:
@@ -276,13 +289,14 @@ def playable_roles(content: dict[str, Any]) -> list[dict[str, Any]]:
     return [c for c in chars if _is_present(c, 1)]
 
 
-def cast_for(content: dict[str, Any], act: int, exclude_id: str | None = None) -> list[dict[str, Any]]:
-    """The addressable cast at this act (offstage/not-yet-arrived excluded). In character
-    mode `exclude_id` drops the character the player is embodying (you don't talk to self)."""
+def cast_for(content: dict[str, Any], act: int, exclude_id: str | None = None,
+             state: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """The addressable cast at this act (offstage/not-yet-arrived/dead excluded). In
+    character mode `exclude_id` drops the embodied character (you don't talk to self)."""
     return [
         {"id": c.get("id"), "name": c.get("name"),
          "is_lead": c.get("is_lead", False), "avatar_url": c.get("avatar_url")}
-        for c in present_characters(content, act)
+        for c in present_characters(content, act, _dead_ids(state or {}))
         if c.get("id") != exclude_id
     ]
 
@@ -536,6 +550,9 @@ def _physical_place(content: dict[str, Any], state: dict[str, Any]) -> str:
     props = [p.get("name") for p in (loc.get("props") or []) if p.get("name")]
     if props:
         concrete += f"　这里可以翻查：{'、'.join(props)}。"
+    stash = [(i.get("name") or "") for i in (state.get("stashes") or {}).get(loc.get("id"), []) if i.get("name")]
+    if stash:
+        concrete += f"　玩家之前存放在这里的东西：{'、'.join(stash)}。"
     instruction = (
         "旁白只能描写这个地点里实际存在的东西，不要凭空添置别处的陈设；"
         "玩家要移动到别处，必须经由上面列出的通路，且要把移动过程写出来，不能瞬移。"
@@ -1164,7 +1181,7 @@ def search_props(content: dict[str, Any], state: dict[str, Any],
             trig.add(prop["event_id"])
             state["triggered_event_ids"] = sorted(trig)
         found.append({"id": pid, "name": name, "detail": (prop.get("detail") or "").strip(),
-                      "fragment_id": prop.get("fragment_id")})
+                      "fragment_id": prop.get("fragment_id"), "take": bool(prop.get("take"))})
     state["searched_prop_ids"] = sorted(searched)
     return found
 
@@ -1217,7 +1234,7 @@ def map_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
     avail = {l.get("id"): location_available(content, state, l) for l in locs}
     name_to_id = {l.get("name"): l.get("id") for l in locs if l.get("name")}
     at: dict[str, list[str]] = {}
-    for c in present_characters(content, act):
+    for c in present_characters(content, act, _dead_ids(state)):
         if c.get("id") == pcid:
             continue
         lid = cur if c.get("id") in following else char_home(c, act)
@@ -1267,6 +1284,62 @@ def _ending_by_id(content: dict[str, Any], eid: str | None) -> dict[str, Any] | 
     return None
 
 
+def _inv_find(items: list, name: str) -> int:
+    """Index of an item matching `name` leniently, else -1."""
+    n = (name or "").strip()
+    for i, it in enumerate(items or []):
+        inm = (it.get("name") or "").strip()
+        if inm and (inm == n or inm in n or n in inm):
+            return i
+    return -1
+
+
+def _inv_add(state: dict[str, Any], name: str, detail: str = "") -> bool:
+    items = list(state.get("inventory") or [])
+    if not (name or "").strip() or _inv_find(items, name) >= 0:
+        return False
+    items.append({"name": name.strip(), **({"detail": detail.strip()} if detail.strip() else {})})
+    state["inventory"] = items
+    return True
+
+
+def _inv_remove(state: dict[str, Any], name: str) -> dict[str, Any] | None:
+    items = list(state.get("inventory") or [])
+    i = _inv_find(items, name)
+    if i < 0:
+        return None
+    it = items.pop(i)
+    state["inventory"] = items
+    return it
+
+
+def retrieve_stash(content: dict[str, Any], state: dict[str, Any],
+                   player_input: str, channel: str = "say") -> list[dict[str, Any]]:
+    """取回寄存: naming an item you stashed at THIS place (做/看 channel) puts it back in
+    your pocket. Deterministic, mirrors search_props."""
+    if channel not in ("do", "think"):
+        return []
+    loc = current_location(content, state)
+    if not loc:
+        return []
+    lid = loc.get("id")
+    stash = list((state.get("stashes") or {}).get(lid) or [])
+    got = []
+    for it in list(stash):
+        if (it.get("name") or "") and _contains_any(player_input, [it["name"]]):
+            stash.remove(it)
+            _inv_add(state, it.get("name", ""), it.get("detail", ""))
+            got.append(it)
+    if got:
+        stashes = dict(state.get("stashes") or {})
+        if stash:
+            stashes[lid] = stash
+        else:
+            stashes.pop(lid, None)
+        state["stashes"] = stashes
+    return got
+
+
 def journal(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
     """The player's reviewable dossier (线索档案 + 结局图鉴). Discovery made tangible:
     - secrets the player has STARTED uncovering, with their unlocked fragments' full text
@@ -1295,8 +1368,16 @@ def journal(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
                 "achieved": e.get("id") in achieved,
                 "title": (e.get("title") or "") if e.get("id") in achieved else None}
                for e in story.get("endings", []) or []]
+    loc_names = {l.get("id"): l.get("name") for l in _locations(content)}
     return {"secrets": secrets, "secrets_untouched": untouched, "endings": endings,
-            "choices": dict(state.get("choices") or {})}
+            "choices": dict(state.get("choices") or {}),
+            "identity": state.get("identity"),
+            "identity_log": list(state.get("identity_log") or []),
+            "inventory": list(state.get("inventory") or []),
+            "stashes": [{"location": loc_names.get(lid, lid), "items": items}
+                        for lid, items in (state.get("stashes") or {}).items() if items],
+            "deaths": [c.get("name") for c in _characters(content)
+                       if c.get("id") in _dead_ids(state) and c.get("name")]}
 
 
 def _secret_has_newly(content: dict[str, Any], sid, newly) -> bool:
@@ -1404,6 +1485,11 @@ def run_turn_stream(
     #     physical evidence unlocks directly, its story event fires. Deterministic.
     found_props = search_props(content, state, player_input, channel)
     prop_frag_ids = [pf["fragment_id"] for pf in found_props if pf.get("fragment_id")]
+    retrieved = retrieve_stash(content, state, player_input, channel)
+    for pf in found_props:   # 🎒 a takeable prop goes straight into the pocket
+        if pf.get("take"):
+            _inv_add(state, pf.get("name", ""), pf.get("detail", ""))
+    content_mutated = False  # set when this turn adds an emergent character
 
     # 1c. 🎲 fate check: a risky 做-action gets judged (tiny call) and ROLLED for real.
     #     The result is handed to the director, who must narrate accordingly — no fiat.
@@ -1486,6 +1572,9 @@ def run_turn_stream(
     # legacy everyone-answers. See the extension inside the responder loop.
     member_pool = [c for c in all_chars if c.get("id") != primary_id] if broadcast else []
     pcfg = pressure_cfg(content)
+    dead_names = [c.get("name") for c in _characters(content)
+                  if c.get("id") in _dead_ids(state) and c.get("name")]
+    gen_count = sum(1 for c in _characters(content) if c.get("generated"))
     if channel != "think":
         state["last_speaker_id"] = primary_id
 
@@ -1496,6 +1585,12 @@ def run_turn_stream(
     if player_char:
         persona_for_prompt = {**(persona or {}), "name": player_char.get("name"),
                               "background": player_char.get("background") or (persona or {}).get("background", "")}
+    # 🎖 the player's EVOLVED identity overrides the authored one (升职/揭穿/新头衔) —
+    # NPCs address and treat them by who they are NOW
+    if state.get("identity"):
+        persona_for_prompt = {**(persona_for_prompt or {}),
+                              "background": ((persona_for_prompt or {}).get("background") or "")
+                              + f"　【TA现在的身份：{state['identity']}——在场的人都知道并按此对待TA】"}
 
     # think only applies when the player actually embodies/voices someone (not in god mode)
     is_think = channel == "think" and not observer
@@ -1542,6 +1637,10 @@ def run_turn_stream(
     # relationship mode applies to character↔player only (not god/observer, not the
     # player's own embodied character)
     rel_active = (not observer)
+
+    for it in retrieved:
+        yield emit({"type": "description", "speaker_name": None,
+                    "text": f"（你取回了之前放在这里的{it.get('name','')}。）"})
 
     # searching paid off → narrate the physical evidence BEFORE anyone reacts to it
     for pf in found_props:
@@ -1611,6 +1710,11 @@ def run_turn_stream(
             # ⚠️ the story's pressure meter (model judges this turn's delta)
             "pressure_cfg": ({**pcfg, "value": int(state.get("pressure", 0))}
                              if (pcfg and is_primary) else None),
+            # ☠️/👋/🎖/🎒 dynamic-world context
+            "deaths": dead_names,
+            "player_items": ([i.get("name") for i in (state.get("inventory") or [])]
+                             if is_primary else []),
+            "can_new_char": (is_primary and gen_count < tun["max_new_characters"]),
             # what the others have ALREADY said this turn → react, don't echo
             "said_this_turn": list(said_this_turn),
         }
@@ -1707,6 +1811,69 @@ def run_turn_stream(
                         moments.append({"kind": "pressure", "note": lv["note"], "value": p_new})
                 if p_new >= 100:
                     pressure_blown = True
+            # ☠️ DEATH: a character died this turn — gone for good, remembered by everyone
+            died_ref = (directed.get("died") or "").strip()
+            if died_ref:
+                victim = next((c for c in scene_characters(content, state)
+                               if c.get("id") != pcid and (c.get("name") or "")
+                               and ((c["name"] == died_ref) or (c["name"] in died_ref)
+                                    or (died_ref in c["name"]))), None)
+                if victim:
+                    deads = _dead_ids(state)
+                    deads.add(victim["id"])
+                    state["dead_character_ids"] = sorted(deads)
+                    state["following"] = [f for f in (state.get("following") or [])
+                                          if f != victim["id"]]
+                    dead_names.append(victim.get("name"))
+                    moments.append({"kind": "death", "name": victim.get("name")})
+            # 👋 EMERGENT CHARACTER: the story brought in a brand-new face — make them real
+            nc_raw = (directed.get("new_char") or "").strip()
+            if nc_raw and gen_count < tun["max_new_characters"]:
+                import re as _re
+                import uuid as _uuid
+                parts = _re.split(r"[｜|：:，,]", nc_raw, maxsplit=1)
+                nc_name = parts[0].strip().strip("「」\"'")[:12]
+                nc_desc = (parts[1].strip() if len(parts) > 1 else "")[:120]
+                exists = any((c.get("name") or "") == nc_name for c in _characters(content))
+                if nc_name and not exists:
+                    (content.get("story") or {}).setdefault("characters", []).append({
+                        "id": f"gen_{_uuid.uuid4().hex[:8]}",
+                        "name": nc_name,
+                        "role": nc_desc[:24] or "新登场的人物",
+                        "persona_text": nc_desc,
+                        "relation_default": "stranger",
+                        "home_location_id": state.get("location_id"),
+                        "generated": True,
+                    })
+                    content_mutated = True
+                    gen_count += 1
+                    moments.append({"kind": "arrival", "name": nc_name})
+            # 🎖 IDENTITY: the player's role/standing changed for real
+            idt = (directed.get("identity") or "").strip()
+            if idt and not observer and idt != (state.get("identity") or ""):
+                state["identity"] = idt
+                log = list(state.get("identity_log") or [])
+                log.append({"act": old_act, "text": idt})
+                state["identity_log"] = log
+                moments.append({"kind": "identity", "text": idt})
+            # 🎒 ITEMS: gained / lost / stashed at the current place
+            if not observer:
+                g = (directed.get("gained") or "").strip()
+                if g and _inv_add(state, g):
+                    moments.append({"kind": "item", "verb": "gained", "name": g})
+                l = (directed.get("lost") or "").strip()
+                if l:
+                    it = _inv_remove(state, l)
+                    if it:
+                        moments.append({"kind": "item", "verb": "lost", "name": it.get("name")})
+                st_ref = (directed.get("stashed") or "").strip()
+                if st_ref:
+                    it = _inv_remove(state, st_ref)
+                    if it and state.get("location_id"):
+                        stashes = dict(state.get("stashes") or {})
+                        stashes.setdefault(state["location_id"], []).append(it)
+                        state["stashes"] = stashes
+                        moments.append({"kind": "item", "verb": "stashed", "name": it.get("name")})
             # WHO ELSE speaks this turn: the primary judged who'd naturally chime in
             # (varies 0~2 by context/personality — not everyone, not a fixed order);
             # characters named by the player or whose secret was probed always get to
@@ -1971,7 +2138,8 @@ def run_turn_stream(
         "ending": fired,
         # who's addressable now (a new act may have brought someone onstage); in character
         # mode the embodied character is not in the list (you don't address yourself)
-        "cast": cast_for(content, state["act"], exclude_id=pcid if mode == "character" else None),
+        "cast": cast_for(content, state["act"], exclude_id=pcid if mode == "character" else None,
+                         state=state),
         "here": scene_cast(content, state, exclude_id=pcid if mode == "character" else None),
         "following": list(state.get("following") or []),
         "goal": state["goal"],
@@ -1979,6 +2147,7 @@ def run_turn_stream(
         "hint": hint,          # persistent stuck-hint for the top bar ("" = not stuck / hide)
         "moments": moments,    # threshold moments this turn (UI celebration banners)
         "dice": dice,          # 🎲 this turn's fate roll (already streamed as its own event)
+        "content_mutated": content_mutated,  # 👋 run grew a new character → persist pinned copy
         "pressure_view": ({"name": pcfg.get("name"), "value": int(state.get("pressure", 0))}
                           if pcfg else None),
         "pending_choice": state.get("pending_choice"),  # unanswered key-moment decision

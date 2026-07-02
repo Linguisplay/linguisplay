@@ -578,6 +578,10 @@ async function openJournal() {
   ).join("") || `<div class="jempty">这个剧本没有作者预设的结局。</div>`;
   ov.innerHTML = `<div class="jcard" onclick="event.stopPropagation()">
     <div class="jbar"><b>📔 档案</b><button class="ghost" onclick="document.getElementById('journal').remove()">关闭</button></div>
+    ${jd.identity ? `<div class="jh">🎖 当前身份</div><div class="jfrag">${escapeHtml(jd.identity)}</div>` : ""}
+    ${(jd.inventory||[]).length ? `<div class="jh">🎒 随身物品</div>` + jd.inventory.map(i=>`<div class="jfrag">${escapeHtml(i.name)}${i.detail?`<span class="jwho"> — ${escapeHtml(i.detail)}</span>`:""}</div>`).join("") : ""}
+    ${(jd.stashes||[]).length ? `<div class="jh">📦 存放在各处</div>` + jd.stashes.map(st=>`<div class="jfrag">${escapeHtml(st.location||"")}：${st.items.map(i=>escapeHtml(i.name)).join("、")}</div>`).join("") : ""}
+    ${(jd.deaths||[]).length ? `<div class="jh">🕯 逝者</div><div class="jfrag">${jd.deaths.map(escapeHtml).join("、")}</div>` : ""}
     <div class="jh">已揭开的真相</div>${secs}${more}
     <div class="jh">结局图鉴</div><div class="jends">${ends}</div>
   </div>`;
@@ -978,6 +982,10 @@ function showMoments(moments, relDeltas) {
     else if (m.kind === "act") pushToast(`📖 进入第${m.index}幕${m.title ? " · " + m.title : ""}`, "t-act", i++ * 650);
     else if (m.kind === "ending" && !m.terminal) pushToast(`🏆 达成结局：「${m.title || m.ending_kind}」`, "t-end", i++ * 650);
     else if (m.kind === "pressure") pushToast(`⚠️ ${m.note || ""}`, "t-press", i++ * 650);
+    else if (m.kind === "death") pushToast(`☠️ ${m.name || "有人"} 死了`, "t-press", i++ * 650);
+    else if (m.kind === "arrival") pushToast(`👋 新面孔登场：${m.name || ""}`, "t-act", i++ * 650);
+    else if (m.kind === "identity") pushToast(`🎖 你的身份变了：${m.text || ""}`, "t-end", i++ * 650);
+    else if (m.kind === "item") pushToast(m.verb === "gained" ? `🎒 获得：${m.name}` : m.verb === "stashed" ? `📦 已存放：${m.name}` : `🎒 失去：${m.name}`, "t-unlock", i++ * 650);
     else if (m.kind === "event") pushToast(`🌊 ${m.label || "起变故了"}`, "t-act", i++ * 650);
   }
   const bits = [];

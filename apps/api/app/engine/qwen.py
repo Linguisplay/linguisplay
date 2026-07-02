@@ -193,6 +193,17 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append("")
         lines.append(f"【当前场景：第{scene.get('index','')}幕 {scene.get('title','')}】{scene_events}")
 
+    deaths = [str(n) for n in (prompt.get("deaths") or []) if str(n).strip()]
+    if deaths:
+        lines.append("")
+        lines.append(f"【已不在人世】{'、'.join(deaths)} 已经死了——在场的每个人都记得这件事，"
+                     "各自带着自己的方式消化它。TA们绝不会再出现、不能再开口；提及时用过去式。")
+    inv = [str(n) for n in (prompt.get("player_items") or []) if str(n).strip()]
+    if inv and not observer and group_mode != "member":
+        lines.append("")
+        lines.append(f"「{player_name}」随身带着：{'、'.join(inv)}。（这是TA身上实际有的全部东西——"
+                     "TA掏出此列之外的物品时，其实并没有。）")
+
     if prompt.get("returning"):
         lines.append("")
         lines.append(
@@ -388,6 +399,27 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
         props["move_invite"] = {"type": "string", "description": "若你这轮提出或答应带玩家去某处，填那个地点名（可以是【可去通路】里的，也可以是对话里自然浮现的新地点；旁白只写到起身相邀为止）；否则填空字符串"}
     if not observer and not is_member and not is_think:
         props["ending"] = {"type": "string", "description": "默认空字符串；只有玩家本人此刻被你弄死填 death，走到不可挽回的坏结局填 bad"}
+    # DYNAMIC WORLD judgments (all optional; empty string = nothing happened):
+    # death / a brand-new character entering / the player's identity shifting / items.
+    if not is_member and not is_think:
+        cand = [speaker] + [str(n).strip() for n in (prompt.get("cast") or []) if str(n).strip()]
+        props["character_died"] = {"type": "string", "description":
+                                   "若这一轮剧情里确实有角色【当场死亡且不可挽回】（被杀/意外），"
+                                   "填死者名字（只能从：" + "、".join(cand) + "）；没有则填空字符串"}
+        if prompt.get("can_new_char"):
+            props["new_character"] = {"type": "string", "description":
+                                      "若剧情此刻确实需要一个此前不存在的新人物登场（推门进来/被引见/"
+                                      "下属报到/线人现身），填「名字｜身份与外貌各一句话」；不需要则空字符串"}
+    if not observer and not is_member and not is_think:
+        props["identity_change"] = {"type": "string", "description":
+                                    "若这一轮玩家的身份/职务发生了实质改变（升职、任命、被揭穿、获得头衔），"
+                                    "用一句话写TA的新身份；没有则空字符串"}
+        props["item_gained"] = {"type": "string", "description":
+                                "若玩家这一轮确实把某件具体物品拿到手（捡起/受赠/收起），填物品名；否则空字符串"}
+        props["item_lost"] = {"type": "string", "description":
+                              "若玩家失去/交出/用掉了随身物品，填物品名（须在TA随身物品之列）；否则空字符串"}
+        props["item_stashed"] = {"type": "string", "description":
+                                 "若玩家把随身物品存放/藏在当前地点，填物品名；否则空字符串"}
     pcfg = prompt.get("pressure_cfg") or {}
     if pcfg and not is_member and not is_think:
         props["pressure"] = {"type": "integer", "description":
@@ -747,6 +779,15 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
         out["occurred"] = [str(x).strip() for x in (d.get("occurred_events") or []) if str(x).strip()]
     if "pressure" in d:
         out["pressure_delta"] = _i(d.get("pressure"), -5, 15)
+    if "character_died" in d:
+        out["died"] = str(d.get("character_died") or "").strip()
+    if "new_character" in d:
+        out["new_char"] = str(d.get("new_character") or "").strip()
+    if "identity_change" in d:
+        out["identity"] = str(d.get("identity_change") or "").strip()
+    for k_in, k_out in (("item_gained", "gained"), ("item_lost", "lost"), ("item_stashed", "stashed")):
+        if k_in in d:
+            out[k_out] = str(d.get(k_in) or "").strip()
     if "next_speakers" in d:
         out["next_speakers"] = [str(x).strip() for x in (d.get("next_speakers") or []) if str(x).strip()]
     return out

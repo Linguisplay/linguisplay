@@ -30,7 +30,7 @@ def _to_run(r: RunModel) -> Run:
     # not-yet-arrived excluded); in character mode also drop the embodied character.
     cast = runtime.cast_for(
         r.pinned_content or {}, int(st.get("act", 1)),
-        exclude_id=pcid if mode == "character" else None,
+        exclude_id=pcid if mode == "character" else None, state=st,
     )
     return Run(
         id=r.id,
@@ -57,6 +57,8 @@ def _to_run(r: RunModel) -> Run:
             pending_choice=st.get("pending_choice"),
             player_character_name=(runtime._char_name(r.pinned_content or {}, pcid) if pcid else None),
             pressure=int(st.get("pressure", 0) or 0),
+            identity=st.get("identity"),
+            inventory=list(st.get("inventory") or []),
             pressure_name=((runtime.pressure_cfg(r.pinned_content or {}) or {}).get("name")),
         ),
         cast=cast,
@@ -174,6 +176,11 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
     runtime.ensure_start_location(content, state)
     # an authored key-moment decision on act 1 greets the player at the door
     state["pending_choice"] = runtime.choice_for_act(content, state, 1)
+    # 🎒 the embodied character's authored pocket items start the run with the player
+    if pcid:
+        pc = next((c for c in (content.get("story") or {}).get("characters", [])
+                   if c.get("id") == pcid), None)
+        state["inventory"] = [dict(i) for i in ((pc or {}).get("items") or []) if i.get("name")]
     run = RunModel(
         owner_id=user.id,
         story_id=story.id,
@@ -323,6 +330,10 @@ def play(
             # persist final state + emit the trailing meta events
             if final is not None:
                 run.state = final["state"]
+                if final.get("content_mutated"):
+                    # the run grew an emergent character — persist its private story copy
+                    run.pinned_content = content
+                    flag_modified(run, "pinned_content")
                 db2.commit()
                 yield _event({"event": "state", "state": _to_run(run).state.model_dump()})
                 yield _event({"event": "scene", "scene": final.get("scene")})
