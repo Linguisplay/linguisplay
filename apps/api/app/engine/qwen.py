@@ -380,6 +380,15 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
         props["move_invite"] = {"type": "string", "description": "若你这轮提出或答应带玩家去某处，填那个地点名（可以是【可去通路】里的，也可以是对话里自然浮现的新地点；旁白只写到起身相邀为止）；否则填空字符串"}
     if not observer and not is_member and not is_think:
         props["ending"] = {"type": "string", "description": "默认空字符串；只有玩家本人此刻被你弄死填 death，走到不可挽回的坏结局填 bad"}
+    # TURN ALLOCATION: real conversations aren't a roll call. The primary judges who else
+    # would NATURALLY chime in this turn (0~2, order = who jumps in first; may be nobody).
+    others = [str(n).strip() for n in (prompt.get("cast") or []) if str(n).strip()]
+    if group_mode == "primary" and others:
+        props["next_speakers"] = {"type": "array", "items": {"type": "string"}, "description":
+                                  "你说完后，在场还有谁会自然地接话或忍不住插嘴（0~2个，按谁先开口排；"
+                                  "凭各人性格和这句话与TA的相干程度定，不必人人说话，谁都不接就填[]）。"
+                                  "只能从这些名字里原样抄写：" + "、".join(others)}
+        required.append("next_speakers")
     # ask/event JUDGMENT (anti keyword-stuffing): the model — not substring matching —
     # decides what the player genuinely probed and which authored events truly happened.
     # Candidates are sanitized titles/labels only; the engine reconciles afterwards.
@@ -721,6 +730,8 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
         out["probed"] = [str(x).strip() for x in (d.get("probed_topics") or []) if str(x).strip()]
     if "occurred_events" in d:
         out["occurred"] = [str(x).strip() for x in (d.get("occurred_events") or []) if str(x).strip()]
+    if "next_speakers" in d:
+        out["next_speakers"] = [str(x).strip() for x in (d.get("next_speakers") or []) if str(x).strip()]
     return out
 
 

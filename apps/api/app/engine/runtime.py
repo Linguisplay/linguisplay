@@ -1400,12 +1400,12 @@ def run_turn_stream(
         observer = True
         if target_character_id:
             spot = _char_by_id(content, target_character_id)
-            responders = [spot] + [c for c in all_chars if c.get("id") != target_character_id] if spot else list(all_chars)
+            primary = spot or (all_chars[0] if all_chars else None)
         else:
-            responders = list(all_chars)
-        primary = responders[0] if responders else None
+            primary = all_chars[0] if all_chars else None
         primary_id = primary.get("id") if primary else None
-        broadcast = len(responders) > 1
+        broadcast = len(all_chars) > 1
+        responders = [primary] if primary else []
     else:
         observer = False
         primary = pick_responder(content, state, player_input, target_character_id, probed_char_ids, all_chars)
@@ -1414,11 +1414,14 @@ def run_turn_stream(
         if primary is None or channel == "think":
             # think = observe/examine (handled separately below), no NPC responds
             responders = []
-        elif broadcast:
-            # primary first (it carries the narration), then the rest of the present cast
-            responders = [primary] + [c for c in all_chars if c.get("id") != primary_id]
         else:
             responders = [primary]
+    # REAL conversations aren't a roll call: in a broadcast, the members who follow are
+    # decided AFTER the primary speaks — by the primary's next_speakers judgment (who would
+    # naturally chime in, 0~2, order = who jumps in first), plus deterministic must-speaks
+    # (named in the player's line / owner of a probed secret). No judgment (mock/prose) →
+    # legacy everyone-answers. See the extension inside the responder loop.
+    member_pool = [c for c in all_chars if c.get("id") != primary_id] if broadcast else []
     if channel != "think":
         state["last_speaker_id"] = primary_id
 
@@ -1623,6 +1626,30 @@ def run_turn_stream(
                 trig -= (provisional_events - ev_ids)  # roll back denied keyword guesses
                 trig |= ev_ids
                 state["triggered_event_ids"] = sorted(trig)
+            # WHO ELSE speaks this turn: the primary judged who'd naturally chime in
+            # (varies 0~2 by context/personality — not everyone, not a fixed order);
+            # characters named by the player or whose secret was probed always get to
+            # speak. Extending the list mid-iteration is safe (list iterator is indexed).
+            if broadcast and member_pool:
+                picked = directed.get("next_speakers")
+                if picked is None:
+                    chosen = list(member_pool)  # no judgment (mock/prose) → legacy: everyone
+                else:
+                    chosen = []
+                    for nm in picked:
+                        nm = str(nm).strip()
+                        for c in member_pool:
+                            cn = c.get("name") or ""
+                            if nm and cn and (cn == nm or cn in nm or nm in cn) and c not in chosen:
+                                chosen.append(c)
+                    for c in member_pool:  # deterministic must-speaks
+                        if c in chosen:
+                            continue
+                        cn = c.get("name") or ""
+                        if (cn and cn in (player_input or "")) or c.get("id") in probed_char_ids:
+                            chosen.append(c)
+                    chosen = chosen[:3]
+                responders.extend(chosen)
 
     # think = OBSERVE/EXAMINE. No target → look at the surroundings (where am I, what's
     # going on). With a target → examine that person: a brief intro + their CURRENT state
