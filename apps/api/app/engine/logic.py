@@ -9,7 +9,7 @@ Layer 1 — verify_turn():  play-time. After a turn is generated, a deterministi
                           check that the text didn't (a) drag an absent character into the
                           scene, (b) leak a still-locked secret, or (c) whisk the player to
                           a place they haven't unlocked. Pairs with scrub_beats() to repair.
-Layer 3 — the reasoning scaffold lives in qwen._render_tool (a private `logic_check` field
+Layer 3 — the reasoning scaffold lives in qwen._render_tool (a private `inner_read` field
                           the model fills before speaking); this module holds the shared
                           text helpers it and the verifier both use.
 

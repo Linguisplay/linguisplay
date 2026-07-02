@@ -12,7 +12,7 @@ def test_autonomy_block_and_agenda_in_prompt():
             "channel": "say", "context": {}}
     sys = qwen._build_system(base)
     assert "独立的人" in sys and "不是工具人" in sys      # autonomy directive always present
-    assert "独一无二的声音" in sys                         # distinct-voice instruction present
+    assert "声音只属于你" in sys                           # distinct-voice instruction present
     # an authored agenda is injected as the character's own goal
     sys2 = qwen._build_system({**base, "agenda": "守住城寨那条门路"})
     assert "守住城寨那条门路" in sys2

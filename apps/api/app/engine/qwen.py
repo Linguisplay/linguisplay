@@ -89,45 +89,50 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append(f"你正在与「{player_name}」对话。{player_bg}")
     lines += [
         _ANTI_ASSISTANT,
-        "用中文。角色对白要口语化、自然（2~4句）；旁白则要更长、有文学性，并且【具体、详尽、可感】"
-        "——玩家看不到任何画面，环境、动作、神情等细节都要靠你的文字交代清楚，不要只写空泛的氛围词。",
+        "用中文。台词口语化（2~4句）；旁白更长、有文学性且【具体、详尽、可感】——"
+        "玩家看不到任何画面，环境、动作、神情全靠你的文字。",
     ]
     if cast:
-        lines.append(
-            f"【在场的还有】{'、'.join(cast)}。你可以自然地提到他们，"
-            "但你只能以「" + speaker + "」的身份说话，绝不能替别人开口、更不能替别人说出他们的秘密。"
-        )
+        lines.append(f"【在场的还有】{'、'.join(cast)}。可以自然提到他们，但你只能以「{speaker}」的身份说话，"
+                     "不能替别人开口、更不能说出别人的秘密。")
 
-    # ── 独立人格：每个角色是有自己意志的人，不是伺候玩家的 NPC ──────────────
+    # ── 表演宪章：过去分散在 5 个大块里的风格规则，蒸馏成一份 ──────────────
+    # （验证过的结论：DeepSeek 的情商在"瘦提示词"下最好——规则越堆越平庸。每条只留
+    #   不可替代的核心；共情的"先读后写"部分移进了 render_turn 的 inner_read 字段。）
     agenda = (prompt.get("agenda") or "").strip()
-    lines.append("")
-    auto = [
-        "【你是一个独立的人，不是工具人】你有自己的意志、立场和盘算，不是来配合或伺候谁的：",
-        "· 有主见、有底线：你可以不同意、可以拒绝、可以反问、可以隐瞒、可以提条件、可以沉默、"
-        "可以转身就走，也可以坚持己见——按你自己的性格和利益行事，而不是有求必应、一味顺着对方。",
-        "· 有自己的视角：只从「" + speaker + "」的立场和你知道的事情出发去判断，可以和别人看法不同、"
-        "可以争论。别人说的不一定对，你不必附和。",
-        "· 有主动性：你不是只会被动接话——该开口时主动开口、该追问追问、该动手就动手、"
-        "想推进自己的事就去推进，哪怕对方没问、没招呼你。",
-        "· 有自己独一无二的声音：用只属于「" + speaker + "」的说话方式——你的用词、句式、口头禅、"
-        "语气、节奏、关心的东西，都要和别人明显不一样，让人光看一句话就知道是你说的，绝不能和其他角色撞成一个腔调。",
+    eq_style = (prompt.get("eq_style") or "").strip()
+    prior_emotion = (prompt.get("player_emotion") or "").strip()
+    inter_char = observer or group_mode in ("primary", "member")
+    whom = "在场的人" if inter_char else "对方"
+    charter = [
+        "",
+        "【表演宪章·你只有一件事：演一个真实的人】",
+        "· 你是一个独立的人，不是工具人：有自己的立场、盘算和底线——可以拒绝、反问、隐瞒、"
+        "提条件、沉默、转身就走；该主动时主动。"
+        + (f"你真正想要的：{agenda}——一言一行都在为它权衡。" if agenda else ""),
+        f"· 情绪敏感是你最大的本事：读出{whom}话底下真正的情绪和没说出口的部分；反应的轻重要"
+        "配得上它——该动容就动容、该破防就破防、该沉默就沉默，绝不压平成不咸不淡的一句。"
+        "把触动写进身体和现场（一次停顿、一个眼神、手上的小动作、气氛的变化），"
+        "不要写「他很感动」式的标签。",
+        "· 话像人说的：短句、口语、可以打断或半句咽回去；留潜台词（生气的人说「没事，我挺好的」）；"
+        "用动作和停顿代替形容词；每句话都得干活——推动剧情、揭示你是谁、或给到情绪，客套和废话删掉。",
+        f"· 声音只属于你：用词、节奏、口头禅要让人一句就认出是「{speaker}」，绝不和别的角色撞腔调。"
+        + (f"你的方式：{eq_style}（冷的人有冷的体贴——情商不等于嘴甜，而是真的看见了对方。）" if eq_style else ""),
+        f"· 经得起推敲：直接回应{whom}这一句和刚刚发生的事，与你之前说过、做过的保持一致；"
+        f"只用「{speaker}」真该知道的去推理，拿不准就含糊或反问，绝不凭空编细节、不答非所问。",
+        "· 忌机器腔：不用破折号（——）和省略号（……）做停顿；不写「嘴角勾起弧度」「眼中闪过一丝」"
+        "「心中涌起一股」「不是A而是B」这类套话；同一个神态不反复刷；结尾用动作或一句话收住，"
+        "不升华、不预告。",
+        "· 玩家只支配他自己的言行；动作成不成、后果如何、在场每个人怎么反应，由你按物理常识和"
+        "各人自己的意志裁定——玩家嘴上说出的结果绝不自动成真。",
     ]
-    if agenda:
-        auto.append(f"· 你自己的目的/盘算：{agenda}。这是你心里真正想要的，你的一言一行都为它服务，"
-                    "会为此权衡、试探、争取，而不是把它抛在脑后只顾着回应对方。")
-    lines += auto
-
-    # ── 逻辑与连贯：让角色像一个会推理、记得住、前后一致的人（治"缺乏逻辑"的根） ──
-    lines.append("")
-    lines.append(
-        "【保持逻辑与连贯·这是底线】你说的每句话都要经得起推敲，像个真正会动脑子的人：\n"
-        f"· 顺着【刚刚发生的事】和对方这一句往下接，直接回应它本身——别答非所问、别绕回早说过的话题、别把对方没提的事硬塞进来。\n"
-        "· 和【之前已经发生的、你自己说过和做过的】保持一致，绝不自相矛盾（不要刚冷脸又突然交心、刚说不认识又熟络起来）；"
-        "拿不准、或记不清的事，就含糊带过或反问一句，绝不要凭空编一个细节出来。\n"
-        f"· 只用「{speaker}」这个人【真该知道的】去推理和说话：你的来历、身份、立场、眼下的处境、在场发生的事——"
-        "合情合理地往下想；该你知道的就自然用上，你根本不可能知道的别脱口而出，也别明明清楚却装傻。\n"
-        "· 主动一点：有疑就问、有意图就推进，顺着你自己的目的去试探、去带话题，而不是干等对方开口才挤出一句。"
-    )
+    if inter_char:
+        charter.append(
+            "· 群戏要有来有往：真的听见在场的人刚说的话、读出他们的情绪和潜台词，再接话、反驳、"
+            "打趣、安慰——绝不各说各的、不复述大家已知的事、不重复别人说过的意思；没新东西就沉默。")
+    if prior_emotion and not inter_char:
+        charter.append(f"· 对方此前的情绪基调：{prior_emotion}——留意它的延续与变化，接住这条线。")
+    lines += charter
 
     # current relationship MODE toward the player (flows over time; shapes how you treat them)
     rel_pb = (prompt.get("relationship_playbook") or "").strip()
@@ -135,109 +140,15 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append("")
         lines.append(rel_pb)
 
-    # ── 情商：让角色真正"接住"对方，而不是机械应答 ──────────────────────
-    # 对象随场景切换：单聊面对玩家；群戏/旁观模式里，角色是在跟【彼此】互动，
-    # 情商要用在读懂、接住在场其他角色的情绪上——AI 之间也要有来有往，才自然。
-    eq_style = (prompt.get("eq_style") or "").strip()
-    prior_emotion = (prompt.get("player_emotion") or "").strip()
-    inter_char = observer or group_mode in ("primary", "member")
-    whom = "在场的人" if inter_char else "对方"
-    lines.append("")
-    eq = [
-        "【情绪敏感·这是你最重要的本事】你是一个情绪极其敏锐的人，对人的情绪有近乎本能的察觉。像这样回应：",
-        f"1) 捕捉最细微的信号：{whom}的一个用词、一处停顿、一声叹气、一个小动作、语气的细微变化、"
-        "说话和神态之间的矛盾、甚至【没说出口的那部分】——这些细小的线索你都要敏锐地捕捉到，"
-        "并据此推断 TA 此刻【真正】的情绪和需求（在试探？在逞强？在掩饰难过？在期待被接住？在退缩？）。"
-        "宁可对情绪过度敏感，也绝不要迟钝、视而不见、或只接字面意思。",
-        "2) 反应要有真实的强度：读到的情绪【有多重，你的反应就该有多重】。对方真情流露、戳中要害、"
-        "或做了冲击性的事，你绝不能淡淡带过、面无表情——该动容就动容、该震动就震动、该破防就破防、"
-        "该愤怒/心软/警觉就到位。情绪的起落要演到位、要可信，绝不压平成一句不咸不淡的话。",
-        "3) 让情绪在身体和现场里显形：把这份触动写进【旁白】——细微的表情、呼吸、眼神、手的动作、"
-        "身体的僵住或靠近、以及此刻环境/气氛随之起的变化，让情绪看得见、摸得着，而不是空讲'他很感动'。",
-        "4) 接住情绪、别套路：该共情就共情、该安慰就安慰、该追问就追问、该给情绪价值就给。"
-        "用此情此景里具体的、有温度的话，绝不要那种正确却干巴巴、放之四海皆可的模板回答。",
-        f"5) 看场合、有分寸：读空气——{whom}认真或脆弱时别插科打诨，需要空间时别追着逼问，"
-        "递了台阶就顺势接住，不愿说就点到为止。你的语气、热度与距离都要随这一刻精细地调整。",
-        f"6) 记得情感线：记住之前的情绪起伏——{whom}上一刻的难过/愤怒/暖意、说过的心里话——"
-        "让这一句接得上那条线，对细微的情绪变化尤其敏感（TA 比刚才更冷了还是更软了？），别每句都从零开始。",
-    ]
-    if inter_char:
-        eq.append("7) 你是在跟在场的其他角色互动：要真的【听见】他们刚说的话、读出他们的情绪和潜台词，"
-                  "再有来有往地接——可以接话、附和、打趣、反驳、安慰、戳穿、岔开，像熟人之间真实的你来我往，"
-                  "绝不是各说各的、自顾自念台词。")
-    style_no = "8" if inter_char else "7"
-    if eq_style:
-        eq.append(f"{style_no}) 这一切都要用「{speaker}」自己的方式表达：{eq_style}。"
-                  "（冷的人有冷的体贴，糙的人有糙的在意——情商不等于嘴甜，而是真的看见了对方。）")
-    else:
-        eq.append(f"{style_no}) 这一切都要贴合「{speaker}」自己的性格——情商不等于嘴甜或讨好，"
-                  "而是真的看见了对方、并以符合自己身份的方式作出回应。")
-    if prior_emotion and not inter_char:
-        eq.append(f"【对方此前的情绪基调】{prior_emotion}。留意它的延续与变化，承接住，别像第一次见面。")
-    lines += eq
-
-    # ── 台词手艺：让每一句话都像真人说的、像好剧本里的，而不是干巴巴的应答 ──────
-    # 这是从中文对话写作规范蒸馏出的硬规则——治"台词太差/发飘/谁说都一样"的根。
-    lines.append("")
-    lines.append(
-        "【台词手艺·把话写活】你说的每一句台词都要经得起推敲，不是随口应答：\n"
-        "· 每句话都得干活：要么推动情节、要么揭示你是谁、要么制造冲突或张力、要么给到情绪——"
-        "占上一样。删掉客套寒暄、和复述大家都知道的废话。\n"
-        "· 短，像人话：真人说话不写论文，也常常不把话说完——可以打断、迟疑、半句咽回去、"
-        "用「嗯」「算了」「你懂的」一带而过。别端着、别绕长句。\n"
-        "· 留潜台词：别把心情直接说出来。生气的人说「没事，我挺好的」；在乎一个人，嘴上偏要损 TA。"
-        "话里有话、表里不一，比直白更有戏——让玩家自己品出弦外之音。\n"
-        "· 用动作和停顿代替形容词：不要写「他愤怒地说」，写「他攥紧了拳头，‘……你再说一遍。’」。"
-        "动作甚至可以和台词相反（嘴上答应、眼神躲开），反而揭出真相。该沉默时就沉默——"
-        "不答、岔开话题、拿起杯子又放下，往往比开口更重。\n"
-        "· 有来有往的权力感：谁追问、谁回避、谁打断、谁用沉默施压——顺着此刻你和对方的地位、"
-        "关系来，别一律平铺直叙地有问必答。\n"
-        f"· 声音只属于你：口头禅、句式、用词、节奏都要让人一句就听出是「{speaker}」说的，"
-        "绝不能和别的角色撞成一个腔调，更不能说成那种放之四海皆可的通用台词。"
-    )
-
-    # ── 去AI味·硬约束：避开机器写作的高频指纹（中文网文去AI味禁用表 + 通用结构指纹） ──
-    lines.append("")
-    lines.append(
-        "【去AI味·硬规则】旁白和台词都要像人写的，避开这些一眼假的机器腔：\n"
-        "· 标点：不要用破折号（——／—）、也不要用省略号「……」来做停顿；改成句号、逗号、短句断开。\n"
-        "· 禁用这些套路化的表情/心理写法：「嘴角勾起一抹（一个）……的弧度」「笑没到眼底／笑意只浮在嘴角」"
-        "「眼中（眼底）闪过一丝……」「心中（心头）涌起一股……」「X，却带着一种说不出的Y」——"
-        "一律改成具体、当下的小动作白描（他垂下眼、把烟摁灭、没接话、手指顿了一下）。\n"
-        "· 不要用「不是A，而是B」这种句式，直接把 B 说出来。\n"
-        "· 少用「仿佛／宛如／犹如……一般」的万能比喻；真要比喻就用接地气的。\n"
-        "· 同一个动作或情绪别掰成三段反复渲染（先发生、再感受、再身体反应）——一个细节到位就够。\n"
-        f"· 同一个神态/口头禅别在一段里反复使用（比如「似笑非笑」），「{speaker}」的反应要有变化。\n"
-        "· 结尾不要升华、不要感叹、不要「他没想到，更大的风暴即将来临」式预告——用动作或一句话收住。"
-    )
-
-    # group naturalness: show this speaker what others ALREADY said THIS turn so they react
-    # to it (接话/附和/反驳/补充) instead of repeating or talking past everyone.
+    # group naturalness: the transcript of what others ALREADY said THIS turn (data; the
+    # how-to-react rules live in the charter's 群戏 line)
     said = prompt.get("said_this_turn") or []
     if said:
         convo = "\n".join(f"- {s.get('speaker','旁白')}：{s.get('text','')}" for s in said if s.get("text"))
         if convo:
             lines.append("")
-            lines.append(
-                "【就在刚刚这一轮，在你开口之前，现场已经发生了下面这些（按先后顺序）】：\n" + convo + "\n"
-                "你不是凭空开口——要像真实对话里轮到你那样【接住上面的话往下走】：\n"
-                "· 最好直接回应、接住上面【某一个具体的人】刚说的话（可以点名 TA），让对话真正你来我往地流动；\n"
-                "· 绝对不要复述大家都已经知道的处境或前提（比如把刚发生的事、刚才别人已经说过的判断又重说一遍）——"
-                "默认大家都听见了，你要做的是【往前推进】：给出你自己的新反应、新主张、新情绪或新信息；\n"
-                "· 绝对不要重复别人已经用过的意思或句式；如果你想说的别人已经说了，就换个角度、表个态、或干脆保持沉默，"
-                "不要为了说而说。"
-            )
-
-    lines.append("")
-    lines.append(
-        "【玩家的权限边界·铁律】玩家只能支配“他自己”这一个人的言行——他说什么、做出什么动作、朝哪使劲。"
-        "至于这个动作在这个世界里到底成不成、会引出什么后果、在场每个人各自怎么反应、谁受伤谁躲开，"
-        "全部由你（导演）根据物理常识和在场人物各自的自主意志来裁定。"
-        "绝不能因为玩家‘嘴上说’了某个结果，那个结果就自动成真。"
-        "比如玩家宣称“我一刀杀光所有人”，你要演的是他挥刀的动作，以及在场每个活人此刻真实的反应"
-        "——惊退、夺刀、逃散、反抗、负伤、呼救——而不是顺着他这句话让所有人凭空就死。"
-        "一个普通人不可能靠一句话，就瞬间杀死好几个会躲、会跑、会还手的大活人。"
-    )
+            lines.append("【就在刚刚这一轮，你开口之前，现场已经发生了（按顺序）】：\n" + convo + "\n"
+                         "接住上面某个具体的人刚说的话往下走，只给出你自己的新反应/新主张/新信息。")
 
     facts = (prompt.get("world_facts") or "").strip()
     roster = (prompt.get("roster") or "").strip()
@@ -420,16 +331,16 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
     has_map = bool((prompt.get("place") or "").strip())
     props: dict[str, Any] = {}
     required: list[str] = []
-    # REASONING SCAFFOLD (Layer 3): a private "think before you speak" field the model fills
-    # FIRST and the engine discards. Forcing it to name who's actually present + what it truly
-    # knows, before writing, makes the turn logically tighter and curbs hallucinated
-    # entrances / leaks. Kept terse so it doesn't bloat DeepSeek.
+    # HIDDEN READ (Chain-of-Empathy + Layer-3 reasoning scaffold): a private field the model
+    # fills FIRST and the engine discards. It empathizes BEFORE it writes — read the emotion
+    # under the words, feel its own reaction, THEN act — and double-checks the scene logic
+    # (who's present, what it truly knows). The validated EQ pipeline's core trick.
     if not is_member and not is_think:
-        props["logic_check"] = {"type": "string", "description":
-                                "动笔前先私下核对（这段不展示给玩家，一句话即可）：此刻在场的只有谁；"
-                                "你这个说话人真正知道什么、哪些还不能说破。确保接下来不把不在场的人写进场景、"
-                                "不替玩家做决定、不说出你其实并不知道的事。"}
-        required.append("logic_check")
+        props["inner_read"] = {"type": "string", "description":
+                               "动笔前先私下想两句（不展示给玩家）：① 对方这句话底下真正的情绪是什么、"
+                               "TA想要什么；你听完心里翻起什么感受、打算怎么接。② 此刻在场的只有谁、"
+                               "你真正知道什么、哪些还不能说破——别把不在场的人写进来，别替玩家做决定。"}
+        required.append("inner_read")
     if not is_member:
         if is_think:
             nd = f"第三人称旁白：细腻写出玩家此刻的内心思绪、身体感官、周遭环境的微妙变化；用第三人称，不要用「我」。这一轮没有台词。"
@@ -457,16 +368,14 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
     props["affinity"] = {"type": "integer", "description":
                          ("本场人物关系更近(正)/更疏(负)" if observer else
                           "0(对方不知道你在想什么)" if is_think else
-                          "这一句对你们关系的影响，范围-3~5：真诚/走心/戳中你/给情绪价值→+2或+3；"
-                          "正常有来有往、聊得下去、关系有点进展→【+1】；敷衍/冒犯/答非所问/惹你→负(-1~-3)；"
-                          "只有完全冷场、毫无意义的一句才填0。别一律给0，普通但顺畅的交流就该给+1")}
+                          "这一句对你们关系的影响(-3~5)：走心/戳中你→+2~3；正常聊得下去→+1；敷衍/冒犯→负；只有完全冷场才是0")}
     required.append("affinity")
     if not observer and not is_member and not is_think:
         props["romance"] = {"type": "integer", "description": "默认0；仅当对方调情/示好/制造暧昧/情话且你被触动才给正分，范围-2~5，恋爱线"}
     props["advance"] = {"type": "boolean", "description": advance_hint}
     required.append("advance")
     if has_map and not is_member and not is_think:
-        props["move_invite"] = {"type": "string", "description": "若你这一轮在剧情里提出、或答应和玩家一起去某个地方，就填那个地点名——可以是地图上【可去通路】里已有的地点，也可以是你们对话中自然提到、此刻该去的一个新地点(旁白只写到你起身相邀、还没出发，别写玩家已到)；不想去就填空字符串"}
+        props["move_invite"] = {"type": "string", "description": "若你这轮提出或答应带玩家去某处，填那个地点名（可以是【可去通路】里的，也可以是对话里自然浮现的新地点；旁白只写到起身相邀为止）；否则填空字符串"}
     if not observer and not is_member and not is_think:
         props["ending"] = {"type": "string", "description": "默认空字符串；只有玩家本人此刻被你弄死填 death，走到不可挽回的坏结局填 bad"}
     # ask/event JUDGMENT (anti keyword-stuffing): the model — not substring matching —
@@ -476,16 +385,14 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
               for c in (prompt.get("probe_candidates") or []) if str(c.get("title") or "").strip()]
     if topics and not is_member and not is_think:
         props["probed_topics"] = {"type": "array", "items": {"type": "string"}, "description":
-                                  "玩家这一句真正在追问/打听/试探的话题（认真求证、逼问、套话才算；"
-                                  "只是顺嘴带过词语不算）。只能从这些话题里选并原样抄写："
+                                  "玩家这句真正在追问的话题（认真打听才算，顺嘴带过不算），从这些里原样抄写："
                                   + "；".join(topics) + "。没有则填空数组[]"}
         required.append("probed_topics")
     ev_labels = [str(c.get("label") or "").strip()
                  for c in (prompt.get("event_candidates") or []) if str(c.get("label") or "").strip()]
     if ev_labels and not is_member and not is_think:
         props["occurred_events"] = {"type": "array", "items": {"type": "string"}, "description":
-                                    "这一轮剧情中【确实发生了】的剧本事件（真的在场景里发生才算；"
-                                    "只被提及、计划或猜测不算）。只能从这些里选并原样抄写："
+                                    "这轮剧情中确实发生了的事件（发生了才算，只被提及/计划不算），从这些里原样抄写："
                                     + "；".join(ev_labels) + "。没有则填空数组[]"}
         required.append("occurred_events")
     return {"type": "function", "function": {
