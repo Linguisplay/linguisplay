@@ -77,7 +77,9 @@ CHARACTERS = [
     {
         "id": "shin",
         # 蓝信一 守在暗巷里，是最早盯上生面孔的人。可走暧昧/恋人线，也可能因你威胁大哥而成敌人。
+        # 作息表: 风声紧了(act4起)就撤回理发店和兄弟们守在一起——去哪找他，本身就是剧情。
         "home_location_id": "loc_alley",
+        "schedule": [{"from_act": 4, "location_id": "loc_barber"}],
         "relation_default": "stranger",
         "relation_allowed": ["stranger", "peer", "friend", "flirt", "lover", "enemy"],
         "name": "蓝信一",
@@ -117,6 +119,7 @@ CHARACTERS = [
         "id": "sei",
         # 四仔 常泡在大牌档收风，城里城外的消息都从他这桌过。够意思换够意思。
         "home_location_id": "loc_dai",
+        "schedule": [{"from_act": 6, "location_id": "loc_barber"}],
         "relation_default": "stranger",
         "relation_allowed": ["stranger", "peer", "friend", "enemy"],
         "name": "四仔",

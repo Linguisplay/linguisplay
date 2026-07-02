@@ -158,6 +158,14 @@ def lint_story(content: dict[str, Any]) -> list[Issue]:
         for ex in l.get("exits") or []:
             if ex not in loc_ids and ex not in loc_names:
                 err("dangling_exit", where, f"出口指向不存在的地点：{ex}")
+        frag_ids_all = {f.get("id") for f in frags if f.get("id")}
+        event_ids_all = {ev.get("id") for a in acts for ev in (a.get("events") or []) if ev.get("id")}
+        for p in (l.get("props") or []):
+            pwhere = f"{where}.props[{p.get('name','')}]"
+            if p.get("fragment_id") and p["fragment_id"] not in frag_ids_all:
+                err("dangling_prop_frag", pwhere, f"物证指向不存在的 fragment：{p['fragment_id']}")
+            if p.get("event_id") and p["event_id"] not in event_ids_all:
+                err("dangling_prop_event", pwhere, f"物证指向不存在的事件：{p['event_id']}")
         _check_frag_refs((l.get("unlock") or {}).get("required_fragment_ids") or [], where, None)
     # inbound reachability: a non-start location with no exit pointing at it is unreachable
     if locs:
@@ -176,6 +184,11 @@ def lint_story(content: dict[str, Any]) -> list[Issue]:
     for c in chars:
         cid = c.get("id")
         where = f"char:{cid}"
+        for e in (c.get("schedule") or []):
+            slid = (e.get("location_id") or "").strip()
+            if slid and slid not in loc_ids:
+                err("bad_schedule", where,
+                    f"角色「{c.get('name','')}」的作息表指向不存在的地点：{slid}")
         home = c.get("home_location_id")
         if home and home not in loc_ids:
             err("bad_home", where, f"角色「{c.get('name','')}」的 home_location_id={home} 不是已知地点。")
@@ -201,6 +214,11 @@ def lint_story(content: dict[str, Any]) -> list[Issue]:
     if _endings(content) and good == 0:
         warn("no_good_ending", "endings", "没有任何 true/normal 结局 —— 玩家无论怎么玩都只能走向坏结局/死亡。")
 
+    for f in frags:
+        lid = (f.get("unlock") or {}).get("location_id")
+        if lid and lid not in loc_ids:
+            err("bad_frag_location", f"fragment[{f.get('id')}]",
+                f"解锁条件指向不存在的地点：{lid}")
     return issues
 
 

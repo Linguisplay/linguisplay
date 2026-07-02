@@ -127,6 +127,20 @@
 #journal .jends { display:flex; flex-direction:column; gap:5px; }
 #journal .jend { font-size:13px; color:#7b8296; padding:6px 10px; border-radius:8px; background:#181a24; border:1px solid #232635; }
 #journal .jend.got { color:#ecdcff; border-color:#4a3a66; background:#1e1930; }
+#mapov { position:fixed; inset:0; z-index:70; background:rgba(0,0,0,.55); display:grid; place-items:center; }
+#mapov .mcard { width:min(600px, 94vw); max-height:80vh; overflow-y:auto; background:#12161a; border:1px solid #2c4233; border-radius:14px; padding:16px 18px; box-shadow:0 12px 48px rgba(0,0,0,.6); }
+#mapov .jbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+#mapov .mgrid { display:grid; grid-template-columns:repeat(auto-fill, minmax(160px, 1fr)); gap:10px; }
+#mapov .mnode { padding:10px 12px; border-radius:11px; background:#171d22; border:1px solid #26333a; }
+#mapov .mnode.here { border-color:#8fe0a6; background:#16241c; box-shadow:0 0 0 1px #8fe0a655; }
+#mapov .mnode.cango { cursor:pointer; }
+#mapov .mnode.cango:hover { border-color:#5b8a6c; background:#1a2a20; }
+#mapov .mname { font-size:13.5px; font-weight:700; color:#d7e8dc; }
+#mapov .mhere { font-size:10.5px; color:#8fe0a6; font-weight:400; }
+#mapov .mgo { font-size:10.5px; color:#7fb08e; font-weight:400; border:1px solid #3a5a45; border-radius:6px; padding:0 5px; }
+#mapov .mchars { font-size:12px; color:#c9c9d4; margin-top:4px; }
+#mapov .mexits { font-size:11px; color:#7b8a80; margin-top:3px; }
+#mapov .mhidden { color:#7b8296; font-size:12px; font-style:italic; margin-top:10px; }
 </style>
 </head>
 <body>
@@ -137,6 +151,7 @@
   <header>
     <b>LinguisPlay <span class="muted" style="font-weight:400">· AI 虚构内容</span></b>
     <span style="display:flex; gap:8px; align-items:center">
+      <button id="mapBtn" class="iconbtn hidden" title="地图：已发现的地点与去处" onclick="openMap()">🗺</button>
       <button id="journalBtn" class="iconbtn hidden" title="档案：已揭开的真相与结局图鉴" onclick="openJournal()">📔</button>
       <button id="soundBtn" class="iconbtn hidden" title="背景音乐开关" onclick="toggleSound()">🔊</button>
       <button id="backBtn" class="ghost hidden" style="padding:5px 10px" onclick="backToPick()">← 剧本</button>
@@ -293,7 +308,7 @@ async function startRun(storyId, mode="character", playerCharacterId=null, playe
     story_id: storyId, persona_id: personaId, mode, player_character_id: playerCharacterId }) });
   runId = run.id;
   hide("role");
-  hide("pick"); show("play"); show("backBtn"); show("soundBtn"); show("journalBtn");
+  hide("pick"); show("play"); show("backBtn"); show("soundBtn"); show("journalBtn"); show("mapBtn");
   resetEnded();
   chat.innerHTML = ""; suggest.innerHTML = ""; state.innerHTML = "";
   curBgmMood = null; curScene = null; curLocId = null;
@@ -319,12 +334,12 @@ function sendLeave() { if (runId) { try { navigator.sendBeacon(`/runs/${runId}/l
 window.addEventListener("pagehide", sendLeave);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") sendLeave(); });
 
-function backToPick() { sendLeave(); runId = null; stopBgm(); hide("play"); hide("backBtn"); hide("soundBtn"); hide("journalBtn"); show("pick"); }
+function backToPick() { sendLeave(); runId = null; stopBgm(); hide("play"); hide("backBtn"); hide("soundBtn"); hide("journalBtn"); hide("mapBtn"); show("pick"); }
 async function doLogout() {
   sendLeave();  // must fire while the session cookie is still valid
   try { await j("/auth/logout", { method:"POST" }); } catch(e){}
   runId = null; stopBgm();
-  hide("play"); hide("pick"); hide("role"); hide("backBtn"); hide("soundBtn"); hide("journalBtn"); hide("logoutBtn");
+  hide("play"); hide("pick"); hide("role"); hide("backBtn"); hide("soundBtn"); hide("journalBtn"); hide("mapBtn"); hide("logoutBtn");
   show("auth");
 }
 
@@ -429,6 +444,7 @@ async function moveTo(name) {
     applyRunUpdate(run);
     const who = following.length ? `（你带着同行的人来到了 ${name}。）` : `（你来到了 ${name}。）`;
     renderBeat({ author:"engine", type:"description", text: who });
+    renderDiscoveries(run.discoveries);
   } catch(e) { renderBeat({ author:"engine", type:"description", text:`（${e.message}）` }); }
 }
 async function toggleFollow(id, want) {
@@ -459,6 +475,7 @@ async function acceptMove(req) {
     const run = await j(`/runs/${runId}/move`, { method:"POST", body: JSON.stringify({ location: req.to || req.to_name, with_character_id: req.by_id, generate: !!req.generate }) });
     applyRunUpdate(run);
     renderBeat({ author:"engine", type:"description", text:`（你跟着${req.by_name||"对方"}来到了 ${req.to_name}。）` });
+    renderDiscoveries(run.discoveries);
   } catch(e) { renderBeat({ author:"engine", type:"description", text:`（${e.message}）` }); }
 }
 // 关键节点抉择 (VN choice): an authored decision card. Picking applies its effects
@@ -515,6 +532,45 @@ async function openJournal() {
     <div class="jh">已揭开的真相</div>${secs}${more}
     <div class="jh">结局图鉴</div><div class="jends">${ends}</div>
   </div>`;
+}
+// 到达即发现: physical truths that unlocked the moment we arrived
+function renderDiscoveries(list) {
+  for (const d of (list || [])) {
+    renderBeat({ author:"engine", type:"description", text: d.text });
+    if (d.title) showMoments([{ kind:"unlock", title: d.title }], {});
+  }
+}
+
+// 🗺 map panel: the discovered world — where you are, who's where, click to travel
+async function openMap() {
+  if (!runId) return;
+  let mp;
+  try { mp = await j(`/runs/${runId}/map`); } catch (e) { return; }
+  let ov = document.getElementById("mapov");
+  if (!ov) {
+    ov = document.createElement("div"); ov.id = "mapov";
+    ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+    document.body.appendChild(ov);
+  }
+  const curNode = (mp.nodes || []).find(n => n.here);
+  const reachable = new Set(((curNode || {}).exits || []).map(x => x.id));
+  const cards = (mp.nodes || []).map(n => {
+    const chars = n.chars.length ? `<div class="mchars">👤 ${n.chars.map(escapeHtml).join("、")}</div>` : "";
+    const exits = n.exits.length ? `<div class="mexits">→ ${n.exits.map(x => escapeHtml(x.name)).join("、")}</div>` : "";
+    const canGo = !n.here && reachable.has(n.id);
+    const cls = "mnode" + (n.here ? " here" : "") + (canGo ? " cango" : "");
+    const go = canGo ? `data-go="${escapeHtml(n.name)}"` : "";
+    const tag = n.here ? `<span class="mhere">📍 你在这里</span>` : (canGo ? `<span class="mgo">可前往</span>` : "");
+    return `<div class="${cls}" ${go}><div class="mname">${escapeHtml(n.name)} ${tag}</div>${chars}${exits}</div>`;
+  }).join("");
+  const hidden = mp.hidden > 0 ? `<div class="mhidden">还有 ${mp.hidden} 处地方，你尚未打听到…</div>` : "";
+  ov.innerHTML = `<div class="mcard" onclick="event.stopPropagation()">
+    <div class="jbar"><b>🗺 地图</b><button class="ghost" onclick="document.getElementById('mapov').remove()">关闭</button></div>
+    <div class="mgrid">${cards || '<div class="jempty">这个故事没有标注地图。</div>'}</div>${hidden}
+  </div>`;
+  ov.querySelectorAll("[data-go]").forEach(el => {
+    el.onclick = async () => { ov.remove(); await moveTo(el.getAttribute("data-go")); };
+  });
 }
 function updatePlaceholder() {
   const c = cast.find(x => x.id === target);

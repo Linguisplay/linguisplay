@@ -3,7 +3,7 @@
 Fragments of a character's secret are revealed in layers, each guarded by an
 unlock_schema whose conditions are ALL ANDed:
 
-    affinity_min · act_min · asks_min · trigger_event_ids
+    affinity_min · act_min · asks_min · trigger_event_ids · location_id
 
 These are evaluated server-side BEFORE any semantic (pgvector) retrieval, so a
 locked fragment's `content` can never reach the LLM prompt, the phone Notes app,
@@ -54,11 +54,13 @@ def _conditions(frag: Frag, state: State) -> list[bool]:
     u = frag.get("unlock") or {}
     triggered = set(state.get("triggered_event_ids") or [])
     needed_events = u.get("trigger_event_ids") or []
+    loc_need = u.get("location_id")  # the player must BE here (物理探索维度)
     return [
         int(state.get("affinity", 0)) >= int(u.get("affinity_min") or 0),
         int(state.get("act", 1)) >= int(u.get("act_min") or 0),
         _asks_for(state, frag.get("secret_id")) >= int(u.get("asks_min") or 0),
         all(e in triggered for e in needed_events),
+        (not loc_need) or state.get("location_id") == loc_need,
     ]
 
 

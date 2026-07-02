@@ -48,6 +48,7 @@ def default_state() -> dict[str, Any]:
         "affinity": 0,
         "flags": {},
         "choices": {},                  # answered key-moment decisions: {key: option_id}
+        "searched_prop_ids": [],        # props already turned over (现场搜查, once each)
         "pending_choice": None,         # an authored decision awaiting the player's pick
         "unlocked_fragment_ids": [],
         "asks": {},
@@ -211,13 +212,28 @@ def present_characters(content: dict[str, Any], act: int) -> list[dict[str, Any]
     return [c for c in _characters(content) if _is_present(c, act)]
 
 
+def char_home(c: dict[str, Any], act: int) -> str | None:
+    """Where this character is DURING this act (作息表): the schedule entry with the
+    highest from_act <= act wins; no schedule (or none reached yet) → home_location_id.
+    None = ubiquitous (legacy stories that don't pin characters to places)."""
+    best_from, best_loc = -1, None
+    for e in (c.get("schedule") or []):
+        try:
+            fa = int(e.get("from_act") or 0)
+        except (TypeError, ValueError):
+            continue
+        lid = (e.get("location_id") or "").strip()
+        if lid and fa <= int(act) and fa > best_from:
+            best_from, best_loc = fa, lid
+    return best_loc or c.get("home_location_id")
+
+
 def _is_here(c: dict[str, Any], state: dict[str, Any], cur_loc_id: str | None) -> bool:
-    """Is this character in the player's CURRENT scene? A character pinned to a home
-    location is only here when the player is AT that location, OR when the character is
-    currently following the player. A character with no home location is ubiquitous
-    (present everywhere in their act — the backward-compatible old behavior for stories
-    that don't pin characters to places)."""
-    home = c.get("home_location_id")
+    """Is this character in the player's CURRENT scene? A character pinned to a place
+    (per-act schedule, else home location) is only here when the player is AT that place,
+    OR when the character is currently following the player. A character with no place at
+    all is ubiquitous (present everywhere in their act — backward-compatible)."""
+    home = char_home(c, int(state.get("act", 1) or 1))
     if not home:
         return True
     cid = c.get("id")
@@ -505,6 +521,9 @@ def _physical_place(content: dict[str, Any], state: dict[str, Any]) -> str:
     exits = [e for e in (loc.get("exits") or []) if e]
     if exits:
         concrete += f"　从这里可以去：{'、'.join(exits)}。"
+    props = [p.get("name") for p in (loc.get("props") or []) if p.get("name")]
+    if props:
+        concrete += f"　这里可以翻查：{'、'.join(props)}。"
     instruction = (
         "旁白只能描写这个地点里实际存在的东西，不要凭空添置别处的陈设；"
         "玩家要移动到别处，必须经由上面列出的通路，且要把移动过程写出来，不能瞬移。"
@@ -599,6 +618,17 @@ def _frag_title_map(content: dict[str, Any]) -> dict[str, str]:
     return out
 
 
+def _frag_location_map(content: dict[str, Any]) -> dict[str, str]:
+    """fragment id → the location_id its unlock requires the player to be at (if any)."""
+    out: dict[str, str] = {}
+    for sec in content.get("secrets", []) or []:
+        for f in sec.get("fragments", []) or []:
+            lid = (f.get("unlock") or {}).get("location_id")
+            if f.get("id") and lid:
+                out[f.get("id")] = lid
+    return out
+
+
 def _event_label_map(content: dict[str, Any]) -> dict[str, str]:
     out: dict[str, str] = {}
     for act in (content.get("story") or {}).get("acts", []) or []:
@@ -646,6 +676,7 @@ def act_progress(content: dict[str, Any], state: dict[str, Any], act_index: int)
     triggered = set(state.get("triggered_event_ids") or [])
     ftitles = _frag_title_map(content)
     elabels = _event_label_map(content)
+    floc = _frag_location_map(content)
     items: list[dict[str, Any]] = []
     seen: set[str] = set()
     for fid in adv.get("required_fragment_ids") or []:
@@ -653,7 +684,15 @@ def act_progress(content: dict[str, Any], state: dict[str, Any], act_index: int)
         if label in seen:
             continue
         seen.add(label)
-        items.append({"label": label, "done": fid in unlocked})
+        done = fid in unlocked
+        # a location-gated clue guides the player TO the place ("去X看看") once the
+        # place itself is discoverable — turning the checklist into a travel plan
+        if not done:
+            lid = floc.get(fid)
+            loc = _location_by_id(content, lid) if lid else None
+            if loc and location_available(content, state, loc):
+                label = f"{label}（去「{loc.get('name','')}」看看）"
+        items.append({"label": label, "done": done})
     for eid in adv.get("required_event_ids") or []:
         items.append({"label": elabels.get(eid, "关键进展"), "done": eid in triggered})
     done = sum(1 for it in items if it["done"])
@@ -1085,6 +1124,103 @@ def apply_choice(content: dict[str, Any], state: dict[str, Any], option_id: str)
     return {"label": picked.get("label") or "", "flag": picked.get("flag")}
 
 
+def search_props(content: dict[str, Any], state: dict[str, Any],
+                 player_input: str, channel: str = "say") -> list[dict[str, Any]]:
+    """现场搜查: the player names a searchable prop at their CURRENT place on the 做/看
+    channel → it's turned over. Mutates state: fires the prop's story event; returns the
+    found props (with their evidence fragment ids) for the caller to unlock + narrate.
+    Deterministic — physical evidence is found by physically looking, no dice."""
+    if channel not in ("do", "think"):
+        return []
+    loc = current_location(content, state)
+    if not loc:
+        return []
+    found: list[dict[str, Any]] = []
+    searched = set(state.get("searched_prop_ids") or [])
+    for i, prop in enumerate(loc.get("props") or []):
+        name = (prop.get("name") or "").strip()
+        if not name:
+            continue
+        pid = (prop.get("id") or "").strip() or f"{loc.get('id')}_prop{i}"
+        if pid in searched or not _contains_any(player_input, [name]):
+            continue
+        searched.add(pid)
+        if prop.get("event_id"):
+            trig = set(state.get("triggered_event_ids") or [])
+            trig.add(prop["event_id"])
+            state["triggered_event_ids"] = sorted(trig)
+        found.append({"id": pid, "name": name, "detail": (prop.get("detail") or "").strip(),
+                      "fragment_id": prop.get("fragment_id")})
+    state["searched_prop_ids"] = sorted(searched)
+    return found
+
+
+def _fragment_content(content: dict[str, Any], fid: str | None) -> str:
+    for sec in content.get("secrets", []) or []:
+        for f in sec.get("fragments", []) or []:
+            if f.get("id") == fid:
+                return (f.get("content") or "").strip()
+    return ""
+
+
+def discover_on_arrival(content: dict[str, Any], state: dict[str, Any]) -> list[dict[str, Any]]:
+    """After the player MOVES: unlock fragments whose only missing key was being HERE
+    (unlock.location_id) and hand back discovery narrations — physical truths reveal the
+    moment you stand in the right place, not a turn later. Mutates state (sticky)."""
+    state["location_id"] = (current_location(content, state) or {}).get("id")
+    frags = gating.iter_fragments(content)
+    newly = gating.evaluate_unlocks(state, frags)
+    here = state.get("location_id")
+    # only fragments gated ON this place narrate as arrival discoveries; anything else
+    # newly eligible stays for the normal turn flow (voiced by characters)
+    found = [f for f in frags if f.get("id") in set(newly)
+             and (f.get("unlock") or {}).get("location_id") == here]
+    if not found:
+        return []
+    fids = [f.get("id") for f in found]
+    state["unlocked_fragment_ids"] = sorted(
+        set(state.get("unlocked_fragment_ids") or []) | set(fids))
+    out = []
+    for f in found:
+        body = (f.get("content") or "").strip()
+        title = (f.get("secret_title") or "").strip()
+        out.append({"fragment_id": f.get("id"), "title": title,
+                    "text": f"（到了这里你才看清——{body}）"})
+    return out
+
+
+def map_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+    """The discovered world for the 🗺 map panel: unlocked places as nodes (current one
+    flagged), exits filtered to unlocked destinations, who stands where right now.
+    Locked places surface only as an unnamed count — the map never spoils geography."""
+    locs = _locations(content)
+    if not locs:
+        return {"nodes": [], "hidden": 0, "current": None}
+    act = int(state.get("act", 1) or 1)
+    cur = (current_location(content, state) or {}).get("id")
+    pcid = state.get("player_character_id")
+    following = set(state.get("following") or [])
+    avail = {l.get("id"): location_available(content, state, l) for l in locs}
+    name_to_id = {l.get("name"): l.get("id") for l in locs if l.get("name")}
+    at: dict[str, list[str]] = {}
+    for c in present_characters(content, act):
+        if c.get("id") == pcid:
+            continue
+        lid = cur if c.get("id") in following else char_home(c, act)
+        if lid and avail.get(lid) and c.get("name"):
+            at.setdefault(lid, []).append(c["name"])
+    nodes = []
+    for l in locs:
+        lid = l.get("id")
+        if not avail.get(lid):
+            continue
+        exits = [{"id": name_to_id[en], "name": en}
+                 for en in (l.get("exits") or []) if avail.get(name_to_id.get(en))]
+        nodes.append({"id": lid, "name": l.get("name") or "", "here": lid == cur,
+                      "chars": at.get(lid, []), "exits": exits})
+    return {"nodes": nodes, "hidden": sum(1 for v in avail.values() if not v), "current": cur}
+
+
 def journal(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
     """The player's reviewable dossier (线索档案 + 结局图鉴). Discovery made tangible:
     - secrets the player has STARTED uncovering, with their unlocked fragments' full text
@@ -1193,6 +1329,9 @@ def run_turn_stream(
     llm = llm or get_llm()
     state = {**default_state(), **(state or {})}
     old_act = int(state.get("act", 1))
+    # normalize the player's position to the EFFECTIVE location (unset → first authored)
+    # so the location gating dimension always sees where they truly stand
+    state["location_id"] = (current_location(content, state) or {}).get("id")
     all_beats: list[dict[str, Any]] = []  # accumulated for scene classification
     # snapshot which places are reachable BEFORE this turn, so we can announce any that
     # newly open up (so a new exit never just silently appears — "莫名其妙解锁" fix)
@@ -1214,15 +1353,22 @@ def run_turn_stream(
     _apply_event_triggers(content, state, player_input)
     provisional_events = set(state.get("triggered_event_ids") or []) - _ev_before
 
+    # 1b. 现场搜查: naming a searchable prop at THIS place (做/看 channel) turns it over —
+    #     physical evidence unlocks directly, its story event fires. Deterministic.
+    found_props = search_props(content, state, player_input, channel)
+    prop_frag_ids = [pf["fragment_id"] for pf in found_props if pf.get("fragment_id")]
+
     # 2. gate on the CURRENT state (asks updated; affinity not yet changed this turn).
     #    asks-driven reveals surface THIS turn so the director can voice them; affinity-
     #    driven ones land NEXT turn (the warmth rose now, the confession follows) — that
     #    one-turn lag is intentional and reads naturally.
     frags = gating.iter_fragments(content)
+    already0 = set(state.get("unlocked_fragment_ids") or [])
     newly = gating.evaluate_unlocks(state, frags)
-    state["unlocked_fragment_ids"] = sorted(
-        set(state.get("unlocked_fragment_ids") or []) | set(newly)
-    )
+    for fid in prop_frag_ids:  # physical evidence found by searching = direct unlock
+        if fid not in already0 and fid not in newly:
+            newly.append(fid)
+    state["unlocked_fragment_ids"] = sorted(already0 | set(newly))
 
     # judgment candidates for the primary director call (titles/labels only, never bodies)
     probe_cands = _probe_candidates(content, state)
@@ -1330,6 +1476,19 @@ def run_turn_stream(
     # relationship mode applies to character↔player only (not god/observer, not the
     # player's own embodied character)
     rel_active = (not observer)
+
+    # searching paid off → narrate the physical evidence BEFORE anyone reacts to it
+    for pf in found_props:
+        body = _fragment_content(content, pf.get("fragment_id"))
+        if body:
+            yield emit({"type": "description", "speaker_name": None,
+                        "text": f"（你翻查{pf['name']}——{body}）"})
+        elif pf.get("detail"):
+            yield emit({"type": "description", "speaker_name": None,
+                        "text": f"（你翻查{pf['name']}：{pf['detail']}）"})
+        else:
+            yield emit({"type": "description", "speaker_name": None,
+                        "text": f"（你翻查了{pf['name']}，没有发现特别的东西。）"})
 
     for idx, sp in enumerate(responders):
         sp_id = sp.get("id")

@@ -81,6 +81,9 @@ class Character(BaseModel):
     # this character's OWN goal/agenda/stance in the story — what THEY are after,
     # independent of the player. Drives autonomous, self-interested behavior. Optional.
     agenda: Optional[str] = None
+    # 作息表: where this character is per act — [{from_act, location_id}], last entry with
+    # from_act <= current act wins; falls back to home_location_id. Makes the world move.
+    schedule: list[dict[str, Any]] = []
     # relationship mode toward the player: the starting archetype (e.g. "陌生人"/"长辈"/
     # "暧昧对象") and which archetypes it may FLOW into. Empty allowed = any. See
     # engine/relationships.py for the library.
@@ -163,6 +166,18 @@ class LocationUnlock(BaseModel):
     required_fragment_ids: list[str] = []  # info the player must have uncovered first
 
 
+class LocationProp(BaseModel):
+    """A searchable fixture at a place (现场物证). Examining/searching it BY NAME while
+    standing here yields its payload: unlock a fragment (the physical evidence) and/or
+    trigger a story event. `detail` is what turning it over reveals when it carries no
+    clue (or as extra color). Names are concrete nouns the author wrote — spoiler-safe."""
+    id: Optional[str] = None
+    name: str = ""
+    detail: str = ""
+    fragment_id: Optional[str] = None  # unlocks this fragment when searched
+    event_id: Optional[str] = None     # triggers this story event when searched
+
+
 class Location(BaseModel):
     """A concrete physical place in the story world. `detail` should name specific,
     sensible fixtures/objects (not vague mood) so narration stays grounded; `exits` lists
@@ -172,6 +187,7 @@ class Location(BaseModel):
     detail: str = ""  # concrete fixtures/props/layout/lighting at this place
     exits: list[str] = []  # names of places reachable from here
     unlock: LocationUnlock = LocationUnlock()  # gate: appears only once these are met
+    props: list["LocationProp"] = []  # searchable physical evidence at this place
 
 
 class EndingCondition(BaseModel):
@@ -250,6 +266,9 @@ class Unlock(BaseModel):
     act_min: Optional[int] = None
     asks_min: Optional[int] = None
     trigger_event_ids: list[str] = []
+    # the player must BE at this place for the fragment to unlock — turns talking-only
+    # investigation into go-there exploration (物理探索). None = anywhere.
+    location_id: Optional[str] = None
 
 
 class FragmentInput(BaseModel):
@@ -312,6 +331,8 @@ class Run(BaseModel):
     state: RunState
     cast: list[dict[str, Any]] = []  # [{id, name, is_lead, avatar_url}] for the play UI
     created_at: Optional[datetime] = None
+    # arrival discoveries from a /move (走到对的地方，真相当场揭开) — [{title, text}]
+    discoveries: list[dict[str, Any]] = []
 
 
 class RunSummary(BaseModel):

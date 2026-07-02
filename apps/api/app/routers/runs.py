@@ -375,13 +375,31 @@ def move(run_id: str, body: MoveIn, user: User = Depends(current_user), db: Sess
         if body.with_character_id not in foll:
             foll.append(body.with_character_id)
         st["following"] = foll
+    # 到达即发现: truths gated on BEING here reveal the moment the player arrives
+    discoveries = runtime.discover_on_arrival(content, st)
+    if discoveries:
+        seq = (r.beats[-1].seq + 1) if r.beats else 0
+        present_ids = [c.get("id") for c in runtime.scene_characters(content, st) if c.get("id")]
+        for i, d in enumerate(discoveries):
+            db.add(BeatModel(run_id=r.id, seq=seq + i, type="description", speaker_name=None,
+                             text=d.get("text", ""), author="engine", present_ids=present_ids))
     r.state = st
     if generated:
         r.pinned_content = content
         flag_modified(r, "pinned_content")
     db.commit()
     db.refresh(r)
-    return _to_run(r)
+    out = _to_run(r)
+    out.discoveries = discoveries
+    return out
+
+
+@router.get("/{run_id}/map")
+def get_map(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """The discovered world: unlocked places, current position, who stands where.
+    Locked places appear only as an unnamed count."""
+    r = _own_run(run_id, user, db)
+    return runtime.map_view(r.pinned_content or {}, r.state or {})
 
 
 @router.get("/{run_id}/journal")
