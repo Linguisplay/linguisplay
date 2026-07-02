@@ -56,6 +56,8 @@ def _to_run(r: RunModel) -> Run:
                                     exclude_id=pcid if mode == "character" else None),
             pending_choice=st.get("pending_choice"),
             player_character_name=(runtime._char_name(r.pinned_content or {}, pcid) if pcid else None),
+            pressure=int(st.get("pressure", 0) or 0),
+            pressure_name=((runtime.pressure_cfg(r.pinned_content or {}) or {}).get("name")),
         ),
         cast=cast,
         created_at=r.created_at,
@@ -301,6 +303,10 @@ def play(
                 beat_log=beat_log, target_character_id=body.target_character_id,
                 returning=returning,
             ):
+                if kind == "dice":
+                    # the roll streams BEFORE the narration so the UI can animate it
+                    yield _event({"event": "dice", "dice": payload})
+                    continue
                 if kind == "beat":
                     eb = BeatModel(
                         run_id=run_id, seq=seq, type=payload.get("type", "description"),
@@ -330,6 +336,8 @@ def play(
                 yield _event({"event": "goal", "goal": final.get("goal", "")})
                 yield _event({"event": "progress", "progress": final.get("progress")})
                 yield _event({"event": "hint", "hint": final.get("hint", "")})
+                if final.get("pressure_view"):
+                    yield _event({"event": "pressure", "pressure": final["pressure_view"]})
                 yield _event({"event": "place", "location": final.get("location")})
                 if final.get("pending_choice"):
                     yield _event({"event": "choice", "choice": final["pending_choice"]})

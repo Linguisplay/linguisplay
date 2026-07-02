@@ -311,6 +311,14 @@ def _build_system(prompt: dict[str, Any]) -> str:
                 f"【这是一个动作，不是台词】「{player_name}」做的是一个【动作/行为】。把场景当成有物理规则的引擎："
                 "narration 里要把这个动作的【具体、即时、连锁后果】一步步演出来（碰到什么、什么声响、光线位置变化、"
                 "惊动了谁、谁如何反应），绝不能无视或淡化；做不到或会致命也要如实演出。speech 可留空（只用动作神态回应）。")
+            chk = prompt.get("check") or {}
+            if chk:
+                verdict = {"crit_success": "大成功——干得超预期地漂亮，甚至带来意外之喜",
+                           "success": "成功——如愿做成了",
+                           "fail": "失败——没做成，并付出一点小代价或引来注意",
+                           "crit_fail": "大失败——不但没成，还出了岔子、把局面搞得更糟"}.get(chk.get("outcome"), "")
+                lines.append(f"【命运判定已掷出（成功率{chk.get('risk')}%，掷出{chk.get('roll')}）：{verdict}】"
+                             "旁白必须严格按这个结果演出，不许翻案、不许淡化。")
 
     lines.append("")
     # OUTPUT is delivered via the render_turn TOOL (function calling) — narration & speech go
@@ -380,6 +388,13 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
         props["move_invite"] = {"type": "string", "description": "若你这轮提出或答应带玩家去某处，填那个地点名（可以是【可去通路】里的，也可以是对话里自然浮现的新地点；旁白只写到起身相邀为止）；否则填空字符串"}
     if not observer and not is_member and not is_think:
         props["ending"] = {"type": "string", "description": "默认空字符串；只有玩家本人此刻被你弄死填 death，走到不可挽回的坏结局填 bad"}
+    pcfg = prompt.get("pressure_cfg") or {}
+    if pcfg and not is_member and not is_think:
+        props["pressure"] = {"type": "integer", "description":
+                             f"这一轮玩家言行对「{pcfg.get('name','压力')}」的影响，-5~15："
+                             f"{pcfg.get('hint','出格冒进会推高，谨慎低调会回落')}；无关紧要就填0。"
+                             f"（当前值 {pcfg.get('value',0)}/100）"}
+        required.append("pressure")
     # TURN ALLOCATION: real conversations aren't a roll call. The primary judges who else
     # would NATURALLY chime in this turn (0~2, order = who jumps in first; may be nobody).
     others = [str(n).strip() for n in (prompt.get("cast") or []) if str(n).strip()]
@@ -730,6 +745,8 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
         out["probed"] = [str(x).strip() for x in (d.get("probed_topics") or []) if str(x).strip()]
     if "occurred_events" in d:
         out["occurred"] = [str(x).strip() for x in (d.get("occurred_events") or []) if str(x).strip()]
+    if "pressure" in d:
+        out["pressure_delta"] = _i(d.get("pressure"), -5, 15)
     if "next_speakers" in d:
         out["next_speakers"] = [str(x).strip() for x in (d.get("next_speakers") or []) if str(x).strip()]
     return out
@@ -1218,6 +1235,31 @@ class QwenLLM:
         except Exception:
             return {"detail": ""}
 
+    def _risk(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🎲 risk judge: how likely is this player action to succeed here (0~100)?
+        100 = mundane, no dice needed. Tiny call — a single integer out."""
+        action = (prompt.get("action") or "")[:200]
+        place = (prompt.get("place") or "")[:60]
+        world = (prompt.get("world_facts") or "").replace("\n", " ")[:200]
+        sys = ("你是动作难度裁判。给玩家这个动作在此情境下的成功概率打分，只输出一个0~100的整数，"
+               "不要任何其他文字。日常、无风险、必然做得到的动作=100；有点难度或代价=60~90；"
+               "很悬=30~59；近乎不可能=1~29。判断现实可行性，不考虑剧情需要。")
+        u = f"情境：{place}。{world}\n玩家动作：{action}\n成功概率（0~100）："
+        try:
+            resp = httpx.post(
+                self._url,
+                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
+                json={"model": self._model, "messages": [{"role": "system", "content": sys},
+                      {"role": "user", "content": u}], "max_tokens": 8, "temperature": 0.0},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            import re
+            m = re.search(r"\d+", resp.json()["choices"][0]["message"]["content"] or "")
+            return {"risk": max(0, min(100, int(m.group()))) if m else 100}
+        except Exception:
+            return {"risk": 100}
+
     def _parting(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """悬念离场: ONE cliffhanger narration when the player leaves mid-run — an unfinished
         beat that pulls them back. Spoiler-safe: may point at a topic LABEL, never content."""
@@ -1288,6 +1330,8 @@ class QwenLLM:
             return self._start_place(prompt)
         if prompt.get("parting"):
             return self._parting(prompt)
+        if prompt.get("risk_judge"):
+            return self._risk(prompt)
         speaker = prompt.get("speaker_name") or "角色"
         channel = prompt.get("channel") or "say"
         observe = bool(prompt.get("observe"))

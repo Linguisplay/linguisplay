@@ -11,6 +11,8 @@ proposes affinity deltas / flag changes as structured side-effects). The gate
 
 from __future__ import annotations
 
+import random
+
 import re
 from typing import Any
 
@@ -49,6 +51,8 @@ def default_state() -> dict[str, Any]:
         "flags": {},
         "choices": {},                  # answered key-moment decisions: {key: option_id}
         "searched_prop_ids": [],        # props already turned over (现场搜查, once each)
+        "pressure": 0,                  # ⚠️ story pressure meter (暴露值/灵异度), 0~100
+        "world_pulse": 0,               # 🌊 quiet turns since the world last moved by itself
         "pending_choice": None,         # an authored decision awaiting the player's pick
         "unlocked_fragment_ids": [],
         "asks": {},
@@ -108,6 +112,8 @@ DEFAULT_TUNING = {
     "close_step_min": -6, "close_step_max": 8, "rom_step_min": -4, "rom_step_max": 6,
     # hours away after which the next turn counts as a RETURN (角色接起上次的话头)
     "return_gap_hours": 6,
+    "dice": 1,                  # 🎲 risky 做-actions get a visible fate roll (0 = off)
+    "world_event_every": 4,     # 🌊 after this many quiet turns an authored act event fires itself (0 = off)
 }
 
 
@@ -811,6 +817,8 @@ def evaluate_ending(
 
     matches = []
     for e in endings:
+        if e.get("trigger"):
+            continue  # mechanism-invoked (e.g. pressure blowout) — never a normal match
         cond = e.get("condition") or {}
         gate_act = int(cond.get("act_min") or 0) or max_act  # 0 ⇒ only at the final act
         if act < gate_act:
@@ -1221,6 +1229,38 @@ def map_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
     return {"nodes": nodes, "hidden": sum(1 for v in avail.values() if not v), "current": cur}
 
 
+_rng = random.Random()  # module-level so tests can monkeypatch/seed
+
+
+def _roll_check(risk: int) -> dict[str, Any]:
+    """🎲 fate roll against a 0~99 risk (success chance %). Crit success on the top
+    tenth of the success band; crit fail on a 97+ miss."""
+    roll = _rng.randint(1, 100)
+    if roll <= max(1, risk // 10):
+        outcome = "crit_success"
+    elif roll <= risk:
+        outcome = "success"
+    elif roll >= 97:
+        outcome = "crit_fail"
+    else:
+        outcome = "fail"
+    return {"risk": int(risk), "roll": roll, "outcome": outcome}
+
+
+def pressure_cfg(content: dict[str, Any]) -> dict[str, Any] | None:
+    """The story's authored pressure meter (卧底暴露值/灵异逼近…), or None when the story
+    doesn't run one. Shape: {name, hint, ending_id, levels: [{at, note}]}"""
+    cfg = (content.get("story") or {}).get("pressure") or {}
+    return cfg if (cfg.get("name") or "").strip() else None
+
+
+def _ending_by_id(content: dict[str, Any], eid: str | None) -> dict[str, Any] | None:
+    for e in (content.get("story") or {}).get("endings", []) or []:
+        if e.get("id") == eid:
+            return e
+    return None
+
+
 def journal(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
     """The player's reviewable dossier (线索档案 + 结局图鉴). Discovery made tangible:
     - secrets the player has STARTED uncovering, with their unlocked fragments' full text
@@ -1305,8 +1345,8 @@ def run_turn(
     ):
         if kind == "beat":
             beats.append(payload)
-        else:
-            final = payload
+        elif kind == "final":
+            final = payload  # "dice" etc. ride inside the final payload for this wrapper
     final["beats"] = beats
     return final
 
@@ -1332,6 +1372,7 @@ def run_turn_stream(
     # normalize the player's position to the EFFECTIVE location (unset → first authored)
     # so the location gating dimension always sees where they truly stand
     state["location_id"] = (current_location(content, state) or {}).get("id")
+    tun = tuning_for(content)
     all_beats: list[dict[str, Any]] = []  # accumulated for scene classification
     # snapshot which places are reachable BEFORE this turn, so we can announce any that
     # newly open up (so a new exit never just silently appears — "莫名其妙解锁" fix)
@@ -1358,6 +1399,21 @@ def run_turn_stream(
     found_props = search_props(content, state, player_input, channel)
     prop_frag_ids = [pf["fragment_id"] for pf in found_props if pf.get("fragment_id")]
 
+    # 1c. 🎲 fate check: a risky 做-action gets judged (tiny call) and ROLLED for real.
+    #     The result is handed to the director, who must narrate accordingly — no fiat.
+    dice = None
+    if channel == "do" and tun["dice"] and (state.get("mode") or "character") != "god":
+        rj = llm.generate({"risk_judge": True, "action": player_input,
+                           "place": (current_location(content, state) or {}).get("name") or "",
+                           "world_facts": (content.get("story") or {}).get("world_facts") or ""}) or {}
+        try:
+            risk = max(0, min(100, int(rj.get("risk", 100))))
+        except (TypeError, ValueError):
+            risk = 100
+        if risk < 100:
+            dice = _roll_check(risk)
+            yield ("dice", dice)
+
     # 2. gate on the CURRENT state (asks updated; affinity not yet changed this turn).
     #    asks-driven reveals surface THIS turn so the director can voice them; affinity-
     #    driven ones land NEXT turn (the warmth rose now, the confession follows) — that
@@ -1378,6 +1434,7 @@ def run_turn_stream(
     # clicking into place, a relationship tier-up, a new act, an ending milestone.
     moments: list[dict[str, Any]] = []
     rel_deltas: dict[str, dict[str, int]] = {}   # per-char ♥ movement this turn (UI float)
+    pressure_blown = False                       # ⚠️ meter hit 100 → forced terminal ending
     for t in _titles_for_fragments(content, newly):
         moments.append({"kind": "unlock", "title": t})
 
@@ -1422,6 +1479,7 @@ def run_turn_stream(
     # (named in the player's line / owner of a probed secret). No judgment (mock/prose) →
     # legacy everyone-answers. See the extension inside the responder loop.
     member_pool = [c for c in all_chars if c.get("id") != primary_id] if broadcast else []
+    pcfg = pressure_cfg(content)
     if channel != "think":
         state["last_speaker_id"] = primary_id
 
@@ -1449,7 +1507,6 @@ def run_turn_stream(
     # gated act without uncovering a new required clue. The longer they spin, the more
     # forthcoming the NPCs' guidance becomes (and at the top tier a narrator nudge fires).
     # Only meaningful while the act is locked and there's still something to find.
-    tun = tuning_for(content)
     stuck_in = int(state.get("stuck", 0) or 0) if (act_locked and needed_topics) else 0
     stuck_level = 1 if stuck_in >= tun["stuck_nudge"] else 0
     stuck_level = 2 if stuck_in >= tun["stuck_push"] else stuck_level
@@ -1543,6 +1600,11 @@ def run_turn_stream(
             "event_candidates": event_cands if is_primary else [],
             # the player came back after a while away → greet them and pick up the thread
             "returning": bool(returning) if is_primary else False,
+            # 🎲 the fate roll for this 做-action (director must narrate its outcome)
+            "check": dice if is_primary else None,
+            # ⚠️ the story's pressure meter (model judges this turn's delta)
+            "pressure_cfg": ({**pcfg, "value": int(state.get("pressure", 0))}
+                             if (pcfg and is_primary) else None),
             # what the others have ALREADY said this turn → react, don't echo
             "said_this_turn": list(said_this_turn),
         }
@@ -1626,6 +1688,19 @@ def run_turn_stream(
                 trig -= (provisional_events - ev_ids)  # roll back denied keyword guesses
                 trig |= ev_ids
                 state["triggered_event_ids"] = sorted(trig)
+            # ⚠️ pressure: apply the judged delta, announce level crossings, remember a blowout
+            if pcfg and directed.get("pressure_delta") is not None:
+                p_old = int(state.get("pressure", 0))
+                p_new = max(0, min(100, p_old + int(directed.get("pressure_delta") or 0)))
+                state["pressure"] = p_new
+                for lv in sorted(pcfg.get("levels") or [], key=lambda x: int(x.get("at", 0))):
+                    at = int(lv.get("at", 0))
+                    if p_old < at <= p_new and (lv.get("note") or "").strip():
+                        yield emit({"type": "description", "speaker_name": None,
+                                    "text": f"（{lv['note']}）"})
+                        moments.append({"kind": "pressure", "note": lv["note"], "value": p_new})
+                if p_new >= 100:
+                    pressure_blown = True
             # WHO ELSE speaks this turn: the primary judged who'd naturally chime in
             # (varies 0~2 by context/personality — not everyone, not a fixed order);
             # characters named by the player or whose secret was probed always get to
@@ -1682,6 +1757,30 @@ def run_turn_stream(
         for b in obs:
             yield emit(b)
         affinity_delta = 0
+
+    # 🌊 the world moves by itself: after enough quiet turns, an authored event of the
+    #    current act HAPPENS (its people must be in the player's scene) — the world stops
+    #    waiting for the player to make everything occur. Feeds event-gated progress too.
+    if not is_think and responders:
+        trig_now = set(state.get("triggered_event_ids") or [])
+        if trig_now - _ev_before:
+            state["world_pulse"] = 0          # something already happened this turn
+        else:
+            state["world_pulse"] = int(state.get("world_pulse", 0) or 0) + 1
+        wev = tun["world_event_every"]
+        if wev > 0 and state["world_pulse"] >= wev:
+            here_ids = {c.get("id") for c in scene_characters(content, state)}
+            for ev in (current_act(content, old_act) or {}).get("events", []) or []:
+                eid = ev.get("id")
+                who = ev.get("who_character_ids") or []
+                if eid and eid not in trig_now and (not who or set(who) <= here_ids)                         and (ev.get("what_happens") or "").strip():
+                    trig_now.add(eid)
+                    state["triggered_event_ids"] = sorted(trig_now)
+                    yield emit({"type": "description", "speaker_name": None,
+                                "text": f"就在这时——{ev['what_happens']}"})
+                    moments.append({"kind": "event", "label": ev["what_happens"][:40]})
+                    state["world_pulse"] = 0
+                    break
 
     affinity_delta = 0 if is_think else max(tun["affinity_clamp_min"],
                                             min(tun["affinity_clamp_max"], affinity_delta))
@@ -1752,7 +1851,16 @@ def run_turn_stream(
     #    shows its narration but the open world keeps going, so the player can explore on
     #    and even upgrade to a higher-tier ending later. Only a fatal action (death) is
     #    terminal and locks the run. Each milestone announces once (tracked by id).
-    candidate = evaluate_ending(content, state, model_ending)
+    if pressure_blown and pcfg:
+        authored = _ending_by_id(content, pcfg.get("ending_id")) or {}
+        model_ending = None
+        candidate = {"id": authored.get("id") or "pressure",
+                     "kind": authored.get("kind", "bad"),
+                     "title": authored.get("title") or f"{pcfg.get('name','压力')}到达顶点",
+                     "text": authored.get("text") or "",
+                     "terminal": True}
+    else:
+        candidate = evaluate_ending(content, state, model_ending)
     fired = None
     if candidate:
         achieved = set(state.get("achieved_endings") or [])
@@ -1849,6 +1957,9 @@ def run_turn_stream(
         "progress": progress,  # {items:[{label,done}], done, total} — the clue checklist
         "hint": hint,          # persistent stuck-hint for the top bar ("" = not stuck / hide)
         "moments": moments,    # threshold moments this turn (UI celebration banners)
+        "dice": dice,          # 🎲 this turn's fate roll (already streamed as its own event)
+        "pressure_view": ({"name": pcfg.get("name"), "value": int(state.get("pressure", 0))}
+                          if pcfg else None),
         "pending_choice": state.get("pending_choice"),  # unanswered key-moment decision
         "rel_deltas": rel_deltas,  # per-char ♥ movement this turn (UI floating chips)
         "location": location,  # {id,name,detail,exits} the player's current place (or None)

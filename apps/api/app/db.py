@@ -43,7 +43,7 @@ def _ensure_columns() -> None:
 
     wanted = {"stories": [("endings", "JSON DEFAULT '[]'"), ("world_facts", "TEXT"),
                           ("locations", "JSON DEFAULT '[]'"), ("mature", "INTEGER DEFAULT 0"),
-                          ("tuning", "JSON DEFAULT '{}'")],
+                          ("tuning", "JSON DEFAULT '{}'"), ("pressure", "JSON")],
               "beats": [("present_ids", "JSON")]}
     insp = inspect(engine)
     with engine.begin() as conn:

@@ -125,6 +125,19 @@ ACTS = [
     ]},
 ]
 
+# ⚠️ 危机系统: 灵异逼近度。挑衅未知、直呼那个存在、落单冒进会推高；爆表 = 它不再躲了。
+PRESSURE = {
+    "name": "灵异逼近",
+    "hint": "直呼或挑衅那个'多出来的存在'、执意落单冒进、打破大家心照不宣的沉默，都会推高；"
+            "稳住众人、不去招惹会回落",
+    "ending_id": "end_dark",
+    "levels": [
+        {"at": 35, "note": "应急灯的频闪变密了。谁都没说话，可谁都注意到了。"},
+        {"at": 65, "note": "背后的黑暗有了重量。你数呼吸声——比在场的人数，多了一道。"},
+        {"at": 90, "note": "所有影子都静止了，除了一个。它在朝你偏头。"},
+    ],
+}
+
 # Concrete physical places on this floor — anchors the player's position so the model
 # describes real fixtures instead of vague atmosphere, and can't teleport people around.
 LOCATIONS = [
@@ -224,6 +237,10 @@ ENDINGS = [
              "只是再没人敢在这层楼加班到十一点以后。",
      # middle tier: you got out, but never really understood why
      "condition": {"affinity_min": 6, "act_min": 0}},
+    {"id": "end_dark", "kind": "death", "trigger": "pressure", "title": "灯灭了",
+     "text": "最后一盏应急灯熄灭的那一刻，你终于看清了一直站在你背后的东西。走廊里，刷卡记录停在 23:04，"
+             "从此这层楼加班的名单上，多了一个谁也想不起来的名字——你的。",
+     "condition": {"affinity_min": 0, "act_min": 0}},
     {"id": "end_bad", "kind": "bad", "title": "没数清的那一个",
      "text": "你始终没能让老周把你们当成'自己人'，话问得越急，他越是沉默。六点门开，你们慌忙往外冲——"
              "清点人数时，却怎么也数不清到底是四个，还是五个。后来谁也不愿提起那一夜，只是其中一个人，"
@@ -298,6 +315,7 @@ def main() -> None:
             acts=ACTS,
             endings=ENDINGS,
             locations=LOCATIONS,
+            pressure=PRESSURE,
             visibility="public",
         )
         db.add(story)

@@ -100,6 +100,8 @@ class Story(Base):
     # Per-story pacing/balance knob overrides (see engine/runtime.DEFAULT_TUNING and
     # docs/tuning.md). Empty = engine defaults.
     tuning: Mapped[dict] = mapped_column(JSON, default=dict)
+    # ⚠️ pressure meter config {name,hint,ending_id,levels:[{at,note}]}; None = off
+    pressure: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # 18+ flag. When on, the engine permits explicit adult content (still refusing
     # minors). Players are already age-gated 18+ at signup (DOB gate).

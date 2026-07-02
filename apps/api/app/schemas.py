@@ -202,6 +202,9 @@ class EndingCondition(BaseModel):
 class Ending(BaseModel):
     id: Optional[str] = None
     kind: Literal["true", "normal", "bad", "death"] = "normal"
+    # non-empty = this ending never fires from normal condition matching; it's invoked
+    # only by the named mechanism (e.g. "pressure" = the meter blowing out at 100)
+    trigger: Optional[str] = None
     title: str = ""
     text: str = ""  # the closing narration shown to the player
     condition: EndingCondition = EndingCondition()
@@ -223,6 +226,7 @@ class StoryInput(BaseModel):
     endings: Optional[list[Ending]] = None
     locations: Optional[list[Location]] = None
     tuning: Optional[dict] = None  # pacing/balance knob overrides (docs/tuning.md)
+    pressure: Optional[dict] = None  # ⚠️ pressure meter {name,hint,ending_id,levels:[{at,note}]}
 
 
 class Story(BaseModel):
@@ -244,6 +248,7 @@ class Story(BaseModel):
     endings: list[Ending] = []
     locations: list[Location] = []
     tuning: dict = {}
+    pressure: Optional[dict] = None
     completion: float = 0.0
 
 
@@ -322,6 +327,8 @@ class RunState(BaseModel):
     here: list[dict[str, Any]] = []  # characters in the player's CURRENT scene [{id,name,...}]
     pending_choice: Optional[dict[str, Any]] = None  # an unanswered key-moment decision
     player_character_name: Optional[str] = None  # name of the embodied character (character mode)
+    pressure: int = 0                    # ⚠️ story pressure meter value (0~100)
+    pressure_name: Optional[str] = None  # the meter's authored name (None = story runs none)
 
 
 class Run(BaseModel):

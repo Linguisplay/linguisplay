@@ -240,6 +240,18 @@ ACTS = [
      }},
 ]
 
+# ⚠️ 危机系统: 卧底的暴露风险。言行出格会推高；爆表 = 身份败露，王九的刀不会等。
+PRESSURE = {
+    "name": "暴露风险",
+    "hint": "亮出警队背景、打探过急、言行不像走投无路的外来妹，都会推高；圆得回来、低调合群会回落",
+    "ending_id": "end_death",
+    "levels": [
+        {"at": 35, "note": "有人开始拿眼角扫你了——你哪句话说得不像个讨生活的。"},
+        {"at": 65, "note": "巷口有人压低了声音议论你的来路，看你的眼神变了。"},
+        {"at": 90, "note": "空气绷紧了。他们没说破，像是在等你露出最后一个破绽。"},
+    ],
+}
+
 # Concrete physical places in the walled city — anchors the player's position so the model
 # describes real fixtures (not vague atmosphere) and keeps movement consistent.
 LOCATIONS = [
@@ -460,6 +472,7 @@ def main() -> None:
             acts=ACTS,
             endings=ENDINGS,
             locations=LOCATIONS,
+            pressure=PRESSURE,
             visibility="public",
         )
         db.add(story)

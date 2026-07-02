@@ -68,6 +68,10 @@ class MockLLM:
         if prompt.get("start_place"):
             return {"name": "此处", "detail": ""}
 
+        # 🎲 risk judge: mock says "no dice needed" so tests stay deterministic.
+        if prompt.get("risk_judge"):
+            return {"risk": 100}
+
         # parting cliffhanger (悬念离场): narration only, deterministic.
         if prompt.get("parting"):
             topics = prompt.get("topics") or []

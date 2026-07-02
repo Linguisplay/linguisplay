@@ -141,6 +141,13 @@
 #mapov .mchars { font-size:12px; color:#c9c9d4; margin-top:4px; }
 #mapov .mexits { font-size:11px; color:#7b8a80; margin-top:3px; }
 #mapov .mhidden { color:#7b8296; font-size:12px; font-style:italic; margin-top:10px; }
+#pressurebar { flex:0 0 auto; margin:6px 16px 0; padding:7px 12px; border-radius:10px; background:#241416cc; border:1px solid #4a2a28; font-size:12.5px; display:flex; align-items:center; gap:10px; color:#e8c9c4; }
+#pressurebar .ptrack { flex:1; height:7px; border-radius:5px; background:#00000055; overflow:hidden; }
+#pressurebar .pfill { display:block; height:100%; border-radius:5px; transition:width .6s ease, background .6s ease; }
+.dice { align-self:center; font-size:13px; color:#d8cfae; background:#1e1b12ee; border:1px solid #4a4224; border-radius:12px; padding:7px 16px; }
+.dice .roll { font-size:15px; color:#ffd479; min-width:2ch; display:inline-block; text-align:center; }
+.dice.win { border-color:#3c8a52; } .dice.win b:last-child { color:#8fe0a6; }
+.dice.lose { border-color:#8a3c3c; } .dice.lose b:last-child { color:#ff9a8f; }
 </style>
 </head>
 <body>
@@ -198,6 +205,7 @@
     <div id="placebar" class="hidden"></div>
     <div id="goalbar" class="hidden"></div>
     <div id="hintbar" class="hidden"></div>
+    <div id="pressurebar" class="hidden"></div>
     <div id="clues" class="hidden"></div>
     <div id="chat"></div>
     <div id="suggest"></div>
@@ -364,6 +372,8 @@ async function enterRun(run) {
   beats.forEach(renderBeat);
   renderState(run.state);
   renderChoiceAsk(run.state && run.state.pending_choice);
+  renderPressure(run.state && run.state.pressure_name
+    ? { name: run.state.pressure_name, value: run.state.pressure || 0 } : null);
   // resuming an already-finished run: re-show its ending and keep input locked
   if (run.state && run.state.ended) showEnding(run.state.ending);
 }
@@ -611,6 +621,38 @@ async function openMap() {
     el.onclick = async () => { ov.remove(); await moveTo(el.getAttribute("data-go")); };
   });
 }
+// 🎲 fate roll: a rolling number that settles into the real result
+function showDice(d) {
+  if (!d) return;
+  const row = document.createElement("div");
+  row.className = "dice";
+  const label = { crit_success: "大成功！", success: "成功", fail: "失败", crit_fail: "大失败！" }[d.outcome] || "";
+  const cls = (d.outcome === "success" || d.outcome === "crit_success") ? "win" : "lose";
+  row.innerHTML = `🎲 命运判定 · 需要 ≤${d.risk} <b class="roll">--</b>`;
+  chat.appendChild(row); chat.scrollTop = chat.scrollHeight;
+  const rollEl = row.querySelector(".roll");
+  let n = 0;
+  const t = setInterval(() => { rollEl.textContent = 1 + Math.floor(Math.random() * 100); }, 55);
+  setTimeout(() => {
+    clearInterval(t);
+    rollEl.textContent = d.roll;
+    row.classList.add(cls);
+    row.innerHTML += ` —— <b>${label}</b>`;
+    chat.scrollTop = chat.scrollHeight;
+  }, 900);
+}
+
+// ⚠️ pressure meter (暴露值/灵异度…): color shifts as it climbs
+function renderPressure(p) {
+  const el = document.getElementById("pressurebar");
+  if (!p || !p.name) { el.classList.add("hidden"); return; }
+  const v = Math.max(0, Math.min(100, p.value || 0));
+  const color = v >= 80 ? "#e0574f" : v >= 50 ? "#e0a34f" : "#5b8a6c";
+  el.innerHTML = `<span>⚠️ ${escapeHtml(p.name)}</span>` +
+    `<span class="ptrack"><span class="pfill" style="width:${v}%;background:${color}"></span></span>` +
+    `<span style="color:${color}">${v}</span>`;
+  el.classList.remove("hidden");
+}
 function updatePlaceholder() {
   const c = cast.find(x => x.id === target);
   if (playMode === "god") {
@@ -843,6 +885,8 @@ async function send() {
         else if (ev.event === "hint") { renderHint(ev.hint); }
         else if (ev.event === "moments") { afterPlay.moments = ev.moments; afterPlay.relDeltas = ev.rel_deltas; }
         else if (ev.event === "choice") { afterPlay.choice = ev.choice; }
+        else if (ev.event === "dice") { showDice(ev.dice); }
+        else if (ev.event === "pressure") { renderPressure(ev.pressure); }
         else if (ev.event === "move_request") { afterPlay.moveReq = ev.move_request; }
         else if (ev.event === "suggest") { afterPlay.suggest = ev.suggestions; }
         else if (ev.event === "ending") { afterPlay.ending = ev.ending; }
@@ -887,6 +931,8 @@ function showMoments(moments, relDeltas) {
     else if (m.kind === "rel_up") pushToast(`💗 你和 ${m.name} 成了「${m.mode_name}」`, "t-rel", i++ * 650);
     else if (m.kind === "act") pushToast(`📖 进入第${m.index}幕${m.title ? " · " + m.title : ""}`, "t-act", i++ * 650);
     else if (m.kind === "ending" && !m.terminal) pushToast(`🏆 达成结局：「${m.title || m.ending_kind}」`, "t-end", i++ * 650);
+    else if (m.kind === "pressure") pushToast(`⚠️ ${m.note || ""}`, "t-press", i++ * 650);
+    else if (m.kind === "event") pushToast(`🌊 ${m.label || "起变故了"}`, "t-act", i++ * 650);
   }
   const bits = [];
   for (const cid in relDeltas) {
