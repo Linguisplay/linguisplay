@@ -53,6 +53,7 @@ def default_state() -> dict[str, Any]:
         "searched_prop_ids": [],        # props already turned over (现场搜查, once each)
         "pressure": 0,                  # ⚠️ story pressure meter (暴露值/灵异度), 0~100
         "world_pulse": 0,               # 🌊 quiet turns since the world last moved by itself
+        "turns_in_act": 0,              # pacing: turns spent in the current act
         "pending_choice": None,         # an authored decision awaiting the player's pick
         "unlocked_fragment_ids": [],
         "asks": {},
@@ -113,6 +114,9 @@ DEFAULT_TUNING = {
     # hours away after which the next turn counts as a RETURN (角色接起上次的话头)
     "return_gap_hours": 6,
     "dice": 1,                  # 🎲 risky 做-actions get a visible fate roll (0 = off)
+    # pacing brakes (推进太快 fix): gains taper as scores climb; a soft act needs real time
+    "affinity_taper_den": 100,  # positive 好感 gain scales by (1 - affinity/this), floor 0.3
+    "min_turns_per_act": 6,     # soft acts: no advance (model OR backstop) before this many turns
     "world_event_every": 4,     # 🌊 after this many quiet turns an authored act event fires itself (0 = off)
 }
 
@@ -1784,20 +1788,35 @@ def run_turn_stream(
 
     affinity_delta = 0 if is_think else max(tun["affinity_clamp_min"],
                                             min(tun["affinity_clamp_max"], affinity_delta))
+    if affinity_delta > 0:
+        # diminishing returns: the warmer things already are, the less another nice line moves
+        scale = max(0.3, 1 - int(state.get("affinity", 0)) / max(1, tun["affinity_taper_den"]))
+        affinity_delta = max(1, int(round(affinity_delta * scale)))
 
     # 4. apply affinity, then decide progression. HARD GATE: if this act authored advance
     #    conditions, it advances ONLY when can_advance() is satisfied (program-checked) —
     #    the model's 推进 and affinity backstop can no longer talk past it. Acts with NO
     #    authored conditions fall back to the old soft advance (model 推进 / affinity).
     state["affinity"] = max(0, int(state.get("affinity", 0)) + affinity_delta)
+    if not is_think:
+        state["turns_in_act"] = int(state.get("turns_in_act", 0) or 0) + 1
     max_act = _max_act_index(content)
     if act_has_gate(content, old_act):
         new_act = (min(max_act, old_act + 1)
                    if (max_act and can_advance(content, state, old_act)) else old_act)
     else:
-        backstop = 1 + state["affinity"] // tun["act_backstop_div"]  # soft-run stall safety net
-        target = max(old_act + (1 if advance else 0), backstop)
+        # a soft act needs REAL time in it before anything can advance it — the model's
+        # eager 推进 and the affinity backstop both wait out min_turns_per_act, and a turn
+        # moves at most ONE act (no affinity-fueled multi-act jumps).
+        if int(state.get("turns_in_act", 0)) >= tun["min_turns_per_act"]:
+            backstop = 1 + state["affinity"] // tun["act_backstop_div"]  # stall safety net
+            target = max(old_act + (1 if advance else 0), backstop)
+        else:
+            target = old_act
+        target = min(target, old_act + 1)
         new_act = min(max_act, target) if max_act else target
+    if new_act > old_act:
+        state["turns_in_act"] = 0
     state["act"] = new_act
 
     # 4a. (movement is player-driven only — see the /move endpoint. The model can no longer

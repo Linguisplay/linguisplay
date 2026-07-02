@@ -7,6 +7,7 @@ from app.engine import runtime
 STORY = {
     "story": {
         "id": "s",
+        "tuning": {"min_turns_per_act": 0},   # this test drives the act by hand
         "characters": [{"id": "c1", "name": "M", "is_lead": True}],
         "acts": [
             {"index": 1, "title": "一"},

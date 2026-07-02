@@ -179,11 +179,20 @@ def _tv(tuning: dict | None, key: str, default: int) -> int:
 
 def apply_deltas(scores: dict[str, int], closeness_delta: int, romance_delta: int,
                  tuning: dict | None = None) -> dict[str, int]:
-    """Apply per-turn deltas, clamped per-step and to range, so flow stays gradual."""
+    """Apply per-turn deltas, clamped per-step and to range, so flow stays gradual.
+    GAINS TAPER as the score climbs (the closer you already are, the more a step costs —
+    diminishing returns keep 暖场刷分 from racing up the tiers); losses stay full-force,
+    so trust is slow to build and quick to break."""
     cd = _clamp(int(closeness_delta or 0),
                 _tv(tuning, "close_step_min", CLOSE_STEP[0]), _tv(tuning, "close_step_max", CLOSE_STEP[1]))
     rd = _clamp(int(romance_delta or 0),
                 _tv(tuning, "rom_step_min", ROM_STEP[0]), _tv(tuning, "rom_step_max", ROM_STEP[1]))
+    if cd > 0:
+        scale = max(0.25, 1 - int(scores.get("closeness", START_CLOSENESS)) / max(1, _tv(tuning, "close_taper_den", 130)))
+        cd = max(1, int(round(cd * scale)))
+    if rd > 0:
+        scale = max(0.25, 1 - int(scores.get("romance", START_ROMANCE)) / max(1, _tv(tuning, "rom_taper_den", 110)))
+        rd = max(1, int(round(rd * scale)))
     return {
         "closeness": _clamp(int(scores.get("closeness", START_CLOSENESS)) + cd, CLOSE_MIN, CLOSE_MAX),
         "romance": _clamp(int(scores.get("romance", START_ROMANCE)) + rd, ROM_MIN, ROM_MAX),
