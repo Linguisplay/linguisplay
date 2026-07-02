@@ -116,6 +116,8 @@ DEFAULT_TUNING = {
     "dice": 1,                  # 🎲 risky 做-actions get a visible fate roll (0 = off)
     # pacing brakes (推进太快 fix): gains taper as scores climb; a soft act needs real time
     "affinity_taper_den": 100,  # positive 好感 gain scales by (1 - affinity/this), floor 0.3
+    "close_taper_den": 130,     # per-char 亲近 gain taper denominator (relationships.py)
+    "rom_taper_den": 110,       # per-char 心动 gain taper denominator
     "min_turns_per_act": 6,     # soft acts: no advance (model OR backstop) before this many turns
     "world_event_every": 4,     # 🌊 after this many quiet turns an authored act event fires itself (0 = off)
 }
