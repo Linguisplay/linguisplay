@@ -836,6 +836,15 @@ function paintKeywordBg(scene) {
   img.onerror = () => { if (scene.night) { const f=new Image(); const u2=`/scene/bg/${scene.bg}.jpg`; f.onload=()=>bg.style.backgroundImage=`url(${u2})`; f.src=u2; } };
   img.src = url;
 }
+// AUTOPLAY UNLOCK: browsers reject play() that isn't tied to a fresh user gesture (our
+// first attempt fires after async loads, so it's silently blocked and never retried).
+// Any real interaction re-kicks a stalled bgm — the music starts on your first click/key.
+function kickAudio() {
+  if (soundOn && bgm.src && bgm.paused && !ended) bgm.play().catch(()=>{});
+}
+document.addEventListener("click", kickAudio, true);
+document.addEventListener("keydown", kickAudio, true);
+
 function toggleSound() {
   soundOn = !soundOn;
   soundBtn.textContent = soundOn ? "🔊" : "🔇";
