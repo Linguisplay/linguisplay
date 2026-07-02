@@ -782,6 +782,7 @@ async function typeInto(el, text, ms=22) {
 // play one engine beat with a "typing…" pause then a typewriter reveal
 async function playBeat(b) {
   if (b.author === "player") { renderBeat(b); return; }
+  if (pendingSfx) { const n = pendingSfx; pendingSfx = null; playSfx(n); }
   if (b.type === "description") {
     const node = document.createElement("div"); node.className = "desc"; chat.appendChild(node);
     await typeInto(node, b.text, 16);   // narration types a bit faster
@@ -796,19 +797,55 @@ async function playBeat(b) {
 }
 
 // ── immersive scene (background / bgm / sfx) ──────────
+// ── audio mixer: gentle levels, fades, ducking — nothing hard-cuts ──────────
+const BGM_VOL = 0.35, SFX_VOL = 0.5;
+bgm.volume = BGM_VOL; sfx.volume = SFX_VOL;
+let fadeTimer = null, pendingSfx = null;
+function _ramp(el, to, ms, then) {
+  const from = el.volume, t0 = performance.now();
+  if (fadeTimer && el === bgm) cancelAnimationFrame(fadeTimer);
+  function step(t) {
+    const k = Math.min(1, (t - t0) / ms);
+    el.volume = from + (to - from) * k;
+    if (k < 1) { const id = requestAnimationFrame(step); if (el === bgm) fadeTimer = id; }
+    else if (then) then();
+  }
+  requestAnimationFrame(step);
+}
+function swapBgm(mood) {           // crossfade instead of a hard src cut
+  const start = () => {
+    bgm.src = `/scene/bgm/${mood}.mp3`;
+    bgm.volume = 0;
+    if (soundOn) bgm.play().catch(()=>{});
+    _ramp(bgm, BGM_VOL, 1600);
+  };
+  if (!bgm.src || bgm.paused) start();
+  else _ramp(bgm, 0, 900, start);
+}
+function playSfx(name) {           // fade in + duck the music underneath
+  if (!soundOn || !name) return;
+  sfx.src = `/scene/sfx/${name}.mp3`;
+  sfx.volume = 0;
+  sfx.play().catch(()=>{});
+  _ramp(sfx, SFX_VOL, 300);
+  if (!bgm.paused) {
+    _ramp(bgm, BGM_VOL * 0.45, 300);
+    sfx.onended = () => _ramp(bgm, BGM_VOL, 900);
+  }
+}
+
 function applyScene(scene) {
   if (!scene) return;
   curScene = scene;
   const mood = scene.mood || "daily";
   paintBackground();
-  // bgm by mood (loops). silent if file missing.
   if (mood !== curBgmMood) {
     curBgmMood = mood;
-    bgm.src = `/scene/bgm/${mood}.mp3`;
-    if (soundOn) bgm.play().catch(()=>{});
+    swapBgm(mood);
   }
-  // one-shot sfx
-  if (scene.sfx) { sfx.src = `/scene/sfx/${scene.sfx}.mp3`; if (soundOn) sfx.play().catch(()=>{}); }
+  // one-shot sfx: HELD until the next beat starts typing, so the sound lands with the
+  // words that describe it instead of firing the moment the stream ends (太生硬 fix)
+  if (scene.sfx) pendingSfx = scene.sfx;
 }
 // Paint the backdrop. Priority: AI-generated per-LOCATION image (consistent for a place) →
 // keyword/preset image from the scene classifier → mood gradient. Each step degrades to the
@@ -840,7 +877,7 @@ function paintKeywordBg(scene) {
 // first attempt fires after async loads, so it's silently blocked and never retried).
 // Any real interaction re-kicks a stalled bgm — the music starts on your first click/key.
 function kickAudio() {
-  if (soundOn && bgm.src && bgm.paused && !ended) bgm.play().catch(()=>{});
+  if (soundOn && bgm.src && bgm.paused && !ended) { bgm.volume = BGM_VOL; bgm.play().catch(()=>{}); }
 }
 document.addEventListener("click", kickAudio, true);
 document.addEventListener("keydown", kickAudio, true);
@@ -955,6 +992,7 @@ function showMoments(moments, relDeltas) {
 }
 
 function finishTurn() {
+  if (pendingSfx) { const n = pendingSfx; pendingSfx = null; playSfx(n); }
   if (afterPlay) {
     if ((afterPlay.moments && afterPlay.moments.length) || (afterPlay.relDeltas && Object.keys(afterPlay.relDeltas).length))
       showMoments(afterPlay.moments || [], afterPlay.relDeltas || {});

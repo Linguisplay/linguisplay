@@ -111,7 +111,7 @@ def _thump(freq: float, dur: float, sr: int = SR) -> np.ndarray:
     n = int(sr * dur)
     t = np.arange(n) / sr
     sweep = freq * np.exp(-t * 8)      # pitch drops as the hit decays
-    return (np.sin(2 * np.pi * np.cumsum(sweep) / sr) * _env(n, 0.005, 7)).astype(np.float32)
+    return (np.sin(2 * np.pi * np.cumsum(sweep) / sr) * _env(n, 0.02, 6)).astype(np.float32)
 
 
 def sfx_rain(sr=SR):
@@ -180,6 +180,20 @@ def sfx_ringtone(sr=SR):
     return np.tile(burst, 2)
 
 
+def _reverb(x: np.ndarray, sr: int = SR, tail: float = 0.5) -> np.ndarray:
+    """A handful of decaying early reflections + room to breathe — takes the synthetic
+    dryness off percussive one-shots so they stop punching through the scene."""
+    n = len(x) + int(sr * tail)
+    y = np.zeros(n, np.float32)
+    y[:len(x)] += x
+    for delay, gain in ((0.029, 0.32), (0.047, 0.24), (0.071, 0.18), (0.109, 0.12), (0.151, 0.07)):
+        i = int(sr * delay)
+        y[i:i + len(x)] += gain * x
+    return y
+
+
+_PERCUSSIVE = {"knock", "door", "footsteps", "heartbeat"}
+
 SFX_BUILDERS = {
     "rain": sfx_rain, "wind": sfx_wind, "waves": sfx_waves, "thunder": sfx_thunder,
     "heartbeat": sfx_heartbeat, "knock": sfx_knock, "door": sfx_door,
@@ -195,8 +209,11 @@ def gen_sfx(force: bool = False) -> None:
             print(f"  skip {stem} (exists)")
             continue
         audio = fn().astype(np.float32)
-        audio = 0.8 * audio / (np.max(np.abs(audio)) + 1e-6)
-        _mp3(path, _fade(audio, 60))
+        if stem in _PERCUSSIVE:
+            audio = _reverb(audio)
+        peak = 0.6 if stem in _PERCUSSIVE else 0.75
+        audio = peak * audio / (np.max(np.abs(audio)) + 1e-6)
+        _mp3(path, _fade(audio, 120))
 
 
 if __name__ == "__main__":
