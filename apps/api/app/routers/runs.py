@@ -55,6 +55,7 @@ def _to_run(r: RunModel) -> Run:
             here=runtime.scene_cast(r.pinned_content or {}, st,
                                     exclude_id=pcid if mode == "character" else None),
             pending_choice=st.get("pending_choice"),
+            player_character_name=(runtime._char_name(r.pinned_content or {}, pcid) if pcid else None),
         ),
         cast=cast,
         created_at=r.created_at,
@@ -112,6 +113,8 @@ def list_runs(user: User = Depends(current_user), db: Session = Depends(get_db))
     for r in rows:
         story = (r.pinned_content or {}).get("story", {})
         last = r.beats[-1].text if r.beats else None
+        st = r.state or {}
+        pcid = st.get("player_character_id")
         out.append(
             RunSummary(
                 id=r.id,
@@ -121,6 +124,10 @@ def list_runs(user: User = Depends(current_user), db: Session = Depends(get_db))
                 persona_id=r.persona_id,
                 last_beat_preview=last,
                 unread=False,
+                act=int(st.get("act", 1) or 1),
+                mode=st.get("mode", "character"),
+                player_character_name=(runtime._char_name(r.pinned_content or {}, pcid) if pcid else None),
+                ended=bool(st.get("ended")),
                 updated_at=r.updated_at,
             )
         )

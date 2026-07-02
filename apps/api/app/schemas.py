@@ -321,6 +321,7 @@ class RunState(BaseModel):
     following: list[str] = []  # character ids currently traveling WITH the player
     here: list[dict[str, Any]] = []  # characters in the player's CURRENT scene [{id,name,...}]
     pending_choice: Optional[dict[str, Any]] = None  # an unanswered key-moment decision
+    player_character_name: Optional[str] = None  # name of the embodied character (character mode)
 
 
 class Run(BaseModel):
@@ -344,6 +345,10 @@ class RunSummary(BaseModel):
     last_beat_preview: Optional[str] = None
     unread: bool = False
     updated_at: Optional[datetime] = None
+    act: int = 1
+    mode: str = "character"
+    player_character_name: Optional[str] = None
+    ended: bool = False
 
 
 class RunCreate(BaseModel):

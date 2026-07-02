@@ -266,7 +266,37 @@ async function afterAuth() {
   personaId = mask.id; myName = mask.name || "我";
   const page = await j("/stories");
   stories.innerHTML = "";
-  if (!page.items.length) { stories.innerHTML = "<p class='muted'>还没有已发布的剧本。</p>"; show("pick"); return; }
+  // 继续你的故事: existing runs come FIRST — the relationships you built are the game
+  try {
+    const runs = await j("/runs");
+    if (runs.length) {
+      const h = document.createElement("p");
+      h.className = "muted"; h.style.margin = "4px 0"; h.textContent = "继续你的故事";
+      stories.appendChild(h);
+      runs.slice(0, 8).forEach(r => {
+        const div = document.createElement("div");
+        div.className = "card runcard"; div.style.margin = "8px 0"; div.style.cursor = "pointer";
+        const who = r.mode === "god" ? "旁观" : (r.player_character_name ? `扮演${r.player_character_name}` : "");
+        const tag = r.ended ? "（已完结·可回看）" : `第${r.act}幕`;
+        const prev = (r.last_beat_preview || "").slice(0, 42);
+        div.innerHTML = `<b>${escapeHtml(r.story_title)}</b> <span class="muted">${escapeHtml(who)} · ${escapeHtml(tag)}</span>` +
+          `<div class="muted" style="margin-top:4px">${escapeHtml(prev)}${(r.last_beat_preview||"").length>42?"…":""}</div>`;
+        const del = document.createElement("a");
+        del.textContent = "✕"; del.title = "删除这段进度";
+        del.style.cssText = "float:right; color:#7b8296; padding:0 4px";
+        del.onclick = async (e) => { e.stopPropagation();
+          if (!confirm(`删除《${r.story_title}》的这段进度？关系和已揭开的真相都会丢失。`)) return;
+          await j(`/runs/${r.id}`, { method:"DELETE" }); div.remove(); };
+        div.prepend(del);
+        div.onclick = () => resumeRun(r.id);
+        stories.appendChild(div);
+      });
+      const h2 = document.createElement("p");
+      h2.className = "muted"; h2.style.margin = "14px 0 4px"; h2.textContent = "开一段新的";
+      stories.appendChild(h2);
+    }
+  } catch (e) {}
+  if (!page.items.length) { stories.innerHTML += "<p class='muted'>还没有已发布的剧本。</p>"; show("pick"); return; }
   page.items.forEach(s => {
     const div = document.createElement("div");
     div.className = "card"; div.style.margin = "10px 0"; div.style.cursor = "pointer";
@@ -302,10 +332,19 @@ function editCurrentStory() { if (currentStoryId) location.href = `/studio?story
 
 // ── run lifecycle ─────────────────────────────────────
 async function startRun(storyId, mode="character", playerCharacterId=null, playerCharacterName=null) {
-  playMode = mode;
-  myName = (mode === "character" && playerCharacterName) ? playerCharacterName : "我";
   const run = await j("/runs", { method:"POST", body: JSON.stringify({
     story_id: storyId, persona_id: personaId, mode, player_character_id: playerCharacterId }) });
+  await enterRun(run);
+}
+// resume a previous run — pick up exactly where the story left off (the parting
+// cliffhanger is the last thing on screen; the cast greets you back on your next line)
+async function resumeRun(id) {
+  const run = await j(`/runs/${id}`);
+  await enterRun(run);
+}
+async function enterRun(run) {
+  playMode = (run.state && run.state.mode) || "character";
+  myName = (playMode === "character" && run.state && run.state.player_character_name) || "我";
   runId = run.id;
   hide("role");
   hide("pick"); show("play"); show("backBtn"); show("soundBtn"); show("journalBtn"); show("mapBtn");
