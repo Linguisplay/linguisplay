@@ -8,7 +8,7 @@ from ..security import read_session_token
 from ..models import Fragment as FragmentModel
 from ..models import Secret as SecretModel
 from ..models import Story as StoryModel
-from ..models import StorySnapshot, User
+from ..models import StoryMeta, StorySnapshot, User
 from ..schemas import (
     PublishResult,
     Secret,
@@ -159,6 +159,27 @@ def get_story(
         if viewer_id != s.owner_id:
             raise HTTPException(404, "story not found")
     return _to_story(s)
+
+
+@router.get("/{story_id}/meta")
+def get_story_meta(story_id: str, user: User = Depends(current_user),
+                   db: Session = Depends(get_db)):
+    """🌱 This player's cross-run progress on one story: the persistent ending gallery,
+    earned achievements, and whether NG+ perks are unlocked (any ending reached once)."""
+    s = db.get(StoryModel, story_id)
+    if not s:
+        raise HTTPException(404, "story not found")
+    meta = (db.query(StoryMeta)
+            .filter(StoryMeta.user_id == user.id, StoryMeta.story_id == story_id).first())
+    from ..engine import runtime as _rt
+    return {
+        "endings_achieved": list(meta.endings_achieved or []) if meta else [],
+        "endings_total": len(s.endings or []),
+        "achievements": list(meta.achievements or []) if meta else [],
+        "runs_ended": int(meta.runs_ended or 0) if meta else 0,
+        "ng_plus": bool(meta and (meta.endings_achieved or [])),
+        "perks": [{"id": k, **v} for k, v in _rt.PERKS.items()],
+    }
 
 
 @router.patch("/{story_id}", response_model=Story)

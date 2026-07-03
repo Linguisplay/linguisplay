@@ -375,6 +375,9 @@ class RunCreate(BaseModel):
     # (watch the cast interact with each other — the 旁观/CP mode).
     mode: Literal["character", "god"] = "character"
     player_character_id: Optional[str] = None  # which character you play (character mode)
+    # 🌱 NG+ start perk ("veteran" | "instinct"); only honored once this story has been
+    # completed (any ending reached) by this user at least once
+    perk: Optional[str] = None
 
 
 class Beat(BaseModel):

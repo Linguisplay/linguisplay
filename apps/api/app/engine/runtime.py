@@ -1644,6 +1644,47 @@ def journal(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
                        if c.get("id") in _dead_ids(state) and c.get("name")]}
 
 
+# ── 🌱 achievements & NG+ (二周目) ───────────────────────────────────────────────
+# Story-AGNOSTIC milestones computed from the run state whenever an ending fires;
+# they persist per (user, story) alongside the cross-run ending gallery. Perks are
+# small NG+ start advantages a player earns by reaching any ending once.
+PERKS = {
+    "veteran": {"name": "故人", "desc": "似曾相识——开局便与每个人多几分亲近"},
+    "instinct": {"name": "直觉", "desc": "冥冥之感——所有命运判定成功率 +10%"},
+}
+INSTINCT_BONUS = 10
+VETERAN_CLOSENESS = 8
+
+
+def compute_achievements(content: dict[str, Any], state: dict[str, Any]) -> list[dict[str, Any]]:
+    """The achievements this run's CURRENT state has earned. Evaluated when an ending
+    fires; the router merges them into the player's per-story meta. Pure & agnostic:
+    only the abstract shape of the story is consulted, never any specific 剧本."""
+    out: list[dict[str, Any]] = []
+    achieved = list(state.get("achieved_endings") or [])
+    if not achieved:
+        return out
+    story = content.get("story") or {}
+    kinds = {e.get("id"): e.get("kind") for e in story.get("endings") or []}
+    if any(kinds.get(eid) == "true" for eid in achieved):
+        out.append({"id": "true_end", "name": "拨云见日", "desc": "达成真结局"})
+    if _characters(content) and not state.get("dead_character_ids"):
+        out.append({"id": "no_blood", "name": "一滴血都没流", "desc": "抵达结局时，无人死去"})
+    all_frag_ids = {f.get("id") for f in gating.iter_fragments(content) if f.get("id")}
+    if all_frag_ids and all_frag_ids <= set(state.get("unlocked_fragment_ids") or []):
+        out.append({"id": "all_truths", "name": "无所不知", "desc": "揭开这个故事的全部真相"})
+    tun = tuning_for(content)
+    rel = state.get("rel") or {}
+    if any(relationships.derive_mode(c, rel.get(c.get("id")) or relationships.new_scores(), tun)
+           == "lover" for c in _characters(content)):
+        out.append({"id": "heartbeat", "name": "心有所属", "desc": "有人真正为你心动"})
+    if int(state.get("confronts_won") or 0) >= 3:
+        out.append({"id": "interrogator", "name": "铁齿铜牙", "desc": "三次对质撬开真相"})
+    if tun["turns_per_slot"] > 0 and int((state.get("clock") or {}).get("day", 1) or 1) <= 2:
+        out.append({"id": "swift", "name": "雷厉风行", "desc": "两天之内便抵达结局"})
+    return out
+
+
 def _secret_has_newly(content: dict[str, Any], sid, newly) -> bool:
     """Did any of this secret's fragments unlock THIS turn?"""
     newset = set(newly or [])
@@ -1729,9 +1770,13 @@ def _confront_gen(content, state, persona, secret, frag, next_locked, target, ll
     closeness = int(scores.get("closeness", 0))
     # the closer you are, the likelier they come clean when cornered
     chance = max(25, min(90, tun["confront_base"] + closeness // 2))
+    if state.get("perk") == "instinct":   # 🌱 NG+ 直觉: every fate check runs warmer
+        chance = min(95, chance + INSTINCT_BONUS)
     dice = _roll_check(chance)
     yield ("dice", dice)
     success = dice["outcome"] in ("success", "crit_success")
+    if success:
+        state["confronts_won"] = int(state.get("confronts_won") or 0) + 1
     forced_id = next_locked.get("id") if success else None
     if forced_id:
         state["unlocked_fragment_ids"] = sorted(set(state.get("unlocked_fragment_ids") or [])
@@ -1931,6 +1976,8 @@ def run_turn_stream(
         except (TypeError, ValueError):
             risk = 100
         if risk < 100:
+            if state.get("perk") == "instinct":  # 🌱 NG+ 直觉: fate runs warmer
+                risk = min(95, risk + INSTINCT_BONUS)
             dice = _roll_check(risk)
             yield ("dice", dice)
 

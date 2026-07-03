@@ -75,6 +75,12 @@
   #placebar .clock.ddl { color: #ffb27a; }
   .jconfront { color: #d9a8e6; cursor: pointer; font-size: 12px; white-space: nowrap; text-decoration: underline dotted; margin-left: 4px; }
   .jconfront:hover { color: #f0c9ff; }
+  .smeta { margin: 4px 0 10px; padding: 9px 12px; border-radius: 10px; background: #1a1a24; border: 1px solid #2c2c3c; font-size: 12.5px; color: #cfd6e6; }
+  .smeta .badge { display: inline-block; background: #2b2438; border: 1px solid #4a3a66; color: #e0cfff; border-radius: 8px; padding: 1px 7px; margin: 2px 2px; font-size: 11.5px; }
+  .smeta .perks { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .smeta .perk { display: inline-flex; flex-direction: column; gap: 1px; background: #1f2a20; border: 1px solid #2c4233; border-radius: 9px; padding: 5px 10px; cursor: pointer; color: #cfe6d4; font-size: 12px; }
+  .smeta .perk small { color: #8aa092; font-size: 10.5px; }
+  .smeta .perk input { margin-right: 4px; }
   /* relationship tag + follow control under each in-scene character */
   .castitem .rel { font-size: 10px; padding: 0 4px; border-radius: 6px; line-height: 1.5; white-space: nowrap; }
   .rel-stranger { color:#9aa0ad; background:#2a2d36; } .rel-peer { color:#cfd6e6; background:#2b3142; }
@@ -245,6 +251,7 @@
   <!-- role / mode picker -->
   <div id="role" class="card hidden">
     <div class="bar" style="justify-content:space-between"><h3 style="margin:0">选择玩法</h3><span class="bar"><a onclick="editCurrentStory()">✏️ 编辑这个剧本</a><a onclick="backToStories()">← 换剧本</a></span></div>
+    <div id="storyMeta"></div>
     <p class="muted" style="margin:6px 0 4px">扮演其中一个角色，亲自下场：</p>
     <div id="roleChars"></div>
     <p class="muted" style="border-top:1px solid #23232c; padding-top:12px; margin-top:12px">或者，当个隐形看客：</p>
@@ -392,7 +399,32 @@ async function chooseRole(storyId) {
     roleChars.appendChild(b);
   });
   if (!chars.length) roleChars.innerHTML = "<p class='muted'>这个剧本还没有可扮演的角色。</p>";
+  renderStoryMeta(storyId);
   hide("pick"); show("role");
+}
+// 🌱 cross-run progress: the persistent ending gallery + achievements + NG+ perk picker
+let chosenPerk = null;
+async function renderStoryMeta(storyId) {
+  const el = document.getElementById("storyMeta");
+  el.innerHTML = ""; chosenPerk = null;
+  let m;
+  try { m = await j(`/stories/${storyId}/meta`); } catch (e) { return; }
+  const bits = [];
+  if (m.endings_total) bits.push(`🏆 结局图鉴 ${m.endings_achieved.length}/${m.endings_total}`);
+  if ((m.achievements || []).length)
+    bits.push(m.achievements.map(a => `<span class="badge" title="${escapeHtml(a.desc||"")}">🏅${escapeHtml(a.name)}</span>`).join(" "));
+  let perks = "";
+  if (m.ng_plus) {
+    perks = `<div class="perks"><span class="muted">🌱 二周目优势：</span>` +
+      [{ id: null, name: "无", desc: "原汁原味再来一局" }].concat(m.perks || []).map(p =>
+        `<label class="perk"><span><input type="radio" name="perk" ${p.id===null?"checked":""} data-perk="${p.id||""}">` +
+        `${escapeHtml(p.name)}</span><small>${escapeHtml(p.desc||"")}</small></label>`).join("") + `</div>`;
+  }
+  if (!bits.length && !perks) return;
+  el.innerHTML = `<div class="smeta">${bits.join(" · ")}${perks}</div>`;
+  el.querySelectorAll("input[name=perk]").forEach(r => {
+    r.onchange = () => { chosenPerk = r.dataset.perk || null; };
+  });
 }
 function backToStories() { hide("role"); show("pick"); }
 function editCurrentStory() { if (currentStoryId) location.href = `/studio?story=${currentStoryId}`; }
@@ -400,7 +432,9 @@ function editCurrentStory() { if (currentStoryId) location.href = `/studio?story
 // ── run lifecycle ─────────────────────────────────────
 async function startRun(storyId, mode="character", playerCharacterId=null, playerCharacterName=null) {
   const run = await j("/runs", { method:"POST", body: JSON.stringify({
-    story_id: storyId, persona_id: personaId, mode, player_character_id: playerCharacterId }) });
+    story_id: storyId, persona_id: personaId, mode, player_character_id: playerCharacterId,
+    perk: chosenPerk }) });
+  if (chosenPerk) pushToast(`🌱 二周目优势生效：${chosenPerk === "veteran" ? "故人" : "直觉"}`, "t-act", 400);
   await enterRun(run);
 }
 // resume a previous run — pick up exactly where the story left off (the parting
@@ -1121,6 +1155,7 @@ async function streamTurn(url, bodyObj) {
         else if (ev.event === "move_request") { afterPlay.moveReq = ev.move_request; }
         else if (ev.event === "suggest") { afterPlay.suggest = ev.suggestions; }
         else if (ev.event === "ending") { afterPlay.ending = ev.ending; }
+        else if (ev.event === "achievements") { (ev.achievements||[]).forEach((a,k) => pushToast(`🏅 成就达成：「${a.name}」— ${a.desc||""}`, "t-end", 900 + k*700)); }
       }
     }
   } catch(e){

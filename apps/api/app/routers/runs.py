@@ -14,7 +14,7 @@ from ..models import Beat as BeatModel
 from ..models import Persona as PersonaModel
 from ..models import Run as RunModel
 from ..models import Story as StoryModel
-from ..models import StorySnapshot, User
+from ..models import StoryMeta, StorySnapshot, User
 from ..schemas import (Beat, ChooseIn, ConfrontIn, FollowIn, MoveIn, PlayIn, Run, RunCreate,
                        RunState, RunSummary)
 from .stories import _to_secret, _to_story
@@ -183,6 +183,19 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
         pc = next((c for c in (content.get("story") or {}).get("characters", [])
                    if c.get("id") == pcid), None)
         state["inventory"] = [dict(i) for i in ((pc or {}).get("items") or []) if i.get("name")]
+    # 🌱 NG+ perk: earned by reaching any ending of THIS story once; applied at the start
+    if body.perk:
+        if body.perk not in runtime.PERKS:
+            raise HTTPException(400, "没有这种开局优势")
+        meta = (db.query(StoryMeta)
+                .filter(StoryMeta.user_id == user.id, StoryMeta.story_id == story.id).first())
+        if not meta or not (meta.endings_achieved or []):
+            raise HTTPException(403, "先走到一个结局，才解锁二周目优势")
+        state["perk"] = body.perk
+        if body.perk == "veteran":
+            base = runtime.relationships.new_scores()
+            state["rel"] = {c["id"]: {**base, "closeness": base["closeness"] + runtime.VETERAN_CLOSENESS}
+                            for c in (content.get("story") or {}).get("characters", []) if c.get("id")}
     run = RunModel(
         owner_id=user.id,
         story_id=story.id,
@@ -362,6 +375,13 @@ def play(
                 yield _event({"event": "suggest", "suggestions": final.get("suggestions", [])})
                 if final.get("ending"):
                     yield _event({"event": "ending", "ending": final["ending"]})
+                    # 🌱 the ending outlives the run: cross-run gallery + achievements
+                    try:
+                        new_ach = _bump_story_meta(db2, run, content, final)
+                        if new_ach:
+                            yield _event({"event": "achievements", "achievements": new_ach})
+                    except Exception:
+                        pass
             yield _event({"event": "done"})
         except Exception as e:  # never leave the client hanging
             yield _event({"event": "beat", "beat": {"id": "", "type": "description",
@@ -375,6 +395,29 @@ def play(
 
 def _event(obj: dict) -> str:
     return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
+
+
+def _bump_story_meta(db2: Session, run: RunModel, content: dict, final: dict) -> list[dict]:
+    """🌱 Fold a just-fired ending into the player's per-story meta (cross-run gallery,
+    achievements, NG+ unlock). Returns the achievements newly earned THIS moment."""
+    meta = (db2.query(StoryMeta)
+            .filter(StoryMeta.user_id == run.owner_id, StoryMeta.story_id == run.story_id)
+            .first())
+    if not meta:
+        meta = StoryMeta(user_id=run.owner_id, story_id=run.story_id)
+        db2.add(meta)
+    eid = (final.get("ending") or {}).get("id")
+    state = final.get("state") or {}
+    if len(state.get("achieved_endings") or []) <= 1:
+        meta.runs_ended = int(meta.runs_ended or 0) + 1  # this run's FIRST ending
+    if eid:
+        meta.endings_achieved = sorted(set(meta.endings_achieved or []) | {eid})
+    have = {a.get("id") for a in (meta.achievements or [])}
+    new = [a for a in runtime.compute_achievements(content, state) if a["id"] not in have]
+    if new:
+        meta.achievements = list(meta.achievements or []) + new
+    db2.commit()
+    return new
 
 
 # ── move / follow (the explore + companion mechanics) ─────────────────────────

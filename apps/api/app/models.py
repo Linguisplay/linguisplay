@@ -201,6 +201,24 @@ class Run(Base):
     )
 
 
+class StoryMeta(Base):
+    """🌱 Per-(user, story) progress that OUTLIVES runs: the cross-run ending gallery,
+    earned achievements, and the NG+ (二周目) unlock. Written whenever a run reaches an
+    ending; read on the story pick screen and at run creation (perk validation)."""
+
+    __tablename__ = "story_meta"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    story_id: Mapped[str] = mapped_column(ForeignKey("stories.id"), index=True)
+
+    endings_achieved: Mapped[list] = mapped_column(JSON, default=list)  # ending ids
+    achievements: Mapped[list] = mapped_column(JSON, default=list)      # [{id,name,desc}]
+    runs_ended: Mapped[int] = mapped_column(Integer, default=0)         # runs that reached ≥1 ending
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+
+
 class Beat(Base):
     """One rendered turn segment. type ∈ {description, think, dialogue}."""
 
