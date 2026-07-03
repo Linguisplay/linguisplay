@@ -798,6 +798,8 @@ async function openCharCard(cid) {
     ${barHtml("亲近", p.closeness, -40, 100, "#8fe0a6")}
     ${barHtml("心动", p.romance, 0, 100, "#ff8fb3")}`}
     ${bio ? `<div class="jh">你所了解的TA</div>${bio}` : ""}
+    ${(p.ties||[]).length ? `<div class="jh">TA与其他人</div>` + p.ties.map(t =>
+      `<div class="clog">${({"-2":"⚔️","-1":"💢","1":"🤝","2":"🛡️"})[String(t.stance)] || "·"} ${escapeHtml(t.name)} <span class="jwho">${escapeHtml(t.label || "")}</span></div>`).join("") : ""}
     <div class="jh">TA的秘密</div>${secrets || '<div class="jempty">还一无所知。</div>'}
     <div class="jh">你们的故事</div>${logs}
   </div>`;
@@ -1183,6 +1185,7 @@ function showMoments(moments, relDeltas) {
       success: `🃏 对质奏效——${m.name}松了口`, fail: `🃏 ${m.name}扛住了你的对质`,
       crit_fail: `🃏 弄巧成拙——${m.name}反将你一军` }[m.outcome] || "🃏 对质", m.outcome === "fail" || m.outcome === "crit_fail" ? "t-press" : "t-unlock", i++ * 650);
     else if (m.kind === "deadline") pushToast(`⏳ ${m.text || "大限"}——就在今天`, "t-press", i++ * 650);
+    else if (m.kind === "npc_rel") pushToast(m.delta > 0 ? `🤝 ${m.a}和${m.b}走近了` : `⚡ ${m.a}和${m.b}闹僵了`, m.delta > 0 ? "t-rel" : "t-press", i++ * 650);
   }
   const bits = [];
   for (const cid in relDeltas) {

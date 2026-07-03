@@ -59,6 +59,10 @@ CHARACTERS = [
     {
         "id": "cyclone",
         # 龙卷风 守着自己的理发店——城寨的'客厅'。你要见他，得去他那儿，他不会跟着你跑。
+        # 🕸 初始关系网: 和十二少情同父子、蓝信一是他的眼线；与王九是几十年的死仇。
+        "ties": [{"char_id": "twelfth", "stance": 2, "label": "情同父子"},
+                 {"char_id": "shin", "stance": 1, "label": "亲信"},
+                 {"char_id": "wonggau", "stance": -2, "label": "几十年的死仇"}],
         "home_location_id": "loc_barber",
         "relation_default": "stranger",
         "relation_allowed": ["stranger", "peer", "friend"],
@@ -114,6 +118,9 @@ CHARACTERS = [
     {
         "id": "twelfth",
         # 十二少 在理发店和兄弟们扎堆。松口最快、最易交心，可一旦觉得你害了兄弟翻脸也最狠。
+        # 🕸 和四仔是拌嘴拌不散的兄弟；看不惯蓝信一的阴阳怪气。
+        "ties": [{"char_id": "sei", "stance": 2, "label": "过命的兄弟"},
+                 {"char_id": "shin", "stance": -1, "label": "互相看不顺眼"}],
         "home_location_id": "loc_barber",
         "relation_default": "stranger",
         "relation_allowed": ["stranger", "peer", "friend", "enemy"],
@@ -166,6 +173,8 @@ CHARACTERS = [
     },
     {
         "id": "wonggau",
+        # 🕸 给大老板卖命，但各怀心思。
+        "ties": [{"char_id": "boss", "stance": 1, "label": "受雇卖命"}],
         # 王九 第三幕带人堵在巷口——城外的威胁先在隘口现身。默认敌人，几乎不会跟你走。
         "home_location_id": "loc_mouth",
         "relation_default": "enemy",

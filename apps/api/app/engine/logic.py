@@ -213,6 +213,13 @@ def lint_story(content: dict[str, Any]) -> list[Issue]:
         home = c.get("home_location_id")
         if home and home not in loc_ids:
             err("bad_home", where, f"角色「{c.get('name','')}」的 home_location_id={home} 不是已知地点。")
+        char_ids_all = {x.get("id") for x in chars if x.get("id")}
+        for t in (c.get("ties") or []):
+            if t.get("char_id") not in char_ids_all:
+                err("bad_tie", where,
+                    f"角色「{c.get('name','')}」的 ties 指向不存在的角色：{t.get('char_id')}")
+            elif t.get("char_id") == cid:
+                warn("self_tie", where, f"角色「{c.get('name','')}」和自己有 tie——会被忽略。")
         af = int(c.get("appears_from_act") or 0)
         if af > max_act:
             warn("never_appears", where,

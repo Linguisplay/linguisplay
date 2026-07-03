@@ -198,6 +198,11 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append("")
         lines.append(f"【此刻的时间】{ck}。旁白与对话必须贴合这个时辰——天光、街面动静、人的作息。")
 
+    stances = (prompt.get("npc_stances") or "").strip()
+    if stances:
+        lines.append("")
+        lines.append(f"【你和在场之人的过节与交情】{stances}。你对他们的语气、站位、眼神都该带着这层关系。")
+
     deaths = [str(n) for n in (prompt.get("deaths") or []) if str(n).strip()]
     if deaths:
         lines.append("")
@@ -445,6 +450,20 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                               "若玩家失去/交出/用掉了随身物品，填物品名（须在TA随身物品之列）；否则空字符串"}
         props["item_stashed"] = {"type": "string", "description":
                                  "若玩家把随身物品存放/藏在当前地点，填物品名；否则空字符串"}
+    # 🕸 NPC↔NPC judgment: did this scene genuinely move two present characters
+    # closer / further apart (a quarrel, a debt repaid, a betrayal witnessed)?
+    cast_n = [str(n).strip() for n in (prompt.get("cast") or []) if str(n).strip()]
+    if not is_member and not is_think and cast_n:  # speaker + ≥1 other = a pair exists
+        props["npc_rel_shifts"] = {
+            "type": "array", "maxItems": 2,
+            "items": {"type": "object", "properties": {
+                "a": {"type": "string"}, "b": {"type": "string"},
+                "delta": {"type": "integer", "description": "1=走近了, -1=闹僵了"},
+                "why": {"type": "string", "description": "一句话缘由"}},
+                "required": ["a", "b", "delta"]},
+            "description": "仅当这一轮剧情让【在场两个角色彼此之间】（都不是玩家）的关系发生实质变化"
+                           "（争执翻脸/冰释前嫌/一起扛过事）才填，最多2条；名字只能原样抄写在场角色名。"
+                           "通常填空数组[]。"}
     if (prompt.get("clock") or "").strip() and not is_member and not is_think:
         props["time_skip"] = {"type": "string", "description":
                               "默认空字符串。仅当这一轮剧情明确跨过了大段时间才填："
@@ -821,6 +840,14 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
         out["next_speakers"] = [str(x).strip() for x in (d.get("next_speakers") or []) if str(x).strip()]
     if "time_skip" in d:
         out["time_skip"] = str(d.get("time_skip") or "").strip()
+    if "npc_rel_shifts" in d:
+        shifts = []
+        for s in (d.get("npc_rel_shifts") or []):
+            if isinstance(s, dict) and str(s.get("a") or "").strip() and str(s.get("b") or "").strip():
+                shifts.append({"a": str(s["a"]).strip(), "b": str(s["b"]).strip(),
+                               "delta": _i(s.get("delta"), -1, 1),
+                               "why": str(s.get("why") or "").strip()})
+        out["npc_shifts"] = shifts
     return out
 
 

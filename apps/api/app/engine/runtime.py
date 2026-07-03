@@ -77,6 +77,7 @@ def default_state() -> dict[str, Any]:
         "rel": {},                      # per-character relationship toward player {cid:{closeness,romance}}
         "following": [],                # character ids currently traveling WITH the player
         "clock": {"day": 1, "slot": 0, "turns_in_slot": 0},  # ⏳ diegetic time (slot → SLOTS)
+        "npc_rel": {},                  # 🕸 NPC↔NPC stances {"a|b": {stance,-2..2, label?, log:[]}}
     }
 
 
@@ -1360,6 +1361,113 @@ def _ending_by_id(content: dict[str, Any], eid: str | None) -> dict[str, Any] | 
     return None
 
 
+# ── 🕸 NPC↔NPC relationship web ─────────────────────────────────────────────────
+# Characters hold stances toward EACH OTHER (not just toward the player): authored
+# initial ties evolve as scenes play out (the primary judges real shifts, the engine
+# clamps and records them). Feeds performances, the dossier card, and god mode.
+_STANCE_LABEL = {-2: "仇怨", -1: "不睦", 0: "", 1: "交好", 2: "同盟"}
+
+
+def _pair_key(a: str, b: str) -> str:
+    return "|".join(sorted([a or "", b or ""]))
+
+
+def _ensure_npc_rel(content: dict[str, Any], state: dict[str, Any]) -> None:
+    """Seed authored ties (character.ties: [{char_id, stance, label?}]) into the live web —
+    idempotent: an existing pair entry (already seeded or already evolved) is never reset."""
+    web = dict(state.get("npc_rel") or {})
+    ids = {c.get("id") for c in _characters(content)}
+    for c in _characters(content):
+        cid = c.get("id")
+        for t in (c.get("ties") or []):
+            other = t.get("char_id")
+            if not cid or other not in ids or other == cid:
+                continue
+            key = _pair_key(cid, other)
+            if key in web:
+                continue
+            try:
+                stance = max(-2, min(2, int(t.get("stance") or 0)))
+            except (TypeError, ValueError):
+                continue
+            web[key] = {"stance": stance, "label": (t.get("label") or "").strip() or None,
+                        "log": []}
+    state["npc_rel"] = web
+
+
+def npc_stance(state: dict[str, Any], a: str, b: str) -> dict[str, Any] | None:
+    """The current stance between two characters: {stance, label} (label = authored flavor
+    if any, else the engine name for the level). None when they have no charged relation."""
+    e = (state.get("npc_rel") or {}).get(_pair_key(a, b))
+    if not e or not int(e.get("stance") or 0):
+        return None
+    stance = int(e["stance"])
+    return {"stance": stance, "label": e.get("label") or _STANCE_LABEL.get(stance, "")}
+
+
+def apply_npc_shift(content: dict[str, Any], state: dict[str, Any], a_ref: str, b_ref: str,
+                    delta: int, why: str, act: int) -> dict[str, Any] | None:
+    """Apply ONE judged NPC↔NPC shift: both names must resolve to LIVING characters
+    PRESENT in the player's scene (never the player), delta clamps to ±1, stance to
+    [-2,2]. A shift past an authored label drops the label (the old flavor no longer
+    fits). Returns {a,b,delta,stance} for the UI moment, or None when refused."""
+    here = {(c.get("name") or ""): c for c in scene_characters(content, state)
+            if c.get("id") != state.get("player_character_id")}
+
+    def _resolve(ref):
+        ref = (ref or "").strip()
+        for nm, c in here.items():
+            if nm and ref and (nm == ref or nm in ref or ref in nm):
+                return c
+        return None
+
+    ca, cb = _resolve(a_ref), _resolve(b_ref)
+    if not ca or not cb or ca.get("id") == cb.get("id"):
+        return None
+    delta = 1 if int(delta or 0) > 0 else -1 if int(delta or 0) < 0 else 0
+    if not delta:
+        return None
+    web = dict(state.get("npc_rel") or {})
+    key = _pair_key(ca["id"], cb["id"])
+    e = dict(web.get(key) or {"stance": 0, "label": None, "log": []})
+    new_stance = max(-2, min(2, int(e.get("stance") or 0) + delta))
+    if new_stance == int(e.get("stance") or 0):
+        return None
+    e["stance"], e["label"] = new_stance, None  # evolved past the authored flavor
+    log = list(e.get("log") or [])
+    log.append({"act": int(act), "delta": delta, "why": (why or "").strip()[:60]})
+    e["log"] = log[-12:]
+    web[key] = e
+    state["npc_rel"] = web
+    return {"a": ca.get("name"), "b": cb.get("name"), "delta": delta, "stance": new_stance}
+
+
+def npc_stance_line(content: dict[str, Any], state: dict[str, Any], sp_id: str,
+                    others: list[dict[str, Any]]) -> str:
+    """ONE lean prompt line: this speaker's charged stances toward who else is here."""
+    bits = []
+    for c in others:
+        s = npc_stance(state, sp_id, c.get("id") or "")
+        if s and c.get("name"):
+            bits.append(f"你与{c['name']}：{s['label']}")
+    return "；".join(bits)
+
+
+def npc_ties_of(content: dict[str, Any], state: dict[str, Any], char_id: str) -> list[dict[str, Any]]:
+    """The dossier view: this character's charged stances toward people the player has MET
+    (unmet names never leak). [{name, stance, label}] sorted worst-first."""
+    met = set(state.get("met_ids") or [])
+    out = []
+    for c in _characters(content):
+        other = c.get("id")
+        if not other or other == char_id or other not in met:
+            continue
+        s = npc_stance(state, char_id, other)
+        if s:
+            out.append({"name": c.get("name") or "", "stance": s["stance"], "label": s["label"]})
+    return sorted(out, key=lambda x: x["stance"])
+
+
 def rel_log(state: dict[str, Any], char_id: str | None, act: int, kind: str, text: str) -> None:
     """Append a moment to this character's 关系大事记 (capped)."""
     if not char_id or not (text or "").strip():
@@ -1480,6 +1588,7 @@ def character_profile(content: dict[str, Any], state: dict[str, Any],
         "can_follow": (not dead) and relationships.can_follow(c, scores, tun),
         "secrets": secrets, "secrets_hidden": hidden,
         "where": where,
+        "ties": npc_ties_of(content, state, char_id),  # 🕸 TA与其他人 (met-only, no leaks)
         "log": list((state.get("rel_log") or {}).get(char_id) or []),
         "bio": [b for b in bio_open if b], "bio_next_at": bio_next,
         "closeness": closeness, "romance": int(scores.get("romance", 0)),
@@ -1778,6 +1887,7 @@ def run_turn_stream(
     # so the location gating dimension always sees where they truly stand
     state["location_id"] = (current_location(content, state) or {}).get("id")
     tun = tuning_for(content)
+    _ensure_npc_rel(content, state)  # 🕸 authored ties come alive on first touch
     all_beats: list[dict[str, Any]] = []  # accumulated for scene classification
     # snapshot which places are reachable BEFORE this turn, so we can announce any that
     # newly open up (so a new exit never just silently appears — "莫名其妙解锁" fix)
@@ -2040,6 +2150,9 @@ def run_turn_stream(
             "scene": current_act(content, old_act),
             "next_act_title": (next_act or {}).get("title", "") if next_act else "",
             "clock": clock_line,                  # ⏳ 第几天·什么时段 (+ deadline countdown)
+            # 🕸 this speaker's charged stances toward who else is in the scene
+            "npc_stances": npc_stance_line(content, state, sp_id,
+                                           [c for c in all_chars if c.get("id") != sp_id]),
             "cast": others,
             # in a broadcast, non-primary characters may stay silent and never narrate
             "group_mode": ("primary" if is_primary else "member") if broadcast else None,
@@ -2204,6 +2317,13 @@ def run_turn_stream(
                     content_mutated = True
                     gen_count += 1
                     moments.append({"kind": "arrival", "name": nc_name})
+            # 🕸 NPC↔NPC shifts: the scene moved two characters closer/apart (≤2 a turn,
+            # both must be living and present, never the player — engine-enforced)
+            for sh in (directed.get("npc_shifts") or [])[:2]:
+                applied_sh = apply_npc_shift(content, state, sh.get("a"), sh.get("b"),
+                                             sh.get("delta"), sh.get("why", ""), old_act)
+                if applied_sh:
+                    moments.append({"kind": "npc_rel", **applied_sh})
             # 🎖 IDENTITY: the player's role/standing changed for real
             idt = (directed.get("identity") or "").strip()
             if idt and not observer and idt != (state.get("identity") or ""):
