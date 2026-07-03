@@ -23,7 +23,7 @@ _ANTI_ASSISTANT = (
 
 # Punctuation style guard: LLMs lean hard on the em-dash; the user wants prose that
 # breathes with 句号/逗号 instead. Appended to every player-visible prose generator.
-_STYLE_PUNCT = "行文标点以句号、逗号为主，破折号「——」整段至多一处，能不用就不用。"
+_STYLE_PUNCT = "【禁用破折号】行文一律不用「——」，改用句号、逗号或冒号断句（唯一例外：话被打断时可用在句尾）。"
 
 # 18+ permission block, appended only when the run is mature (story flagged 18+ and the
 # player is age-gated 18+ at signup). Mirrors the old persona R18 feature.

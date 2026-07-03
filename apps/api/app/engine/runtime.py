@@ -44,6 +44,48 @@ def _contains_any(haystack: str, needles) -> bool:
     return any(n and n.lower() in h for n in needles)
 
 
+# ── punctuation guard (user rule: 破折号能不用就不用，提示词管不住就硬管) ─────────────
+_CLOSE_QUOTES = "」”』\"'"
+_PUNCT_AFTER = "，。！？；：、）」”…"
+_PUNCT_BEFORE = "，。！？；：、（「“…"
+
+
+def dedash(text: str) -> str:
+    """Deterministically rewrite em-dash runs in GENERATED text: a run that ends the
+    line or sits right before a closing quote is a dramatic interruption and survives;
+    every other one becomes a comma (or vanishes when it would double punctuation).
+    Models ignore the style instruction often enough that this is enforced in code."""
+    if not text or "—" not in text:
+        return text
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch != "—":
+            out.append(ch)
+            i += 1
+            continue
+        j = i
+        while j < n and text[j] == "—":
+            j += 1
+        nxt = text[j] if j < n else ""
+        prev = out[-1] if out else ""
+        if j >= n or nxt in _CLOSE_QUOTES:
+            out.append("——")                    # cut-off mid-sentence: keep the drama
+        elif prev in _PUNCT_BEFORE or nxt in _PUNCT_AFTER or not prev:
+            pass                                 # glued to punctuation / leading: drop
+        else:
+            out.append("，")
+        i = j
+    return "".join(out)
+
+
+def dedash_beat(b: dict[str, Any]) -> dict[str, Any]:
+    if b.get("text"):
+        b["text"] = dedash(b["text"])
+    return b
+
+
 def default_state() -> dict[str, Any]:
     return {
         "act": 1,
@@ -847,7 +889,7 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
     # gesture, one crack of something withheld, one line spoken straight at them. The
     # "earned intimacy" promise made perceivable in 30 seconds.
     beats += opening_hook_beats(content, state, player_char, llm)
-    return beats
+    return [dedash_beat(b) for b in beats]
 
 
 def opening_hook_beats(content: dict[str, Any], state: dict[str, Any],
@@ -928,7 +970,7 @@ def build_act_transition(content: dict[str, Any], state: dict[str, Any], old_act
         ev = " ".join(e.get("what_happens", "") for e in (act.get("events") or []))
         if ev:
             beats = [{"type": "description", "speaker_name": None, "text": ev}]
-    return beats
+    return [dedash_beat(b) for b in beats]
 
 
 _ENDING_PRIORITY = {"true": 3, "normal": 2, "bad": 1, "death": 0}
@@ -1113,7 +1155,7 @@ def _smart_suggestions(llm, all_beats, player_input, primary, content, state, lo
             "player_name": player_name, "player_desc": player_desc,
             "place": (location or {}).get("name") or "",
         }})
-        return [s for s in (out.get("suggestions") or []) if s][:3]
+        return [dedash(s) for s in (out.get("suggestions") or []) if s][:3]
     except Exception:
         return []
 
@@ -1193,7 +1235,7 @@ def farewell_beats(content: dict[str, Any], state: dict[str, Any], c: dict[str, 
                             "char": {"name": c.get("name"), "role": c.get("role") or "",
                                      "persona_text": (c.get("persona_text") or "")[:160],
                                      "eq_style": (c.get("eq_style") or "")[:100]}}) or {}
-        line = str(out.get("line") or "").strip().strip("「」\"'")[:60]
+        line = dedash(str(out.get("line") or "").strip().strip("「」\"'")[:60])
     except Exception:
         line = ""
     if not line:
@@ -1242,7 +1284,7 @@ def arrival_narration(content: dict[str, Any], state: dict[str, Any], persona: d
     except Exception:
         txt = ""
     if txt:
-        return txt
+        return dedash(txt)
     bits = [_first_sentence(loc.get("detail") or "", 60)]
     for p in people:
         who = "，".join(b for b in (p["role"], p["look"]) if b)
@@ -1799,7 +1841,7 @@ def compose_message(content: dict[str, Any], state: dict[str, Any], char: dict[s
                                 relationships.derive_mode(char, scores, tun)),
                             "reason": reason, "hint": hint,
                             "thread_tail": _thread_tail(state, char.get("id"))}) or {}
-        msgs = [str(m).strip()[:120] for m in (out.get("msgs") or []) if str(m).strip()][:2]
+        msgs = [dedash(str(m).strip()[:120]) for m in (out.get("msgs") or []) if str(m).strip()][:2]
     except Exception:
         msgs = []
     return msgs or [fallback]
@@ -1942,7 +1984,7 @@ def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str
                         or state.get("memory", ""),
                         "thread_tail": _thread_tail(state, char_id, 8),
                         "text": text}) or {}
-    msgs = [str(m).strip()[:120] for m in (out.get("msgs") or []) if str(m).strip()][:3]
+    msgs = [dedash(str(m).strip()[:120]) for m in (out.get("msgs") or []) if str(m).strip()][:3]
     dc = int(out.get("closeness", 0) or 0)
     dr = int(out.get("romance", 0) or 0)
     if dc or dr:
@@ -2206,7 +2248,7 @@ def build_parting_hook(content: dict[str, Any], state: dict[str, Any],
         hint = f"关于「{topics[0]}」的话" if topics else "有句话"
         beats = [{"type": "description", "speaker_name": None,
                   "text": f"（你起身离开。身后有人欲言又止，{hint}似乎还没说完。）"}]
-    return beats[:1]
+    return [dedash_beat(b) for b in beats[:1]]
 
 
 def confront_stream(content: dict[str, Any], state: dict[str, Any], persona: dict[str, Any],
@@ -2297,6 +2339,7 @@ def _confront_gen(content, state, persona, secret, frag, next_locked, target, ll
     beats_out: list[dict[str, Any]] = []
 
     def emit(b):
+        dedash_beat(b)
         beats_out.append(b)
         return ("beat", b)
 
@@ -2356,7 +2399,7 @@ def _confront_gen(content, state, persona, secret, frag, next_locked, target, ll
         nxt = current_act(content, new_act) or {}
         moments.append({"kind": "act", "index": new_act, "title": nxt.get("title", "")})
         yield emit({"type": "description", "speaker_name": None,
-                    "text": f"—— 第{new_act}幕 · {nxt.get('title', '')} ——"})
+                    "text": f"✦ 第{new_act}幕 · {nxt.get('title', '')} ✦"})
         nc = choice_for_act(content, state, new_act)
         if nc:
             state["pending_choice"] = nc
@@ -2670,6 +2713,7 @@ def run_turn_stream(
             clock_line += f"。「{dl0['text']}」就在今天"
 
     def emit(b: dict[str, Any]):
+        dedash_beat(b)
         all_beats.append(b)
         return ("beat", b)
 
@@ -3113,7 +3157,7 @@ def run_turn_stream(
         if nc:
             state["pending_choice"] = nc
         yield emit({"type": "description", "speaker_name": None,
-                    "text": f"—— 第{new_act}幕 · {nxt.get('title', '')} ——"})
+                    "text": f"✦ 第{new_act}幕 · {nxt.get('title', '')} ✦"})
         for b in build_act_transition(content, state, old_act, new_act, persona, llm):
             yield emit(b)
 
