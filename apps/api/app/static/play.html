@@ -276,6 +276,12 @@
 const API = "/api/v1";
 let runId = null, personaId = null, myName = "我";
 let soundOn = true, curBgmMood = null;
+// 聊天头像: name → portrait url (built from the story's full cast so replayed bubbles of
+// dead/absent characters keep their face; cast/here updates merge in emergent characters)
+let avatarMap = {};
+function mergeAvatars(list) {
+  (list || []).forEach(c => { if (c && c.name && c.avatar_url) avatarMap[c.name] = c.avatar_url; });
+}
 let curScene = null, curLocId = null;  // for backdrop: last scene + current place id
 let cast = [], target = null;  // target = character_id the player is addressing (null = auto)
 let relations = {}, following = [];  // {cid:{mode,mode_name,romance,...}} ; ids traveling with you
@@ -399,6 +405,8 @@ async function resumeRun(id) {
   await enterRun(run);
 }
 async function enterRun(run) {
+  avatarMap = {};
+  try { mergeAvatars((await j(`/stories/${run.story_id}`)).characters); } catch (e) {}
   playMode = (run.state && run.state.mode) || "character";
   myName = (playMode === "character" && run.state && run.state.player_character_name) || "我";
   runId = run.id;
@@ -409,6 +417,7 @@ async function enterRun(run) {
   curBgmMood = null; curScene = null; curLocId = null;
   target = null;
   cast = (run.state && run.state.here) || run.cast || [];
+  mergeAvatars(cast); mergeAvatars(run.cast);
   relations = (run.state && run.state.relations) || {};
   following = (run.state && run.state.following) || [];
   renderCast();
@@ -470,7 +479,7 @@ function renderBeat(b) {
 // unmistakably "words said out loud" vs the narration band.
 function makeRow(side, name, text, withWho, spoken) {
   const row = document.createElement("div"); row.className = "row " + side + (side==="left"?" npc":" me");
-  row.appendChild(avatarEl(name));
+  row.appendChild(avatarEl(name, avatarMap[name]));
   const bub = document.createElement("div"); bub.className = "bubble";
   const body = spoken ? `<span class="said">${escapeHtml(text)}</span>` : escapeHtml(text);
   bub.innerHTML = (withWho ? `<div class="who">${escapeHtml(name)}</div>` : "") + body;
@@ -535,6 +544,7 @@ function renderCast() {
 function updateCast(next) {
   if (!Array.isArray(next)) return;
   cast = next;
+  mergeAvatars(next);
   if (target && !cast.some(c => c.id === target)) target = null;
   renderCast(); updatePlaceholder();
 }
@@ -890,7 +900,7 @@ function resetEnded() { ended = false; msg.disabled = false; channel.disabled = 
 let typingEl = null;
 function showTyping(name) {
   typingEl = document.createElement("div"); typingEl.className = "row left typing";
-  typingEl.appendChild(avatarEl(name));
+  typingEl.appendChild(avatarEl(name, avatarMap[name]));
   const b = document.createElement("div"); b.className = "bubble"; b.innerHTML = "<span>●</span><span>●</span><span>●</span>";
   typingEl.appendChild(b); chat.appendChild(typingEl); chat.scrollTop = chat.scrollHeight;
 }
@@ -900,7 +910,7 @@ function hideTyping(){ if (typingEl){ typingEl.remove(); typingEl = null; } }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 function makeTypingRow(side, name) {
   const row = document.createElement("div"); row.className = "row " + side + (side==="left"?" npc":" me");
-  row.appendChild(avatarEl(name));
+  row.appendChild(avatarEl(name, avatarMap[name]));
   const bub = document.createElement("div"); bub.className = "bubble";
   const who = document.createElement("div"); who.className = "who"; who.textContent = name; bub.appendChild(who);
   // .said → CSS adds the 「」 quotes, so streamed speech looks identical to replayed speech
