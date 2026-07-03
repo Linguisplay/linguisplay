@@ -43,7 +43,7 @@
   .said::after  { content: "」"; color: #8ea2ff; }   /* quotes via CSS → always present on BOTH render paths */
   .me .bubble { background: #2a2350e6; border: 1px solid #3a3270; }
   /* narration = a clearly different "stage" band: centered, dim, boxed — never looks like a speech bubble */
-  .desc { align-self: center; color: #b9c0d0; font-size: 12.5px; font-style: italic; text-align: center; max-width: 90%; line-height: 1.6; padding: 7px 14px; background: rgba(10,11,16,.58); border-radius: 12px; border: 1px dashed #ffffff1f; }
+  .desc { align-self: center; color: #c6cddd; font-size: 15px; font-style: italic; text-align: center; max-width: 92%; line-height: 1.75; padding: 8px 14px; background: rgba(10,11,16,.58); border-radius: 12px; border: 1px dashed #ffffff1f; }
   .think { align-self: flex-end; background: #20202ae6; color: #bbb; font-style: italic; padding: 9px 13px; border-radius: 13px; max-width: 88%; }
   .typing .bubble { background: #1c2030e6; border: 1px solid #2a3350; color: #9fb0ff; }
   .typing .bubble span { animation: blink 1.2s infinite; }
@@ -148,6 +148,33 @@
 .dice .roll { font-size:15px; color:#ffd479; min-width:2ch; display:inline-block; text-align:center; }
 .dice.win { border-color:#3c8a52; } .dice.win b:last-child { color:#8fe0a6; }
 .dice.lose { border-color:#8a3c3c; } .dice.lose b:last-child { color:#ff9a8f; }
+
+/* ── mobile: uncramp the pinned stack, bigger readable text ── */
+@media (max-width: 640px) {
+  header { padding: 8px 10px; }
+  header b { font-size: 14px; }
+  #cast { padding: 5px 8px; gap: 5px; }
+  .castitem { min-width: 38px; }
+  .castitem small { font-size: 10px; }
+  #placebar, #goalbar, #hintbar, #pressurebar, #clues, #moveask, #choiceask
+    { margin: 4px 8px 0; padding: 6px 9px; font-size: 12px; border-radius: 9px; }
+  #chat { padding: 10px 9px; gap: 9px; }
+  .row { max-width: 95%; }
+  .bubble { padding: 8px 11px; font-size: 15px; line-height: 1.7; }
+  .desc { font-size: 14.5px; max-width: 97%; }
+  .think { font-size: 14px; }
+  footer { padding: 8px 9px; gap: 6px; }
+  footer select { padding: 8px 5px; }
+  #suggest { padding: 0 9px 3px; gap: 5px; }
+  .chip { font-size: 11.5px; padding: 4px 9px; }
+  #state { padding: 4px 10px; font-size: 11px; }
+  .toast { font-size: 13px; padding: 8px 14px; }
+  .dice { font-size: 12.5px; }
+  /* info bars collapse to one line; tap to unfold */
+  .collapsible { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+  .collapsible.open { white-space: normal; overflow: visible; }
+  #pressurebar.collapsible { display: flex; }  /* the meter keeps its flex layout */
+}
 </style>
 </head>
 <body>
@@ -657,6 +684,17 @@ function renderPressure(p) {
     `<span style="color:${color}">${v}</span>`;
   el.classList.remove("hidden");
 }
+// pinned info bars fold to one line on small screens; tapping unfolds/refolds
+for (const id of ["placebar", "goalbar", "hintbar", "clues"]) {
+  const el = document.getElementById(id);
+  if (!el) continue;
+  el.classList.add("collapsible");
+  el.addEventListener("click", (e) => {
+    if (e.target.classList && e.target.classList.contains("exit")) return; // keep exits tappable
+    el.classList.toggle("open");
+  });
+}
+
 function updatePlaceholder() {
   const c = cast.find(x => x.id === target);
   if (playMode === "god") {
