@@ -51,6 +51,18 @@ def _secrets(content: dict[str, Any]) -> list[dict[str, Any]]:
     return content.get("secrets") or []
 
 
+# ⏳ must mirror runtime.SLOTS (duplicated, same reason as the accessors above)
+_SLOTS = ("晨", "午", "夜")
+
+
+def _clock_on(content: dict[str, Any]) -> bool:
+    """Does this story run the clock? Mirrors runtime.tuning_for's turns_per_slot logic."""
+    try:
+        return int((_story(content).get("tuning") or {}).get("turns_per_slot", 4)) > 0
+    except (TypeError, ValueError):
+        return True
+
+
 # ═══════════════════════════════════════════════════════════════════════════════════════
 # Layer 2 — STORY LINTER (author-time structural consistency)
 # ═══════════════════════════════════════════════════════════════════════════════════════
@@ -189,6 +201,15 @@ def lint_story(content: dict[str, Any]) -> list[Issue]:
             if slid and slid not in loc_ids:
                 err("bad_schedule", where,
                     f"角色「{c.get('name','')}」的作息表指向不存在的地点：{slid}")
+            e_slots = [s for s in (e.get("slots") or []) if s]
+            for sl in e_slots:
+                if sl not in _SLOTS:
+                    err("bad_slot", where,
+                        f"角色「{c.get('name','')}」的作息表用了未知时段「{sl}」（可用：{'、'.join(_SLOTS)}）")
+            if e_slots and not _clock_on(content):
+                warn("slots_no_clock", where,
+                     f"角色「{c.get('name','')}」的作息表按时段排班，但本剧关闭了时钟"
+                     "(tuning.turns_per_slot=0) —— 该角色将永远停在「晨」的班上。")
         home = c.get("home_location_id")
         if home and home not in loc_ids:
             err("bad_home", where, f"角色「{c.get('name','')}」的 home_location_id={home} 不是已知地点。")
@@ -219,6 +240,21 @@ def lint_story(content: dict[str, Any]) -> list[Issue]:
         if lid and lid not in loc_ids:
             err("bad_frag_location", f"fragment[{f.get('id')}]",
                 f"解锁条件指向不存在的地点：{lid}")
+
+    # — ⏳ clock / deadline —
+    ck = _story(content).get("clock") or {}
+    if ck:
+        try:
+            dd = int(ck.get("deadline_day") or 0)
+        except (TypeError, ValueError):
+            dd = 0
+        ending_ids = {e.get("id") for e in _endings(content) if e.get("id")}
+        eid = ck.get("deadline_ending_id")
+        if eid and eid not in ending_ids:
+            err("bad_deadline_ending", "clock", f"deadline_ending_id={eid} 不是已知结局。")
+        if dd and not _clock_on(content):
+            warn("deadline_no_clock", "clock",
+                 "设了 deadline_day 但时钟已关闭 (tuning.turns_per_slot=0) —— 大限永远不会到。")
     return issues
 
 

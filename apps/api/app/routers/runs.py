@@ -60,6 +60,7 @@ def _to_run(r: RunModel) -> Run:
             identity=st.get("identity"),
             inventory=list(st.get("inventory") or []),
             pressure_name=((runtime.pressure_cfg(r.pinned_content or {}) or {}).get("name")),
+            clock=runtime.clock_view(r.pinned_content or {}, st),
         ),
         cast=cast,
         created_at=r.created_at,
@@ -313,6 +314,9 @@ def play(
                 if kind == "dice":
                     # the roll streams BEFORE the narration so the UI can animate it
                     yield _event({"event": "dice", "dice": payload})
+                    continue
+                if kind == "clock":
+                    yield _event({"event": "clock", "clock": payload})
                     continue
                 if kind == "beat":
                     eb = BeatModel(

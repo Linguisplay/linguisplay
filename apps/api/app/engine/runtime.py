@@ -76,6 +76,7 @@ def default_state() -> dict[str, Any]:
         "mature": False,                # 18+ run: engine may permit explicit adult content
         "rel": {},                      # per-character relationship toward player {cid:{closeness,romance}}
         "following": [],                # character ids currently traveling WITH the player
+        "clock": {"day": 1, "slot": 0, "turns_in_slot": 0},  # ⏳ diegetic time (slot → SLOTS)
     }
 
 
@@ -128,6 +129,19 @@ DEFAULT_TUNING = {
     "min_turns_per_act": 6,     # soft acts: no advance (model OR backstop) before this many turns
     "max_new_characters": 4,    # 👋 emergent mid-story characters a run may accumulate
     "world_event_every": 4,     # 🌊 after this many quiet turns an authored act event fires itself (0 = off)
+    "turns_per_slot": 4,        # ⏳ turns per 时段 (晨/午/夜); a day = 3 slots. 0 = clock off
+}
+
+# ⏳ the diegetic clock: three slots make a day. Slot-restricted schedule entries and
+# story deadlines (story.clock) hang off this. Story-agnostic — the names are the frame,
+# not any script's content.
+SLOTS = ("晨", "午", "夜")
+AWAY = "__away__"  # a scheduled character whose no entry covers this hour: off somewhere, unreachable
+
+_SLOT_NARR = {
+    "晨": "（长夜过去，第{day}天的晨光透了进来，街面上有了新的动静。）",
+    "午": "（不知不觉，日头已经爬到头顶。）",
+    "夜": "（天色沉了下来，夜幕罩住了这一带。）",
 }
 
 
@@ -238,32 +252,86 @@ def _dead_ids(state: dict[str, Any]) -> set:
     return set(state.get("dead_character_ids") or [])
 
 
-def char_home(c: dict[str, Any], act: int) -> str | None:
-    """Where this character is DURING this act (作息表): the schedule entry with the
-    highest from_act <= act wins; no schedule (or none reached yet) → home_location_id.
+def clock_cfg(content: dict[str, Any]) -> dict[str, Any]:
+    """The story's authored clock config (story.clock): optionally a hard deadline —
+    {deadline_day, deadline_text, deadline_ending_id}. Empty dict when none authored."""
+    return (content.get("story") or {}).get("clock") or {}
+
+
+def active_slot(content: dict[str, Any], state: dict[str, Any]) -> str | None:
+    """The current 时段 name, or None when this story runs no clock (slot-restricted
+    schedule entries then apply at all hours — legacy behavior)."""
+    if tuning_for(content)["turns_per_slot"] <= 0:
+        return None
+    clk = state.get("clock") or {}
+    return SLOTS[int(clk.get("slot", 0) or 0) % len(SLOTS)]
+
+
+def clock_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
+    """What the UI shows on the 🕐 chip: day/slot label + the authored deadline countdown.
+    None = this story runs no clock."""
+    slot = active_slot(content, state)
+    if slot is None:
+        return None
+    day = int((state.get("clock") or {}).get("day", 1) or 1)
+    view: dict[str, Any] = {"day": day, "slot": slot, "label": f"第{day}天·{slot}"}
+    ccfg = clock_cfg(content)
+    try:
+        dd = int(ccfg.get("deadline_day") or 0)
+    except (TypeError, ValueError):
+        dd = 0
+    if dd:
+        view["deadline"] = {"text": (ccfg.get("deadline_text") or "").strip() or "大限",
+                            "days_left": dd - day}
+    return view
+
+
+def char_home(c: dict[str, Any], act: int, slot: str | None = None) -> str | None:
+    """Where this character is RIGHT NOW (作息表): among schedule entries with
+    from_act <= act that cover the current 时段 (an entry may carry slots: ["夜"] —
+    no slots = all hours), the highest from_act wins; slot-specific beats generic on a
+    tie. A scheduled character whom no entry covers this hour is AWAY (off somewhere,
+    unreachable) — home_location_id only backs up characters with no reached schedule.
     None = ubiquitous (legacy stories that don't pin characters to places)."""
-    best_from, best_loc = -1, None
+    best = (-1, -1)
+    best_loc = None
+    reached = False
     for e in (c.get("schedule") or []):
         try:
             fa = int(e.get("from_act") or 0)
         except (TypeError, ValueError):
             continue
         lid = (e.get("location_id") or "").strip()
-        if lid and fa <= int(act) and fa > best_from:
-            best_from, best_loc = fa, lid
-    return best_loc or c.get("home_location_id")
+        if not lid or fa > int(act):
+            continue
+        reached = True
+        entry_slots = [s for s in (e.get("slots") or []) if s]
+        if entry_slots and slot is not None and slot not in entry_slots:
+            continue
+        key = (fa, 1 if entry_slots else 0)
+        if key > best:
+            best, best_loc = key, lid
+    if best_loc:
+        return best_loc
+    if reached and slot is not None:
+        return AWAY
+    return c.get("home_location_id")
 
 
-def _is_here(c: dict[str, Any], state: dict[str, Any], cur_loc_id: str | None) -> bool:
+def _is_here(c: dict[str, Any], state: dict[str, Any], cur_loc_id: str | None,
+             slot: str | None = None) -> bool:
     """Is this character in the player's CURRENT scene? A character pinned to a place
-    (per-act schedule, else home location) is only here when the player is AT that place,
-    OR when the character is currently following the player. A character with no place at
-    all is ubiquitous (present everywhere in their act — backward-compatible)."""
-    home = char_home(c, int(state.get("act", 1) or 1))
-    if not home:
-        return True
+    (per-act/per-slot schedule, else home location) is only here when the player is AT
+    that place, OR when the character is currently following the player. AWAY = off
+    somewhere this hour, encounterable nowhere. A character with no place at all is
+    ubiquitous (present everywhere in their act — backward-compatible)."""
     cid = c.get("id")
     if cid and cid in (state.get("following") or []):
+        return True
+    home = char_home(c, int(state.get("act", 1) or 1), slot)
+    if home == AWAY:
+        return False
+    if not home:
         return True
     return cur_loc_id == home
 
@@ -276,8 +344,9 @@ def scene_characters(content: dict[str, Any], state: dict[str, Any]) -> list[dic
     # resolve the effective location (None → the opening/first place, as current_location does)
     cur = current_location(content, state)
     cur_id = cur.get("id") if cur else state.get("location_id")
+    slot = active_slot(content, state)
     return [c for c in present_characters(content, act, _dead_ids(state))
-            if _is_here(c, state, cur_id)]
+            if _is_here(c, state, cur_id, slot)]
 
 
 def playable_roles(content: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1238,11 +1307,12 @@ def map_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
     avail = {l.get("id"): location_available(content, state, l) for l in locs}
     name_to_id = {l.get("name"): l.get("id") for l in locs if l.get("name")}
     at: dict[str, list[str]] = {}
+    slot = active_slot(content, state)
     for c in present_characters(content, act, _dead_ids(state)):
         if c.get("id") == pcid:
             continue
-        lid = cur if c.get("id") in following else char_home(c, act)
-        if lid and avail.get(lid) and c.get("name"):
+        lid = cur if c.get("id") in following else char_home(c, act, slot)
+        if lid and lid != AWAY and avail.get(lid) and c.get("name"):
             at.setdefault(lid, []).append(c["name"])
     nodes = []
     for l in locs:
@@ -1383,9 +1453,11 @@ def character_profile(content: dict[str, Any], state: dict[str, Any],
         else:
             hidden += 1
     # where they are right now (only if the place is discovered)
-    home = char_home(c, act)
-    loc = _location_by_id(content, home) if home else None
+    home = char_home(c, act, active_slot(content, state))
+    loc = _location_by_id(content, home) if (home and home != AWAY) else None
     where = (loc.get("name") if (loc and location_available(content, state, loc)) else None)
+    if home == AWAY:
+        where = "此刻不知去向"
     if char_id in set(state.get("following") or []):
         where = "与你同行"
     # 分层小传: closeness unlocks authored layers; the next locked bar is shown as a tease
@@ -1713,6 +1785,18 @@ def run_turn_stream(
     advance = False
     model_ending = None
     primary_invite = None  # a character asked to LEAD the player elsewhere → confirm prompt
+    time_skip = ""         # ⏳ the primary judged the scene skipped time (睡到天亮/等到入夜)
+
+    # ⏳ the hour, for narration consistency + deadline awareness (one lean line)
+    clock_line = ""
+    cv0 = clock_view(content, state)
+    if cv0:
+        clock_line = cv0["label"]
+        dl0 = cv0.get("deadline")
+        if dl0 and dl0["days_left"] > 0:
+            clock_line += f"。距离「{dl0['text']}」还有{dl0['days_left']}天"
+        elif dl0 and dl0["days_left"] == 0:
+            clock_line += f"。「{dl0['text']}」就在今天"
 
     def emit(b: dict[str, Any]):
         all_beats.append(b)
@@ -1781,6 +1865,7 @@ def run_turn_stream(
             "mature": bool(state.get("mature")),   # 18+ run → adult content permitted
             "scene": current_act(content, old_act),
             "next_act_title": (next_act or {}).get("title", "") if next_act else "",
+            "clock": clock_line,                  # ⏳ 第几天·什么时段 (+ deadline countdown)
             "cast": others,
             # in a broadcast, non-primary characters may stay silent and never narrate
             "group_mode": ("primary" if is_primary else "member") if broadcast else None,
@@ -1865,6 +1950,7 @@ def run_turn_stream(
             # confirm prompt (never auto-applied; the player relocates via /move on a yes).
             primary_invite = directed.get("move_invite")
             primary_name_for_invite = sp_name
+            time_skip = (directed.get("time_skip") or "").strip()
             emo = (directed.get("player_emotion") or "").strip()
             if emo:
                 state["player_emotion"] = emo       # carry the emotional read into next turn
@@ -2131,6 +2217,43 @@ def run_turn_stream(
         yield emit({"type": "description", "speaker_name": None,
                     "text": f"（你打听到城寨里还有去处：{where}——现在可以过去看看了。）"})
 
+    # 5c. ⏳ time flows: turns spend the current 时段; enough of them — or the scene
+    #     explicitly skipping time (睡到天亮/等到入夜) — roll it over. Characters keep
+    #     their 作息: the roster the player sees next reflects the new hour. A pure
+    #     look-around costs no time. Sleeping past an authored deadline ends the story.
+    deadline_blown = False
+    if tun["turns_per_slot"] > 0 and not is_think:
+        clk = dict(state.get("clock") or {})
+        clk.setdefault("day", 1); clk.setdefault("slot", 0); clk.setdefault("turns_in_slot", 0)
+        day_before = int(clk["day"])
+        skip = "" if time_skip in ("无", "没有", "none") else time_skip
+        if skip:
+            steps = (len(SLOTS) - int(clk["slot"])) if ("次日" in skip or "天亮" in skip) else 1
+            clk["turns_in_slot"] = 0
+        else:
+            clk["turns_in_slot"] = int(clk["turns_in_slot"]) + 1
+            steps = 1 if clk["turns_in_slot"] >= tun["turns_per_slot"] else 0
+            if steps:
+                clk["turns_in_slot"] = 0
+        for _ in range(steps):
+            clk["slot"] = int(clk["slot"]) + 1
+            if clk["slot"] >= len(SLOTS):
+                clk["slot"], clk["day"] = 0, int(clk["day"]) + 1
+        state["clock"] = clk
+        cv = clock_view(content, state)
+        if steps and cv:
+            yield emit({"type": "description", "speaker_name": None,
+                        "text": _SLOT_NARR[cv["slot"]].format(day=cv["day"])})
+            yield ("clock", cv)
+        # authored deadline: crossing INTO the day warns loudly; letting it pass ends it
+        dl = (cv or {}).get("deadline")
+        if dl and dl["days_left"] == 0 and int(clk["day"]) > day_before:
+            yield emit({"type": "description", "speaker_name": None,
+                        "text": f"（已经是第{clk['day']}天——「{dl['text']}」，就在今天。）"})
+            moments.append({"kind": "deadline", "text": dl["text"]})
+        elif dl and dl["days_left"] < 0 and not state.get("ended"):
+            deadline_blown = True
+
     # 6. ending check. Authored endings are MILESTONES (true/normal/bad) — reaching one
     #    shows its narration but the open world keeps going, so the player can explore on
     #    and even upgrade to a higher-tier ending later. Only a fatal action (death) is
@@ -2141,6 +2264,16 @@ def run_turn_stream(
         candidate = {"id": authored.get("id") or "pressure",
                      "kind": authored.get("kind", "bad"),
                      "title": authored.get("title") or f"{pcfg.get('name','压力')}到达顶点",
+                     "text": authored.get("text") or "",
+                     "terminal": True}
+    elif deadline_blown:
+        ccfg = clock_cfg(content)
+        authored = _ending_by_id(content, ccfg.get("deadline_ending_id")) or {}
+        model_ending = None
+        candidate = {"id": authored.get("id") or "deadline",
+                     "kind": authored.get("kind", "bad"),
+                     "title": authored.get("title")
+                     or f"{(ccfg.get('deadline_text') or '大限').strip()}——为时已晚",
                      "text": authored.get("text") or "",
                      "terminal": True}
     else:
@@ -2246,6 +2379,8 @@ def run_turn_stream(
         "content_mutated": content_mutated,  # 👋 run grew a new character → persist pinned copy
         "pressure_view": ({"name": pcfg.get("name"), "value": int(state.get("pressure", 0))}
                           if pcfg else None),
+        "clock_view": clock_view(content, state),  # ⏳ {day,slot,label,deadline?} or None
+
         "pending_choice": state.get("pending_choice"),  # unanswered key-moment decision
         "rel_deltas": rel_deltas,  # per-char ♥ movement this turn (UI floating chips)
         "location": location,  # {id,name,detail,exits} the player's current place (or None)

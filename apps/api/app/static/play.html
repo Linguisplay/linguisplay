@@ -71,6 +71,8 @@
   #placebar .exits { color: #8aa092; }
   #placebar .exit { cursor: pointer; text-decoration: underline dotted; padding: 0 1px; }
   #placebar .exit:hover { color: #bdf0c9; }
+  #placebar .clock { color: #e6d9a8; margin-right: 10px; white-space: nowrap; }
+  #placebar .clock.ddl { color: #ffb27a; }
   /* relationship tag + follow control under each in-scene character */
   .castitem .rel { font-size: 10px; padding: 0 4px; border-radius: 6px; line-height: 1.5; white-space: nowrap; }
   .rel-stranger { color:#9aa0ad; background:#2a2d36; } .rel-peer { color:#cfd6e6; background:#2b3142; }
@@ -283,6 +285,7 @@ function mergeAvatars(list) {
   (list || []).forEach(c => { if (c && c.name && c.avatar_url) avatarMap[c.name] = c.avatar_url; });
 }
 let curScene = null, curLocId = null;  // for backdrop: last scene + current place id
+let curClock = null, curLocData = null; // ⏳ the diegetic clock + last place (placebar redraws)
 let cast = [], target = null;  // target = character_id the player is addressing (null = auto)
 let relations = {}, following = [];  // {cid:{mode,mode_name,romance,...}} ; ids traveling with you
 let currentStoryId = null, playMode = "character";
@@ -427,6 +430,7 @@ async function enterRun(run) {
   applyScene(run.state && run.state.scene);
   const beats = await j(`/runs/${runId}/play`);
   beats.forEach(renderBeat);
+  curClock = (run.state && run.state.clock) || null;
   renderState(run.state);
   renderChoiceAsk(run.state && run.state.pending_choice);
   renderPressure(run.state && run.state.pressure_name
@@ -821,14 +825,29 @@ function renderState(st) {
   if (st.progress !== undefined) renderProgress(st.progress);
   if (st.location !== undefined) renderPlace(st.location);
 }
+function clockChip() {
+  if (!curClock || !curClock.label) return "";
+  let s = `<span class="clock">🕐 ${escapeHtml(curClock.label)}</span>`;
+  const dl = curClock.deadline;
+  if (dl && dl.days_left === 0) s += `<span class="clock ddl">⏳ ${escapeHtml(dl.text)} · 就在今天</span>`;
+  else if (dl && dl.days_left > 0) s += `<span class="clock${dl.days_left <= 1 ? " ddl" : ""}">⏳ ${escapeHtml(dl.text)} · 还剩${dl.days_left}天</span>`;
+  return s;
+}
+function renderClock(cv, announce) {
+  curClock = cv || null;
+  if (announce && cv && cv.label) pushToast(`🕐 ${escapeHtml(cv.label)}`, "", 2600);
+  renderPlace(curLocData);
+}
 function renderPlace(loc) {
+  curLocData = loc || null;
   // track the current place so the background can use its AI-generated image
   const newLocId = (loc && loc.id) || null;
   if (newLocId !== curLocId) { curLocId = newLocId; paintBackground(); }
   const el = document.getElementById("placebar");
-  if (!loc || !loc.name) { el.classList.add("hidden"); return; }
+  if ((!loc || !loc.name) && !clockChip()) { el.classList.add("hidden"); return; }
+  if (!loc || !loc.name) { el.innerHTML = clockChip(); el.classList.remove("hidden"); return; }
   const exits = (loc.exits||[]).filter(Boolean);
-  el.innerHTML = `📍 <b>${escapeHtml(loc.name)}</b>`;
+  el.innerHTML = `${clockChip()}📍 <b>${escapeHtml(loc.name)}</b>`;
   if (exits.length) {
     const wrap = document.createElement("span"); wrap.className = "exits"; wrap.append("　→ 可去：");
     exits.forEach((name, i) => {
@@ -1080,6 +1099,7 @@ async function send() {
         else if (ev.event === "moments") { afterPlay.moments = ev.moments; afterPlay.relDeltas = ev.rel_deltas; }
         else if (ev.event === "choice") { afterPlay.choice = ev.choice; }
         else if (ev.event === "dice") { showDice(ev.dice); }
+        else if (ev.event === "clock") { renderClock(ev.clock, true); }
         else if (ev.event === "pressure") { renderPressure(ev.pressure); }
         else if (ev.event === "move_request") { afterPlay.moveReq = ev.move_request; }
         else if (ev.event === "suggest") { afterPlay.suggest = ev.suggestions; }

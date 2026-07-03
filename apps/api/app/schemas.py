@@ -232,6 +232,7 @@ class StoryInput(BaseModel):
     locations: Optional[list[Location]] = None
     tuning: Optional[dict] = None  # pacing/balance knob overrides (docs/tuning.md)
     pressure: Optional[dict] = None  # ⚠️ pressure meter {name,hint,ending_id,levels:[{at,note}]}
+    clock: Optional[dict] = None  # ⏳ {deadline_day, deadline_text, deadline_ending_id}
 
 
 class Story(BaseModel):
@@ -254,6 +255,7 @@ class Story(BaseModel):
     locations: list[Location] = []
     tuning: dict = {}
     pressure: Optional[dict] = None
+    clock: Optional[dict] = None
     completion: float = 0.0
 
 
@@ -336,6 +338,7 @@ class RunState(BaseModel):
     identity: Optional[str] = None       # 🎖 the player's current 身份 (None = as authored)
     inventory: list[dict[str, Any]] = [] # 🎒 pocket items [{name, detail?}]
     pressure_name: Optional[str] = None  # the meter's authored name (None = story runs none)
+    clock: Optional[dict[str, Any]] = None  # ⏳ {day,slot,label,deadline?} (None = no clock)
 
 
 class Run(BaseModel):

@@ -316,6 +316,8 @@ def main() -> None:
             endings=ENDINGS,
             locations=LOCATIONS,
             pressure=PRESSURE,
+            # 一夜之内的故事：昼夜时钟会破坏「这一晚出不去」的设定，关掉
+            tuning={"turns_per_slot": 0},
             visibility="public",
         )
         db.add(story)

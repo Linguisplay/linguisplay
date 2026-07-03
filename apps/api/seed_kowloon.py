@@ -85,9 +85,10 @@ CHARACTERS = [
     {
         "id": "shin",
         # 蓝信一 守在暗巷里，是最早盯上生面孔的人。可走暧昧/恋人线，也可能因你威胁大哥而成敌人。
-        # 作息表: 风声紧了(act4起)就撤回理发店和兄弟们守在一起——去哪找他，本身就是剧情。
+        # 作息表: 昼伏夜出——晌午躲着补觉谁也找不到他；风声紧了(act4起)整天撤回理发店。
         "home_location_id": "loc_alley",
-        "schedule": [{"from_act": 4, "location_id": "loc_barber"}],
+        "schedule": [{"from_act": 1, "location_id": "loc_alley", "slots": ["晨", "夜"]},
+                     {"from_act": 4, "location_id": "loc_barber"}],
         "relation_default": "stranger",
         "relation_allowed": ["stranger", "peer", "friend", "flirt", "lover", "enemy"],
         "name": "蓝信一",
@@ -137,9 +138,11 @@ CHARACTERS = [
     },
     {
         "id": "sei",
-        # 四仔 常泡在大牌档收风，城里城外的消息都从他这桌过。够意思换够意思。
+        # 四仔 常泡在大牌档收风，晌午溜到巷口看城外动静；收网前夜(act6)缩回理发店。
         "home_location_id": "loc_dai",
-        "schedule": [{"from_act": 6, "location_id": "loc_barber"}],
+        "schedule": [{"from_act": 1, "location_id": "loc_dai"},
+                     {"from_act": 1, "location_id": "loc_mouth", "slots": ["午"]},
+                     {"from_act": 6, "location_id": "loc_barber"}],
         "relation_default": "stranger",
         "relation_allowed": ["stranger", "peer", "friend", "enemy"],
         "name": "四仔",
@@ -430,7 +433,16 @@ ENDINGS = [
      "text": "你沉不住气，在最不该亮身份的时候亮了底。王九的刀比城寨的灯先到——你倒在那条满是污水的暗巷里，"
              "怀里那张联系线人的纸条，再也递不出去了。",
      "condition": {"affinity_min": 0, "act_min": 0}},
+    # ⏳ 时钟机制专用（trigger:"clock"）：拖过第7天，收网强制执行，谁的人都没做成。
+    {"id": "end_late", "kind": "bad", "trigger": "clock", "title": "收网之夜·两头落空",
+     "text": "你在城寨里磨到了最后一刻，什么也没查清，哪边也没站定。哨声在第七夜准时响起，"
+             "警队按预案强攻——城寨的人以为是你带的路，警队的人以为你早已叛变。"
+             "混乱里没有人来接应你。这座城塌下来的时候，你两头都不是人。",
+     "condition": {"affinity_min": 0, "act_min": 0}},
 ]
+
+# ⏳ 时间流动: 卧底任务有期限——第7天就是收网日。查清真相、站定立场，都得赶在它之前。
+CLOCK = {"deadline_day": 7, "deadline_text": "警队收网", "deadline_ending_id": "end_late"}
 
 
 def get_or_create_demo_user(db) -> User:
@@ -499,6 +511,7 @@ def main() -> None:
             endings=ENDINGS,
             locations=LOCATIONS,
             pressure=PRESSURE,
+            clock=CLOCK,
             visibility="public",
         )
         db.add(story)

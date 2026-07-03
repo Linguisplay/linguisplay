@@ -193,6 +193,11 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append("")
         lines.append(f"【当前场景：第{scene.get('index','')}幕 {scene.get('title','')}】{scene_events}")
 
+    ck = (prompt.get("clock") or "").strip()
+    if ck:
+        lines.append("")
+        lines.append(f"【此刻的时间】{ck}。旁白与对话必须贴合这个时辰——天光、街面动静、人的作息。")
+
     deaths = [str(n) for n in (prompt.get("deaths") or []) if str(n).strip()]
     if deaths:
         lines.append("")
@@ -420,6 +425,10 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                               "若玩家失去/交出/用掉了随身物品，填物品名（须在TA随身物品之列）；否则空字符串"}
         props["item_stashed"] = {"type": "string", "description":
                                  "若玩家把随身物品存放/藏在当前地点，填物品名；否则空字符串"}
+    if (prompt.get("clock") or "").strip() and not is_member and not is_think:
+        props["time_skip"] = {"type": "string", "description":
+                              "默认空字符串。仅当这一轮剧情明确跨过了大段时间才填："
+                              "睡了一觉/到第二天→填「次日」；一直等到下一个时段（等到天黑/晌午）→填「下一时段」。"}
     pcfg = prompt.get("pressure_cfg") or {}
     if pcfg and not is_member and not is_think:
         props["pressure"] = {"type": "integer", "description":
@@ -790,6 +799,8 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
             out[k_out] = str(d.get(k_in) or "").strip()
     if "next_speakers" in d:
         out["next_speakers"] = [str(x).strip() for x in (d.get("next_speakers") or []) if str(x).strip()]
+    if "time_skip" in d:
+        out["time_skip"] = str(d.get("time_skip") or "").strip()
     return out
 
 
