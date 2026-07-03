@@ -355,6 +355,8 @@ class Run(BaseModel):
     created_at: Optional[datetime] = None
     # arrival discoveries from a /move (走到对的地方，真相当场揭开) — [{title, text}]
     discoveries: list[dict[str, Any]] = []
+    # fresh next-step chips for the scene just entered (only set by /move)
+    suggestions: list[str] = []
 
 
 class RunSummary(BaseModel):

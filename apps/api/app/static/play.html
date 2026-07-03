@@ -610,6 +610,7 @@ async function moveTo(name) {
     const who = following.length ? `（你带着同行的人来到了 ${name}。）` : `（你来到了 ${name}。）`;
     renderBeat({ author:"engine", type:"description", text: who });
     renderDiscoveries(run.discoveries);
+    if (run.suggestions && run.suggestions.length) renderSuggest(run.suggestions);
   } catch(e) { renderBeat({ author:"engine", type:"description", text:`（${e.message}）` }); }
 }
 async function toggleFollow(id, want) {
@@ -641,6 +642,7 @@ async function acceptMove(req) {
     applyRunUpdate(run);
     renderBeat({ author:"engine", type:"description", text:`（你跟着${req.by_name||"对方"}来到了 ${req.to_name}。）` });
     renderDiscoveries(run.discoveries);
+    if (run.suggestions && run.suggestions.length) renderSuggest(run.suggestions);
   } catch(e) { renderBeat({ author:"engine", type:"description", text:`（${e.message}）` }); }
 }
 // 关键节点抉择 (VN choice): an authored decision card. Picking applies its effects

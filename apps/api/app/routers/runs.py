@@ -467,6 +467,9 @@ def move(run_id: str, body: MoveIn, user: User = Depends(current_user), db: Sess
     db.refresh(r)
     out = _to_run(r)
     out.discoveries = discoveries
+    # the scene just changed under the player's feet — regenerate the next-step chips
+    # for THIS place and THESE people (the old ones point at who's no longer here)
+    out.suggestions = runtime.arrival_suggestions(content, st)
     return out
 
 

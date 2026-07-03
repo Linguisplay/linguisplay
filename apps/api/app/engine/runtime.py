@@ -1062,6 +1062,7 @@ def _smart_suggestions(llm, all_beats, player_input, primary, content, state, lo
             "speaker": primary_name, "player_input": player_input, "reply": reply[:120],
             "present": present, "exits": exits, "topics": needed_topics, "relation": rel_name,
             "player_name": player_name, "player_desc": player_desc,
+            "place": (location or {}).get("name") or "",
         }})
         return [s for s in (out.get("suggestions") or []) if s][:3]
     except Exception:
@@ -1090,6 +1091,37 @@ def build_suggestions(context: dict[str, Any]) -> list[str]:
             seen.add(x)
             out.append(x)
     return out[:3]
+
+
+def arrival_suggestions(content: dict[str, Any], state: dict[str, Any],
+                        llm: LLM | None = None) -> list[str]:
+    """Fresh next-step chips for a scene the player JUST WALKED INTO — the previous
+    turn's suggestions point at people and things that are no longer here. Grounded in
+    the current place, who is actually present, and the act's open topics; falls back
+    to a deterministic set (talk to who's here / search what's here / look around)."""
+    if (state.get("mode") or "character") == "god":
+        return []
+    llm = llm or get_llm()
+    loc = current_location(content, state) or {}
+    pcid = state.get("player_character_id")
+    here = [c for c in scene_characters(content, state) if c.get("id") != pcid]
+    if here:
+        primary = next((c for c in here if c.get("is_lead")), here[0])
+        smart = _smart_suggestions(
+            llm, [], f"（你刚走进{loc.get('name') or '这里'}，还没开口）", primary,
+            content, state, location_view(content, state),
+            _pending_topics(act_progress(content, state, int(state.get("act", 1) or 1))),
+            False)
+        if smart:
+            return smart
+    det: list[str] = [f"和{c.get('name')}搭话" for c in here[:2] if c.get("name")]
+    searched = set(state.get("searched_prop_ids") or [])
+    prop = next((p.get("name") for p in (loc.get("props") or [])
+                 if p.get("name") and p.get("id") not in searched), None)
+    if prop:
+        det.append(f"翻查{prop}")
+    det.append("看看四周")
+    return det[:3]
 
 
 def _detect_asks(content: dict[str, Any], player_input: str) -> list[str]:
