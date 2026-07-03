@@ -276,7 +276,7 @@
       <div class="hero-t">TA有不会告诉你的事。</div>
       <div class="hero-s">除非你走进TA的生命。</div>
       <div class="hero-p">
-        <span>🔒 每个角色都藏着<b>真正锁住的秘密</b>——问是问不出来的，要靠你赢得</span>
+        <span>🔒 每个角色都藏着<b>真正锁住的秘密</b>：问是问不出来的，要靠你赢得</span>
         <span>💗 关系是<b>挣来的</b>：TA记得你说过的每句话、约过的每一面、欠下的每次爽约</span>
         <span>🌙 世界<b>自己会动</b>：时辰流转、人来人往，TA还会主动给你捎话</span>
       </div>
@@ -532,7 +532,7 @@ async function enterRun(run) {
     try {
       const jd = await j(`/runs/${runId}/journal`);
       const n = (jd.secrets_untouched || 0) + (jd.secrets || []).length;
-      if (n > 0) pushToast(`🔒 这个故事里藏着 <b>${n}</b> 个秘密——没有人会主动告诉你。`, "t-unlock", 1500);
+      if (n > 0) pushToast(`🔒 这个故事里藏着 <b>${n}</b> 个秘密，没有人会主动告诉你。`, "t-unlock", 1500);
     } catch (e) {}
   }
   curClock = (run.state && run.state.clock) || null;
@@ -754,7 +754,7 @@ async function openJournal() {
         ? ` <a class="jconfront" data-frag="${escapeHtml(f.id)}" data-char="${escapeHtml(sec.character_id || "")}">🃏 当面对质</a>` : ""
     }</div>`).join("");
     const left = sec.locked_count > 0
-      ? `<div class="jlocked">…还有 ${sec.locked_count} 层没有揭开${sec.confrontable ? `<span class="jwho">（${escapeHtml(sec.character)}就在眼前——可拿已知的证据当面对质）</span>` : ""}</div>` : "";
+      ? `<div class="jlocked">…还有 ${sec.locked_count} 层没有揭开${sec.confrontable ? `<span class="jwho">（${escapeHtml(sec.character)}就在眼前，可拿已知的证据当面对质）</span>` : ""}</div>` : "";
     const who = sec.character ? `<span class="jwho">（${escapeHtml(sec.character)}）</span>` : "";
     return `<div class="jsec"><div class="jtitle">🔓 ${escapeHtml(sec.title)}${who}</div>${layers}${left}</div>`;
   }).join("") || `<div class="jempty">还没有揭开任何真相。</div>`;
@@ -843,7 +843,7 @@ async function openThread(cid) {
 function renderThread(th) {
   const bubbles = (th.msgs || []).map(m =>
     `<div class="pmsg ${m.from === "me" ? "me" : "them"}"><span>${escapeHtml(m.text)}</span><small>${escapeHtml(m.at||"")}</small></div>`
-  ).join("") || `<div class="jempty">还没说过话——发一条试试。</div>`;
+  ).join("") || `<div class="jempty">还没说过话，发一条试试。</div>`;
   const dead = th.dead;
   const composer = dead
     ? `<div class="jempty">TA已不在人世，这个对话停在了这里。</div>`
@@ -951,7 +951,7 @@ function showDice(d) {
     clearInterval(t);
     rollEl.textContent = d.roll;
     row.classList.add(cls);
-    row.innerHTML += ` —— <b>${label}</b>`;
+    row.innerHTML += ` · <b>${label}</b>`;
     chat.scrollTop = chat.scrollHeight;
   }, 900);
 }
@@ -1430,14 +1430,14 @@ function showMoments(moments, relDeltas) {
     else if (m.kind === "identity") pushToast(`🎖 你的身份变了：${m.text || ""}`, "t-end", i++ * 650);
     else if (m.kind === "item") pushToast(m.verb === "gained" ? `🎒 获得：${m.name}` : m.verb === "stashed" ? `📦 已存放：${m.name}` : `🎒 失去：${m.name}`, "t-unlock", i++ * 650);
     else if (m.kind === "event") pushToast(`🌊 ${m.label || "起变故了"}`, "t-act", i++ * 650);
-    else if (m.kind === "confront") pushToast({ crit_success: `🃏 一击即中——${m.name}彻底松口了`,
-      success: `🃏 对质奏效——${m.name}松了口`, fail: `🃏 ${m.name}扛住了你的对质`,
-      crit_fail: `🃏 弄巧成拙——${m.name}反将你一军` }[m.outcome] || "🃏 对质", m.outcome === "fail" || m.outcome === "crit_fail" ? "t-press" : "t-unlock", i++ * 650);
-    else if (m.kind === "deadline") pushToast(`⏳ ${m.text || "大限"}——就在今天`, "t-press", i++ * 650);
+    else if (m.kind === "confront") pushToast({ crit_success: `🃏 一击即中：${m.name}彻底松口了`,
+      success: `🃏 对质奏效：${m.name}松了口`, fail: `🃏 ${m.name}扛住了你的对质`,
+      crit_fail: `🃏 弄巧成拙：${m.name}反将你一军` }[m.outcome] || "🃏 对质", m.outcome === "fail" || m.outcome === "crit_fail" ? "t-press" : "t-unlock", i++ * 650);
+    else if (m.kind === "deadline") pushToast(`⏳ ${m.text || "大限"}：就在今天`, "t-press", i++ * 650);
     else if (m.kind === "npc_rel") pushToast(m.delta > 0 ? `🤝 ${m.a}和${m.b}走近了` : `⚡ ${m.a}和${m.b}闹僵了`, m.delta > 0 ? "t-rel" : "t-press", i++ * 650);
     else if (m.kind === "promise") pushToast(
       m.status === "made" ? `${m.romantic ? "💞" : "🤝"} ${m.name}和你约好了：${m.when || ""}·${m.what || ""}` :
-      m.status === "kept" ? `${m.romantic ? "💞 心动赴约" : "🤝 如约而至"}——${m.what || ""}` :
+      m.status === "kept" ? `${m.romantic ? "💞 心动赴约" : "🤝 如约而至"}：${m.what || ""}` :
       `💔 你爽约了${m.name ? "：" + m.name : ""}（${m.what || ""}）`,
       m.status === "missed" ? "t-press" : "t-rel", i++ * 650);
   }

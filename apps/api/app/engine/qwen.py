@@ -21,6 +21,10 @@ _ANTI_ASSISTANT = (
     "你必须始终留在角色里：不要说自己是AI/助手/语言模型，不要解释规则，不要使用括号外的旁白说明。"
 )
 
+# Punctuation style guard: LLMs lean hard on the em-dash; the user wants prose that
+# breathes with 句号/逗号 instead. Appended to every player-visible prose generator.
+_STYLE_PUNCT = "行文标点以句号、逗号为主，破折号「——」整段至多一处，能不用就不用。"
+
 # 18+ permission block, appended only when the run is mature (story flagged 18+ and the
 # player is age-gated 18+ at signup). Mirrors the old persona R18 feature.
 _R18_BLOCK = (
@@ -388,7 +392,7 @@ def _build_system(prompt: dict[str, Any]) -> str:
     # carry the per-field rules; here we just point at it.
     lines.append("【输出方式】通过调用 render_turn 工具来输出这一轮："
                  "把第三人称旁白填进 narration，把角色【说出口】的原话填进 speech，其余填对应字段。"
-                 "不要在工具之外写任何正文。")
+                 "不要在工具之外写任何正文。" + _STYLE_PUNCT)
     return "\n".join(lines)
 
 
@@ -657,7 +661,7 @@ def _build_observe_system(prompt: dict[str, Any]) -> str:
     if focus:
         lines.append(f"玩家特别留意的是：{focus}（请把笔墨聚焦在这里）。")
     lines.append("")
-    lines.append("直接输出这段旁白文字本身，不要任何前缀、标签或解释。")
+    lines.append("直接输出这段旁白文字本身，不要任何前缀、标签或解释。" + _STYLE_PUNCT)
     return "\n".join(lines)
 
 
@@ -721,7 +725,7 @@ def _build_intro_system(prompt: dict[str, Any]) -> str:
     else:
         lines.append("最后，用一句话给玩家一个此刻可以着手去做的小方向。")
     lines.append("")
-    lines.append("直接输出这段开场旁白文字本身，不要任何前缀、标签或解释。")
+    lines.append("直接输出这段开场旁白文字本身，不要任何前缀、标签或解释。" + _STYLE_PUNCT)
     return "\n".join(lines)
 
 
@@ -781,7 +785,7 @@ def _build_transition_system(prompt: dict[str, Any]) -> str:
     if goal:
         lines.append(f"最后用单独一句话、自然地点出这一幕的新目标：『{goal}』。")
     lines.append("")
-    lines.append("直接输出这段过场旁白文字本身，不要任何前缀、标签或解释。")
+    lines.append("直接输出这段过场旁白文字本身，不要任何前缀、标签或解释。" + _STYLE_PUNCT)
     return "\n".join(lines)
 
 
@@ -1418,7 +1422,7 @@ class QwenLLM:
                f"旁白：一句第三人称——你注意到{pl}的那个瞬间（一个具体的动作/眼神变化），"
                f"并露出一丝【有话没说】的破绽。{tease_line}\n"
                f"台词：你对{pl}亲口说的第一句话（短，直接冲着TA本人来，一眼就是你的口吻——"
-               "让TA感觉被点名、被看见，而不是被客套地接待）。")
+               "让TA感觉被点名、被看见，而不是被客套地接待）。两行都不要用破折号。")
         try:
             resp = httpx.post(
                 self._url,
@@ -1479,7 +1483,7 @@ class QwenLLM:
                f"你与对方的关系：{prompt.get('relation','')}。\n"
                f"你此刻不在对方身边，要通过{device}给TA捎话。情境：{prompt.get('hint','')}\n"
                "写1~2条【短消息】：每条一行、口语、短（20字内最好），必须一眼就是你的声音——"
-               "你的口头禅、你的脾气、你的分寸。不要旁白、不要引号、不要署名，只输出消息本身。")
+               "你的口头禅、你的脾气、你的分寸。不要旁白、不要引号、不要署名，只输出消息本身。不用破折号。")
         u = f"你们之前捎过的话：\n{tail}\n\n现在写你要发的消息（1~2行）："
         try:
             resp = httpx.post(
@@ -1569,7 +1573,7 @@ class QwenLLM:
                "② 再写此刻在场的每个人【正在做什么】——具体的动作、姿态、注意力所在，贴合各自的身份和长相，"
                "一人一笔，谁都不能只是'站在那里'；\n"
                "③ 最后写谁最先注意到玩家进来、那一瞬的反应（一个眼神/动作即可，不写对话）。\n"
-               "不要替玩家做动作或说话，不要剧透，不要总结抒情。只输出旁白本身。")
+               "不要替玩家做动作或说话，不要剧透，不要总结抒情。只输出旁白本身。" + _STYLE_PUNCT)
         u = (f"地点：{prompt.get('place','')}（{prompt.get('detail','')}）\n"
              f"时间：{prompt.get('slot','') or '不明'}\n"
              f"走进来的人：{prompt.get('player_name') or '玩家'}\n"
@@ -1601,7 +1605,7 @@ class QwenLLM:
         sys = ("你在为一个互动剧情游戏写【玩家暂时离开】时的收尾旁白。写1~2句第三人称旁白，"
                "留一个让人惦记的钩子：在场的某人欲言又止、一个反常的细节此刻才被注意到、"
                f"或一句没说完的话。{tline}要具体可感，不要总结、不要抒情空话、不要预告。"
-               "只输出旁白本身。")
+               "只输出旁白本身。" + _STYLE_PUNCT)
         u = f"地点：{place or '（未知）'}\n在场的人：{cast}\n玩家此刻起身离开。写那1~2句收尾旁白。"
         try:
             resp = httpx.post(

@@ -605,7 +605,7 @@ def set_follow(content: dict[str, Any], state: dict[str, Any],
             state["following"] = following
             mode = relationships.derive_mode(char, scores, tun)
             reason = (f"{name}对你满是戒备，不会跟你走。" if mode == "enemy"
-                      else f"你和{name}还没熟到那份上——先多聊聊、把关系处近点，TA 才愿意跟你走。")
+                      else f"你和{name}还没熟到那份上。先多聊聊、把关系处近点，TA 才愿意跟你走。")
             return {"ok": False, "following": following, "name": name, "reason": reason}
         following.append(char_id)
         rel_log(state, char_id, int(state.get("act", 1) or 1), "follow",
@@ -883,7 +883,7 @@ def opening_hook_beats(content: dict[str, Any], state: dict[str, Any],
     except Exception:
         pass
     if not narration and tease:
-        narration = (f"（{host.get('name')}的目光落在你身上，多停了一瞬——像在掂量你，"
+        narration = (f"（{host.get('name')}的目光落在你身上，多停了一瞬，像在掂量你，"
                      f"又像有什么关于「{tease}」的话到了嘴边，被咽了回去。）")
     beats: list[dict[str, Any]] = []
     if narration:
@@ -1161,7 +1161,7 @@ def entrance_beat(content: dict[str, Any], state: dict[str, Any], c: dict[str, A
     bits = "，".join(b for b in (role, look) if b)
     lead = f"{flavor}，" if flavor else ""
     return {"type": "description", "speaker_name": None,
-            "text": f"（{lead}{c.get('name')}来了{('——' + bits) if bits else ''}。）"}
+            "text": f"（{lead}{c.get('name')}来了{('，' + bits) if bits else ''}。）"}
 
 
 def _exit_dest(content: dict[str, Any], state: dict[str, Any],
@@ -1176,7 +1176,7 @@ def _exit_dest(content: dict[str, Any], state: dict[str, Any],
     if loc:
         return None, "，往你还没去过的地方去了"
     if home == AWAY:
-        return None, "——没人知道TA这个时辰去了哪"
+        return None, "，没人知道TA这个时辰去了哪"
     return None, ""
 
 
@@ -1197,7 +1197,7 @@ def farewell_beats(content: dict[str, Any], state: dict[str, Any], c: dict[str, 
     except Exception:
         line = ""
     if not line:
-        line = f"我先走一步——{dest}那边还有事。" if dest else "先这样，我得走了。回头见。"
+        line = f"我先走一步，{dest}那边还有事。" if dest else "先这样，我得走了。回头见。"
     return [
         {"type": "dialogue", "speaker_name": c.get("name"), "text": line},
         {"type": "description", "speaker_name": None,
@@ -1246,7 +1246,7 @@ def arrival_narration(content: dict[str, Any], state: dict[str, Any], persona: d
     bits = [_first_sentence(loc.get("detail") or "", 60)]
     for p in people:
         who = "，".join(b for b in (p["role"], p["look"]) if b)
-        bits.append(f"{p['name']}正在这里{('——' + who) if who else ''}")
+        bits.append(f"{p['name']}正在这里{('（' + who + '）') if who else ''}")
     return "（" + "。".join(b for b in bits if b) + "。）" if any(bits) else ""
 
 
@@ -1486,7 +1486,7 @@ def discover_on_arrival(content: dict[str, Any], state: dict[str, Any]) -> list[
         body = (f.get("content") or "").strip()
         title = (f.get("secret_title") or "").strip()
         out.append({"fragment_id": f.get("id"), "title": title,
-                    "text": f"（到了这里你才看清——{body}）"})
+                    "text": f"（到了这里你才看清：{body}）"})
     return out
 
 
@@ -1836,7 +1836,7 @@ def phone_deliveries(content: dict[str, Any], state: dict[str, Any], here_ids: s
             pr["reminded"] = True
             msgs = compose_message(content, state, c, "reminder",
                                    f"你们约好了{when}（{what}），时辰快到了，你捎话提醒TA，带上你自己的语气",
-                                   f"别忘了{when}——{what}。我等你。", llm)
+                                   f"别忘了{when}，{what}。我等你。", llm)
             out.append(phone_push(content, state, c, msgs, now_label))
         elif pr.get("status") in ("missed", "missed_noted") and not pr.get("texted"):
             pr["texted"] = True
@@ -2205,7 +2205,7 @@ def build_parting_hook(content: dict[str, Any], state: dict[str, Any],
     if not beats:
         hint = f"关于「{topics[0]}」的话" if topics else "有句话"
         beats = [{"type": "description", "speaker_name": None,
-                  "text": f"（你起身离开。身后有人欲言又止——{hint}，似乎还没说完。）"}]
+                  "text": f"（你起身离开。身后有人欲言又止，{hint}似乎还没说完。）"}]
     return beats[:1]
 
 
@@ -2301,12 +2301,12 @@ def _confront_gen(content, state, persona, secret, frag, next_locked, target, ll
         return ("beat", b)
 
     yield emit({"type": "description", "speaker_name": None,
-                "text": f"（你直视着{tname}，把你已经知道的事一字一句摆到TA面前——{ev}）"})
+                "text": f"（你直视着{tname}，把你已经知道的事一字一句摆到TA面前：{ev}）"})
     if forced_id:
         for t in _titles_for_fragments(content, [forced_id]):
             moments.append({"kind": "unlock", "title": t})
         rel_log(state, char_id, old_act, "confront",
-                f"你当面摆出证据，TA终于松口——「{title}」又揭开一层。")
+                f"你当面摆出证据，TA终于松口，「{title}」又揭开一层。")
     else:
         rel_log(state, char_id, old_act, "confront",
                 f"你拿「{title}」的证据当面对质，被TA挡了回来。")
@@ -2575,7 +2575,7 @@ def run_turn_stream(
                             "what": promise_kept.get("what"),
                             "romantic": bool(promise_kept.get("romantic"))})
             rel_log(state, kc, old_act, "promise",
-                    f"你如约而至——{promise_kept.get('what','')}。")
+                    f"你如约而至：{promise_kept.get('what','')}。")
 
     if mode == "god":
         # Invisible-observer mode: the player doesn't speak in-scene; the present cast
@@ -2694,7 +2694,7 @@ def run_turn_stream(
         body = _fragment_content(content, pf.get("fragment_id"))
         if body:
             yield emit({"type": "description", "speaker_name": None,
-                        "text": f"（你翻查{pf['name']}——{body}）"})
+                        "text": f"（你翻查{pf['name']}：{body}）"})
         elif pf.get("detail"):
             yield emit({"type": "description", "speaker_name": None,
                         "text": f"（你翻查{pf['name']}：{pf['detail']}）"})
@@ -2828,7 +2828,7 @@ def run_turn_stream(
                 rel_log(state, sp_id, old_act, "rel_up",
                         f"你们成了「{relationships.name_of(mode_after)}」。")
                 yield emit({"type": "description", "speaker_name": None,
-                            "text": f"💗（你感觉到，和{sp_name}的关系又近了一层——现在你们是"
+                            "text": f"💗（你感觉到，和{sp_name}的关系又近了一层。现在你们是"
                                     f"「{relationships.name_of(mode_after)}」了。）"})
         if directed.get("advance_act"):
             advance = True
@@ -2851,7 +2851,7 @@ def run_turn_stream(
                                     "name": sp_name, "what": made["what"], "when": when,
                                     "romantic": bool(made.get("romantic"))})
                     yield emit({"type": "description", "speaker_name": None,
-                                "text": f"（约定立下了：{when}，{loc_nm}——{made['what']}。）"})
+                                "text": f"（约定立下了：{when}，{loc_nm}见，{made['what']}。）"})
             emo = (directed.get("player_emotion") or "").strip()
             if emo:
                 state["player_emotion"] = emo       # carry the emotional read into next turn
@@ -3042,7 +3042,7 @@ def run_turn_stream(
                     trig_now.add(eid)
                     state["triggered_event_ids"] = sorted(trig_now)
                     yield emit({"type": "description", "speaker_name": None,
-                                "text": f"就在这时——{ev['what_happens']}"})
+                                "text": f"就在这时，{ev['what_happens']}"})
                     moments.append({"kind": "event", "label": ev["what_happens"][:40]})
                     state["world_pulse"] = 0
                     break
@@ -3100,7 +3100,7 @@ def run_turn_stream(
     hint = ""
     if state["stuck"] >= tun["stuck_spell"] and needed_topics:
         todo = "、".join(f"「{t}」" for t in needed_topics)
-        hint = f"还没弄明白的是：{todo}。别干等——主动开口去问，或动手查一查，这一章的结就卡在这上面。"
+        hint = f"还没弄明白的是：{todo}。别干等，主动开口去问，或动手查一查，这一章的结就卡在这上面。"
     elif state["stuck"] >= tun["stuck_push"] and needed_topics:
         hint = f"眼下最该弄清的，是「{needed_topics[0]}」。不妨直接追问，或留意周围相关的破绽。"
 
@@ -3125,7 +3125,7 @@ def run_turn_stream(
     if new_places:
         where = "、".join(f"「{n}」" for n in new_places)
         yield emit({"type": "description", "speaker_name": None,
-                    "text": f"（你打听到城寨里还有去处：{where}——现在可以过去看看了。）"})
+                    "text": f"（你打听到城寨里还有去处：{where}，现在可以过去看看了。）"})
 
     # 5c. ⏳ time flows: turns spend the current 时段; enough of them — or the scene
     #     explicitly skipping time (睡到天亮/等到入夜) — roll it over. Characters keep
@@ -3159,7 +3159,7 @@ def run_turn_stream(
         dl = (cv or {}).get("deadline")
         if dl and dl["days_left"] == 0 and int(clk["day"]) > day_before:
             yield emit({"type": "description", "speaker_name": None,
-                        "text": f"（已经是第{clk['day']}天——「{dl['text']}」，就在今天。）"})
+                        "text": f"（已经是第{clk['day']}天，「{dl['text']}」就在今天。）"})
             moments.append({"kind": "deadline", "text": dl["text"]})
         elif dl and dl["days_left"] < 0 and not state.get("ended"):
             deadline_blown = True
@@ -3177,10 +3177,10 @@ def run_turn_stream(
                 moments.append({"kind": "promise", "status": "missed",
                                 "name": pr.get("char_name"), "what": pr.get("what")})
                 rel_log(state, mc, old_act, "promise",
-                        f"你爽约了——{pr.get('what','')}。")
+                        f"你爽约了：{pr.get('what','')}。")
                 yield emit({"type": "description", "speaker_name": None,
-                            "text": f"（你猛然想起——和{pr.get('char_name','')}约好的"
-                                    f"（{pr.get('what','')}），已经过了时辰。）"})
+                            "text": f"（你猛然想起，和{pr.get('char_name','')}约好的"
+                                    f"（{pr.get('what','')}）已经过了时辰。）"})
 
     # 5d. people come and go with the hour and the act — never silently. Anyone the
     #     roster diff shows arriving gets a concrete line (looks + role); anyone leaving
@@ -3230,7 +3230,7 @@ def run_turn_stream(
         candidate = {"id": authored.get("id") or "deadline",
                      "kind": authored.get("kind", "bad"),
                      "title": authored.get("title")
-                     or f"{(ccfg.get('deadline_text') or '大限').strip()}——为时已晚",
+                     or f"{(ccfg.get('deadline_text') or '大限').strip()}，为时已晚",
                      "text": authored.get("text") or "",
                      "terminal": True}
     else:
@@ -3264,7 +3264,7 @@ def run_turn_stream(
                 yield emit({"type": "description", "speaker_name": None, "text": candidate["text"]})
             if not terminal:
                 yield emit({"type": "description", "speaker_name": None,
-                            "text": "（你已抵达一种结局，但故事并未就此打住——你仍可以留在这个世界继续探索。）"})
+                            "text": "（你已抵达一种结局，但故事并未就此打住。你仍可以留在这个世界继续探索。）"})
 
     # 6b. roll older turns into the long-horizon digest (every ~MEMORY_BATCH turns). Done
     #     here — after the reply beats have already streamed — so it never delays what the

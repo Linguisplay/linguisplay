@@ -124,4 +124,4 @@ def test_arrival_narration_llm_and_fallback():
     assert names == {"甲", "乙"} and all(p["relation"] for p in ctx["people"])
     # mock path (no prose) → deterministic pan still names everyone with a concrete stroke
     txt2 = runtime.arrival_narration(STORY, st, {"name": "我"}, llm=PlainLLM())
-    assert "甲正在这里——店主" in txt2 and "乙" in txt2 and "吊灯" in txt2
+    assert "甲正在这里（店主" in txt2 and "乙" in txt2 and "吊灯" in txt2

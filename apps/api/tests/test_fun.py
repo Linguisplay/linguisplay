@@ -109,7 +109,7 @@ def test_world_moves_by_itself_after_quiet_turns():
     for turn in range(1, 6):
         out = runtime.run_turn(BASE, st, {"name": "我"}, "随便聊聊", channel="say")  # MockLLM
         st = out["state"]
-        if any("就在这时——远处传来一声闷响" in b.get("text", "") for b in out["beats"]):
+        if any("就在这时，远处传来一声闷响" in b.get("text", "") for b in out["beats"]):
             fired_at = fired_at or turn
     assert fired_at == 4                             # default world_event_every = 4
     assert "ev1" in st["triggered_event_ids"]
