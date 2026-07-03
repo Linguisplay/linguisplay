@@ -84,6 +84,40 @@
   .smeta .perk { display: inline-flex; flex-direction: column; gap: 1px; background: #1f2a20; border: 1px solid #2c4233; border-radius: 9px; padding: 5px 10px; cursor: pointer; color: #cfe6d4; font-size: 12px; }
   .smeta .perk small { color: #8aa092; font-size: 10.5px; }
   .smeta .perk input { margin-right: 4px; }
+  /* 📱 小手机 */
+  #phoneBtn { position: relative; }
+  .pbadge { position: absolute; top: -4px; right: -5px; background: #e0574f; color: #fff; border-radius: 9px; font-size: 10px; line-height: 1; padding: 2px 5px; font-weight: 700; }
+  #phoneov { position: fixed; inset: 0; z-index: 75; background: rgba(0,0,0,.55); display: grid; place-items: center; }
+  #phoneov .pcard { width: min(400px, 94vw); height: min(620px, 88vh); display: flex; flex-direction: column; background: #101018; border: 1px solid #34344a; border-radius: 22px; padding: 14px 14px 12px; box-shadow: 0 14px 56px rgba(0,0,0,.65); }
+  #phoneov .pbar { display: flex; align-items: center; gap: 10px; padding-bottom: 9px; border-bottom: 1px solid #23232f; }
+  #phoneov .pbar b { flex: 1; text-align: center; font-size: 14px; }
+  #phoneov .pback { color: #8ea2ff; cursor: pointer; font-size: 13px; white-space: nowrap; }
+  #phoneov .pbody { flex: 1; overflow-y: auto; padding-top: 10px; display: flex; flex-direction: column; }
+  .papps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 16px 6px; }
+  .papp { position: relative; display: flex; flex-direction: column; align-items: center; gap: 5px; font-size: 30px; cursor: pointer; background: #191926; border: 1px solid #2a2a3a; border-radius: 14px; padding: 13px 4px 9px; }
+  .papp:hover { background: #202032; }
+  .papp small { font-size: 11px; color: #aab2c4; }
+  .appdot { position: absolute; top: 5px; right: 8px; background: #e0574f; color: #fff; border-radius: 8px; font-size: 10px; padding: 1px 5px; font-weight: 700; }
+  .pthread { display: flex; align-items: center; gap: 10px; padding: 9px 6px; border-bottom: 1px solid #1d1d28; cursor: pointer; }
+  .pthread:hover { background: #171722; }
+  .pav { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex: 0 0 40px; }
+  .plet { display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 17px; }
+  .pmeta { flex: 1; min-width: 0; }
+  .pname { font-size: 13.5px; color: #e6e9f2; display: flex; align-items: center; gap: 6px; }
+  .plast { font-size: 12px; color: #8a93a8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pat { color: #5d647a; font-size: 10.5px; white-space: nowrap; }
+  .pmsgs { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 4px 2px; }
+  .pmsg { max-width: 78%; display: flex; flex-direction: column; }
+  .pmsg span { padding: 8px 12px; border-radius: 14px; font-size: 13.5px; line-height: 1.55; }
+  .pmsg small { color: #565d72; font-size: 10px; margin-top: 2px; }
+  .pmsg.them { align-self: flex-start; } .pmsg.them span { background: #23232f; color: #e2e5ee; border-bottom-left-radius: 5px; }
+  .pmsg.me { align-self: flex-end; align-items: flex-end; } .pmsg.me span { background: #2c4a35; color: #dff1e3; border-bottom-right-radius: 5px; }
+  .pcompose { display: flex; gap: 8px; padding-top: 10px; }
+  .pcompose input { flex: 1; background: #191924; border: 1px solid #2c2c3c; border-radius: 18px; color: #e6e9f2; padding: 9px 14px; font-size: 13.5px; }
+  .pcompose button { border-radius: 18px; padding: 0 16px; background: #2c4a35; border: 1px solid #3c6a4a; color: #dff1e3; cursor: pointer; }
+  .pcalnow, .pcalddl { font-size: 13.5px; color: #dfe4f0; padding: 6px 4px; }
+  .pcalddl { color: #ffb27a; }
+  .pcalitem { font-size: 13px; color: #d5cfe0; padding: 7px 4px; border-bottom: 1px solid #1d1d28; }
   /* relationship tag + follow control under each in-scene character */
   .castitem .rel { font-size: 10px; padding: 0 4px; border-radius: 6px; line-height: 1.5; white-space: nowrap; }
   .rel-stranger { color:#9aa0ad; background:#2a2d36; } .rel-peer { color:#cfd6e6; background:#2b3142; }
@@ -219,6 +253,7 @@
   <header>
     <b>LinguisPlay <span class="muted" style="font-weight:400">· AI 虚构内容</span></b>
     <span style="display:flex; gap:8px; align-items:center">
+      <button id="phoneBtn" class="iconbtn hidden" title="小手机：消息、日历、通讯录" onclick="openPhone()">📱<span id="phoneBadge" class="pbadge hidden"></span></button>
       <button id="mapBtn" class="iconbtn hidden" title="地图：已发现的地点与去处" onclick="openMap()">🗺</button>
       <button id="journalBtn" class="iconbtn hidden" title="档案：已揭开的真相与结局图鉴" onclick="openJournal()">📔</button>
       <button id="soundBtn" class="iconbtn hidden" title="背景音乐开关" onclick="toggleSound()">🔊</button>
@@ -454,7 +489,7 @@ async function enterRun(run) {
   myName = (playMode === "character" && run.state && run.state.player_character_name) || "我";
   runId = run.id;
   hide("role");
-  hide("pick"); show("play"); show("backBtn"); show("soundBtn"); show("journalBtn"); show("mapBtn");
+  hide("pick"); show("play"); show("backBtn"); show("soundBtn"); show("journalBtn"); show("mapBtn"); show("phoneBtn");
   resetEnded();
   chat.innerHTML = ""; suggest.innerHTML = ""; state.innerHTML = "";
   curBgmMood = null; curScene = null; curLocId = null;
@@ -484,7 +519,7 @@ function sendLeave() { if (runId) { try { navigator.sendBeacon(`/runs/${runId}/l
 window.addEventListener("pagehide", sendLeave);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") sendLeave(); });
 
-function backToPick() { sendLeave(); runId = null; stopBgm(); hide("play"); hide("backBtn"); hide("soundBtn"); hide("journalBtn"); hide("mapBtn"); show("pick"); }
+function backToPick() { sendLeave(); runId = null; stopBgm(); hide("play"); hide("backBtn"); hide("soundBtn"); hide("journalBtn"); hide("mapBtn"); hide("phoneBtn"); show("pick"); }
 async function doLogout() {
   sendLeave();  // must fire while the session cookie is still valid
   try { await j("/auth/logout", { method:"POST" }); } catch(e){}
@@ -716,6 +751,121 @@ async function openJournal() {
     el.onclick = () => confrontClue(el.dataset.frag, el.dataset.char);
   });
 }
+// ── 📱 小手机: messages / calendar / contacts / notes in one shell ──────────────
+let phoneUnread = 0, phoneDevice = "手机";
+function setPhoneBadge(n) {
+  phoneUnread = Math.max(0, n | 0);
+  const b = document.getElementById("phoneBadge");
+  if (!b) return;
+  if (phoneUnread > 0) { b.textContent = phoneUnread > 9 ? "9+" : phoneUnread; b.classList.remove("hidden"); }
+  else b.classList.add("hidden");
+}
+function phoneShell(inner, title, backTo) {
+  let ov = document.getElementById("phoneov");
+  if (!ov) {
+    ov = document.createElement("div"); ov.id = "phoneov";
+    ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+    document.body.appendChild(ov);
+  }
+  const back = backTo ? `<a class="pback" onclick="${backTo}">‹ 返回</a>` : "";
+  ov.innerHTML = `<div class="pcard" onclick="event.stopPropagation()">
+    <div class="pbar">${back}<b>${escapeHtml(title)}</b>
+      <button class="ghost" onclick="document.getElementById('phoneov').remove()">合上</button></div>
+    <div class="pbody">${inner}</div></div>`;
+  return ov;
+}
+async function openPhone() {
+  if (!runId) return;
+  let inbox = { threads: [], unread: 0, device: phoneDevice };
+  try { inbox = await j(`/runs/${runId}/phone`); } catch (e) {}
+  phoneDevice = inbox.device || "手机";
+  setPhoneBadge(inbox.unread || 0);
+  const msgBadge = inbox.unread ? `<span class="appdot">${inbox.unread > 9 ? "9+" : inbox.unread}</span>` : "";
+  const inner = `<div class="papps">
+    <div class="papp" onclick="openInbox()">💬${msgBadge}<small>信息</small></div>
+    <div class="papp" onclick="openContacts()">👥<small>通讯录</small></div>
+    <div class="papp" onclick="openCalendar()">🗓<small>日历</small></div>
+    <div class="papp" onclick="document.getElementById('phoneov').remove(); openJournal()">📔<small>备忘录</small></div>
+  </div>`;
+  phoneShell(inner, phoneDevice === "手机" ? "📱 小手机" : `📮 ${phoneDevice}`);
+}
+async function openInbox() {
+  let inbox;
+  try { inbox = await j(`/runs/${runId}/phone`); } catch (e) { return; }
+  phoneDevice = inbox.device || phoneDevice;
+  setPhoneBadge(inbox.unread || 0);
+  const rows = (inbox.threads || []).map(t => {
+    const dot = t.unread ? `<span class="appdot">${t.unread}</span>` : "";
+    const av = t.avatar_url ? `<img class="pav" src="${t.avatar_url}">`
+                            : `<span class="pav plet" style="background:${avatarColor(t.name)}">${escapeHtml((t.name||"?")[0])}</span>`;
+    return `<div class="pthread" data-cid="${escapeHtml(t.char_id)}">${av}<div class="pmeta">
+      <div class="pname">${t.dead ? "🕯 " : ""}${escapeHtml(t.name)}${dot}</div>
+      <div class="plast">${escapeHtml(t.last)}</div></div><small class="pat">${escapeHtml(t.at||"")}</small></div>`;
+  }).join("") || `<div class="jempty">还没有人给你捎过话。<br>关系近了，TA们会主动来找你的。</div>`;
+  const ov = phoneShell(rows, "💬 信息", "openPhone()");
+  ov.querySelectorAll(".pthread").forEach(el => { el.onclick = () => openThread(el.dataset.cid); });
+}
+async function openThread(cid) {
+  let th;
+  try { th = await j(`/runs/${runId}/phone/${cid}`); } catch (e) { return; }
+  renderThread(th);
+}
+function renderThread(th) {
+  const bubbles = (th.msgs || []).map(m =>
+    `<div class="pmsg ${m.from === "me" ? "me" : "them"}"><span>${escapeHtml(m.text)}</span><small>${escapeHtml(m.at||"")}</small></div>`
+  ).join("") || `<div class="jempty">还没说过话——发一条试试。</div>`;
+  const dead = th.dead;
+  const composer = dead
+    ? `<div class="jempty">TA已不在人世，这个对话停在了这里。</div>`
+    : `<div class="pcompose"><input id="pmsgIn" placeholder="发条${escapeHtml(th.device||"消息")}…"
+         onkeydown="if(event.key==='Enter')sendPhoneMsg('${escapeHtml(th.char_id)}')">
+       <button onclick="sendPhoneMsg('${escapeHtml(th.char_id)}')">发送</button></div>`;
+  const ov = phoneShell(`<div class="pmsgs" id="pmsgs">${bubbles}</div>${composer}`,
+                        `${escapeHtml(th.name)}`, "openInbox()");
+  const box = ov.querySelector("#pmsgs"); if (box) box.scrollTop = box.scrollHeight;
+  openPhone.lastThread = th.char_id;
+}
+async function sendPhoneMsg(cid) {
+  const inp = document.getElementById("pmsgIn");
+  const text = (inp && inp.value || "").trim();
+  if (!text) return;
+  inp.value = ""; inp.disabled = true;
+  try {
+    const th = await j(`/runs/${runId}/phone/${cid}`, { method:"POST", body: JSON.stringify({ text }) });
+    renderThread(th);
+    if (!th.replied) pushToast("（对方已读，没有回。）", "", 2400);
+  } catch (e) { pushToast("⚠️ " + escapeHtml(e.message), "", 3000); if (inp) inp.disabled = false; }
+}
+async function openContacts() {
+  let story = null;
+  try { story = await j(`/stories/${currentStoryId}`); } catch (e) {}
+  const known = (cast || []).map(c => c.id);
+  const chars = ((story && story.characters) || []).filter(c => c.avatar_url || known.includes(c.id));
+  const rows = chars.map(c => {
+    const av = c.avatar_url ? `<img class="pav" src="${c.avatar_url}">`
+                            : `<span class="pav plet" style="background:${avatarColor(c.name)}">${escapeHtml((c.name||"?")[0])}</span>`;
+    return `<div class="pthread" data-cid="${escapeHtml(c.id)}">${av}<div class="pmeta">
+      <div class="pname">${escapeHtml(c.name||"")}</div>
+      <div class="plast">${escapeHtml(c.role||"")}</div></div></div>`;
+  }).join("") || `<div class="jempty">通讯录空空如也。</div>`;
+  const ov = phoneShell(rows, "👥 通讯录", "openPhone()");
+  ov.querySelectorAll(".pthread").forEach(el => {
+    el.onclick = () => { document.getElementById("phoneov").remove(); openCharCard(el.dataset.cid); };
+  });
+}
+function openCalendar() {
+  const ck = curClock;
+  const now = ck && ck.label ? `<div class="pcalnow">🕐 现在：<b>${escapeHtml(ck.label)}</b></div>` : "";
+  let ddl = "";
+  if (ck && ck.deadline) {
+    const d = ck.deadline;
+    ddl = `<div class="pcalddl">⏳ ${escapeHtml(d.text)}：${d.days_left > 0 ? `还剩 <b>${d.days_left}</b> 天` : d.days_left === 0 ? "<b>就在今天</b>" : "已经过去"}</div>`;
+  }
+  const prs = (lastPromises || []).map(p =>
+    `<div class="pcalitem">${p.romantic ? "💞" : "🤝"} <b>${escapeHtml(p.when)}</b>${p.place ? " · " + escapeHtml(p.place) : ""} · ${escapeHtml(p.what)}<span class="jwho">（${escapeHtml(p.name)}）</span></div>`
+  ).join("") || `<div class="jempty">日历上暂时没有约定。</div>`;
+  phoneShell(`${now}${ddl}<div class="jh">约定</div>${prs}`, "🗓 日历", "openPhone()");
+}
 // 到达即发现: physical truths that unlocked the moment we arrived
 function renderDiscoveries(list) {
   for (const d of (list || [])) {
@@ -881,6 +1031,7 @@ function renderState(st) {
   if (st.progress !== undefined) renderProgress(st.progress);
   if (st.location !== undefined) renderPlace(st.location);
   if (st.promises !== undefined) renderPromises(st.promises);
+  if (st.phone_unread !== undefined) setPhoneBadge(st.phone_unread);
 }
 function clockChip() {
   if (!curClock || !curClock.label) return "";
@@ -918,7 +1069,9 @@ function renderPlace(loc) {
   el.classList.remove("hidden");
 }
 // 🤝 open appointments hang visibly in the bar — the come-back hook you can't unsee
+let lastPromises = [];
 function renderPromises(list) {
+  lastPromises = list || [];
   const el = document.getElementById("promisebar");
   if (!list || !list.length) { el.classList.add("hidden"); return; }
   const p = list[0];
@@ -1176,6 +1329,12 @@ async function streamTurn(url, bodyObj) {
         else if (ev.event === "choice") { afterPlay.choice = ev.choice; }
         else if (ev.event === "dice") { showDice(ev.dice); }
         else if (ev.event === "clock") { renderClock(ev.clock, true); }
+        else if (ev.event === "phone") {
+          const m = ev.message || {};
+          setPhoneBadge(phoneUnread + (m.msgs || []).length);
+          pushToast(`📱 ${escapeHtml(m.name || "")}：${escapeHtml(((m.msgs || [])[0] || "").slice(0, 24))}`, "t-rel", 400);
+          playSfx && playSfx("knock");
+        }
         else if (ev.event === "pressure") { renderPressure(ev.pressure); }
         else if (ev.event === "move_request") { afterPlay.moveReq = ev.move_request; }
         else if (ev.event === "suggest") { afterPlay.suggest = ev.suggestions; }

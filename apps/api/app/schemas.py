@@ -236,6 +236,7 @@ class StoryInput(BaseModel):
     tuning: Optional[dict] = None  # pacing/balance knob overrides (docs/tuning.md)
     pressure: Optional[dict] = None  # ⚠️ pressure meter {name,hint,ending_id,levels:[{at,note}]}
     clock: Optional[dict] = None  # ⏳ {deadline_day, deadline_text, deadline_ending_id}
+    phone: Optional[dict] = None  # 📱 {enabled, device: "手机"|"传呼机"|"口信"…}
 
 
 class Story(BaseModel):
@@ -259,6 +260,7 @@ class Story(BaseModel):
     tuning: dict = {}
     pressure: Optional[dict] = None
     clock: Optional[dict] = None
+    phone: Optional[dict] = None
     completion: float = 0.0
 
 
@@ -343,6 +345,7 @@ class RunState(BaseModel):
     pressure_name: Optional[str] = None  # the meter's authored name (None = story runs none)
     clock: Optional[dict[str, Any]] = None  # ⏳ {day,slot,label,deadline?} (None = no clock)
     promises: list[dict[str, Any]] = []  # 🤝 open appointments [{name,what,when,place,romantic}]
+    phone_unread: int = 0  # 📱 unread incoming messages (badge)
 
 
 class Run(BaseModel):
@@ -423,3 +426,8 @@ class ConfrontIn(BaseModel):
     # 🃏 证据对峙: present an UNLOCKED fragment to the character its secret belongs to
     fragment_id: str
     character_id: str
+
+
+class PhoneSendIn(BaseModel):
+    # 📱 a text message the player sends from the 信息 app
+    text: str

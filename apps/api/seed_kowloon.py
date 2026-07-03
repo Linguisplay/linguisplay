@@ -453,6 +453,9 @@ ENDINGS = [
 # ⏳ 时间流动: 卧底任务有期限——第7天就是收网日。查清真相、站定立场，都得赶在它之前。
 CLOCK = {"deadline_day": 7, "deadline_text": "警队收网", "deadline_ending_id": "end_late"}
 
+# 📱 年代感：八十年代的城寨没有手机——街坊捎的「口信」就是这里的信息网络。
+PHONE = {"device": "口信"}
+
 
 def get_or_create_demo_user(db) -> User:
     u = db.query(User).filter(User.email == DEMO_EMAIL).first()
@@ -521,6 +524,7 @@ def main() -> None:
             locations=LOCATIONS,
             pressure=PRESSURE,
             clock=CLOCK,
+            phone=PHONE,
             visibility="public",
         )
         db.add(story)

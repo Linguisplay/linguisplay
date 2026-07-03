@@ -56,6 +56,7 @@ def _to_story(s: StoryModel) -> Story:
         tuning=s.tuning or {},
         pressure=s.pressure,
         clock=s.clock,
+        phone=s.phone,
         completion=_completion(s),
     )
 
@@ -127,6 +128,7 @@ def create_story(
     data.pop("tuning", None)
     data.pop("pressure", None)
     data.pop("clock", None)
+    data.pop("phone", None)
     s = StoryModel(
         owner_id=user.id,
         characters=[c.model_dump() for c in (body.characters or [])],
@@ -136,6 +138,7 @@ def create_story(
         tuning=body.tuning or {},
         pressure=body.pressure,
         clock=body.clock,
+        phone=body.phone,
         **data,
     )
     db.add(s)
@@ -205,6 +208,8 @@ def update_story(
         s.pressure = data.pop("pressure")
     if "clock" in data:
         s.clock = data.pop("clock")
+    if "phone" in data:
+        s.phone = data.pop("phone")
     for k, v in data.items():
         setattr(s, k, v)
     db.commit()

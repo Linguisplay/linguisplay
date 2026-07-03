@@ -76,6 +76,14 @@ class MockLLM:
         if prompt.get("arrive"):
             return {}
 
+        # 📱 incoming-message composer: mock defers to the deterministic fallback text.
+        if prompt.get("compose_msg"):
+            return {}
+
+        # 📱 text-back: deterministic in-voice stub, no relationship movement.
+        if prompt.get("phone_reply"):
+            return {"msgs": ["嗯。"], "closeness": 0, "romance": 0}
+
         # parting cliffhanger (悬念离场): narration only, deterministic.
         if prompt.get("parting"):
             topics = prompt.get("topics") or []

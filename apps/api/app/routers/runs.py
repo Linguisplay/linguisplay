@@ -15,8 +15,8 @@ from ..models import Persona as PersonaModel
 from ..models import Run as RunModel
 from ..models import Story as StoryModel
 from ..models import StoryMeta, StorySnapshot, User
-from ..schemas import (Beat, ChooseIn, ConfrontIn, FollowIn, MoveIn, PlayIn, Run, RunCreate,
-                       RunState, RunSummary)
+from ..schemas import (Beat, ChooseIn, ConfrontIn, FollowIn, MoveIn, PhoneSendIn, PlayIn, Run,
+                       RunCreate, RunState, RunSummary)
 from .stories import _to_secret, _to_story
 
 router = APIRouter(prefix="/runs", tags=["runs"])
@@ -63,6 +63,7 @@ def _to_run(r: RunModel) -> Run:
             pressure_name=((runtime.pressure_cfg(r.pinned_content or {}) or {}).get("name")),
             clock=runtime.clock_view(r.pinned_content or {}, st),
             promises=runtime.promises_view(r.pinned_content or {}, st),
+            phone_unread=runtime.phone_threads_view(r.pinned_content or {}, st)["unread"],
         ),
         cast=cast,
         created_at=r.created_at,
@@ -333,6 +334,9 @@ def play(
                 if kind == "clock":
                     yield _event({"event": "clock", "clock": payload})
                     continue
+                if kind == "phone":
+                    yield _event({"event": "phone", "message": payload})
+                    continue
                 if kind == "beat":
                     eb = BeatModel(
                         run_id=run_id, seq=seq, type=payload.get("type", "description"),
@@ -497,6 +501,49 @@ def get_character(run_id: str, char_id: str,
     if not prof:
         raise HTTPException(404, "没有这个人")
     return prof
+
+
+@router.get("/{run_id}/phone")
+def get_phone(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """📱 the 信息 app's inbox: one row per thread + total unread + the story's device name."""
+    r = _own_run(run_id, user, db)
+    return runtime.phone_threads_view(r.pinned_content or {}, r.state or {})
+
+
+@router.get("/{run_id}/phone/{char_id}")
+def get_phone_thread(run_id: str, char_id: str,
+                     user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """One full thread; opening it marks it read."""
+    r = _own_run(run_id, user, db)
+    st = dict(r.state or {})
+    view = runtime.phone_thread(r.pinned_content or {}, st, char_id)
+    if not view:
+        raise HTTPException(404, "没有这个人")
+    r.state = st
+    flag_modified(r, "state")
+    db.commit()
+    return view
+
+
+@router.post("/{run_id}/phone/{char_id}")
+def send_phone(run_id: str, char_id: str, body: PhoneSendIn,
+               user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """📱 text a character from anywhere. They answer in voice under the same gate as a
+    scene turn — or leave the player on read (replied=false)."""
+    r = _own_run(run_id, user, db)
+    if (r.state or {}).get("ended"):
+        raise HTTPException(409, "这局已经结束了")
+    st = dict(r.state or {})
+    persona = db.get(PersonaModel, r.persona_id)
+    try:
+        view = runtime.phone_send(r.pinned_content or {}, st, _persona_dict(persona) if persona else {},
+                                  char_id, body.text)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    r.state = st
+    flag_modified(r, "state")
+    db.commit()
+    return view
 
 
 @router.get("/{run_id}/journal")
