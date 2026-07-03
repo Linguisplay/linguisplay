@@ -15,7 +15,8 @@ from ..models import Persona as PersonaModel
 from ..models import Run as RunModel
 from ..models import Story as StoryModel
 from ..models import StorySnapshot, User
-from ..schemas import Beat, ChooseIn, FollowIn, MoveIn, PlayIn, Run, RunCreate, RunState, RunSummary
+from ..schemas import (Beat, ChooseIn, ConfrontIn, FollowIn, MoveIn, PlayIn, Run, RunCreate,
+                       RunState, RunSummary)
 from .stories import _to_secret, _to_story
 
 router = APIRouter(prefix="/runs", tags=["runs"])
@@ -450,6 +451,75 @@ def get_journal(run_id: str, user: User = Depends(current_user), db: Session = D
     the ending gallery (achieved vs ？？？), decisions made. Locked bodies never leave."""
     r = _own_run(run_id, user, db)
     return runtime.journal(r.pinned_content or {}, r.state or {})
+
+
+@router.post("/{run_id}/confront")
+def confront(run_id: str, body: ConfrontIn, user: User = Depends(current_user),
+             db: Session = Depends(get_db)):
+    """🃏 证据对峙: present an unlocked clue to the character it belongs to, face to face.
+    Validates first (400 with a readable reason), then streams the /play SSE contract:
+    the visible opposed roll, the confrontation beats, and the state that follows."""
+    r = _own_run(run_id, user, db)
+    if (r.state or {}).get("ended"):
+        raise HTTPException(409, "这局已经结束了")
+    persona = db.get(PersonaModel, r.persona_id)
+    content = r.pinned_content or {}
+    state0 = r.state or {}
+    persona_dict = _persona_dict(persona) if persona else {}
+    present_ids = [c.get("id") for c in runtime.scene_characters(content, state0) if c.get("id")]
+    beat_log = [{"author": b.author, "type": b.type, "text": b.text,
+                 "speaker_name": b.speaker_name, "present_ids": b.present_ids}
+                for b in r.beats]
+    try:
+        gen = runtime.confront_stream(content, state0, persona_dict,
+                                      body.fragment_id, body.character_id, beat_log=beat_log)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    start_seq = (r.beats[-1].seq + 1) if r.beats else 0
+
+    def sse():
+        db2 = SessionLocal()
+        try:
+            run = db2.get(RunModel, run_id)
+            seq = start_seq
+            final = None
+            for kind, payload in gen:
+                if kind == "dice":
+                    yield _event({"event": "dice", "dice": payload})
+                elif kind == "beat":
+                    eb = BeatModel(run_id=run_id, seq=seq, type=payload.get("type", "description"),
+                                   speaker_name=payload.get("speaker_name"),
+                                   text=payload.get("text", ""),
+                                   author="engine", present_ids=present_ids)
+                    db2.add(eb)
+                    db2.commit()
+                    db2.refresh(eb)
+                    seq += 1
+                    yield _event({"event": "beat", "beat": _to_beat(eb).model_dump()})
+                else:
+                    final = payload
+            if final is not None:
+                run.state = final["state"]
+                db2.commit()
+                yield _event({"event": "state", "state": _to_run(run).state.model_dump()})
+                if final.get("moments") or final.get("rel_deltas"):
+                    yield _event({"event": "moments", "moments": final.get("moments", []),
+                                  "rel_deltas": final.get("rel_deltas", {})})
+                yield _event({"event": "goal", "goal": final.get("goal", "")})
+                yield _event({"event": "progress", "progress": final.get("progress")})
+                if final.get("pressure_view"):
+                    yield _event({"event": "pressure", "pressure": final["pressure_view"]})
+                if final.get("pending_choice"):
+                    yield _event({"event": "choice", "choice": final["pending_choice"]})
+            yield _event({"event": "done"})
+        except Exception as e:
+            yield _event({"event": "beat", "beat": {"id": "", "type": "description",
+                          "speaker_name": None, "text": f"[出错] {type(e).__name__}", "author": "engine"}})
+            yield _event({"event": "done"})
+        finally:
+            db2.close()
+
+    return StreamingResponse(sse(), media_type="text/event-stream")
 
 
 @router.post("/{run_id}/choose")

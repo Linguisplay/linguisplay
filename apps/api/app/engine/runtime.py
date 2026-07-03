@@ -130,6 +130,8 @@ DEFAULT_TUNING = {
     "max_new_characters": 4,    # 👋 emergent mid-story characters a run may accumulate
     "world_event_every": 4,     # 🌊 after this many quiet turns an authored act event fires itself (0 = off)
     "turns_per_slot": 4,        # ⏳ turns per 时段 (晨/午/夜); a day = 3 slots. 0 = clock off
+    "confront_base": 55,        # 🃏 evidence-confrontation base success %, + closeness//2
+    "confront_cost": 3,         # 🃏 closeness cost of a successful confrontation (fail ×2, 大失败 ×3)
 }
 
 # ⏳ the diegetic clock: three slots make a day. Slot-restricted schedule entries and
@@ -1494,6 +1496,9 @@ def journal(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
     unlocked = set(state.get("unlocked_fragment_ids") or [])
     story = content.get("story") or {}
     chars = {c.get("id"): c.get("name") for c in story.get("characters", []) or []}
+    # 🃏 who can be confronted right now: the secret's owner, alive, standing in this scene
+    here_ids = {c.get("id") for c in scene_characters(content, state)
+                if c.get("id") != state.get("player_character_id")}
     secrets, untouched = [], 0
     for sec in content.get("secrets", []) or []:
         frags = sec.get("fragments", []) or []
@@ -1501,10 +1506,16 @@ def journal(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
         if not got:
             untouched += 1
             continue
+        scid = sec.get("character_id")
         secrets.append({
             "title": (sec.get("title") or "").strip(),
-            "character": chars.get(sec.get("character_id")) or "",
+            "character": chars.get(scid) or "",
+            "character_id": scid,
+            # 出示对峙 is offered only when there's still a layer to pry open
+            "confrontable": bool(scid in here_ids and len(got) < len(frags)
+                                 and (state.get("mode") or "character") != "god"),
             "unlocked": [(f.get("content") or "").strip() for f in got],
+            "frags": [{"id": f.get("id"), "text": (f.get("content") or "").strip()} for f in got],
             "locked_count": len(frags) - len(got),
         })
     achieved = set(state.get("achieved_endings") or [])
@@ -1552,6 +1563,169 @@ def build_parting_hook(content: dict[str, Any], state: dict[str, Any],
         beats = [{"type": "description", "speaker_name": None,
                   "text": f"（你起身离开。身后有人欲言又止——{hint}，似乎还没说完。）"}]
     return beats[:1]
+
+
+def confront_stream(content: dict[str, Any], state: dict[str, Any], persona: dict[str, Any],
+                    fragment_id: str, char_id: str,
+                    llm: LLM | None = None, beat_log: list[dict[str, Any]] | None = None):
+    """🃏 证据对峙: the player slams a truth they've UNLOCKED down in front of the character
+    it belongs to. A visible opposed check decides the scene: success pries the secret's
+    next layer open ON THE SPOT (evidence beats every unlock gate — but being cornered
+    costs the relationship); failure hardens them, and a 大失败 hands them the round and
+    feeds the story's pressure meter. Knowledge stops being a museum piece — it's a verb.
+
+    Validates EAGERLY (raises ValueError with a player-readable reason), then returns a
+    generator speaking the /play stream contract: ('dice',…) ('beat',…) ('final',…)."""
+    llm = llm or get_llm()
+    state = {**default_state(), **(state or {})}
+    state["location_id"] = (current_location(content, state) or {}).get("id")
+    if (state.get("mode") or "character") == "god":
+        raise ValueError("旁观者不在故事里，无法与人对峙")
+    target = _char_by_id(content, char_id)
+    if not target:
+        raise ValueError("没有这个人")
+    if char_id in _dead_ids(state):
+        raise ValueError("TA已不在人世")
+    if char_id == state.get("player_character_id"):
+        raise ValueError("不能对峙你自己")
+    if not any(c.get("id") == char_id for c in scene_characters(content, state)):
+        raise ValueError("TA不在这里——先找到TA再当面对质")
+    secret = frag = None
+    for sec in content.get("secrets") or []:
+        for f in sec.get("fragments") or []:
+            if f.get("id") == fragment_id:
+                secret, frag = sec, f
+                break
+    if not frag:
+        raise ValueError("没有这条线索")
+    unlocked = set(state.get("unlocked_fragment_ids") or [])
+    if fragment_id not in unlocked:
+        raise ValueError("你还没真正掌握这条线索")
+    if secret.get("character_id") != char_id:
+        raise ValueError("这件事不在TA身上——证据要摆到当事人面前才有分量")
+    next_locked = next((f for f in secret.get("fragments") or []
+                        if f.get("id") not in unlocked), None)
+    if next_locked is None:
+        raise ValueError("关于这件事，TA已经没什么可瞒你的了")
+    return _confront_gen(content, state, persona, secret, frag, next_locked, target, llm, beat_log)
+
+
+def _confront_gen(content, state, persona, secret, frag, next_locked, target, llm, beat_log):
+    tun = tuning_for(content)
+    char_id = target.get("id")
+    tname = target.get("name") or "TA"
+    old_act = int(state.get("act", 1) or 1)
+    rel_all = state.setdefault("rel", {})
+    scores = rel_all.get(char_id) or relationships.new_scores()
+    closeness = int(scores.get("closeness", 0))
+    # the closer you are, the likelier they come clean when cornered
+    chance = max(25, min(90, tun["confront_base"] + closeness // 2))
+    dice = _roll_check(chance)
+    yield ("dice", dice)
+    success = dice["outcome"] in ("success", "crit_success")
+    forced_id = next_locked.get("id") if success else None
+    if forced_id:
+        state["unlocked_fragment_ids"] = sorted(set(state.get("unlocked_fragment_ids") or [])
+                                                | {forced_id})
+    # being cornered stings even when they yield; a 大成功 lands so true it costs nothing
+    cost = tun["confront_cost"]
+    dc = {"crit_success": 0, "success": -cost, "fail": -cost * 2, "crit_fail": -cost * 3}[dice["outcome"]]
+    rel_deltas: dict[str, dict[str, int]] = {}
+    if dc:
+        rel_all[char_id] = relationships.apply_deltas(scores, dc, 0, tun)
+        applied = int(rel_all[char_id].get("closeness", 0)) - closeness
+        if applied:
+            rel_deltas[char_id] = {"name": tname, "closeness": applied, "romance": 0}
+    moments: list[dict[str, Any]] = [{"kind": "confront", "name": tname,
+                                      "outcome": dice["outcome"]}]
+    pcfg = pressure_cfg(content)
+    if pcfg and dice["outcome"] == "crit_fail":
+        # a blown confrontation makes noise. Capped at 99: only a full turn can blow the lid
+        state["pressure"] = min(99, int(state.get("pressure", 0)) + 8)
+        moments.append({"kind": "pressure", "note": "这场对质闹出了动静。",
+                        "value": state["pressure"]})
+    title = (secret.get("title") or "").strip() or "那件事"
+    ev = (frag.get("content") or "").strip()
+    beats_out: list[dict[str, Any]] = []
+
+    def emit(b):
+        beats_out.append(b)
+        return ("beat", b)
+
+    yield emit({"type": "description", "speaker_name": None,
+                "text": f"（你直视着{tname}，把你已经知道的事一字一句摆到TA面前——{ev}）"})
+    if forced_id:
+        for t in _titles_for_fragments(content, [forced_id]):
+            moments.append({"kind": "unlock", "title": t})
+        rel_log(state, char_id, old_act, "confront",
+                f"你当面摆出证据，TA终于松口——「{title}」又揭开一层。")
+    else:
+        rel_log(state, char_id, old_act, "confront",
+                f"你拿「{title}」的证据当面对质，被TA挡了回来。")
+    # the model PERFORMS the aftermath with the character's full normal context; the forced
+    # fragment rides the standard new_reveal channel (【必须亲口说出来】 machinery)
+    frags = gating.iter_fragments(content)
+    ctx = gating.build_context(char_id, frags, state, newly_ids=[forced_id] if forced_id else [])
+    pcid = state.get("player_character_id")
+    player_char = _char_by_id(content, pcid) if pcid else None
+    persona_for_prompt = persona or {}
+    if player_char:
+        persona_for_prompt = {**persona_for_prompt, "name": player_char.get("name"),
+                              "background": player_char.get("background") or persona_for_prompt.get("background", "")}
+    pl_name = persona_for_prompt.get("name") or "对方"
+    sp_hist = history_for(beat_log, char_id) if beat_log is not None else []
+    directed = llm.generate({
+        "speaker_name": tname,
+        "speaker_persona": target.get("persona_text", ""),
+        "persona": persona_for_prompt,
+        "player_input": f"（{pl_name}把关于「{title}」的证据摆在你面前，要你说清楚。）",
+        "channel": "say",
+        "context": ctx,
+        "history": sp_hist,
+        "memory": (state.get("memory_by_char", {}) or {}).get(char_id) or state.get("memory", ""),
+        "world_facts": (content.get("story") or {}).get("world_facts") or "",
+        "roster": _physical_roster(content, state, persona),
+        "place": _physical_place(content, state),
+        "eq_style": target.get("eq_style", ""),
+        "agenda": target.get("agenda", ""),
+        "relationship_playbook": relationships.playbook_block(
+            relationships.derive_mode(target, rel_all.get(char_id) or scores, tun),
+            mature=bool(state.get("mature"))),
+        "knowledge": target.get("knowledge", ""),
+        "mature": bool(state.get("mature")),
+        "scene": current_act(content, old_act),
+        "clock": (clock_view(content, state) or {}).get("label", ""),
+        "confrontation": {"evidence": ev, "title": title, "outcome": dice["outcome"]},
+    })
+    for b in directed.get("beats", []):
+        yield emit(b)
+    # a successful confrontation may satisfy an act gate — let it open right here
+    new_act = old_act
+    max_act = _max_act_index(content)
+    if act_has_gate(content, old_act) and max_act and can_advance(content, state, old_act):
+        new_act = min(max_act, old_act + 1)
+        state["act"], state["turns_in_act"] = new_act, 0
+        nxt = current_act(content, new_act) or {}
+        moments.append({"kind": "act", "index": new_act, "title": nxt.get("title", "")})
+        yield emit({"type": "description", "speaker_name": None,
+                    "text": f"—— 第{new_act}幕 · {nxt.get('title', '')} ——"})
+        nc = choice_for_act(content, state, new_act)
+        if nc:
+            state["pending_choice"] = nc
+    state["goal"] = current_goal(content, new_act)
+    yield ("final", {
+        "state": state,
+        "newly_unlocked": [forced_id] if forced_id else [],
+        "moments": moments,
+        "rel_deltas": rel_deltas,
+        "dice": dice,
+        "goal": state["goal"],
+        "progress": act_progress(content, state, new_act),
+        "pending_choice": state.get("pending_choice"),
+        "pressure_view": ({"name": pcfg.get("name"), "value": int(state.get("pressure", 0))}
+                          if pcfg else None),
+        "relations": relations_summary(content, state),
+    })
 
 
 def run_turn(

@@ -408,3 +408,9 @@ class FollowIn(BaseModel):
 
 class ChooseIn(BaseModel):
     option_id: str  # the picked ChoiceOption.id of the run's pending choice
+
+
+class ConfrontIn(BaseModel):
+    # 🃏 证据对峙: present an UNLOCKED fragment to the character its secret belongs to
+    fragment_id: str
+    character_id: str

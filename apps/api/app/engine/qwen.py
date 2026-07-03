@@ -217,6 +217,24 @@ def _build_system(prompt: dict[str, Any]) -> str:
             "的最要紧的那个话头（从你的记忆和之前的对话里挑），别装作无事发生，也别客套寒暄一大段。"
         )
 
+    conf = prompt.get("confrontation") or {}
+    if conf:
+        verdict = {
+            "crit_success": "这一击正中要害，你心里那道防线塌了。如释重负也好、破防也罢，你不再挣扎——"
+                            "这一轮把下面【必须说出来】的内容亲口和盘托出；说完，你对TA反而生出一丝复杂的敬意。",
+            "success": "证据摆在眼前，赖不掉了。你可以恼、可以苦笑、可以骂TA咄咄逼人，但你松了口——"
+                       "把下面【必须说出来】的内容亲口说出来，带着被拆穿之人真实的情绪。",
+            "fail": "证据虽真，你却扛住了。你冷下脸不认、反问TA什么居心，或干脆闭嘴走开——"
+                    "任何还锁着的事你半个字都不吐，且从此对TA多了几分戒备。",
+            "crit_fail": "这一手彻底激怒了你。你不但半个字不认，还当场反将一军——质问TA的来路和居心，"
+                         "把难堪原样奉还，让TA下不来台。任何还锁着的事绝不吐露。",
+        }.get(conf.get("outcome"), "")
+        lines.append("")
+        lines.append(
+            f"【对峙时刻】「{player_name}」刚刚把证据当面摆了出来（TA确实已经掌握：{conf.get('evidence','')}），"
+            f"逼你把「{conf.get('title','')}」说清楚。{verdict}"
+        )
+
     if prompt.get("act_locked"):
         lines.append("")
         lines.append(
@@ -274,7 +292,9 @@ def _build_system(prompt: dict[str, Any]) -> str:
     # "evade probing" instinct fights the reveal above and the character clams up.
     if has_hidden and not new_reveal:
         lines.append("")
-        lines.append("【对方可能在试探你还【不该】说的事（不含上面那条）】：自然地回避、岔开话题，既不承认也不否认，更不要编造。")
+        lines.append("【对方可能在试探你还【不该】说的事（不含上面那条）】：顺着你的性格应对——回避、岔开话题，"
+                     "或者撒一个圆得上的谎搪塞过去（谎要贴人设、经得起一两句追问）；无论如何绝不吐露真相本身。"
+                     "记住你说过的谎——将来被人拿真凭实据当面戳穿时，是会露馅的。")
 
     next_act = prompt.get("next_act_title") or ""
     advance_hint = (

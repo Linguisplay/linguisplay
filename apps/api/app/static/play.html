@@ -73,6 +73,8 @@
   #placebar .exit:hover { color: #bdf0c9; }
   #placebar .clock { color: #e6d9a8; margin-right: 10px; white-space: nowrap; }
   #placebar .clock.ddl { color: #ffb27a; }
+  .jconfront { color: #d9a8e6; cursor: pointer; font-size: 12px; white-space: nowrap; text-decoration: underline dotted; margin-left: 4px; }
+  .jconfront:hover { color: #f0c9ff; }
   /* relationship tag + follow control under each in-scene character */
   .castitem .rel { font-size: 10px; padding: 0 4px; border-radius: 6px; line-height: 1.5; white-space: nowrap; }
   .rel-stranger { color:#9aa0ad; background:#2a2d36; } .rel-peer { color:#cfd6e6; background:#2b3142; }
@@ -641,8 +643,13 @@ async function openJournal() {
     document.body.appendChild(ov);
   }
   const secs = (jd.secrets || []).map(sec => {
-    const layers = sec.unlocked.map(u => `<div class="jfrag">${escapeHtml(u)}</div>`).join("");
-    const left = sec.locked_count > 0 ? `<div class="jlocked">…还有 ${sec.locked_count} 层没有揭开</div>` : "";
+    const frags = sec.frags && sec.frags.length ? sec.frags : (sec.unlocked || []).map(u => ({ id: null, text: u }));
+    const layers = frags.map(f => `<div class="jfrag">${escapeHtml(f.text)}${
+      (sec.confrontable && f.id)
+        ? ` <a class="jconfront" data-frag="${escapeHtml(f.id)}" data-char="${escapeHtml(sec.character_id || "")}">🃏 当面对质</a>` : ""
+    }</div>`).join("");
+    const left = sec.locked_count > 0
+      ? `<div class="jlocked">…还有 ${sec.locked_count} 层没有揭开${sec.confrontable ? `<span class="jwho">（${escapeHtml(sec.character)}就在眼前——可拿已知的证据当面对质）</span>` : ""}</div>` : "";
     const who = sec.character ? `<span class="jwho">（${escapeHtml(sec.character)}）</span>` : "";
     return `<div class="jsec"><div class="jtitle">🔓 ${escapeHtml(sec.title)}${who}</div>${layers}${left}</div>`;
   }).join("") || `<div class="jempty">还没有揭开任何真相。</div>`;
@@ -661,6 +668,9 @@ async function openJournal() {
     <div class="jh">已揭开的真相</div>${secs}${more}
     <div class="jh">结局图鉴</div><div class="jends">${ends}</div>
   </div>`;
+  ov.querySelectorAll(".jconfront").forEach(el => {
+    el.onclick = () => confrontClue(el.dataset.frag, el.dataset.char);
+  });
 }
 // 到达即发现: physical truths that unlocked the moment we arrived
 function renderDiscoveries(list) {
@@ -1068,15 +1078,20 @@ async function send() {
     else renderBeat({ author:"player", type: channel.value==="think"?"think":"dialogue", text });
   }
   showTyping("");
-  // beats stream in AS the server computes each responder → play them one-by-one (typed)
-  // the moment they arrive, so the first character appears in ~2-3s, the rest follow.
+  await streamTurn(`${API}/runs/${runId}/play`,
+                   { input: text, channel: channel.value, target_character_id: target });
+}
+// shared SSE turn pipeline: beats stream in AS the server computes each responder → play
+// them one-by-one (typed) the moment they arrive. Used by normal turns AND confrontations.
+async function streamTurn(url, bodyObj) {
   playQ = []; playing = false; streamDone = false; firstBeat = true;
   afterPlay = { suggest: null, ending: undefined, moveReq: null, moments: null, relDeltas: null, choice: null };
   renderMoveAsk(null);  // clear any prior pending move prompt
   try {
-    const r = await fetch(`${API}/runs/${runId}/play`, {
+    const r = await fetch(url, {
       method:"POST", credentials:"include", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ input: text, channel: channel.value, target_character_id: target }) });
+      body: JSON.stringify(bodyObj) });
+    if (!r.ok) { let d = ""; try { d = (await r.json()).detail || ""; } catch(e){} throw new Error(d || ("HTTP " + r.status)); }
     const reader = r.body.getReader(); const dec = new TextDecoder();
     let buf = "";
     while (true) {
@@ -1106,10 +1121,23 @@ async function send() {
         else if (ev.event === "ending") { afterPlay.ending = ev.ending; }
       }
     }
-  } catch(e){ playQ.push({author:"engine",type:"description",text:"[出错] "+e.message}); pump(); }
+  } catch(e){
+    // nothing streamed yet (e.g. a 400 validation reason) → a toast reads better than a beat
+    if (firstBeat) pushToast("⚠️ " + escapeHtml(e.message), "", 3200);
+    else { playQ.push({author:"engine",type:"description",text:"[出错] "+e.message}); pump(); }
+  }
   hideTyping();
   streamDone = true;
   if (!playing) finishTurn();   // queue already drained (or nothing arrived)
+}
+// 🃏 证据对峙: present an unlocked clue to its owner, face to face — a visible opposed
+// roll, then the scene. The server's opening beat narrates the slam; no local echo needed.
+async function confrontClue(fragId, charId) {
+  const ov = document.getElementById("journal"); if (ov) ov.remove();
+  if (!runId || ended) return;
+  sendBtn.disabled = true; suggest.innerHTML = "";
+  showTyping("");
+  await streamTurn(`${API}/runs/${runId}/confront`, { fragment_id: fragId, character_id: charId });
 }
 // ── streaming beat queue: play arrivals one-by-one while more stream in ──
 let playQ = [], playing = false, streamDone = false, firstBeat = true, afterPlay = null;
@@ -1151,6 +1179,10 @@ function showMoments(moments, relDeltas) {
     else if (m.kind === "identity") pushToast(`🎖 你的身份变了：${m.text || ""}`, "t-end", i++ * 650);
     else if (m.kind === "item") pushToast(m.verb === "gained" ? `🎒 获得：${m.name}` : m.verb === "stashed" ? `📦 已存放：${m.name}` : `🎒 失去：${m.name}`, "t-unlock", i++ * 650);
     else if (m.kind === "event") pushToast(`🌊 ${m.label || "起变故了"}`, "t-act", i++ * 650);
+    else if (m.kind === "confront") pushToast({ crit_success: `🃏 一击即中——${m.name}彻底松口了`,
+      success: `🃏 对质奏效——${m.name}松了口`, fail: `🃏 ${m.name}扛住了你的对质`,
+      crit_fail: `🃏 弄巧成拙——${m.name}反将你一军` }[m.outcome] || "🃏 对质", m.outcome === "fail" || m.outcome === "crit_fail" ? "t-press" : "t-unlock", i++ * 650);
+    else if (m.kind === "deadline") pushToast(`⏳ ${m.text || "大限"}——就在今天`, "t-press", i++ * 650);
   }
   const bits = [];
   for (const cid in relDeltas) {

@@ -33,8 +33,12 @@ def test_journal_shape_and_no_leaks():
     jd = runtime.journal(STORY, st)
     blob = str(jd)
     # unlocked truth readable in full; locked layer only as a count; untouched secret invisible
-    assert jd["secrets"] == [{"title": "安全门的反常", "character": "老周",
-                              "unlocked": ["BODY_OPEN"], "locked_count": 1}]
+    sec = jd["secrets"][0]
+    assert len(jd["secrets"]) == 1
+    assert (sec["title"], sec["character"], sec["unlocked"], sec["locked_count"]) == \
+        ("安全门的反常", "老周", ["BODY_OPEN"], 1)
+    # 🃏 confrontation affordances ride along: fragment ids of KNOWN text only + owner
+    assert sec["frags"] == [{"id": "f1", "text": "BODY_OPEN"}] and sec["character_id"] == "c1"
     assert "BODY_SHUT" not in blob and "BODY_VIRGIN" not in blob
     assert "第六个人" not in blob                 # untouched secret's TITLE hidden too
     assert jd["secrets_untouched"] == 1
