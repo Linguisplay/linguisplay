@@ -451,8 +451,14 @@ def move(run_id: str, body: MoveIn, user: User = Depends(current_user), db: Sess
         if body.with_character_id not in foll:
             foll.append(body.with_character_id)
         st["following"] = foll
+    # 到达旁白: a vivid pan of the place just entered — the space, what each person here
+    # is doing right now, who notices first. Rides ahead of the arrival discoveries.
+    persona = db.get(PersonaModel, r.persona_id)
+    arrival = runtime.arrival_narration(content, st, _persona_dict(persona) if persona else {})
     # 到达即发现: truths gated on BEING here reveal the moment the player arrives
     discoveries = runtime.discover_on_arrival(content, st)
+    if arrival:
+        discoveries = [{"text": arrival}] + discoveries
     if discoveries:
         seq = (r.beats[-1].seq + 1) if r.beats else 0
         present_ids = [c.get("id") for c in runtime.scene_characters(content, st) if c.get("id")]

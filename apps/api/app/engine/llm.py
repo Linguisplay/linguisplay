@@ -72,6 +72,10 @@ class MockLLM:
         if prompt.get("risk_judge"):
             return {"risk": 100}
 
+        # 到达旁白: mock returns nothing → runtime assembles its deterministic pan.
+        if prompt.get("arrive"):
+            return {}
+
         # parting cliffhanger (悬念离场): narration only, deterministic.
         if prompt.get("parting"):
             topics = prompt.get("topics") or []

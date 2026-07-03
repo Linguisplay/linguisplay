@@ -1093,6 +1093,81 @@ def build_suggestions(context: dict[str, Any]) -> list[str]:
     return out[:3]
 
 
+# ── entrances & exits: people never just pop in/out of the cast bar ─────────────
+# Slot flavor prefixes for deterministic entrance lines (keyed by SLOTS names).
+_SLOT_FLAVOR = {"晨": "晨光里", "午": "日头底下", "夜": "夜色里"}
+
+
+def _first_sentence(s: str, cap: int = 48) -> str:
+    return (s or "").strip().replace("\n", " ").split("。")[0][:cap]
+
+
+def entrance_beat(content: dict[str, Any], state: dict[str, Any], c: dict[str, Any]) -> dict[str, Any]:
+    """A CONCRETE arrival line for a character who just walked into the scene (the hour
+    rolled / a new act brought them on): looks + role, not a bare name in the cast bar."""
+    slot = active_slot(content, state)
+    flavor = _SLOT_FLAVOR.get(slot or "", "")
+    look = _first_sentence(c.get("persona_text") or "")
+    role = (c.get("role") or "").strip()
+    bits = "，".join(b for b in (role, look) if b)
+    lead = f"{flavor}，" if flavor else ""
+    return {"type": "description", "speaker_name": None,
+            "text": f"（{lead}{c.get('name')}来了{('——' + bits) if bits else ''}。）"}
+
+
+def exit_beat(content: dict[str, Any], state: dict[str, Any], c: dict[str, Any]) -> dict[str, Any]:
+    """A departure line that says WHERE they went when the schedule knows (探索钩子)."""
+    home = char_home(c, int(state.get("act", 1) or 1), active_slot(content, state))
+    loc = _location_by_id(content, home) if (home and home != AWAY) else None
+    dest = (loc or {}).get("name")
+    if dest and location_available(content, state, loc):
+        tail = f"——这个时辰，TA惯常在{dest}那边"
+    elif home == AWAY:
+        tail = "——没人知道TA这个时辰去了哪"
+    else:
+        tail = ""
+    return {"type": "description", "speaker_name": None,
+            "text": f"（不知什么时候，{c.get('name')}已经离开了{tail}。）"}
+
+
+def arrival_narration(content: dict[str, Any], state: dict[str, Any], persona: dict[str, Any],
+                      llm: LLM | None = None) -> str:
+    """The moment the player WALKS INTO a place: a vivid 2~4 sentence pan — the space
+    itself, then what each person present is DOING right now (posture/activity/attention,
+    true to who they are), and who notices the player first. LLM-written; degrades to a
+    deterministic per-person assembly so the scene is never a bare name list."""
+    llm = llm or get_llm()
+    loc = current_location(content, state) or {}
+    pcid = state.get("player_character_id")
+    tun = tuning_for(content)
+    rels = state.get("rel") or {}
+    people = []
+    for c in scene_characters(content, state):
+        if c.get("id") == pcid or not c.get("name"):
+            continue
+        mode = relationships.derive_mode(c, rels.get(c.get("id")) or relationships.new_scores(), tun)
+        people.append({"name": c["name"], "role": (c.get("role") or "").strip(),
+                       "look": _first_sentence(c.get("persona_text") or "", 60),
+                       "relation": relationships.name_of(mode)})
+    try:
+        out = llm.generate({"arrive": True,
+                            "place": loc.get("name") or "", "detail": (loc.get("detail") or "")[:160],
+                            "slot": (clock_view(content, state) or {}).get("label", ""),
+                            "people": people,
+                            "player_name": (persona or {}).get("name") or ""}) or {}
+        txt = next((b.get("text", "") for b in out.get("beats") or []
+                    if b.get("type") == "description" and (b.get("text") or "").strip()), "")
+    except Exception:
+        txt = ""
+    if txt:
+        return txt
+    bits = [_first_sentence(loc.get("detail") or "", 60)]
+    for p in people:
+        who = "，".join(b for b in (p["role"], p["look"]) if b)
+        bits.append(f"{p['name']}正在这里{('——' + who) if who else ''}")
+    return "（" + "。".join(b for b in bits if b) + "。）" if any(bits) else ""
+
+
 def arrival_suggestions(content: dict[str, Any], state: dict[str, Any],
                         llm: LLM | None = None) -> list[str]:
     """Fresh next-step chips for a scene the player JUST WALKED INTO — the previous
@@ -2045,6 +2120,9 @@ def run_turn_stream(
     state["location_id"] = (current_location(content, state) or {}).get("id")
     tun = tuning_for(content)
     _ensure_npc_rel(content, state)  # 🕸 authored ties come alive on first touch
+    # who stands in the scene as the turn OPENS — the closing diff narrates arrivals/exits
+    here_before = {c.get("id") for c in scene_characters(content, state) if c.get("id")}
+    emergent_ids: set = set()  # characters born THIS turn (their entrance is already scripted)
     all_beats: list[dict[str, Any]] = []  # accumulated for scene classification
     # snapshot which places are reachable BEFORE this turn, so we can announce any that
     # newly open up (so a new exit never just silently appears — "莫名其妙解锁" fix)
@@ -2525,8 +2603,10 @@ def run_turn_stream(
                 nc_desc = (parts[1].strip() if len(parts) > 1 else "")[:120]
                 exists = any((c.get("name") or "") == nc_name for c in _characters(content))
                 if nc_name and not exists:
+                    nc_id = f"gen_{_uuid.uuid4().hex[:8]}"
+                    emergent_ids.add(nc_id)
                     (content.get("story") or {}).setdefault("characters", []).append({
-                        "id": f"gen_{_uuid.uuid4().hex[:8]}",
+                        "id": nc_id,
                         "name": nc_name,
                         "role": nc_desc[:24] or "新登场的人物",
                         "persona_text": nc_desc,
@@ -2785,6 +2865,22 @@ def run_turn_stream(
                 yield emit({"type": "description", "speaker_name": None,
                             "text": f"（你猛然想起——和{pr.get('char_name','')}约好的"
                                     f"（{pr.get('what','')}），已经过了时辰。）"})
+
+    # 5d. people come and go with the hour and the act — never silently. Anyone the
+    #     roster diff shows arriving gets a concrete line (looks + role); anyone leaving
+    #     gets a farewell that says where they've gone when the作息 knows. The cast bar
+    #     never just mutates behind the player's back.
+    here_now = scene_characters(content, state)
+    here_after = {c.get("id") for c in here_now if c.get("id")}
+    dead_now = _dead_ids(state)
+    for c in here_now:
+        if c.get("id") in (here_after - here_before) and c.get("id") != pcid \
+                and c.get("id") not in emergent_ids:
+            yield emit(entrance_beat(content, state, c))
+    for cg in _characters(content):
+        if cg.get("id") in (here_before - here_after) and cg.get("id") != pcid \
+                and cg.get("id") not in dead_now:
+            yield emit(exit_beat(content, state, cg))
 
     # 6. ending check. Authored endings are MILESTONES (true/normal/bad) — reaching one
     #    shows its narration but the open world keeps going, so the player can explore on

@@ -455,7 +455,9 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
         if prompt.get("can_new_char"):
             props["new_character"] = {"type": "string", "description":
                                       "若剧情此刻确实需要一个此前不存在的新人物登场（推门进来/被引见/"
-                                      "下属报到/线人现身），填「名字｜身份与外貌各一句话」；不需要则空字符串"}
+                                      "下属报到/线人现身），填「名字｜身份与外貌各一句话」，并且 narration "
+                                      "里必须把TA的登场写实：进场的动作、外貌神态、第一眼给人的感觉；"
+                                      "不需要则空字符串"}
     if not observer and not is_member and not is_think:
         props["identity_change"] = {"type": "string", "description":
                                     "若这一轮玩家的身份/职务发生了实质改变（升职、任命、被揭穿、获得头衔），"
@@ -1395,6 +1397,41 @@ class QwenLLM:
         except Exception:
             return {"risk": 100}
 
+    def _arrive(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """到达旁白: the player just walked into a place. One vivid pan (2~4 sentences):
+        the space itself first, then what each person present is DOING right now, and who
+        notices the player first. Degrades to {} so runtime assembles a deterministic one."""
+        people = prompt.get("people") or []
+        plist = "\n".join(
+            f"- {p.get('name','')}（{p.get('role','')}；与玩家的关系：{p.get('relation','')}）：{p.get('look','')}"
+            for p in people) or "（这里此刻没有别人）"
+        sys = ("你在为互动剧情游戏写【玩家刚走进一个地方】的到达旁白。写2~4句，第三人称：\n"
+               "① 先写一眼看到的空间——光线、声响、气味，必须扣住给出的地点细节，不要泛泛；\n"
+               "② 再写此刻在场的每个人【正在做什么】——具体的动作、姿态、注意力所在，贴合各自的身份和长相，"
+               "一人一笔，谁都不能只是'站在那里'；\n"
+               "③ 最后写谁最先注意到玩家进来、那一瞬的反应（一个眼神/动作即可，不写对话）。\n"
+               "不要替玩家做动作或说话，不要剧透，不要总结抒情。只输出旁白本身。")
+        u = (f"地点：{prompt.get('place','')}（{prompt.get('detail','')}）\n"
+             f"时间：{prompt.get('slot','') or '不明'}\n"
+             f"走进来的人：{prompt.get('player_name') or '玩家'}\n"
+             f"此刻在场：\n{plist}")
+        try:
+            resp = httpx.post(
+                self._url,
+                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
+                json={"model": self._model, "messages": [{"role": "system", "content": sys},
+                      {"role": "user", "content": u}], "max_tokens": 260, "temperature": 0.9},
+                timeout=25,
+            )
+            resp.raise_for_status()
+            txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+        except Exception:
+            txt = ""
+        if not txt:
+            return {}
+        return {"beats": [{"type": "description", "speaker_name": None, "text": txt}],
+                "affinity_delta": 0, "advance_act": False, "ending": None}
+
     def _parting(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """悬念离场: ONE cliffhanger narration when the player leaves mid-run — an unfinished
         beat that pulls them back. Spoiler-safe: may point at a topic LABEL, never content."""
@@ -1465,6 +1502,8 @@ class QwenLLM:
             return self._start_place(prompt)
         if prompt.get("parting"):
             return self._parting(prompt)
+        if prompt.get("arrive"):
+            return self._arrive(prompt)
         if prompt.get("risk_judge"):
             return self._risk(prompt)
         speaker = prompt.get("speaker_name") or "角色"
