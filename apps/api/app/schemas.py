@@ -81,6 +81,9 @@ class Character(BaseModel):
     # this character's OWN goal/agenda/stance in the story — what THEY are after,
     # independent of the player. Drives autonomous, self-interested behavior. Optional.
     agenda: Optional[str] = None
+    # 分层小传: [{closeness_min, text}] — closeness unlocks the character's backstory
+    # layer by layer (getting to KNOW someone is itself the collection loop)
+    bio_layers: list[dict[str, Any]] = []
     # 🎒 starting pocket items when the player EMBODIES this character: [{name, detail}]
     items: list[dict[str, Any]] = []
     # 作息表: where this character is per act — [{from_act, location_id}], last entry with

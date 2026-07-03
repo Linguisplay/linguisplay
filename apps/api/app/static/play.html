@@ -175,6 +175,27 @@
   .collapsible.open { white-space: normal; overflow: visible; }
   #pressurebar.collapsible { display: flex; }  /* the meter keeps its flex layout */
 }
+.av img { width:100%; height:100%; object-fit:cover; border-radius:50%; }
+.castitem .cinfo { color:#8a93a8; margin-left:3px; cursor:pointer; font-style:normal; }
+.castitem .cinfo:hover { color:#cfd6e6; }
+#charcard { position:fixed; inset:0; z-index:70; background:rgba(0,0,0,.55); display:grid; place-items:center; }
+#charcard .jcard { width:min(520px, 94vw); max-height:84vh; overflow-y:auto; background:#14141c; border:1px solid #34344a; border-radius:14px; padding:16px 18px; box-shadow:0 12px 48px rgba(0,0,0,.6); }
+#charcard .jbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+#charcard .jh { color:#8ea2ff; font-weight:700; font-size:13px; margin:13px 0 6px; border-bottom:1px dashed #2a3350; padding-bottom:4px; }
+#charcard .chead { display:flex; gap:14px; align-items:flex-start; }
+#charcard .cportrait { width:86px; height:86px; border-radius:12px; object-fit:cover; flex:0 0 86px; box-shadow:0 2px 10px #0008; }
+#charcard .cletter { display:grid; place-items:center; font-size:34px; font-weight:700; color:#fff; }
+#charcard .cmeta { display:flex; flex-direction:column; gap:5px; min-width:0; }
+#charcard .cdesc { color:#c9cfdd; font-size:12.5px; line-height:1.6; }
+#charcard .cbar { display:flex; align-items:center; gap:8px; font-size:12px; color:#aab2c4; margin:5px 0; }
+#charcard .cbar b { min-width:2.5ch; text-align:right; color:#dfe4f0; }
+#charcard .ctrack { flex:1; height:7px; border-radius:5px; background:#00000055; overflow:hidden; }
+#charcard .cfill { display:block; height:100%; border-radius:5px; transition:width .5s ease; }
+#charcard .clog { font-size:12.5px; color:#c9c9d4; line-height:1.7; }
+.av.pulse-up { animation:pulseg 1.5s ease; } .av.pulse-rom { animation:pulser 1.5s ease; } .av.pulse-down { animation:pulsed 1.5s ease; }
+@keyframes pulseg { 0%{box-shadow:0 0 0 0 #8fe0a6cc} 60%{box-shadow:0 0 0 9px #8fe0a600} 100%{box-shadow:0 0 0 0 #8fe0a600} }
+@keyframes pulser { 0%{box-shadow:0 0 0 0 #ff8fb3cc} 60%{box-shadow:0 0 0 9px #ff8fb300} 100%{box-shadow:0 0 0 0 #ff8fb300} }
+@keyframes pulsed { 0%{box-shadow:0 0 0 0 #e0574fcc} 60%{box-shadow:0 0 0 9px #e0574f00} 100%{box-shadow:0 0 0 0 #e0574f00} }
 </style>
 </head>
 <body>
@@ -421,7 +442,16 @@ async function doLogout() {
 
 // ── rendering ─────────────────────────────────────────
 function avatarColor(name){ let h=0; for(const c of (name||"?")) h=(h*31+c.charCodeAt(0))%360; return `hsl(${h},45%,42%)`; }
-function avatarEl(name){ const a=document.createElement("div"); a.className="av"; a.style.background=avatarColor(name); a.textContent=(name||"?").slice(0,1); return a; }
+function avatarEl(name, url){
+  const a = document.createElement("div"); a.className = "av";
+  a.style.background = avatarColor(name); a.textContent = (name||"?").slice(0,1);
+  if (url) {
+    const img = document.createElement("img");
+    img.src = url; img.alt = name || "";
+    img.onload = () => { a.textContent = ""; a.appendChild(img); };
+  }
+  return a;
+}
 
 function renderBeat(b) {
   let node;
@@ -463,8 +493,13 @@ function renderCast() {
   cast.forEach(c => {
     const d = document.createElement("div");
     d.className = "castitem" + (target === c.id ? " sel" : "");
-    d.appendChild(avatarEl(c.name));
-    const s = document.createElement("small"); s.textContent = c.name; d.appendChild(s);
+    d.dataset.cid = c.id;
+    d.appendChild(avatarEl(c.name, c.avatar_url));
+    const nm = document.createElement("small"); nm.textContent = c.name;
+    const info = document.createElement("a"); info.className = "cinfo"; info.textContent = "ⓘ";
+    info.onclick = (e) => { e.stopPropagation(); openCharCard(c.id); };
+    nm.appendChild(info);
+    d.appendChild(nm);
     // relationship tag (skip the lead — the spine character has no flowing mode)
     const rel = relations[c.id];
     if (rel && rel.mode_name && !c.is_lead) {
@@ -693,6 +728,67 @@ for (const id of ["placebar", "goalbar", "hintbar", "clues"]) {
     if (e.target.classList && e.target.classList.contains("exit")) return; // keep exits tappable
     el.classList.toggle("open");
   });
+}
+
+// ── 角色档案卡: one place where a PERSON comes together ──────────────────────
+function barHtml(label, val, min, max, color) {
+  const pct = Math.max(0, Math.min(100, ((val - min) / (max - min)) * 100));
+  return `<div class="cbar"><span>${label}</span><span class="ctrack"><span class="cfill" style="width:${pct}%;background:${color}"></span></span><b>${val}</b></div>`;
+}
+async function openCharCard(cid) {
+  if (!runId) return;
+  let p;
+  try { p = await j(`/runs/${runId}/character/${cid}`); } catch (e) { return; }
+  let ov = document.getElementById("charcard");
+  if (!ov) {
+    ov = document.createElement("div"); ov.id = "charcard";
+    ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+    document.body.appendChild(ov);
+  }
+  const rel = p.relation || {};
+  const KIND_ICON = { meet: "🤝", rel_up: "💗", reveal: "🔓", death: "🕯", follow: "🚶" };
+  const logs = (p.log || []).slice(-12).reverse().map(e =>
+    `<div class="clog">${KIND_ICON[e.kind] || "·"} <span class="jwho">第${e.act}幕</span> ${escapeHtml(e.text)}</div>`).join("")
+    || `<div class="jempty">你们的故事才刚开始。</div>`;
+  const secrets = (p.secrets || []).map(sec =>
+    `<div class="clog">🔓 ${escapeHtml(sec.title)} <span class="jwho">${sec.unlocked}/${sec.total} 层</span></div>`).join("")
+    + (p.secrets_hidden ? `<div class="jlocked">TA身上似乎还藏着 ${p.secrets_hidden} 个你未触及的秘密…</div>` : "");
+  const bio = (p.bio || []).map(b => `<div class="jfrag">${escapeHtml(b)}</div>`).join("")
+    + (p.bio_next_at != null ? `<div class="jlocked">🔒 关系再近一点（亲近≥${p.bio_next_at}），你会更了解TA…</div>` : "");
+  const nextTxt = rel.next && rel.next.name ? `<span class="jwho">（差${rel.next.to_next}到「${rel.next.name}」）</span>` : "";
+  const av = p.avatar_url ? `<img class="cportrait" src="${p.avatar_url}" alt="">`
+                          : `<div class="cportrait cletter" style="background:${avatarColor(p.name)}">${escapeHtml((p.name||"?").slice(0,1))}</div>`;
+  const followBtn = (!p.dead && playMode !== "god" && !p.is_lead)
+    ? `<button class="ghost" style="font-size:12px;padding:5px 10px" onclick="toggleFollow('${p.id}', ${!p.following}); document.getElementById('charcard').remove()">${p.following ? "🚶同行中 · 分开走" : (p.can_follow ? "邀TA同行" : "🔒关系不够")}</button>` : "";
+  ov.innerHTML = `<div class="jcard" onclick="event.stopPropagation()">
+    <div class="jbar"><b>${p.dead ? "🕯 " : ""}${escapeHtml(p.name)}${p.is_lead ? " · 核心" : ""}</b>
+      <button class="ghost" onclick="document.getElementById('charcard').remove()">关闭</button></div>
+    <div class="chead">${av}<div class="cmeta">
+      ${p.role ? `<div class="jwho">${escapeHtml(p.role)}</div>` : ""}
+      <div class="cdesc">${escapeHtml((p.persona_text || "").slice(0, 90))}${(p.persona_text||"").length>90?"…":""}</div>
+      ${p.where ? `<div class="jwho">📍 ${escapeHtml(p.where)}</div>` : ""}
+      ${followBtn}
+    </div></div>
+    ${p.dead ? `<div class="jlocked">TA 已不在人世。</div>` : `
+    <div class="jh">你们的关系 · ${escapeHtml(rel.mode_name || "")} ${nextTxt}</div>
+    ${barHtml("亲近", p.closeness, -40, 100, "#8fe0a6")}
+    ${barHtml("心动", p.romance, 0, 100, "#ff8fb3")}`}
+    ${bio ? `<div class="jh">你所了解的TA</div>${bio}` : ""}
+    <div class="jh">TA的秘密</div>${secrets || '<div class="jempty">还一无所知。</div>'}
+    <div class="jh">你们的故事</div>${logs}
+  </div>`;
+}
+
+// ♥ movement pulses the avatar in the cast bar
+function pulseCast(relDeltas) {
+  for (const cid in (relDeltas || {})) {
+    const d = relDeltas[cid];
+    const item = document.querySelector(`.castitem[data-cid="${cid}"] .av`);
+    if (!item) continue;
+    const cls = (d.closeness || 0) < 0 ? "pulse-down" : ((d.romance || 0) > 0 ? "pulse-rom" : "pulse-up");
+    item.classList.add(cls);
+    setTimeout(() => item.classList.remove(cls), 1600);
+  }
 }
 
 function updatePlaceholder() {
@@ -1042,6 +1138,7 @@ function finishTurn() {
   if (afterPlay) {
     if ((afterPlay.moments && afterPlay.moments.length) || (afterPlay.relDeltas && Object.keys(afterPlay.relDeltas).length))
       showMoments(afterPlay.moments || [], afterPlay.relDeltas || {});
+    if (afterPlay.relDeltas) pulseCast(afterPlay.relDeltas);
     if (afterPlay.choice && !ended) renderChoiceAsk(afterPlay.choice);
     if (afterPlay.suggest && !ended) renderSuggest(afterPlay.suggest);
     if (afterPlay.moveReq && !ended) renderMoveAsk(afterPlay.moveReq);

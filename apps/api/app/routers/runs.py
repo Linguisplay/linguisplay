@@ -428,6 +428,18 @@ def get_map(run_id: str, user: User = Depends(current_user), db: Session = Depen
     return runtime.map_view(r.pinned_content or {}, r.state or {})
 
 
+@router.get("/{run_id}/character/{char_id}")
+def get_character(run_id: str, char_id: str,
+                  user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """The 档案卡 for one character: what the player knows, how the relationship stands,
+    the shared timeline. 404 for unknown ids; locked content stays server-side."""
+    r = _own_run(run_id, user, db)
+    prof = runtime.character_profile(r.pinned_content or {}, r.state or {}, char_id)
+    if not prof:
+        raise HTTPException(404, "没有这个人")
+    return prof
+
+
 @router.get("/{run_id}/journal")
 def get_journal(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     """The run's dossier: unlocked truths (full text), layers still locked (counts only),

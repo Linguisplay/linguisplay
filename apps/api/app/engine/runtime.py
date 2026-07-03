@@ -59,6 +59,8 @@ def default_state() -> dict[str, Any]:
         "identity_log": [],             # [{act, text}] — how the identity evolved
         "inventory": [],                # 🎒 pocket: [{name, detail?}] carried items
         "stashes": {},                  # {location_id: [{name,...}]} items left somewhere
+        "met_ids": [],                  # characters the player has already met (首次见面 log)
+        "rel_log": {},                  # 关系大事记: {char_id: [{act, kind, text}]}
         "pending_choice": None,         # an authored decision awaiting the player's pick
         "unlocked_fragment_ids": [],
         "asks": {},
@@ -528,6 +530,8 @@ def set_follow(content: dict[str, Any], state: dict[str, Any],
                       else f"你和{name}还没熟到那份上——先多聊聊、把关系处近点，TA 才愿意跟你走。")
             return {"ok": False, "following": following, "name": name, "reason": reason}
         following.append(char_id)
+        rel_log(state, char_id, int(state.get("act", 1) or 1), "follow",
+                f"{name} 答应与你同行。")
     state["following"] = following
     return {"ok": True, "following": following, "name": name, "reason": ""}
 
@@ -1284,6 +1288,17 @@ def _ending_by_id(content: dict[str, Any], eid: str | None) -> dict[str, Any] | 
     return None
 
 
+def rel_log(state: dict[str, Any], char_id: str | None, act: int, kind: str, text: str) -> None:
+    """Append a moment to this character's 关系大事记 (capped)."""
+    if not char_id or not (text or "").strip():
+        return
+    log = dict(state.get("rel_log") or {})
+    entries = list(log.get(char_id) or [])
+    entries.append({"act": int(act), "kind": kind, "text": text.strip()})
+    log[char_id] = entries[-30:]
+    state["rel_log"] = log
+
+
 def _inv_find(items: list, name: str) -> int:
     """Index of an item matching `name` leniently, else -1."""
     n = (name or "").strip()
@@ -1338,6 +1353,63 @@ def retrieve_stash(content: dict[str, Any], state: dict[str, Any],
             stashes.pop(lid, None)
         state["stashes"] = stashes
     return got
+
+
+def character_profile(content: dict[str, Any], state: dict[str, Any],
+                      char_id: str) -> dict[str, Any] | None:
+    """Everything the player may KNOW about one character, gathered for the 档案卡:
+    public profile, relationship axes + next tier, their secrets' progress (titles only,
+    and only once ≥1 layer is open), where they are, the shared 大事记 timeline, and the
+    bio layers closeness has unlocked. Locked content never leaves the server."""
+    c = _char_by_id(content, char_id)
+    if not c:
+        return None
+    act = int(state.get("act", 1) or 1)
+    tun = tuning_for(content)
+    scores = (state.get("rel") or {}).get(char_id) or relationships.new_scores()
+    rel = relationships.state_for(c, scores, tun)
+    dead = char_id in _dead_ids(state)
+    # their secrets: titles appear only after the first layer opened (journal's rule)
+    unlocked = set(state.get("unlocked_fragment_ids") or [])
+    secrets, hidden = [], 0
+    for sec in content.get("secrets", []) or []:
+        if sec.get("character_id") != char_id:
+            continue
+        frags = sec.get("fragments", []) or []
+        got = sum(1 for f in frags if f.get("id") in unlocked)
+        if got:
+            secrets.append({"title": (sec.get("title") or "").strip(),
+                            "unlocked": got, "total": len(frags)})
+        else:
+            hidden += 1
+    # where they are right now (only if the place is discovered)
+    home = char_home(c, act)
+    loc = _location_by_id(content, home) if home else None
+    where = (loc.get("name") if (loc and location_available(content, state, loc)) else None)
+    if char_id in set(state.get("following") or []):
+        where = "与你同行"
+    # 分层小传: closeness unlocks authored layers; the next locked bar is shown as a tease
+    closeness = int(scores.get("closeness", 0))
+    bio_open, bio_next = [], None
+    for layer in sorted(c.get("bio_layers") or [], key=lambda x: int(x.get("closeness_min", 0))):
+        need = int(layer.get("closeness_min", 0))
+        if closeness >= need:
+            bio_open.append(layer.get("text") or "")
+        elif bio_next is None:
+            bio_next = need
+    return {
+        "id": char_id, "name": c.get("name") or "", "role": c.get("role") or "",
+        "persona_text": c.get("persona_text") or "", "avatar_url": c.get("avatar_url"),
+        "is_lead": bool(c.get("is_lead")), "generated": bool(c.get("generated")),
+        "dead": dead, "relation": rel,
+        "following": char_id in set(state.get("following") or []),
+        "can_follow": (not dead) and relationships.can_follow(c, scores, tun),
+        "secrets": secrets, "secrets_hidden": hidden,
+        "where": where,
+        "log": list((state.get("rel_log") or {}).get(char_id) or []),
+        "bio": [b for b in bio_open if b], "bio_next_at": bio_next,
+        "closeness": closeness, "romance": int(scores.get("romance", 0)),
+    }
 
 
 def journal(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
@@ -1529,6 +1601,15 @@ def run_turn_stream(
     pressure_blown = False                       # ⚠️ meter hit 100 → forced terminal ending
     for t in _titles_for_fragments(content, newly):
         moments.append({"kind": "unlock", "title": t})
+    if newly:
+        newset = set(newly)
+        logged = set()
+        for sec in content.get("secrets", []) or []:
+            scid = sec.get("character_id")
+            title = (sec.get("title") or "").strip()
+            if scid and title and sec.get("id") not in logged                     and any(f.get("id") in newset for f in sec.get("fragments", []) or []):
+                logged.add(sec.get("id"))
+                rel_log(state, scid, old_act, "reveal", f"关于「{title}」的真相，揭开了一层。")
 
     # responder selection. With an explicit @target → just that character. With NO target
     # (and not an inner thought) the player is addressing the WHOLE room — every present
@@ -1541,6 +1622,17 @@ def run_turn_stream(
     # location/following). In CHARACTER mode the player IS pcid, so that character is not an
     # NPC responder. In GOD mode the player embodies no one.
     all_chars = [c for c in scene_characters(content, state) if c.get("id") != pcid]
+
+    # 关系大事记: first time you lay eyes on someone, remember where it happened
+    met = set(state.get("met_ids") or [])
+    here_name = (current_location(content, state) or {}).get("name") or ""
+    for c in all_chars:
+        cid = c.get("id")
+        if cid and cid not in met:
+            met.add(cid)
+            rel_log(state, cid, old_act, "meet",
+                    f"初次见面{('，在' + here_name) if here_name else ''}。")
+    state["met_ids"] = sorted(met)
 
     if mode == "god":
         # Invisible-observer mode: the player doesn't speak in-scene; the present cast
@@ -1760,6 +1852,8 @@ def run_turn_stream(
                 moments.append({"kind": "rel_up", "character_id": sp_id, "name": sp_name,
                                 "mode": mode_after,
                                 "mode_name": relationships.name_of(mode_after)})
+                rel_log(state, sp_id, old_act, "rel_up",
+                        f"你们成了「{relationships.name_of(mode_after)}」。")
                 yield emit({"type": "description", "speaker_name": None,
                             "text": f"💗（你感觉到，和{sp_name}的关系又近了一层——现在你们是"
                                     f"「{relationships.name_of(mode_after)}」了。）"})
@@ -1826,6 +1920,8 @@ def run_turn_stream(
                                           if f != victim["id"]]
                     dead_names.append(victim.get("name"))
                     moments.append({"kind": "death", "name": victim.get("name")})
+                    rel_log(state, victim.get("id"), old_act, "death",
+                            f"{victim.get('name')} 死了。")
             # 👋 EMERGENT CHARACTER: the story brought in a brand-new face — make them real
             nc_raw = (directed.get("new_char") or "").strip()
             if nc_raw and gen_count < tun["max_new_characters"]:
