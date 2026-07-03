@@ -1402,6 +1402,31 @@ class QwenLLM:
         except Exception:
             return {"risk": 100}
 
+    def _farewell(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """One short in-voice goodbye line for a character whose 作息 is pulling them
+        away — may name where they're headed, may leave a hook. Degrades to {}."""
+        ch = prompt.get("char") or {}
+        dest = (prompt.get("dest") or "").strip()
+        where = f"你正要离开{prompt.get('place','这里')}" + (f"，去{dest}那边" if dest else "")
+        sys = (f"你是「{ch.get('name','')}」（{ch.get('role','')}）。人设：{ch.get('persona_text','')}\n"
+               f"表达方式：{ch.get('eq_style','')}\n"
+               f"{where}。对在场的人说一句【告辞的话】——短（15字内），一眼就是你的声音："
+               "可以交代去处、可以留个钩子（回头见/有事来找我）、也可以只一声招呼。"
+               "只输出这句话本身，不要引号、不要旁白。")
+        try:
+            resp = httpx.post(
+                self._url,
+                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
+                json={"model": self._model, "messages": [{"role": "system", "content": sys},
+                      {"role": "user", "content": "你的告辞："}], "max_tokens": 40, "temperature": 0.9},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            line = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+        except Exception:
+            return {}
+        return {"line": line.splitlines()[0][:60]} if line else {}
+
     def _compose_msg(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """📱 an ABSENT character reaches out (promise reminder / stood-up hurt / afterglow).
         1~2 short bubbles, unmistakably in their voice. Degrades to {} → deterministic text."""
@@ -1602,6 +1627,8 @@ class QwenLLM:
             return self._compose_msg(prompt)
         if prompt.get("phone_reply"):
             return self._phone_reply(prompt)
+        if prompt.get("farewell"):
+            return self._farewell(prompt)
         if prompt.get("risk_judge"):
             return self._risk(prompt)
         speaker = prompt.get("speaker_name") or "角色"

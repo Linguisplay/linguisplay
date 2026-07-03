@@ -55,10 +55,14 @@ def test_hour_change_narrates_who_comes_and_goes():
     texts = [b.get("text", "") for b in out["beats"]]
     arrival = next(t for t in texts if "乙来了" in t)
     assert "夜班巡逻" in arrival and "制服袖口" in arrival and "夜色里" in arrival
-    # …and the next roll (夜→次日晨) narrates him leaving, with where he's headed
+    # …and the next roll (夜→次日晨) has him SAY GOODBYE, then narrates where he went
     out2 = runtime.run_turn(STORY, out["state"], {"name": "我"}, "再聊", channel="say",
                             llm=PlainLLM(next_speakers=[]))
-    gone = next(t for t in (b.get("text", "") for b in out2["beats"]) if "乙已经离开" in t)
+    bye = next(b for b in out2["beats"]
+               if b.get("type") == "dialogue" and b.get("speaker_name") == "乙"
+               and "走" in (b.get("text") or ""))
+    assert "后巷" in bye["text"]                                   # the line names his destination
+    gone = next(t for t in (b.get("text", "") for b in out2["beats"]) if "说着起身走了" in t)
     assert "后巷" in gone
 
 

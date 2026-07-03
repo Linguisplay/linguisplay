@@ -80,6 +80,10 @@ class MockLLM:
         if prompt.get("compose_msg"):
             return {}
 
+        # departing goodbye line: mock defers to the deterministic fallback.
+        if prompt.get("farewell"):
+            return {}
+
         # 📱 text-back: deterministic in-voice stub, no relationship movement.
         if prompt.get("phone_reply"):
             return {"msgs": ["嗯。"], "closeness": 0, "romance": 0}

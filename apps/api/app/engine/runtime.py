@@ -132,7 +132,7 @@ DEFAULT_TUNING = {
     "min_turns_per_act": 6,     # soft acts: no advance (model OR backstop) before this many turns
     "max_new_characters": 4,    # 👋 emergent mid-story characters a run may accumulate
     "world_event_every": 4,     # 🌊 after this many quiet turns an authored act event fires itself (0 = off)
-    "turns_per_slot": 4,        # ⏳ turns per 时段 (晨/午/夜); a day = 3 slots. 0 = clock off
+    "turns_per_slot": 6,        # ⏳ turns per 时段 (晨/午/夜); a day = 3 slots. 0 = clock off
     "confront_base": 55,        # 🃏 evidence-confrontation base success %, + closeness//2
     "confront_cost": 3,         # 🃏 closeness cost of a successful confrontation (fail ×2, 大失败 ×3)
     "promise_keep_bonus": 6,    # 🤝 closeness for showing up to a promise (romantic: 心动 too)
@@ -1116,17 +1116,50 @@ def entrance_beat(content: dict[str, Any], state: dict[str, Any], c: dict[str, A
             "text": f"（{lead}{c.get('name')}来了{('——' + bits) if bits else ''}。）"}
 
 
-def exit_beat(content: dict[str, Any], state: dict[str, Any], c: dict[str, Any]) -> dict[str, Any]:
-    """A departure line that says WHERE they went when the schedule knows (探索钩子)."""
+def _exit_dest(content: dict[str, Any], state: dict[str, Any],
+               c: dict[str, Any]) -> tuple[str | None, str]:
+    """Where a departing character is headed: (speakable destination name or None,
+    narration tail). A discovered place gets named (探索钩子); an UNDISCOVERED one is
+    hinted without spoiling geography; AWAY admits nobody knows."""
     home = char_home(c, int(state.get("act", 1) or 1), active_slot(content, state))
     loc = _location_by_id(content, home) if (home and home != AWAY) else None
-    dest = (loc or {}).get("name")
-    if dest and location_available(content, state, loc):
-        tail = f"——这个时辰，TA惯常在{dest}那边"
-    elif home == AWAY:
-        tail = "——没人知道TA这个时辰去了哪"
-    else:
-        tail = ""
+    if loc and location_available(content, state, loc):
+        return loc.get("name"), f"，往{loc.get('name')}那边去了"
+    if loc:
+        return None, "，往你还没去过的地方去了"
+    if home == AWAY:
+        return None, "——没人知道TA这个时辰去了哪"
+    return None, ""
+
+
+def farewell_beats(content: dict[str, Any], state: dict[str, Any], c: dict[str, Any],
+                   llm: LLM) -> list[dict[str, Any]]:
+    """A character leaving the scene SAYS GOODBYE first — one short in-voice line (which
+    may name where they're off to), then a narration that tracks where they went. Nobody
+    just evaporates from the cast bar."""
+    dest, tail = _exit_dest(content, state, c)
+    line = ""
+    try:
+        out = llm.generate({"farewell": True, "dest": dest or "",
+                            "place": (current_location(content, state) or {}).get("name") or "",
+                            "char": {"name": c.get("name"), "role": c.get("role") or "",
+                                     "persona_text": (c.get("persona_text") or "")[:160],
+                                     "eq_style": (c.get("eq_style") or "")[:100]}}) or {}
+        line = str(out.get("line") or "").strip().strip("「」\"'")[:60]
+    except Exception:
+        line = ""
+    if not line:
+        line = f"我先走一步——{dest}那边还有事。" if dest else "先这样，我得走了。回头见。"
+    return [
+        {"type": "dialogue", "speaker_name": c.get("name"), "text": line},
+        {"type": "description", "speaker_name": None,
+         "text": f"（{c.get('name')}说着起身走了{tail}。）"},
+    ]
+
+
+def exit_beat(content: dict[str, Any], state: dict[str, Any], c: dict[str, Any]) -> dict[str, Any]:
+    """The budget-friendly departure (no spoken line): still says where they went."""
+    _, tail = _exit_dest(content, state, c)
     return {"type": "description", "speaker_name": None,
             "text": f"（不知什么时候，{c.get('name')}已经离开了{tail}。）"}
 
@@ -3112,10 +3145,16 @@ def run_turn_stream(
         if c.get("id") in (here_after - here_before) and c.get("id") != pcid \
                 and c.get("id") not in emergent_ids:
             yield emit(entrance_beat(content, state, c))
+    farewell_budget = 2  # spoken goodbyes per turn; any further departures narrate only
     for cg in _characters(content):
         if cg.get("id") in (here_before - here_after) and cg.get("id") != pcid \
                 and cg.get("id") not in dead_now:
-            yield emit(exit_beat(content, state, cg))
+            if farewell_budget > 0:
+                farewell_budget -= 1
+                for b in farewell_beats(content, state, cg, llm):
+                    yield emit(b)
+            else:
+                yield emit(exit_beat(content, state, cg))
 
     # 5e. 📱 the world texts back: absent characters with a live reason (a promise whose
     #     hour is next / just stood up / a lover just parted from) reach out. Capped.

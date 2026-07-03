@@ -56,9 +56,10 @@ _SLOTS = ("晨", "午", "夜")
 
 
 def _clock_on(content: dict[str, Any]) -> bool:
-    """Does this story run the clock? Mirrors runtime.tuning_for's turns_per_slot logic."""
+    """Does this story run the clock? Mirrors runtime.tuning_for's turns_per_slot logic
+    (default must match runtime.DEFAULT_TUNING["turns_per_slot"])."""
     try:
-        return int((_story(content).get("tuning") or {}).get("turns_per_slot", 4)) > 0
+        return int((_story(content).get("tuning") or {}).get("turns_per_slot", 6)) > 0
     except (TypeError, ValueError):
         return True
 

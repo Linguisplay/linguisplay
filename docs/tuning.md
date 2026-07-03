@@ -49,7 +49,7 @@
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `turns_per_slot` | 4 | 每时段回合数；一天 ≈ 12 回合。**0 = 关掉时钟**（一夜/无时间概念的本必关）|
+| `turns_per_slot` | 6 | 每时段回合数；一天 ≈ 18 回合。**0 = 关掉时钟**（一夜/无时间概念的本必关）|
 
 **期限**（story.clock，非 tuning）：`{"deadline_day": 7, "deadline_text": "警队收网",
 "deadline_ending_id": "end_late"}` —— 跨进期限日当天顶栏变红并警告；拖过当天，
