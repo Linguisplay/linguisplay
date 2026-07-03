@@ -61,13 +61,16 @@ def _to_story(s: StoryModel) -> Story:
     )
 
 
-def _to_card(s: StoryModel) -> StoryCard:
+def _to_card(s: StoryModel, secrets_count: int = 0) -> StoryCard:
     return StoryCard(
         id=s.id,
         title=s.title,
         cover_url=s.cover_url,
         one_liner=s.one_liner or (s.synopsis[:120] if s.synopsis else None),
         trope_tags=s.trope_tags or [],
+        secrets_count=secrets_count,
+        endings_count=len(s.endings or []),
+        characters_count=len(s.characters or []),
     )
 
 
@@ -113,7 +116,13 @@ def discover(
     rows = q.order_by(StoryModel.updated_at.desc()).limit(50).all()
     if tags:
         rows = [s for s in rows if set(tags) & set(s.trope_tags or [])]
-    return StoryCardPage(items=[_to_card(s) for s in rows], next_cursor=None)
+    # 🔒 the mystery affordance: how many secrets each story guards (one grouped query)
+    from sqlalchemy import func
+    counts = dict(db.query(SecretModel.story_id, func.count(SecretModel.id))
+                  .filter(SecretModel.story_id.in_([s.id for s in rows] or [""]))
+                  .group_by(SecretModel.story_id).all()) if rows else {}
+    return StoryCardPage(items=[_to_card(s, counts.get(s.id, 0)) for s in rows],
+                         next_cursor=None)
 
 
 @router.post("", status_code=201, response_model=Story)

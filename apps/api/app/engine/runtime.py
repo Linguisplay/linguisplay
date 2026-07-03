@@ -842,7 +842,55 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
         "mature": bool(state.get("mature")),
     })
     beats = [b for b in directed.get("beats", []) if b.get("type") == "description"]
-    return beats or [{"type": "description", "speaker_name": None, "text": opening_narration(content)}]
+    beats = beats or [{"type": "description", "speaker_name": None, "text": opening_narration(content)}]
+    # ✨ 首局魔法时刻: within the first screen, someone SEES the player — one concrete
+    # gesture, one crack of something withheld, one line spoken straight at them. The
+    # "earned intimacy" promise made perceivable in 30 seconds.
+    beats += opening_hook_beats(content, state, player_char, llm)
+    return beats
+
+
+def opening_hook_beats(content: dict[str, Any], state: dict[str, Any],
+                       player_char: dict[str, Any] | None, llm: LLM) -> list[dict[str, Any]]:
+    """The hook: the lead notices the player personally AND visibly swallows something
+    unsaid (keyed to a secret's TITLE only — spoiler-safe by the same rule as hints).
+    LLM writes both strokes; deterministic fallback keeps the withheld-crack narration."""
+    if (state.get("mode") or "character") == "god":
+        return []
+    pcid = state.get("player_character_id")
+    host = next((c for c in scene_characters(content, state)
+                 if c.get("id") != pcid and c.get("is_lead")), None) \
+        or next((c for c in scene_characters(content, state) if c.get("id") != pcid), None)
+    if not host:
+        return []
+    tease = next((s.get("title") for s in content.get("secrets") or []
+                  if (s.get("title") or "").strip()
+                  and (s.get("character_id") == host.get("id"))), None) \
+        or next((s.get("title") for s in content.get("secrets") or []
+                 if (s.get("title") or "").strip()), None)
+    narration = line = ""
+    try:
+        out = llm.generate({"opening_hook": True,
+                            "char": {"name": host.get("name"), "role": host.get("role") or "",
+                                     "persona_text": (host.get("persona_text") or "")[:200],
+                                     "eq_style": (host.get("eq_style") or "")[:100]},
+                            "player_name": (player_char or {}).get("name") or "你",
+                            "player_role": (player_char or {}).get("role") or "",
+                            "place": (current_location(content, state) or {}).get("name") or "",
+                            "tease": tease or ""}) or {}
+        narration = str(out.get("narration") or "").strip()
+        line = str(out.get("line") or "").strip().strip("「」\"'")[:80]
+    except Exception:
+        pass
+    if not narration and tease:
+        narration = (f"（{host.get('name')}的目光落在你身上，多停了一瞬——像在掂量你，"
+                     f"又像有什么关于「{tease}」的话到了嘴边，被咽了回去。）")
+    beats: list[dict[str, Any]] = []
+    if narration:
+        beats.append({"type": "description", "speaker_name": None, "text": narration})
+    if line:
+        beats.append({"type": "dialogue", "speaker_name": host.get("name"), "text": line})
+    return beats
 
 
 def build_act_transition(content: dict[str, Any], state: dict[str, Any], old_act: int,

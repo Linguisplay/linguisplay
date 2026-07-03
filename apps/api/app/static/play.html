@@ -118,6 +118,13 @@
   .pcalnow, .pcalddl { font-size: 13.5px; color: #dfe4f0; padding: 6px 4px; }
   .pcalddl { color: #ffb27a; }
   .pcalitem { font-size: 13px; color: #d5cfe0; padding: 7px 4px; border-bottom: 1px solid #1d1d28; }
+  /* 🎯 门面 */
+  .hero { padding: 6px 2px 12px; border-bottom: 1px solid #23232c; }
+  .hero-t { font-size: 22px; font-weight: 800; letter-spacing: 1px; color: #f0f2f8; line-height: 1.4; }
+  .hero-s { font-size: 14px; color: #9fb0ff; margin-top: 3px; }
+  .hero-p { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; font-size: 12.5px; color: #aab2c4; line-height: 1.6; }
+  .hero-p b { color: #dfe4f0; }
+  .scStats { margin-top: 5px; font-size: 12px; color: #c9a86a; }
   /* relationship tag + follow control under each in-scene character */
   .castitem .rel { font-size: 10px; padding: 0 4px; border-radius: 6px; line-height: 1.5; white-space: nowrap; }
   .rel-stranger { color:#9aa0ad; background:#2a2d36; } .rel-peer { color:#cfd6e6; background:#2b3142; }
@@ -265,7 +272,16 @@
 
   <!-- login -->
   <div id="auth" class="card">
-    <h3 style="margin-top:0">登录 / 注册</h3>
+    <div class="hero">
+      <div class="hero-t">TA有不会告诉你的事。</div>
+      <div class="hero-s">除非你走进TA的生命。</div>
+      <div class="hero-p">
+        <span>🔒 每个角色都藏着<b>真正锁住的秘密</b>——问是问不出来的，要靠你赢得</span>
+        <span>💗 关系是<b>挣来的</b>：TA记得你说过的每句话、约过的每一面、欠下的每次爽约</span>
+        <span>🌙 世界<b>自己会动</b>：时辰流转、人来人往，TA还会主动给你捎话</span>
+      </div>
+    </div>
+    <h3 style="margin-top:14px">登录 / 注册</h3>
     <input id="email" placeholder="email" value="player@demo.com" />
     <input id="pw" type="password" placeholder="密码（≥8位）" value="player123" />
     <div style="display:flex; gap:8px; margin-top:8px">
@@ -282,7 +298,7 @@
 
   <!-- story picker -->
   <div id="pick" class="card hidden">
-    <h3 style="margin-top:0">选择剧本</h3>
+    <h3 style="margin-top:0">今晚，走进谁的生命？</h3>
     <div id="stories"></div>
   </div>
 
@@ -413,7 +429,13 @@ async function afterAuth() {
   page.items.forEach(s => {
     const div = document.createElement("div");
     div.className = "card"; div.style.margin = "10px 0"; div.style.cursor = "pointer";
-    div.innerHTML = `<b>${escapeHtml(s.title)}</b><div class="muted" style="margin-top:4px">${escapeHtml(s.one_liner||"")}</div>`;
+    const stats = [];
+    if (s.secrets_count) stats.push(`🔒 ${s.secrets_count} 个秘密`);
+    if (s.endings_count) stats.push(`🏆 ${s.endings_count} 种结局`);
+    if (s.characters_count) stats.push(`👥 ${s.characters_count} 个角色`);
+    div.innerHTML = `<b>${escapeHtml(s.title)}</b>` +
+      (stats.length ? `<div class="scStats">${stats.join("　")}</div>` : "") +
+      `<div class="muted" style="margin-top:4px">${escapeHtml(s.one_liner||"")}</div>`;
     div.onclick = () => chooseRole(s.id);
     stories.appendChild(div);
   });
@@ -505,6 +527,14 @@ async function enterRun(run) {
   applyScene(run.state && run.state.scene);
   const beats = await j(`/runs/${runId}/play`);
   beats.forEach(renderBeat);
+  // ✨ a brand-new run: make the promise perceivable — this world is LOCKED, go earn it
+  if (!beats.some(b => b.author === "player")) {
+    try {
+      const jd = await j(`/runs/${runId}/journal`);
+      const n = (jd.secrets_untouched || 0) + (jd.secrets || []).length;
+      if (n > 0) pushToast(`🔒 这个故事里藏着 <b>${n}</b> 个秘密——没有人会主动告诉你。`, "t-unlock", 1500);
+    } catch (e) {}
+  }
   curClock = (run.state && run.state.clock) || null;
   renderState(run.state);
   renderChoiceAsk(run.state && run.state.pending_choice);

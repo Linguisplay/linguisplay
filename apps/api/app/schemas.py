@@ -270,6 +270,10 @@ class StoryCard(BaseModel):
     cover_url: Optional[str] = None
     one_liner: Optional[str] = None
     trope_tags: list[str] = []
+    # the mystery affordance up front: how much is LOCKED in here (counts only, no titles)
+    secrets_count: int = 0
+    endings_count: int = 0
+    characters_count: int = 0
 
 
 class StoryCardPage(BaseModel):

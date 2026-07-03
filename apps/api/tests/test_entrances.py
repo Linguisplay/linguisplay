@@ -82,6 +82,33 @@ def test_act_entrance_and_death_makes_no_exit_line():
     assert not any("丙已经离开" in (b.get("text") or "") for b in out3["beats"])
 
 
+def test_opening_hook_plants_the_withheld_crack():
+    # ✨ 首局魔法时刻: the opening ends with the lead visibly swallowing something
+    # (secret TITLE only) + optionally one line straight at the player
+    content = {"story": {**STORY["story"]},
+               "secrets": [{"id": "s1", "character_id": "a", "title": "地窖里的账本",
+                            "fragments": [{"id": "f1", "content": "LOCKED", "retrieval_key": "账",
+                                           "unlock": {"affinity_min": 999}}]}]}
+    st = runtime.default_state()
+    st["location_id"] = "hall"
+    beats = runtime.build_opening(content, st, llm=PlainLLM())
+    hook = next(t for t in (b.get("text", "") for b in beats) if "地窖里的账本" in t)
+    assert "咽" in hook and "LOCKED" not in str(beats)     # tease by title, never content
+    # an LLM-written hook carries both strokes, the line spoken by the lead
+    class HookLLM(PlainLLM):
+        def generate(self, prompt):
+            if prompt.get("opening_hook"):
+                return {"narration": "（甲擦杯子的手停了半拍。）", "line": "新来的？坐。"}
+            return super().generate(prompt)
+    beats2 = runtime.build_opening(content, st, llm=HookLLM())
+    d = next(b for b in beats2 if b.get("type") == "dialogue")
+    assert d["speaker_name"] == "甲" and d["text"] == "新来的？坐。"
+    # god mode gets no personal hook (the player isn't a body in the scene)
+    stg = runtime.default_state(); stg["mode"] = "god"; stg["location_id"] = "hall"
+    assert all(b.get("type") == "description" and "地窖" not in b.get("text", "")
+               for b in runtime.build_opening(content, stg, llm=PlainLLM()))
+
+
 def test_arrival_narration_llm_and_fallback():
     st = runtime.default_state()
     st["location_id"] = "hall"

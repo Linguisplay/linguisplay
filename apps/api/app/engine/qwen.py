@@ -1402,6 +1402,46 @@ class QwenLLM:
         except Exception:
             return {"risk": 100}
 
+    def _opening_hook(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """✨ 首局魔法时刻: the lead notices the player (one concrete stroke), visibly
+        withholds something (keyed to a secret TITLE only), then speaks one line straight
+        at them. Two labeled lines out; degrades to {} → deterministic fallback."""
+        ch = prompt.get("char") or {}
+        pl = prompt.get("player_name") or "对方"
+        pr = prompt.get("player_role") or ""
+        tease = (prompt.get("tease") or "").strip()
+        tease_line = (f"这丝破绽与「{tease}」有关，但你绝不能说破任何内容——只许让人察觉你有所保留。"
+                      if tease else "让人察觉你有所保留即可。")
+        sys = (f"你是「{ch.get('name','')}」（{ch.get('role','')}）。人设：{ch.get('persona_text','')}\n"
+               f"表达方式：{ch.get('eq_style','')}\n"
+               f"故事开场：{pl}（{pr}）刚出现在{prompt.get('place','这里')}。只输出两行：\n"
+               f"旁白：一句第三人称——你注意到{pl}的那个瞬间（一个具体的动作/眼神变化），"
+               f"并露出一丝【有话没说】的破绽。{tease_line}\n"
+               f"台词：你对{pl}亲口说的第一句话（短，直接冲着TA本人来，一眼就是你的口吻——"
+               "让TA感觉被点名、被看见，而不是被客套地接待）。")
+        try:
+            resp = httpx.post(
+                self._url,
+                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
+                json={"model": self._model, "messages": [{"role": "system", "content": sys},
+                      {"role": "user", "content": "输出那两行："}], "max_tokens": 140,
+                      "temperature": 0.9},
+                timeout=20,
+            )
+            resp.raise_for_status()
+            txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+        except Exception:
+            return {}
+        narration = line = ""
+        for ln in txt.splitlines():
+            s = ln.strip()
+            body = s.split("：", 1)[-1].split(":", 1)[-1].strip()
+            if s.startswith("旁白"):
+                narration = body
+            elif s.startswith("台词"):
+                line = body
+        return {"narration": narration, "line": line}
+
     def _farewell(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """One short in-voice goodbye line for a character whose 作息 is pulling them
         away — may name where they're headed, may leave a hook. Degrades to {}."""
@@ -1629,6 +1669,8 @@ class QwenLLM:
             return self._phone_reply(prompt)
         if prompt.get("farewell"):
             return self._farewell(prompt)
+        if prompt.get("opening_hook"):
+            return self._opening_hook(prompt)
         if prompt.get("risk_judge"):
             return self._risk(prompt)
         speaker = prompt.get("speaker_name") or "角色"

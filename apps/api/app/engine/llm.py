@@ -84,6 +84,10 @@ class MockLLM:
         if prompt.get("farewell"):
             return {}
 
+        # ✨ opening hook: mock defers to the deterministic withheld-crack narration.
+        if prompt.get("opening_hook"):
+            return {}
+
         # 📱 text-back: deterministic in-voice stub, no relationship movement.
         if prompt.get("phone_reply"):
             return {"msgs": ["嗯。"], "closeness": 0, "romance": 0}
