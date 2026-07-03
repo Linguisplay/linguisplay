@@ -89,6 +89,9 @@ class Character(BaseModel):
     # 作息表: where this character is per act — [{from_act, location_id}], last entry with
     # from_act <= current act wins; falls back to home_location_id. Makes the world move.
     schedule: list[dict[str, Any]] = []
+    # 🕸 authored NPC↔NPC stances seeding the live relationship web:
+    # [{char_id, stance -2..2, label?}] — see engine/runtime._ensure_npc_rel
+    ties: list[dict[str, Any]] = []
     # relationship mode toward the player: the starting archetype (e.g. "陌生人"/"长辈"/
     # "暧昧对象") and which archetypes it may FLOW into. Empty allowed = any. See
     # engine/relationships.py for the library.
