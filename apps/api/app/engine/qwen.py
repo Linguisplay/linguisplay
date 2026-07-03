@@ -222,6 +222,22 @@ def _build_system(prompt: dict[str, Any]) -> str:
             "的最要紧的那个话头（从你的记忆和之前的对话里挑），别装作无事发生，也别客套寒暄一大段。"
         )
 
+    appo = prompt.get("appointment") or {}
+    if appo:
+        extra = ("这是一场只属于你们两个人的【约会】：把独处的氛围、靠近时的心跳、只说给TA听的话演足——"
+                 "光线、距离、一个比平时停得久一点的眼神。给TA一段配得上专程赴约的名场面，不要闲聊带过。"
+                 if appo.get("romantic") else
+                 "把这场践约演得有分量：TA专程来了，你也当真——把约好的事真正做了/说了，别一笔带过。")
+        lines.append("")
+        lines.append(f"【赴约时刻】TA如约而至——你们之前约好的（{appo.get('what','')}），就是现在。"
+                     f"这一场戏就是这个约定本身：由你主动把它兑现。{extra}")
+
+    bp = (prompt.get("broken_promise") or "").strip()
+    if bp:
+        lines.append("")
+        lines.append(f"【TA爽约了】你们本约好了（{bp}），TA却没来。你心里存着这件事——这一轮用你自己的方式"
+                     "让TA知道（讥一句、冷一点、装不在意、或直接质问，贴你的性格），说完这一场就翻篇，别没完没了。")
+
     conf = prompt.get("confrontation") or {}
     if conf:
         verdict = {
@@ -468,6 +484,18 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
         props["time_skip"] = {"type": "string", "description":
                               "默认空字符串。仅当这一轮剧情明确跨过了大段时间才填："
                               "睡了一觉/到第二天→填「次日」；一直等到下一个时段（等到天黑/晌午）→填「下一时段」。"}
+        if not observer:
+            props["promise_made"] = {
+                "type": "object",
+                "properties": {
+                    "what": {"type": "string", "description": "约好做什么（10字内）"},
+                    "day_offset": {"type": "integer", "description": "0=今天,1=明天,2=后天"},
+                    "slot": {"type": "string", "enum": ["晨", "午", "夜"]},
+                    "place": {"type": "string", "description": "在哪见；留空=就在此处"}},
+                "required": ["what", "day_offset", "slot"],
+                "description": "仅当你这一轮与对方明确定下了一个【将来的约定/邀约】（改天再见、请TA吃饭、"
+                               "夜里带TA去看样东西）才填，平时不填。若你们的关系已到暧昧/恋人，气氛合适时"
+                               "你可以主动发起这样的邀约——由你开口约TA。"}
     pcfg = prompt.get("pressure_cfg") or {}
     if pcfg and not is_member and not is_think:
         props["pressure"] = {"type": "integer", "description":
@@ -848,6 +876,12 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
                                "delta": _i(s.get("delta"), -1, 1),
                                "why": str(s.get("why") or "").strip()})
         out["npc_shifts"] = shifts
+    pm = d.get("promise_made")
+    if isinstance(pm, dict) and str(pm.get("what") or "").strip():
+        out["promise"] = {"what": str(pm.get("what") or "").strip(),
+                          "day_offset": pm.get("day_offset", 0),
+                          "slot": str(pm.get("slot") or "").strip(),
+                          "place": str(pm.get("place") or "").strip()}
     return out
 
 

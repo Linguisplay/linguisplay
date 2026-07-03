@@ -73,6 +73,9 @@
   #placebar .exit:hover { color: #bdf0c9; }
   #placebar .clock { color: #e6d9a8; margin-right: 10px; white-space: nowrap; }
   #placebar .clock.ddl { color: #ffb27a; }
+  #promisebar { flex: 0 0 auto; margin: 6px 16px 0; padding: 6px 12px; border-radius: 10px; background: #241a26cc; border: 1px solid #4a3350; color: #e8cfe0; font-size: 12.5px; line-height: 1.5; }
+  #promisebar b { color: #ff9fc6; }
+  #promisebar .pmore { color: #9a8aa0; margin-left: 8px; }
   .jconfront { color: #d9a8e6; cursor: pointer; font-size: 12px; white-space: nowrap; text-decoration: underline dotted; margin-left: 4px; }
   .jconfront:hover { color: #f0c9ff; }
   .smeta { margin: 4px 0 10px; padding: 9px 12px; border-radius: 10px; background: #1a1a24; border: 1px solid #2c2c3c; font-size: 12.5px; color: #cfd6e6; }
@@ -262,6 +265,7 @@
   <div id="play" class="hidden" style="flex:1; display:flex; flex-direction:column; min-height:0">
     <div id="cast"></div>
     <div id="placebar" class="hidden"></div>
+    <div id="promisebar" class="hidden"></div>
     <div id="goalbar" class="hidden"></div>
     <div id="hintbar" class="hidden"></div>
     <div id="pressurebar" class="hidden"></div>
@@ -699,6 +703,10 @@ async function openJournal() {
     ${(jd.inventory||[]).length ? `<div class="jh">🎒 随身物品</div>` + jd.inventory.map(i=>`<div class="jfrag">${escapeHtml(i.name)}${i.detail?`<span class="jwho"> — ${escapeHtml(i.detail)}</span>`:""}</div>`).join("") : ""}
     ${(jd.stashes||[]).length ? `<div class="jh">📦 存放在各处</div>` + jd.stashes.map(st=>`<div class="jfrag">${escapeHtml(st.location||"")}：${st.items.map(i=>escapeHtml(i.name)).join("、")}</div>`).join("") : ""}
     ${(jd.deaths||[]).length ? `<div class="jh">🕯 逝者</div><div class="jfrag">${jd.deaths.map(escapeHtml).join("、")}</div>` : ""}
+    ${(jd.promises||[]).length ? `<div class="jh">🤝 约定</div>` + jd.promises.map(p => {
+      const tag = p.status === "open" ? "⏳" : p.status === "kept" ? "✅" : "💔";
+      return `<div class="jfrag">${tag} ${escapeHtml(p.when)} · ${escapeHtml(p.what)}<span class="jwho">（${escapeHtml(p.name)}）</span></div>`;
+    }).join("") : ""}
     <div class="jh">已揭开的真相</div>${secs}${more}
     <div class="jh">结局图鉴</div><div class="jends">${ends}</div>
   </div>`;
@@ -870,6 +878,7 @@ function renderState(st) {
   if (st.goal !== undefined) renderGoal(st.goal);
   if (st.progress !== undefined) renderProgress(st.progress);
   if (st.location !== undefined) renderPlace(st.location);
+  if (st.promises !== undefined) renderPromises(st.promises);
 }
 function clockChip() {
   if (!curClock || !curClock.label) return "";
@@ -904,6 +913,19 @@ function renderPlace(loc) {
     });
     el.appendChild(wrap);
   }
+  el.classList.remove("hidden");
+}
+// 🤝 open appointments hang visibly in the bar — the come-back hook you can't unsee
+function renderPromises(list) {
+  const el = document.getElementById("promisebar");
+  if (!list || !list.length) { el.classList.add("hidden"); return; }
+  const p = list[0];
+  const icon = p.romantic ? "💞" : "🤝";
+  let s = `${icon} 约定：<b>${escapeHtml(p.when)}</b>`;
+  if (p.place) s += ` · ${escapeHtml(p.place)}`;
+  s += ` · ${escapeHtml(p.what)}${p.name ? `（${escapeHtml(p.name)}）` : ""}`;
+  if (list.length > 1) s += `<span class="pmore">＋${list.length - 1}</span>`;
+  el.innerHTML = s;
   el.classList.remove("hidden");
 }
 function renderGoal(goal) {
@@ -1145,6 +1167,7 @@ async function streamTurn(url, bodyObj) {
         else if (ev.event === "here") { relations = ev.relations || {}; following = ev.following || []; updateCast(ev.here || []); }
         else if (ev.event === "goal") { renderGoal(ev.goal); }
         else if (ev.event === "place") { renderPlace(ev.location); }
+        else if (ev.event === "promises") { renderPromises(ev.promises); }
         else if (ev.event === "progress") { renderProgress(ev.progress); }
         else if (ev.event === "hint") { renderHint(ev.hint); }
         else if (ev.event === "moments") { afterPlay.moments = ev.moments; afterPlay.relDeltas = ev.rel_deltas; }
@@ -1221,6 +1244,11 @@ function showMoments(moments, relDeltas) {
       crit_fail: `🃏 弄巧成拙——${m.name}反将你一军` }[m.outcome] || "🃏 对质", m.outcome === "fail" || m.outcome === "crit_fail" ? "t-press" : "t-unlock", i++ * 650);
     else if (m.kind === "deadline") pushToast(`⏳ ${m.text || "大限"}——就在今天`, "t-press", i++ * 650);
     else if (m.kind === "npc_rel") pushToast(m.delta > 0 ? `🤝 ${m.a}和${m.b}走近了` : `⚡ ${m.a}和${m.b}闹僵了`, m.delta > 0 ? "t-rel" : "t-press", i++ * 650);
+    else if (m.kind === "promise") pushToast(
+      m.status === "made" ? `${m.romantic ? "💞" : "🤝"} ${m.name}和你约好了：${m.when || ""}·${m.what || ""}` :
+      m.status === "kept" ? `${m.romantic ? "💞 心动赴约" : "🤝 如约而至"}——${m.what || ""}` :
+      `💔 你爽约了${m.name ? "：" + m.name : ""}（${m.what || ""}）`,
+      m.status === "missed" ? "t-press" : "t-rel", i++ * 650);
   }
   const bits = [];
   for (const cid in relDeltas) {

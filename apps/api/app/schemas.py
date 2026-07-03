@@ -339,6 +339,7 @@ class RunState(BaseModel):
     inventory: list[dict[str, Any]] = [] # 🎒 pocket items [{name, detail?}]
     pressure_name: Optional[str] = None  # the meter's authored name (None = story runs none)
     clock: Optional[dict[str, Any]] = None  # ⏳ {day,slot,label,deadline?} (None = no clock)
+    promises: list[dict[str, Any]] = []  # 🤝 open appointments [{name,what,when,place,romantic}]
 
 
 class Run(BaseModel):

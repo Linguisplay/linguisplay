@@ -62,6 +62,7 @@ def _to_run(r: RunModel) -> Run:
             inventory=list(st.get("inventory") or []),
             pressure_name=((runtime.pressure_cfg(r.pinned_content or {}) or {}).get("name")),
             clock=runtime.clock_view(r.pinned_content or {}, st),
+            promises=runtime.promises_view(r.pinned_content or {}, st),
         ),
         cast=cast,
         created_at=r.created_at,
@@ -368,6 +369,7 @@ def play(
                 if final.get("pressure_view"):
                     yield _event({"event": "pressure", "pressure": final["pressure_view"]})
                 yield _event({"event": "place", "location": final.get("location")})
+                yield _event({"event": "promises", "promises": final.get("promises", [])})
                 if final.get("pending_choice"):
                     yield _event({"event": "choice", "choice": final["pending_choice"]})
                 if final.get("move_request"):

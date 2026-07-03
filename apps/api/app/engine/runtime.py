@@ -78,6 +78,7 @@ def default_state() -> dict[str, Any]:
         "following": [],                # character ids currently traveling WITH the player
         "clock": {"day": 1, "slot": 0, "turns_in_slot": 0},  # ⏳ diegetic time (slot → SLOTS)
         "npc_rel": {},                  # 🕸 NPC↔NPC stances {"a|b": {stance,-2..2, label?, log:[]}}
+        "promises": [],                 # 🤝 约定 [{char_id,char_name,what,day,slot,location_id?,romantic,status}]
     }
 
 
@@ -133,7 +134,11 @@ DEFAULT_TUNING = {
     "turns_per_slot": 4,        # ⏳ turns per 时段 (晨/午/夜); a day = 3 slots. 0 = clock off
     "confront_base": 55,        # 🃏 evidence-confrontation base success %, + closeness//2
     "confront_cost": 3,         # 🃏 closeness cost of a successful confrontation (fail ×2, 大失败 ×3)
+    "promise_keep_bonus": 6,    # 🤝 closeness for showing up to a promise (romantic: 心动 too)
+    "promise_break_cost": 4,    # 🤝 closeness lost for standing someone up
 }
+
+MAX_OPEN_PROMISES = 3  # 🤝 open appointments a run may hold at once (per char: one)
 
 # ⏳ the diegetic clock: three slots make a day. Slot-restricted schedule entries and
 # story deadlines (story.clock) hang off this. Story-agnostic — the names are the frame,
@@ -1468,6 +1473,76 @@ def npc_ties_of(content: dict[str, Any], state: dict[str, Any], char_id: str) ->
     return sorted(out, key=lambda x: x["stance"])
 
 
+# ── 🤝 约定 (appointments) ──────────────────────────────────────────────────────
+# The strongest come-back hook: a character sets a FUTURE meeting with the player
+# (place + day + 时段, hung visibly in the top bar). Showing up = a dedicated scene
+# and a relationship reward — a romance-tier appointment plays as a proper 约会名场面
+# (恋与深空-style). Standing them up costs the relationship and they hold the grudge.
+# Runs entirely off the diegetic clock; stories with the clock off never see it.
+def _time_index(state: dict[str, Any]) -> int:
+    clk = state.get("clock") or {}
+    return int(clk.get("day", 1) or 1) * len(SLOTS) + int(clk.get("slot", 0) or 0) % len(SLOTS)
+
+
+def _promise_index(pr: dict[str, Any]) -> int:
+    slot = pr.get("slot")
+    si = SLOTS.index(slot) if slot in SLOTS else 0
+    return int(pr.get("day", 1) or 1) * len(SLOTS) + si
+
+
+def promise_when_label(pr: dict[str, Any], state: dict[str, Any]) -> str:
+    diff = int(pr.get("day", 1) or 1) - int((state.get("clock") or {}).get("day", 1) or 1)
+    day = "今天" if diff <= 0 else "明天" if diff == 1 else "后天" if diff == 2 else f"第{pr.get('day')}天"
+    return f"{day}{pr.get('slot', '')}"
+
+
+def promises_view(content: dict[str, Any], state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Open appointments for the UI, soonest first: [{name, what, when, place, romantic}]."""
+    out = []
+    for pr in sorted((p for p in state.get("promises") or [] if p.get("status") == "open"),
+                     key=_promise_index):
+        loc = _location_by_id(content, pr.get("location_id")) if pr.get("location_id") else None
+        out.append({"name": pr.get("char_name") or "", "what": pr.get("what") or "",
+                    "when": promise_when_label(pr, state),
+                    "place": (loc or {}).get("name") or "", "romantic": bool(pr.get("romantic"))})
+    return out
+
+
+def make_promise(content: dict[str, Any], state: dict[str, Any], char: dict[str, Any],
+                 pm: dict[str, Any], tun: dict[str, int]) -> dict[str, Any] | None:
+    """Record a judged appointment. Refuses: clock off, empty/overlong intent, bad slot,
+    a time not in the future, a char who already has one open, or a full slate."""
+    if tun["turns_per_slot"] <= 0:
+        return None
+    what = str(pm.get("what") or "").strip()[:40]
+    slot = str(pm.get("slot") or "").strip()
+    if not what or slot not in SLOTS:
+        return None
+    try:
+        off = max(0, min(3, int(pm.get("day_offset", 0))))
+    except (TypeError, ValueError):
+        return None
+    prs = list(state.get("promises") or [])
+    cid = char.get("id")
+    if sum(1 for p in prs if p.get("status") == "open") >= MAX_OPEN_PROMISES:
+        return None
+    if any(p.get("status") == "open" and p.get("char_id") == cid for p in prs):
+        return None
+    day = int((state.get("clock") or {}).get("day", 1) or 1) + off
+    pr = {"char_id": cid, "char_name": char.get("name") or "", "what": what,
+          "day": day, "slot": slot, "status": "open"}
+    if _promise_index(pr) <= _time_index(state):
+        return None  # the promised hour must lie ahead
+    dest = resolve_location(content, str(pm.get("place") or "").strip())
+    pr["location_id"] = dest.get("id") if dest else state.get("location_id")
+    # a promise made at 暧昧/恋人 warmth is a DATE — the fulfillment scene plays as one
+    scores = (state.get("rel") or {}).get(cid) or relationships.new_scores()
+    pr["romantic"] = relationships.derive_mode(char, scores, tun) in ("flirt", "lover")
+    prs.append(pr)
+    state["promises"] = prs
+    return pr
+
+
 def rel_log(state: dict[str, Any], char_id: str | None, act: int, kind: str, text: str) -> None:
     """Append a moment to this character's 关系大事记 (capped)."""
     if not char_id or not (text or "").strip():
@@ -1633,7 +1708,12 @@ def journal(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
                 "title": (e.get("title") or "") if e.get("id") in achieved else None}
                for e in story.get("endings", []) or []]
     loc_names = {l.get("id"): l.get("name") for l in _locations(content)}
+    promises = [{"name": p.get("char_name") or "", "what": p.get("what") or "",
+                 "when": promise_when_label(p, state), "status": p.get("status"),
+                 "romantic": bool(p.get("romantic"))}
+                for p in (state.get("promises") or [])]
     return {"secrets": secrets, "secrets_untouched": untouched, "endings": endings,
+            "promises": promises,  # 🤝 约定史: open + kept + missed
             "choices": dict(state.get("choices") or {}),
             "identity": state.get("identity"),
             "identity_log": list(state.get("identity_log") or []),
@@ -2037,6 +2117,42 @@ def run_turn_stream(
                     f"初次见面{('，在' + here_name) if here_name else ''}。")
     state["met_ids"] = sorted(met)
 
+    # 🤝 赴约: an open promise whose hour is NOW, its person standing right here, the
+    # player at the promised place → this very scene is the appointment. Steer the
+    # conversation to them; the relationship reward lands immediately (you SHOWED UP).
+    promise_kept = None
+    if mode != "god" and tun["turns_per_slot"] > 0 and channel != "think":
+        now_idx = _time_index(state)
+        here_ids = {c.get("id") for c in all_chars}
+        for pr in state.get("promises") or []:
+            if (pr.get("status") == "open" and _promise_index(pr) == now_idx
+                    and pr.get("char_id") in here_ids
+                    and ((not pr.get("location_id"))
+                         or pr["location_id"] == state.get("location_id"))):
+                promise_kept = pr
+                break
+        if promise_kept:
+            promise_kept["status"] = "kept"
+            if not target_character_id:
+                target_character_id = promise_kept["char_id"]
+            kc = promise_kept["char_id"]
+            old_sc = (state.get("rel") or {}).get(kc) or relationships.new_scores()
+            state.setdefault("rel", {})[kc] = relationships.apply_deltas(
+                old_sc, tun["promise_keep_bonus"],
+                tun["promise_keep_bonus"] if promise_kept.get("romantic") else 0, tun)
+            got = state["rel"][kc]
+            dcl = int(got.get("closeness", 0)) - int(old_sc.get("closeness", 0))
+            drm = int(got.get("romance", 0)) - int(old_sc.get("romance", 0))
+            if dcl or drm:
+                rel_deltas[kc] = {"name": promise_kept.get("char_name"),
+                                  "closeness": dcl, "romance": drm}
+            moments.append({"kind": "promise", "status": "kept",
+                            "name": promise_kept.get("char_name"),
+                            "what": promise_kept.get("what"),
+                            "romantic": bool(promise_kept.get("romantic"))})
+            rel_log(state, kc, old_act, "promise",
+                    f"你如约而至——{promise_kept.get('what','')}。")
+
     if mode == "god":
         # Invisible-observer mode: the player doesn't speak in-scene; the present cast
         # interact WITH EACH OTHER (the 旁观/CP mode). The player's input is a director
@@ -2200,6 +2316,13 @@ def run_turn_stream(
             # 🕸 this speaker's charged stances toward who else is in the scene
             "npc_stances": npc_stance_line(content, state, sp_id,
                                            [c for c in all_chars if c.get("id") != sp_id]),
+            # 🤝 THIS scene is the appointment being honored (a romance one plays as a date)
+            "appointment": ({"what": promise_kept.get("what", ""),
+                             "romantic": bool(promise_kept.get("romantic"))}
+                            if (promise_kept and sp_id == promise_kept.get("char_id")) else None),
+            # 🤝 the player stood this speaker up — they hold it (voiced once, then let go)
+            "broken_promise": next((p.get("what") for p in (state.get("promises") or [])
+                                    if p.get("status") == "missed" and p.get("char_id") == sp_id), None),
             "cast": others,
             # in a broadcast, non-primary characters may stay silent and never narrate
             "group_mode": ("primary" if is_primary else "member") if broadcast else None,
@@ -2230,6 +2353,11 @@ def run_turn_stream(
             "said_this_turn": list(said_this_turn),
         }
         directed = llm.generate(prompt)
+        if prompt.get("broken_promise"):
+            # the grudge got its scene — from here on it's history, not a broken record
+            for p in (state.get("promises") or []):
+                if p.get("status") == "missed" and p.get("char_id") == sp_id:
+                    p["status"] = "missed_noted"
         # LOGIC BACKSTOP (primary/addressed character only): verify the turn against the live
         # scene before streaming it — no absent character walks in, no locked secret leaks.
         if is_primary and not observer and get_settings().logic_guard:
@@ -2285,6 +2413,19 @@ def run_turn_stream(
             primary_invite = directed.get("move_invite")
             primary_name_for_invite = sp_name
             time_skip = (directed.get("time_skip") or "").strip()
+            # 🤝 the speaker set a future appointment with the player (恋与深空-style
+            # proactive 邀约 at romance tiers) — record it, announce it, hang it in the bar
+            pm = directed.get("promise")
+            if pm and not observer:
+                made = make_promise(content, state, sp, pm, tun)
+                if made:
+                    loc_nm = (_location_by_id(content, made.get("location_id")) or {}).get("name") or "老地方"
+                    when = promise_when_label(made, state)
+                    moments.append({"kind": "promise", "status": "made",
+                                    "name": sp_name, "what": made["what"], "when": when,
+                                    "romantic": bool(made.get("romantic"))})
+                    yield emit({"type": "description", "speaker_name": None,
+                                "text": f"（约定立下了：{when}，{loc_nm}——{made['what']}。）"})
             emo = (directed.get("player_emotion") or "").strip()
             if emo:
                 state["player_emotion"] = emo       # carry the emotional read into next turn
@@ -2594,6 +2735,24 @@ def run_turn_stream(
             moments.append({"kind": "deadline", "text": dl["text"]})
         elif dl and dl["days_left"] < 0 and not state.get("ended"):
             deadline_blown = True
+        # 🤝 爽约: time rolled past a promise the player never showed for. It stings —
+        # and the stood-up character will bring it up next time they meet (once).
+        now2 = _time_index(state)
+        for pr in (state.get("promises") or []):
+            if pr.get("status") == "open" and _promise_index(pr) < now2:
+                pr["status"] = "missed"
+                mc = pr.get("char_id")
+                old_sc = (state.get("rel") or {}).get(mc) or relationships.new_scores()
+                state.setdefault("rel", {})[mc] = relationships.apply_deltas(
+                    old_sc, -tun["promise_break_cost"],
+                    -tun["promise_break_cost"] if pr.get("romantic") else 0, tun)
+                moments.append({"kind": "promise", "status": "missed",
+                                "name": pr.get("char_name"), "what": pr.get("what")})
+                rel_log(state, mc, old_act, "promise",
+                        f"你爽约了——{pr.get('what','')}。")
+                yield emit({"type": "description", "speaker_name": None,
+                            "text": f"（你猛然想起——和{pr.get('char_name','')}约好的"
+                                    f"（{pr.get('what','')}），已经过了时辰。）"})
 
     # 6. ending check. Authored endings are MILESTONES (true/normal/bad) — reaching one
     #    shows its narration but the open world keeps going, so the player can explore on
@@ -2721,6 +2880,7 @@ def run_turn_stream(
         "pressure_view": ({"name": pcfg.get("name"), "value": int(state.get("pressure", 0))}
                           if pcfg else None),
         "clock_view": clock_view(content, state),  # ⏳ {day,slot,label,deadline?} or None
+        "promises": promises_view(content, state),  # 🤝 open appointments, soonest first
 
         "pending_choice": state.get("pending_choice"),  # unanswered key-moment decision
         "rel_deltas": rel_deltas,  # per-char ♥ movement this turn (UI floating chips)
