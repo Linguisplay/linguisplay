@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Query
+from fastapi import APIRouter, Cookie, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from ..db import get_db
 from ..deps import current_user
@@ -327,3 +328,78 @@ def delete_secret(
     sec = _own_secret(story_id, secret_id, user, db)
     db.delete(sec)
     db.commit()
+
+
+# ── author media uploads: your own photos for characters, your own backgrounds ──
+_MEDIA_ROOT = None
+
+
+def _media_dir(kind: str):
+    """app/static/scene/{avatar|bg} — the SAME paths AI enrichment uses, so the play UI
+    needs no changes: uploads simply take precedence by being the file that exists."""
+    import pathlib
+    global _MEDIA_ROOT
+    if _MEDIA_ROOT is None:
+        _MEDIA_ROOT = pathlib.Path(__file__).resolve().parents[1] / "static" / "scene"
+    d = _MEDIA_ROOT / ("avatar" if kind == "avatar" else "bg")
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _sniff_image(data: bytes) -> str | None:
+    if data[:3] == b"\xff\xd8\xff":
+        return "jpg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+
+@router.post("/{story_id}/upload")
+async def upload_media(
+    story_id: str,
+    kind: str = Form(...),               # "avatar" (character photo) | "bg" (location backdrop)
+    target_id: str = Form(...),          # character id / location id in THIS story
+    file: UploadFile = File(...),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Author uploads their own image for a character or a location. Validated by magic
+    bytes (jpg/png/webp) and size (≤5MB), stored under the id-keyed path the play UI
+    already loads; a character upload also writes avatar_url into the story AND its
+    latest snapshot so live discovery/new runs show it immediately."""
+    s = _own_story(story_id, user, db)
+    if kind not in ("avatar", "bg"):
+        raise HTTPException(400, "kind 只能是 avatar 或 bg")
+    data = await file.read()
+    if len(data) > 5 * 1024 * 1024:
+        raise HTTPException(413, "图片太大（上限 5MB）")
+    if not _sniff_image(data):
+        raise HTTPException(415, "只支持 JPG / PNG / WebP 图片")
+    if kind == "avatar":
+        chars = list(s.characters or [])
+        c = next((x for x in chars if x.get("id") == target_id), None)
+        if not c:
+            raise HTTPException(404, "这个剧本里没有该角色")
+    else:
+        if not any((l.get("id") == target_id) for l in (s.locations or [])):
+            raise HTTPException(404, "这个剧本里没有该地点")
+    # the play UI loads bg by the fixed `{id}.jpg` convention → always save as .jpg
+    # (browsers sniff real content; the extension is just the lookup key)
+    path = _media_dir(kind) / f"{target_id}.jpg"
+    path.write_bytes(data)
+    url = f"/scene/{'avatar' if kind == 'avatar' else 'bg'}/{target_id}.jpg"
+    if kind == "avatar":
+        c["avatar_url"] = url
+        s.characters = chars
+        flag_modified(s, "characters")
+        snap = (db.query(StorySnapshot).filter(StorySnapshot.story_id == s.id)
+                .order_by(StorySnapshot.version.desc()).first())
+        if snap and (snap.content or {}).get("story"):
+            for sc in snap.content["story"].get("characters", []):
+                if sc.get("id") == target_id:
+                    sc["avatar_url"] = url
+            flag_modified(snap, "content")
+        db.commit()
+    return {"url": url}

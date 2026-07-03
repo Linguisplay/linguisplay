@@ -100,6 +100,10 @@
     <div class="muted">核心玩法：秘密分层碎片，按「好感/章节/追问次数」解锁。retrieval_key 是给玩家追问时匹配的关键词（脱敏，别写剧透）。</div>
     <div id="secrets"></div>
 
+    <h2>🖼 媒体（照片与背景）</h2>
+    <div class="muted">给角色上传照片、给地点上传背景图（JPG/PNG/WebP，≤5MB）——会替换 AI 生成的图。先保存草稿才有可上传的对象。</div>
+    <div id="media"></div>
+
     <h2>结局 <button class="sm" onclick="addEnding()">+ 加结局</button></h2>
     <div class="muted">结局是<b>可达成的里程碑</b>，不是游戏结束——玩家在<b>最后一幕</b>按好感高低触发对应结局（取满足条件里最高级的：真＞普通＞坏），<b>之后仍能留在世界里继续探索、甚至养更高好感解锁更好的结局</b>。只有「死亡」是真正终结。死亡/坏结局也会在玩家做出致命举动时由 AI 当场触发。建议至少配一个「普通结局」兜底（好感≥0）。</div>
     <div id="endings"></div>
@@ -160,7 +164,46 @@ function openEditor(){
   f_title.value=story.title||""; f_oneliner.value=story.one_liner||""; f_synopsis.value=story.synopsis||"";
   f_world.value=story.world_long||""; f_tropes.value=(story.trope_tags||[]).join(", "); f_vis.value=story.visibility||"private";
   f_mature.checked=!!story.mature;
-  renderChars(); renderActs(); renderSecrets(); renderEndings();
+  renderChars(); renderActs(); renderSecrets(); renderEndings(); renderMedia();
+}
+
+// ── media uploads: your own photos & backdrops ──
+function mediaRow(kind, id, name, img){
+  const cur = img ? `<img src="${img}?t=${Date.now()}" style="width:44px;height:44px;object-fit:cover;border-radius:8px;vertical-align:middle;margin-right:8px" onerror="this.style.display='none'">`
+                  : `<span class="muted" style="margin-right:8px">（暂无图）</span>`;
+  return `<div style="margin:6px 0">${cur}<b>${name||"(未命名)"}</b>
+    <input type="file" accept="image/jpeg,image/png,image/webp" style="margin-left:10px"
+           onchange="uploadMedia('${kind}','${id}',this)">
+    <span class="muted" id="up_${kind}_${id}"></span></div>`;
+}
+function renderMedia(){
+  const el = document.getElementById("media");
+  if (!el) return;
+  if (!story.id){ el.innerHTML = '<div class="muted">保存草稿后即可上传。</div>'; return; }
+  let h = "<h3 style='margin:8px 0 2px'>角色照片</h3>";
+  h += (story.characters||[]).filter(c=>c.id).map(c=>mediaRow("avatar", c.id, c.name, c.avatar_url)).join("")
+       || '<div class="muted">先添加角色。</div>';
+  h += "<h3 style='margin:12px 0 2px'>地点背景</h3>";
+  const locs = story.locations || [];
+  h += locs.filter(l=>l.id).map(l=>mediaRow("bg", l.id, l.name, `/scene/bg/${l.id}.jpg`)).join("")
+       || '<div class="muted">这个剧本没有作者地图（地点目前在 seed 里配置）。</div>';
+  el.innerHTML = h;
+}
+async function uploadMedia(kind, id, input){
+  const f = input.files && input.files[0];
+  const msg = document.getElementById(`up_${kind}_${id}`);
+  if (!f || !story.id) return;
+  msg.textContent = "上传中…";
+  const fd = new FormData();
+  fd.append("kind", kind); fd.append("target_id", id); fd.append("file", f);
+  try {
+    const r = await fetch(`${API}/stories/${story.id}/upload`, { method:"POST", credentials:"include", body: fd });
+    const out = await r.json();
+    if (!r.ok) throw new Error(out.detail || "失败");
+    if (kind === "avatar") { const c = (story.characters||[]).find(x=>x.id===id); if (c) c.avatar_url = out.url; }
+    msg.textContent = "✓ 已上传";
+    renderMedia();
+  } catch(e) { msg.textContent = "✗ " + e.message; }
 }
 
 // ── characters ──
