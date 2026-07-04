@@ -223,6 +223,9 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
     # 18+ permission pinned at run start (story is mature AND player is age-gated 18+ at
     # signup). Stored on the run so the engine can permit adult content this playthrough.
     state["mature"] = bool((content.get("story") or {}).get("mature"))
+    # 🔞 sandbox worlds are player-defined, so 18+ is a per-run choice there too
+    if runtime.sandbox_on(content) and body.mature:
+        state["mature"] = True
     # ARCHITECTURAL INVARIANT: every run has a current location, so the spatial system (place
     # anchor / movement / emergent locations) works for ALL stories — map-less ones get a
     # starting place synthesized from their opening setting.

@@ -421,6 +421,9 @@ class RunCreate(BaseModel):
     # 🏖 sandbox only: the worldview the player defines at run start (their private
     # copy of the story runs on it; ignored for normal authored stories)
     worldview: str = ""
+    # 🔞 sandbox only: per-run 18+ opt-in (players are already DOB-gated 18+ at signup;
+    # authored stories keep using their story-level mature flag instead)
+    mature: bool = False
 
 
 class Beat(BaseModel):
