@@ -231,6 +231,10 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
     # locations), and we must never mutate the shared published snapshot.
     content = copy.deepcopy(content)
 
+    # 🔞 decided up front so the conjured cast can carry the tone from birth
+    mature_run = bool((content.get("story") or {}).get("mature")) \
+        or (runtime.sandbox_on(content) and body.mature)
+
     # 🏖 sandbox: the player DEFINES the world at run start — their private copy runs on
     # that worldview, and opens with a small cast conjured from it (grows forever in play)
     if runtime.sandbox_on(content):
@@ -238,7 +242,7 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
             wv = body.worldview.strip()[:2000]
             content["story"]["world_long"] = wv
             content["story"]["world_facts"] = wv[:400]
-        runtime.seed_sandbox_cast(content)
+        runtime.seed_sandbox_cast(content, mature=mature_run)
 
     # validate the chosen role (character mode) against the story's PLAYABLE characters —
     # the story is authored from the protagonist's POV; embodying an antagonist/late-arrival
@@ -259,10 +263,8 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
         runtime.sync_real_clock(content, state)
     # 18+ permission pinned at run start (story is mature AND player is age-gated 18+ at
     # signup). Stored on the run so the engine can permit adult content this playthrough.
-    state["mature"] = bool((content.get("story") or {}).get("mature"))
-    # 🔞 sandbox worlds are player-defined, so 18+ is a per-run choice there too
-    if runtime.sandbox_on(content) and body.mature:
-        state["mature"] = True
+    # 🔞 pinned per-run (story-authored, or the sandbox per-run opt-in — decided above)
+    state["mature"] = mature_run
     # ARCHITECTURAL INVARIANT: every run has a current location, so the spatial system (place
     # anchor / movement / emergent locations) works for ALL stories — map-less ones get a
     # starting place synthesized from their opening setting.

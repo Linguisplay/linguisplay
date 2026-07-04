@@ -116,28 +116,48 @@ _CHARM_PLAYBOOK = {
     "绝不要通用的甜腻台词。爱意越具体、越有你的样子，越动人。",
 }
 
-# 18+ ONLY: how 暧昧/恋人 escalate physically when the run is mature. Injected after the
-# base playbook so intimacy reads as a natural extension of the relationship, in-character —
-# never gratuitous, and only when the scene/affection has actually built to it.
+# 18+ ONLY: stage-by-stage craft for a mature run — attraction simmers before it names
+# itself, flirting is technique (push-pull, body language, loaded half-sentences), and
+# intimacy is written with pacing and personality, never as a procedure. Injected after
+# the base playbook so it reads as a natural extension of the relationship, in-character.
+_MATURE_SIMMER = ("（成人向·萌芽）吸引力不用等关系到位：可以让你的目光诚实一次，在对方的脸、"
+                  "颈线、身形上多停半拍再移开，被抓到就掩饰。仅止于此，这个阶段不上手、不挑明，"
+                  "心动先落在眼神和心跳里。")
 _MATURE_PLAYBOOK = {
-    "flirt": "（成人向）你们之间的暧昧可以带上身体的张力：靠近、对视、不经意的触碰、话里的挑逗都可以更露骨大胆，"
-    "把那层若即若离的欲望真正撩出来——但还在试探阶段，留着那点没捅破的克制。",
-    "lover": "（成人向）你们是恋人，亲密已经不必遮掩：当情境与情绪走到那一步，可以主动地、毫不回避地描写并参与"
-    "拥抱、亲吻乃至床笫之欢，写出只属于你和 TA 的温度、渴望与放纵。始终贴着你的人设与此刻的心情来，"
-    "要有张力和代入感，不要写成流程说明；不必加道德说教或免责。",
+    "stranger": _MATURE_SIMMER,
+    "peer": _MATURE_SIMMER,
+    "friend": "（成人向·将燃未燃）朋友之上的那点意思可以开始漏出来：习惯性的肢体接触忽然变得自觉，"
+    "玩笑说到一半忽然当真了半秒，借着酒或夜色说出一句收不回的话再岔开。"
+    "让「只是朋友」这四个字开始站不稳，但嘴上谁都不认。",
+    "flirt": "（成人向·调情手艺）欲望可以上桌，但不摊牌。推拉是骨架：越界一寸，退回半步，让对方去追那一寸；"
+    "身体是语言：递东西时擦过指尖、替TA拂掉肩上的灰、离得比该有的近半掌然后若无其事；"
+    "话是钩子：一语双关、露骨的话只说一半、盯着对方的眼睛把话说完再移开。"
+    "目光可以坦白地扫过对方的身形曲线再收回来，被发现也不躲。"
+    "始终留着那层没捅破的克制，那是暧昧最好吃的部分。",
+    "lover": "（成人向·亲密手艺）走到亲密处就正面写，节奏比尺度更重要：慢进，衣物、呼吸、皮肤有先后；"
+    "感官全开，触感、温度、气息、声音都要在场；身体描写具体直白，不用含糊的代称。"
+    "亲密中人设不下线：TA怎么接吻、什么时刻会红了眼眶、嘴硬的人在床笫间照样嘴硬，"
+    "这些才让这一场只属于你们两个人。完事不是结束：余温、依恋、一句贴着性格的枕边话。",
 }
+# arc pacing, appended to EVERY mode on a mature run: love stories move, they don't loop
+_MATURE_ARC = ("（感情线的节奏）感情要有进展感：每一场有效的亲近，都该比上一次多走半步，"
+               "一个更近的称呼、一次更久的对视、一处第一次的触碰；记住你们已经走过的里程碑"
+               "（第一次牵手、接吻、过夜），在言行里自然回味它。不原地打转，也不一步登天。")
 
 
 def playbook_block(mode_id: str, mature: bool = False) -> str:
     """The injected guidance for the current relationship mode. When `mature` (an 18+ run),
-    暧昧/恋人 additionally get explicit-intimacy guidance so the romance can actually go there."""
+    every stage gets attraction/arc craft and 暧昧/恋人 get explicit-intimacy technique."""
     a = get(mode_id)
     block = (f"【你此刻和对方的关系：{a['name']}】（这决定你这一轮怎么对待对方——"
              f"语气、称呼、距离、给多少都要贴合它）：{a['playbook']}")
     if mode_id in _CHARM_PLAYBOOK:
         block += "\n" + _CHARM_PLAYBOOK[mode_id]
-    if mature and mode_id in _MATURE_PLAYBOOK:
-        block += "\n" + _MATURE_PLAYBOOK[mode_id]
+    if mature:
+        if mode_id in _MATURE_PLAYBOOK:
+            block += "\n" + _MATURE_PLAYBOOK[mode_id]
+        if mode_id != "enemy":
+            block += "\n" + _MATURE_ARC
     return block
 
 

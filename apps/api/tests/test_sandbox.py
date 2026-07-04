@@ -171,6 +171,19 @@ def test_start_locations_are_unique_per_run():
     assert len(ids) == 2
 
 
+def test_mature_playbook_carries_craft_and_arc():
+    from app.engine import relationships
+    # every stage on a mature run gets the arc-pacing line (except enemies)
+    assert "感情线的节奏" in relationships.playbook_block("friend", mature=True)
+    assert "感情线的节奏" in relationships.playbook_block("stranger", mature=True)
+    assert "感情线的节奏" not in relationships.playbook_block("enemy", mature=True)
+    # flirting gets technique, intimacy gets pacing; none of it leaks into SFW runs
+    assert "调情手艺" in relationships.playbook_block("flirt", mature=True)
+    assert "亲密手艺" in relationships.playbook_block("lover", mature=True)
+    for mode in ("stranger", "friend", "flirt", "lover"):
+        assert "成人向" not in relationships.playbook_block(mode, mature=False)
+
+
 def test_linter_warns_on_ignored_machinery():
     content = {"story": {"id": "s", "sandbox": {"enabled": True},
                          "characters": [{"id": "a", "name": "甲"}],

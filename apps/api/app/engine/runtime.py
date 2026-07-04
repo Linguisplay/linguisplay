@@ -380,7 +380,8 @@ def sync_real_clock(content: dict[str, Any], state: dict[str, Any]) -> dict[str,
     return clock_view(content, state)
 
 
-def seed_sandbox_cast(content: dict[str, Any], llm: LLM | None = None) -> None:
+def seed_sandbox_cast(content: dict[str, Any], llm: LLM | None = None,
+                      mature: bool = False) -> None:
     """🏖 the sandbox opens ALIVE: conjure a small starting cast from the player's
     worldview (this run's private copy owns them; more will be born in play).
     Deterministic fallback guarantees at least one person to meet."""
@@ -389,7 +390,7 @@ def seed_sandbox_cast(content: dict[str, Any], llm: LLM | None = None) -> None:
         return
     llm = llm or get_llm()
     try:
-        out = llm.generate({"sandbox_cast": True,
+        out = llm.generate({"sandbox_cast": True, "mature": bool(mature),
                             "worldview": (story.get("world_long") or "")[:1200]}) or {}
     except Exception:
         out = {}
