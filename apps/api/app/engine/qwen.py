@@ -231,6 +231,8 @@ def _build_system(prompt: dict[str, Any]) -> str:
         if cond.get("keepsakes"):
             bits.append(f"你一直带着TA送你的{'、'.join(cond['keepsakes'][:3])}"
                         "（在合适的时刻可以自然提起或摩挲它，不要刻意）")
+        if cond.get("carrying"):
+            bits.append(f"你随身带着：{'、'.join(cond['carrying'][:4])}（这是你身上实际有的东西）")
         lines.append("")
         lines.append("【你自己的状态】" + "；".join(bits) + "。")
 
@@ -535,6 +537,19 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                                       "若玩家这一轮把TA的随身物品【送给你】（递给你/塞给你/请你收下），"
                                       "由你按人设和你们的关系决定收不收、喜不喜欢，填"
                                       "「物品名|收|喜」「物品名|收|平」或「物品名|拒」；没有则空字符串"}
+            props["item_crafted"] = {"type": "string", "description":
+                                     "若玩家这一轮用随身材料【动手做出了】新东西（捆扎/组装/调配），"
+                                     "填「成品名|用掉的材料、材料」（材料必须都在TA随身物品之列，做成才算）；"
+                                     "否则空字符串"}
+        carrying = [str(n) for n in ((prompt.get("condition") or {}).get("carrying") or [])]
+        if carrying:
+            props["item_taken"] = {"type": "string", "description":
+                                   "若玩家这一轮从在场者手上【抢走/强拿/顺走】了东西且确实得手，"
+                                   "填「物品名|被拿者名字」（物品须是TA确实带着的）；没有则空字符串"}
+            props["item_traded"] = {"type": "string", "description":
+                                    "若这一轮你与玩家谈成了【以物易物】（你按人设和关系决定换不换、"
+                                    "亏不亏得起），填「玩家给出的物品|玩家换得的物品」；没谈成则空字符串。"
+                                    "你身上带着：" + "、".join(carrying)}
     # 🕸 NPC↔NPC judgment: did this scene genuinely move two present characters
     # closer / further apart (a quarrel, a debt repaid, a betrayal witnessed)?
     cast_n = [str(n).strip() for n in (prompt.get("cast") or []) if str(n).strip()]
@@ -945,6 +960,12 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
         out["harmed"] = str(d.get("character_harmed") or "").strip()
     if "gift_received" in d:
         out["gift"] = str(d.get("gift_received") or "").strip()
+    if "item_crafted" in d:
+        out["crafted"] = str(d.get("item_crafted") or "").strip()
+    if "item_taken" in d:
+        out["taken"] = str(d.get("item_taken") or "").strip()
+    if "item_traded" in d:
+        out["trade"] = str(d.get("item_traded") or "").strip()
     if "npc_moves" in d:
         out["npc_moves"] = [{"who": str(m.get("who") or "").strip(),
                              "to": str(m.get("to") or "").strip()}

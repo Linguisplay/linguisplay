@@ -1095,6 +1095,8 @@ async function openCharCard(cid) {
     ${barHtml("亲近", p.closeness, -40, 100, "#8fe0a6")}
     ${barHtml("心动", p.romance, 0, 100, "#ff8fb3")}`}
     ${bio ? `<div class="jh">你所了解的TA</div>${bio}` : ""}
+    ${(p.carrying||[]).length || (p.keepsakes||[]).length ? `<div class="jh">TA带着的</div><div class="clog">${
+      (p.carrying||[]).map(escapeHtml).join("、")}${(p.keepsakes||[]).length ? `<span class="jwho">　🎁 ${p.keepsakes.map(escapeHtml).join("、")}（你送的）</span>` : ""}</div>` : ""}
     ${(p.ties||[]).length ? `<div class="jh">TA与其他人</div>` + p.ties.map(t =>
       `<div class="clog">${({"-2":"⚔️","-1":"💢","1":"🤝","2":"🛡️"})[String(t.stance)] || "·"} ${escapeHtml(t.name)} <span class="jwho">${escapeHtml(t.label || "")}</span></div>`).join("") : ""}
     <div class="jh">TA的秘密</div>${secrets || '<div class="jempty">还一无所知。</div>'}
@@ -1588,7 +1590,13 @@ function showMoments(moments, relDeltas) {
     else if (m.kind === "death") pushToast(`☠️ ${m.name || "有人"} 死了`, "t-press", i++ * 650);
     else if (m.kind === "arrival") pushToast(`👋 新面孔登场：${m.name || ""}`, "t-act", i++ * 650);
     else if (m.kind === "identity") pushToast(`🎖 你的身份变了：${m.text || ""}`, "t-end", i++ * 650);
-    else if (m.kind === "item") pushToast(m.verb === "gained" ? `🎒 获得：${m.name}` : m.verb === "stashed" ? `📦 已存放：${m.name}` : `🎒 失去：${m.name}`, "t-unlock", i++ * 650);
+    else if (m.kind === "item") pushToast(
+      m.verb === "gained" ? `🎒 获得：${m.name}` :
+      m.verb === "stashed" ? `📦 已存放：${m.name}` :
+      m.verb === "crafted" ? `🛠 做出了：${m.name}` :
+      m.verb === "taken" ? `✊ 抢到手：${m.name}（${m.from || "对方"}记住了）` :
+      m.verb === "traded" ? `🔁 换到了：${m.name}（给出${m.gave || ""}）` :
+      `🎒 失去：${m.name}`, m.verb === "taken" ? "t-press" : "t-unlock", i++ * 650);
     else if (m.kind === "event") pushToast(`🌊 ${m.label || "起变故了"}`, "t-act", i++ * 650);
     else if (m.kind === "confront") pushToast({ crit_success: `🃏 一击即中：${m.name}彻底松口了`,
       success: `🃏 对质奏效：${m.name}松了口`, fail: `🃏 ${m.name}扛住了你的对质`,

@@ -1,0 +1,109 @@
+"""Scene interaction verbs: crafting consumes real materials; snatching needs the fate
+roll on your side and the victim remembers; trading swaps both ends for real. NPC
+possessions are lazily seeded from their authored items and visible on the dossier."""
+
+from app.engine import runtime
+
+STORY = {
+    "story": {"id": "s", "tuning": {"turns_per_slot": 0},
+              "characters": [
+                  {"id": "a", "name": "甲", "is_lead": True,
+                   "items": [{"name": "黄铜怀表", "detail": "老物件"},
+                             {"name": "钥匙串"}]},
+              ],
+              "acts": [{"index": 1, "title": "一"}],
+              "locations": [{"id": "hall", "name": "门厅", "detail": "x", "exits": []}],
+              "pressure": {"name": "风声", "ending_id": None, "levels": []}},
+    "secrets": [],
+}
+
+
+class ActLLM:
+    def __init__(self, **fields):
+        self.fields = fields
+        self.risk = fields.pop("risk", 100)
+
+    def generate(self, prompt):
+        if prompt.get("risk_judge"):
+            return {"risk": self.risk}
+        if prompt.get("intro") or prompt.get("observe") or prompt.get("suggest") \
+                or prompt.get("arrive") or prompt.get("farewell") or prompt.get("offscreen"):
+            return {} if (prompt.get("arrive") or prompt.get("farewell")
+                          or prompt.get("offscreen")) else \
+                   {"beats": [{"type": "description", "speaker_name": None, "text": "x"}],
+                    "affinity_delta": 0, "advance_act": False, "ending": None}
+        out = {"beats": [{"type": "dialogue", "speaker_name": prompt.get("speaker_name"), "text": "嗯"}],
+               "affinity_delta": 0, "advance_act": False, "ending": None}
+        if prompt.get("group_mode") in ("primary", None):
+            out.update(self.fields)
+        return out
+
+
+def _st(inv=None):
+    st = runtime.default_state()
+    st["location_id"] = "hall"
+    if inv:
+        st["inventory"] = [{"name": n} for n in inv]
+    return st
+
+
+def test_crafting_consumes_materials_or_refuses():
+    out = runtime.run_turn(STORY, _st(["麻绳", "竹竿"]), {"name": "我"}, "把它们绑成一根撬棍",
+                           channel="say", llm=ActLLM(crafted="简易撬棍|麻绳、竹竿", next_speakers=[]))
+    names = [i["name"] for i in out["state"]["inventory"]]
+    assert names == ["简易撬棍"]
+    assert any(m.get("verb") == "crafted" for m in out["moments"])
+    # a missing material voids the whole attempt — nothing is consumed
+    out2 = runtime.run_turn(STORY, _st(["麻绳"]), {"name": "我"}, "做撬棍",
+                            channel="say", llm=ActLLM(crafted="简易撬棍|麻绳、竹竿", next_speakers=[]))
+    assert [i["name"] for i in out2["state"]["inventory"]] == ["麻绳"]
+
+
+def test_crafting_respects_a_failed_roll(monkeypatch):
+    monkeypatch.setattr(runtime, "_roll_check",
+                        lambda risk: {"risk": risk, "roll": 99, "outcome": "fail"})
+    out = runtime.run_turn(STORY, _st(["麻绳", "竹竿"]), {"name": "我"}, "绑一根撬棍",
+                           channel="do", llm=ActLLM(risk=50, crafted="简易撬棍|麻绳、竹竿",
+                                                    next_speakers=[]))
+    assert {i["name"] for i in out["state"]["inventory"]} == {"麻绳", "竹竿"}
+
+
+def test_snatch_transfers_and_the_victim_remembers(monkeypatch):
+    monkeypatch.setattr(runtime, "_roll_check",
+                        lambda risk: {"risk": risk, "roll": 1, "outcome": "success"})
+    out = runtime.run_turn(STORY, _st(), {"name": "我"}, "一把夺过他的怀表",
+                           channel="do", llm=ActLLM(risk=40, taken="黄铜怀表|甲",
+                                                    next_speakers=[]))
+    st = out["state"]
+    assert any(i["name"] == "黄铜怀表" for i in st["inventory"])
+    assert all(i["name"] != "黄铜怀表" for i in runtime.char_items(STORY, st, "a"))
+    assert st["rel"]["a"]["closeness"] < 5                      # it cost the relationship
+    assert st["pressure"] == 8                                  # and made noise
+    assert any("抢走" in e["text"] for e in st["rel_log"]["a"])
+    # a failed roll = no transfer, whatever the model claims
+    monkeypatch.setattr(runtime, "_roll_check",
+                        lambda risk: {"risk": risk, "roll": 99, "outcome": "fail"})
+    out2 = runtime.run_turn(STORY, _st(), {"name": "我"}, "再抢一次",
+                            channel="do", llm=ActLLM(risk=40, taken="钥匙串|甲",
+                                                     next_speakers=[]))
+    assert all(i["name"] != "钥匙串" for i in out2["state"]["inventory"])
+
+
+def test_trade_swaps_both_ends_for_real():
+    out = runtime.run_turn(STORY, _st(["银簪"]), {"name": "我"}, "用银簪换你的怀表如何",
+                           channel="say", llm=ActLLM(trade="银簪|黄铜怀表", next_speakers=[]))
+    st = out["state"]
+    assert [i["name"] for i in st["inventory"]] == ["黄铜怀表"]
+    their = [i["name"] for i in runtime.char_items(STORY, st, "a")]
+    assert "银簪" in their and "黄铜怀表" not in their
+    assert st["rel"]["a"]["closeness"] > 5                      # a fair deal builds rapport
+    # trading something you don't have refuses cleanly
+    out2 = runtime.run_turn(STORY, _st(), {"name": "我"}, "拿金子换",
+                            channel="say", llm=ActLLM(trade="金锭|钥匙串", next_speakers=[]))
+    assert out2["state"]["inventory"] == []
+
+
+def test_possessions_visible_on_the_dossier():
+    st = _st()
+    prof = runtime.character_profile(STORY, st, "a")
+    assert prof["carrying"] == ["黄铜怀表", "钥匙串"]

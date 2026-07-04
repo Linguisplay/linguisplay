@@ -439,6 +439,16 @@ def char_hp(state: dict[str, Any], cid: str | None) -> str:
     return ((state.get("char_sim") or {}).get(cid) or {}).get("hp") or "healthy"
 
 
+def char_items(content: dict[str, Any], state: dict[str, Any], cid: str) -> list[dict[str, Any]]:
+    """A character's CURRENT possessions (lazily seeded from their authored items).
+    These are real objects in the world: they can be gifted, snatched, or traded."""
+    sim = _sim(state, cid)
+    if "items" not in sim:
+        c = _char_by_id(content, cid)
+        sim["items"] = [dict(i) for i in ((c or {}).get("items") or []) if i.get("name")]
+    return sim["items"]
+
+
 def _carried_mood(state: dict[str, Any], cid: str | None) -> str:
     """🎭 the emotional state the last scene left this character in — carried into the
     next one unless a full day has passed (time cools most things)."""
@@ -2189,6 +2199,11 @@ def rel_log(state: dict[str, Any], char_id: str | None, act: int, kind: str, tex
     state["rel_log"] = log
 
 
+def _re_split_mats(s: str) -> list[str]:
+    import re as _re
+    return _re.split(r"[、，,+和/]", s or "")
+
+
 def _inv_find(items: list, name: str) -> int:
     """Index of an item matching `name` leniently, else -1."""
     n = (name or "").strip()
@@ -2303,6 +2318,7 @@ def character_profile(content: dict[str, Any], state: dict[str, Any],
         "keepsakes": [k.get("name") for k in
                       (((state.get("char_sim") or {}).get(char_id) or {})
                        .get("keepsakes") or [])],       # 🎁 gifts they kept
+        "carrying": [i.get("name") for i in char_items(content, state, char_id)],
         "log": list((state.get("rel_log") or {}).get(char_id) or []),
         "bio": [b for b in bio_open if b], "bio_next_at": bio_next,
         "closeness": closeness, "romance": int(scores.get("romance", 0)),
@@ -3106,7 +3122,9 @@ def run_turn_stream(
                           "mood": _carried_mood(state, sp_id),
                           "keepsakes": [k.get("name") for k in
                                         (((state.get("char_sim") or {}).get(sp_id) or {})
-                                         .get("keepsakes") or [])]},
+                                         .get("keepsakes") or [])],
+                          "carrying": [i.get("name")
+                                       for i in char_items(content, state, sp_id)]},
             "cast": others,
             # in a broadcast, non-primary characters may stay silent and never narrate
             "group_mode": ("primary" if is_primary else "member") if broadcast else None,
@@ -3366,6 +3384,63 @@ def run_turn_stream(
                 log.append({"act": old_act, "text": idt})
                 state["identity_log"] = log
                 moments.append({"kind": "identity", "text": idt})
+            # 🛠 CRAFT: the player made something with their own materials — every
+            # material must be in the pocket; a failed fate roll voids the attempt
+            cr = (directed.get("crafted") or "").strip()
+            if cr and not observer \
+                    and not (dice and dice.get("outcome") in ("fail", "crit_fail")):
+                cr_name, _, cr_mats = cr.partition("|")
+                mats = [m.strip() for m in _re_split_mats(cr_mats) if m.strip()]
+                inv = state.get("inventory") or []
+                if cr_name.strip() and mats and all(_inv_find(inv, m) >= 0 for m in mats):
+                    used = [(_inv_remove(state, m) or {}).get("name") for m in mats]
+                    _inv_add(state, cr_name.strip(), "用" + "、".join(u for u in used if u) + "做的")
+                    moments.append({"kind": "item", "verb": "crafted", "name": cr_name.strip()})
+            # ✊ SNATCH: the player took something off a character BY FORCE — only a
+            # successful fate roll (or an unresisted grab) makes it stick; the victim
+            # remembers, the relationship pays, the story's pressure feels the noise
+            tk = (directed.get("taken") or "").strip()
+            if tk and not observer \
+                    and not (dice and dice.get("outcome") in ("fail", "crit_fail")):
+                tk_item, _, tk_who = tk.partition("|")
+                victim_t = next((c for c in scene_characters(content, state)
+                                 if c.get("id") != pcid and c.get("name")
+                                 and (c["name"] in tk_who or tk_who.strip() in c["name"])), None)
+                if victim_t:
+                    their = char_items(content, state, victim_t["id"])
+                    ti = _inv_find(their, tk_item.strip())
+                    if ti >= 0:
+                        it = their.pop(ti)
+                        _inv_add(state, it.get("name", ""), it.get("detail", ""))
+                        vid = victim_t["id"]
+                        old_s = rel_all.get(vid) or relationships.new_scores()
+                        rel_all[vid] = relationships.apply_deltas(old_s, -8, 0, tun)
+                        rel_log(state, vid, old_act, "hurt",
+                                f"你从TA手里抢走了{it.get('name')}。TA记住了。")
+                        moments.append({"kind": "item", "verb": "taken",
+                                        "name": it.get("name"), "from": victim_t.get("name")})
+                        if pcfg:
+                            state["pressure"] = min(99, int(state.get("pressure", 0)) + 8)
+            # 🔁 TRADE: a struck bargain — both sides must actually hold their ends
+            tr = (directed.get("trade") or "").strip()
+            if tr and not observer and sp_id:
+                parts = tr.split("|")
+                if len(parts) >= 2:
+                    give_n, get_n = parts[0].strip(), parts[1].strip()
+                    their = char_items(content, state, sp_id)
+                    gi = _inv_find(state.get("inventory") or [], give_n)
+                    ti = _inv_find(their, get_n)
+                    if gi >= 0 and ti >= 0:
+                        mine = _inv_remove(state, give_n)
+                        theirs = their.pop(ti)
+                        their.append(mine)
+                        _inv_add(state, theirs.get("name", ""), theirs.get("detail", ""))
+                        old_s = rel_all.get(sp_id) or relationships.new_scores()
+                        rel_all[sp_id] = relationships.apply_deltas(old_s, 2, 0, tun)
+                        rel_log(state, sp_id, old_act, "gift",
+                                f"你用{mine.get('name')}换了TA的{theirs.get('name')}。")
+                        moments.append({"kind": "item", "verb": "traded",
+                                        "name": theirs.get("name"), "gave": mine.get("name")})
             # 🎁 GIFT: the player handed the speaker something of theirs — the receiver
             # decided (in character) whether to take it and how it landed; kept gifts
             # become keepsakes they carry and remember
