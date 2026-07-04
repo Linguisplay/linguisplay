@@ -44,8 +44,10 @@ def _ensure_columns() -> None:
     wanted = {"stories": [("endings", "JSON DEFAULT '[]'"), ("world_facts", "TEXT"),
                           ("locations", "JSON DEFAULT '[]'"), ("mature", "INTEGER DEFAULT 0"),
                           ("tuning", "JSON DEFAULT '{}'"), ("pressure", "JSON"),
-                          ("clock", "JSON"), ("phone", "JSON")],
-              "beats": [("present_ids", "JSON")]}
+                          ("clock", "JSON"), ("phone", "JSON"),
+                          ("verdict", "JSON")],
+              "beats": [("present_ids", "JSON"), ("mood", "TEXT")],
+              "story_meta": [("cards", "JSON DEFAULT '[]'")]}
     insp = inspect(engine)
     with engine.begin() as conn:
         for table, cols in wanted.items():

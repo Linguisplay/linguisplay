@@ -125,6 +125,21 @@
   .hero-p { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; font-size: 12.5px; color: #aab2c4; line-height: 1.6; }
   .hero-p b { color: #dfe4f0; }
   .scStats { margin-top: 5px; font-size: 12px; color: #c9a86a; }
+  #verdictbar { flex: 0 0 auto; margin: 6px 16px 0; padding: 8px 12px; border-radius: 10px; background: #261a1acc; border: 1px solid #573434; color: #f0d9d9; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+  #verdictbar button { margin-left: auto; background: #6b2f2f; border: 1px solid #8a4444; color: #ffe3e3; border-radius: 9px; padding: 5px 12px; cursor: pointer; white-space: nowrap; }
+  #verdictov { position: fixed; inset: 0; z-index: 80; background: rgba(0,0,0,.6); display: grid; place-items: center; }
+  #verdictov .jcard { width: min(520px, 94vw); max-height: 84vh; overflow-y: auto; background: #1a1216; border: 1px solid #573444; border-radius: 14px; padding: 16px 18px; }
+  #verdictov .vprompt { font-size: 15px; color: #f2e6ea; line-height: 1.7; margin: 8px 0 2px; }
+  #verdictov .vopts { display: flex; flex-direction: column; gap: 7px; margin-top: 10px; }
+  #verdictov .vopt { text-align: left; font-size: 13px; border-radius: 10px; padding: 10px 12px; cursor: pointer; background: #2c2028; border: 1px solid #4a3444; color: #eadfe6; line-height: 1.5; }
+  #verdictov .vopt:hover:not([disabled]) { background: #3a2a35; }
+  #verdictov .vopt[disabled] { opacity: .4; cursor: default; text-decoration: line-through; }
+  .bubble .mood { margin-top: 5px; font-size: 10.5px; color: #b9a6d6; opacity: .85; letter-spacing: .5px; border-top: 1px dashed #ffffff18; padding-top: 3px; }
+  .smeta .cwall { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+  .smeta .ccard { display: inline-flex; flex-direction: column; background: #241f2e; border: 1px solid #3c3450; border-radius: 8px; padding: 3px 8px; font-size: 11.5px; color: #d9d2e8; max-width: 150px; }
+  .smeta .ccard small { color: #8a839c; font-size: 9.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .smeta .ccard.k-moment { border-color: #4a3f2e; background: #2a2620; color: #e8dcc2; }
+  .smeta .ccard.k-place { border-color: #2c4233; background: #1f2a20; color: #cfe6d4; }
   /* relationship tag + follow control under each in-scene character */
   .castitem .rel { font-size: 10px; padding: 0 4px; border-radius: 6px; line-height: 1.5; white-space: nowrap; }
   .rel-stranger { color:#9aa0ad; background:#2a2d36; } .rel-peer { color:#cfd6e6; background:#2b3142; }
@@ -317,6 +332,7 @@
     <div id="cast"></div>
     <div id="placebar" class="hidden"></div>
     <div id="promisebar" class="hidden"></div>
+    <div id="verdictbar" class="hidden"></div>
     <div id="goalbar" class="hidden"></div>
     <div id="hintbar" class="hidden"></div>
     <div id="pressurebar" class="hidden"></div>
@@ -464,10 +480,10 @@ async function chooseRole(storyId) {
   hide("pick"); show("role");
 }
 // 🌱 cross-run progress: the persistent ending gallery + achievements + NG+ perk picker
-let chosenPerk = null;
+let chosenPerk = null, chosenCarry = null;
 async function renderStoryMeta(storyId) {
   const el = document.getElementById("storyMeta");
-  el.innerHTML = ""; chosenPerk = null;
+  el.innerHTML = ""; chosenPerk = null; chosenCarry = null;
   let m;
   try { m = await j(`/stories/${storyId}/meta`); } catch (e) { return; }
   const bits = [];
@@ -481,10 +497,29 @@ async function renderStoryMeta(storyId) {
         `<label class="perk"><span><input type="radio" name="perk" ${p.id===null?"checked":""} data-perk="${p.id||""}">` +
         `${escapeHtml(p.name)}</span><small>${escapeHtml(p.desc||"")}</small></label>`).join("") + `</div>`;
   }
-  if (!bits.length && !perks) return;
-  el.innerHTML = `<div class="smeta">${bits.join(" · ")}${perks}</div>`;
+  // 🃏 the card collection this story has minted for you across runs
+  let cardsHtml = "";
+  const cards = m.cards || [];
+  if (cards.length) {
+    const K = { character: "👤", place: "📍", moment: "✨" };
+    const chips = cards.map(c =>
+      `<span class="ccard k-${c.kind}" title="${escapeHtml(c.text||"")}">${K[c.kind]||"🃏"} ${escapeHtml(c.name)}${c.kind==="moment" ? `<small>${escapeHtml((c.text||"").slice(0,18))}</small>` : ""}</span>`).join("");
+    cardsHtml = `<div class="cwall"><span class="muted">🃏 你在这个故事里铸下的（${cards.length}）：</span>${chips}</div>`;
+    const carriable = cards.filter(c => c.kind === "character");
+    if (m.ng_plus && carriable.length) {
+      cardsHtml += `<div class="perks"><span class="muted">👤 带一位旧识入局：</span>` +
+        [{ id: null, name: "不带" }].concat(carriable).map(c =>
+          `<label class="perk"><span><input type="radio" name="carry" ${c.id===null?"checked":""} data-cid="${c.id||""}">` +
+          `${escapeHtml(c.name)}</span><small>${escapeHtml((c.text||"上一世的旧识").slice(0,20))}</small></label>`).join("") + `</div>`;
+    }
+  }
+  if (!bits.length && !perks && !cardsHtml) return;
+  el.innerHTML = `<div class="smeta">${bits.join(" · ")}${perks}${cardsHtml}</div>`;
   el.querySelectorAll("input[name=perk]").forEach(r => {
     r.onchange = () => { chosenPerk = r.dataset.perk || null; };
+  });
+  el.querySelectorAll("input[name=carry]").forEach(r => {
+    r.onchange = () => { chosenCarry = r.dataset.cid || null; };
   });
 }
 function backToStories() { hide("role"); show("pick"); }
@@ -494,7 +529,7 @@ function editCurrentStory() { if (currentStoryId) location.href = `/studio?story
 async function startRun(storyId, mode="character", playerCharacterId=null, playerCharacterName=null) {
   const run = await j("/runs", { method:"POST", body: JSON.stringify({
     story_id: storyId, persona_id: personaId, mode, player_character_id: playerCharacterId,
-    perk: chosenPerk }) });
+    perk: chosenPerk, carry_card_id: chosenCarry }) });
   if (chosenPerk) pushToast(`🌱 二周目优势生效：${chosenPerk === "veteran" ? "故人" : "直觉"}`, "t-act", 400);
   await enterRun(run);
 }
@@ -580,9 +615,18 @@ function renderBeat(b) {
     node = document.createElement("div"); node.className = "desc"; node.textContent = b.text;
   } else {
     node = makeRow("left", b.speaker_name || "", b.text, true, true);
+    if (b.mood) attachMood(node, b.mood);
   }
   chat.appendChild(node); chat.scrollTop = chat.scrollHeight;
   return node;
+}
+// 📟 心象仪: the speaker's TRUE inner state, pinned under the bubble (may contradict the words)
+function attachMood(row, mood) {
+  const bub = row.querySelector(".bubble");
+  if (!bub) return;
+  const m = document.createElement("div"); m.className = "mood";
+  m.textContent = `📟 ${mood}`;
+  bub.appendChild(m);
 }
 // `spoken` = wrap the text in 「」 and style it as speech, so a dialogue bubble is
 // unmistakably "words said out loud" vs the narration band.
@@ -1062,6 +1106,7 @@ function renderState(st) {
   if (st.location !== undefined) renderPlace(st.location);
   if (st.promises !== undefined) renderPromises(st.promises);
   if (st.phone_unread !== undefined) setPhoneBadge(st.phone_unread);
+  if (st.verdict !== undefined) renderVerdictBar(st.verdict);
 }
 function clockChip() {
   if (!curClock || !curClock.label) return "";
@@ -1098,6 +1143,50 @@ function renderPlace(loc) {
   }
   el.classList.remove("hidden");
 }
+// 🔍 指认结案: the case can be CLOSED — the player commits, with limited attempts
+let curVerdict = null;
+function renderVerdictBar(v) {
+  curVerdict = v || null;
+  const el = document.getElementById("verdictbar");
+  if (!v || v.solved || v.failed || !v.attempts_left) { el.classList.add("hidden"); return; }
+  el.innerHTML = `🔍 <b>可以结案了。</b>把你认定的真相说出来（还有 ${v.attempts_left} 次机会）<button onclick="openVerdict()">正式指认</button>`;
+  el.classList.remove("hidden");
+}
+function openVerdict() {
+  const v = curVerdict;
+  if (!v || !runId) return;
+  let ov = document.getElementById("verdictov");
+  if (!ov) {
+    ov = document.createElement("div"); ov.id = "verdictov";
+    ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+    document.body.appendChild(ov);
+  }
+  const opts = (v.options || []).map(o => {
+    const tried = (v.tried || []).includes(o.id);
+    return `<button class="vopt" data-oid="${escapeHtml(o.id)}" ${tried ? "disabled" : ""}>${escapeHtml(o.label)}${tried ? "（已排除）" : ""}</button>`;
+  }).join("");
+  ov.innerHTML = `<div class="jcard" onclick="event.stopPropagation()">
+    <div class="jbar"><b>🔍 结案指认</b><button class="ghost" onclick="document.getElementById('verdictov').remove()">再想想</button></div>
+    <p class="vprompt">${escapeHtml(v.prompt)}</p>
+    <p class="jwho">指认是正式的。剩余 ${v.attempts_left} 次机会，说错是有代价的。</p>
+    <div class="vopts">${opts}</div></div>`;
+  ov.querySelectorAll(".vopt:not([disabled])").forEach(b => {
+    b.onclick = () => submitVerdict(b.dataset.oid, b.textContent);
+  });
+}
+async function submitVerdict(oid, label) {
+  const ov = document.getElementById("verdictov"); if (ov) ov.remove();
+  try {
+    const res = await j(`/runs/${runId}/verdict`, { method:"POST", body: JSON.stringify({ option_id: oid }) });
+    renderBeat({ author:"player", type:"dialogue", text:`（你正式指认：${label}）` });
+    renderBeat({ author:"engine", type:"description", text: res.text || "" });
+    if (res.correct) pushToast("🔍 指认成立，真相已然大白", "t-end", 300);
+    else pushToast(`🔍 指认不成立${res.attempts_left > 0 ? `，还剩 ${res.attempts_left} 次机会` : ""}`, "t-press", 300);
+    if (res.ending) showEnding(res.ending);
+    renderVerdictBar(res.verdict);
+  } catch (e) { pushToast("⚠️ " + escapeHtml(e.message), "", 3000); }
+}
+
 // 🤝 open appointments hang visibly in the bar — the come-back hook you can't unsee
 let lastPromises = [];
 function renderPromises(list) {
@@ -1212,6 +1301,7 @@ async function playBeat(b) {
     hideTyping();
     const txt = makeTypingRow("left", b.speaker_name || "");
     await typeInto(txt, b.text, 22);
+    if (b.mood) { const row = txt.closest(".row"); if (row) attachMood(row, b.mood); }
   }
   chat.scrollTop = chat.scrollHeight;
 }
@@ -1353,6 +1443,7 @@ async function streamTurn(url, bodyObj) {
         else if (ev.event === "goal") { renderGoal(ev.goal); }
         else if (ev.event === "place") { renderPlace(ev.location); }
         else if (ev.event === "promises") { renderPromises(ev.promises); }
+        else if (ev.event === "verdict") { renderVerdictBar(ev.verdict); }
         else if (ev.event === "progress") { renderProgress(ev.progress); }
         else if (ev.event === "hint") { renderHint(ev.hint); }
         else if (ev.event === "moments") { afterPlay.moments = ev.moments; afterPlay.relDeltas = ev.rel_deltas; }

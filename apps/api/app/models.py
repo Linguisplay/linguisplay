@@ -107,6 +107,9 @@ class Story(Base):
     clock: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # 📱 小手机 config {enabled: bool, device: "手机"|"传呼机"|"口信"…}; None = defaults
     phone: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 🔍 指认结案 config {prompt, options:[{id,label,correct,text?}], attempts, act_min,
+    # fail_ending_id}; None = the story runs no verdict
+    verdict: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # 18+ flag. When on, the engine permits explicit adult content (still refusing
     # minors). Players are already age-gated 18+ at signup (DOB gate).
@@ -216,6 +219,8 @@ class StoryMeta(Base):
 
     endings_achieved: Mapped[list] = mapped_column(JSON, default=list)  # ending ids
     achievements: Mapped[list] = mapped_column(JSON, default=list)      # [{id,name,desc}]
+    # 🃏 minted cards [{id,kind,name,text,payload?}] — emergent chars/places + 名场面
+    cards: Mapped[list] = mapped_column(JSON, default=list)
     runs_ended: Mapped[int] = mapped_column(Integer, default=0)         # runs that reached ≥1 ending
 
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
@@ -239,6 +244,8 @@ class Beat(Base):
     # of history (they only "remember" scenes they were in). None on legacy beats = witnessed
     # by everyone (backward-compatible, no isolation for old runs).
     present_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # 📟 心象仪: the speaker's judged TRUE inner state when this line landed (nullable)
+    mood: Mapped[str | None] = mapped_column(String(24), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 

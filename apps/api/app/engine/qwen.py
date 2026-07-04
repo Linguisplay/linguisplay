@@ -450,6 +450,12 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
         props["romance"] = {"type": "integer", "description": "默认0；仅当对方调情/示好/制造暧昧/情话且你被触动才给正分，范围-2~5，恋爱线"}
     props["advance"] = {"type": "boolean", "description": advance_hint}
     required.append("advance")
+    # 📟 心象仪: the character's OWN true inner state after this line (UI gauge, Dead
+    # Meat's Mind Reader trick) — what they actually feel, not what they show.
+    if not is_think:
+        props["self_state"] = {"type": "string", "description":
+                               "三五个字：这句话说完，你【内心真实】的状态（可与表面相反），"
+                               "如：强装镇定、心里发虚、被戳中了、动了真情、起了杀心；平静无波就填空字符串"}
     if has_map and not is_member and not is_think:
         props["move_invite"] = {"type": "string", "description": "若你这轮提出或答应带玩家去某处，填那个地点名（可以是【可去通路】里的，也可以是对话里自然浮现的新地点；旁白只写到起身相邀为止）；否则填空字符串"}
     if not observer and not is_member and not is_think:
@@ -879,6 +885,8 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
         out["next_speakers"] = [str(x).strip() for x in (d.get("next_speakers") or []) if str(x).strip()]
     if "time_skip" in d:
         out["time_skip"] = str(d.get("time_skip") or "").strip()
+    if "self_state" in d:
+        out["self_state"] = str(d.get("self_state") or "").strip()
     if "npc_rel_shifts" in d:
         shifts = []
         for s in (d.get("npc_rel_shifts") or []):

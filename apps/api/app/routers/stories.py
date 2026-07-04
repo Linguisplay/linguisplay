@@ -57,6 +57,7 @@ def _to_story(s: StoryModel) -> Story:
         pressure=s.pressure,
         clock=s.clock,
         phone=s.phone,
+        verdict=s.verdict,
         completion=_completion(s),
     )
 
@@ -138,6 +139,7 @@ def create_story(
     data.pop("pressure", None)
     data.pop("clock", None)
     data.pop("phone", None)
+    data.pop("verdict", None)
     s = StoryModel(
         owner_id=user.id,
         characters=[c.model_dump() for c in (body.characters or [])],
@@ -148,6 +150,7 @@ def create_story(
         pressure=body.pressure,
         clock=body.clock,
         phone=body.phone,
+        verdict=body.verdict,
         **data,
     )
     db.add(s)
@@ -191,6 +194,7 @@ def get_story_meta(story_id: str, user: User = Depends(current_user),
         "runs_ended": int(meta.runs_ended or 0) if meta else 0,
         "ng_plus": bool(meta and (meta.endings_achieved or [])),
         "perks": [{"id": k, **v} for k, v in _rt.PERKS.items()],
+        "cards": list(meta.cards or []) if meta else [],
     }
 
 
@@ -219,6 +223,8 @@ def update_story(
         s.clock = data.pop("clock")
     if "phone" in data:
         s.phone = data.pop("phone")
+    if "verdict" in data:
+        s.verdict = data.pop("verdict")
     for k, v in data.items():
         setattr(s, k, v)
     db.commit()

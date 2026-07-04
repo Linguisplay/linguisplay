@@ -228,10 +228,11 @@ SECRETS = [
 # Authored endings. Conditions are checked at the final act; best match wins
 # (真＞普通＞坏). Death/坏 also fire dynamically when the player does something fatal.
 ENDINGS = [
+    # 🔍 真结局现在要求玩家亲口指认真相（verdict_solved）——知道，还要敢说出来。
     {"id": "end_true", "kind": "true", "title": "天亮之后",
      "text": "六点整，市电恢复，安全门'咔'地弹开。走廊里只剩你们四个——和镜子里，那个终于转过身、"
              "对你轻轻点头的影子。你知道了他是谁，也知道了：今晚能走出去，是因为他放你们走。",
-     "condition": {"affinity_min": 18, "act_min": 0}},
+     "condition": {"affinity_min": 18, "act_min": 0, "required_flags": {"verdict_solved": True}}},
     {"id": "end_normal", "kind": "normal", "title": "谁也没再提起",
      "text": "灯亮了，门开了，没有人愿意回头看那面镜子。第二天大家照常上班，仿佛什么都没发生过——"
              "只是再没人敢在这层楼加班到十一点以后。",
@@ -247,7 +248,32 @@ ENDINGS = [
              "再没真正离开过这层楼。",
      # worst tier: low rapport — you never earned the answer, so it never let you fully go
      "condition": {"affinity_min": 0, "act_min": 0}},
+    # 🔍 指认失败专用（trigger:"verdict"）：把错的名字说出口，是会被记住的。
+    {"id": "end_wrong", "kind": "bad", "trigger": "verdict", "title": "指错的人",
+     "text": "你把那个名字说出口的一瞬间，镜子里所有的影子同时转过头来。你指错了。"
+             "错误的指认像一份签了名的邀请函：从今晚起，第六个人的位置空了出来，而名单上写的是你的名字。"
+             "六点门开，走出去的还是五个人，只是其中一个，再也照不进镜子。",
+     "condition": {"affinity_min": 0, "act_min": 0}},
 ]
+
+# 🔍 指认结案: 问了一整夜，最后你必须亲口说出：镜子里的第六个人，到底是谁。两次机会。
+VERDICT = {
+    "prompt": "六点前，你必须说出真相：镜子里多出来的第六个人，究竟是谁？",
+    "attempts": 2,
+    "act_min": 3,
+    "fail_ending_id": "end_wrong",
+    "options": [
+        {"id": "v_zhou", "correct": True,
+         "label": "是老周。他早已死在这层楼，刷卡记录里那第五个名字就是他自己",
+         "text": "话音落下，应急灯稳稳地亮了一格。镜子里，那个始终背对着你的影子，肩膀松了下来。"
+                 "老周摘下帽子，朝你露出这一夜第一个真正的笑：'总算，有人肯把话说明白了。'"},
+        {"id": "v_su", "label": "是苏婷。她在撒谎，从头到尾都在演"},
+        {"id": "v_chen", "label": "是陈工。他对配电间熟悉得过了头"},
+        {"id": "v_yang", "label": "是小杨。他的恐惧是装出来的"},
+        {"id": "v_ghost", "label": "是某个和这栋楼有关的外来怨灵，跟在场的人无关"},
+        {"id": "v_none", "label": "根本没有第六个人，是镜子的错觉"},
+    ],
+}
 
 
 def get_or_create_demo_user(db) -> User:
@@ -316,6 +342,7 @@ def main() -> None:
             endings=ENDINGS,
             locations=LOCATIONS,
             pressure=PRESSURE,
+            verdict=VERDICT,
             # 一夜之内的故事：昼夜时钟会破坏「这一晚出不去」的设定，关掉
             tuning={"turns_per_slot": 0},
             visibility="public",

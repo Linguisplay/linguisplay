@@ -237,6 +237,7 @@ class StoryInput(BaseModel):
     pressure: Optional[dict] = None  # ⚠️ pressure meter {name,hint,ending_id,levels:[{at,note}]}
     clock: Optional[dict] = None  # ⏳ {deadline_day, deadline_text, deadline_ending_id}
     phone: Optional[dict] = None  # 📱 {enabled, device: "手机"|"传呼机"|"口信"…}
+    verdict: Optional[dict] = None  # 🔍 {prompt, options, attempts, act_min, fail_ending_id}
 
 
 class Story(BaseModel):
@@ -261,6 +262,7 @@ class Story(BaseModel):
     pressure: Optional[dict] = None
     clock: Optional[dict] = None
     phone: Optional[dict] = None
+    verdict: Optional[dict] = None
     completion: float = 0.0
 
 
@@ -350,6 +352,7 @@ class RunState(BaseModel):
     clock: Optional[dict[str, Any]] = None  # ⏳ {day,slot,label,deadline?} (None = no clock)
     promises: list[dict[str, Any]] = []  # 🤝 open appointments [{name,what,when,place,romantic}]
     phone_unread: int = 0  # 📱 unread incoming messages (badge)
+    verdict: Optional[dict[str, Any]] = None  # 🔍 the case-closing panel (None until unlocked)
 
 
 class Run(BaseModel):
@@ -391,6 +394,9 @@ class RunCreate(BaseModel):
     # 🌱 NG+ start perk ("veteran" | "instinct"); only honored once this story has been
     # completed (any ending reached) by this user at least once
     perk: Optional[str] = None
+    # 🃏 a character card (from the cross-run collection) to carry into this run —
+    # an old acquaintance from a previous life walks back in. NG+ only.
+    carry_card_id: Optional[str] = None
 
 
 class Beat(BaseModel):
@@ -399,6 +405,7 @@ class Beat(BaseModel):
     speaker_name: Optional[str] = None
     text: str = ""
     author: str = "engine"
+    mood: Optional[str] = None  # 📟 the speaker's judged true inner state (心象仪)
 
 
 class PlayIn(BaseModel):
@@ -435,3 +442,8 @@ class ConfrontIn(BaseModel):
 class PhoneSendIn(BaseModel):
     # 📱 a text message the player sends from the 信息 app
     text: str
+
+
+class VerdictIn(BaseModel):
+    # 🔍 the formal accusation the player commits to
+    option_id: str

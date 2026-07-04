@@ -263,6 +263,25 @@ def lint_story(content: dict[str, Any]) -> list[Issue]:
         if dd and not _clock_on(content):
             warn("deadline_no_clock", "clock",
                  "设了 deadline_day 但时钟已关闭 (tuning.turns_per_slot=0) —— 大限永远不会到。")
+
+    # — 🔍 verdict —
+    vd = _story(content).get("verdict") or {}
+    if vd:
+        opts = vd.get("options") or []
+        if not any(o.get("correct") for o in opts):
+            err("verdict_no_answer", "verdict", "指认选项里没有任何 correct=true 的正确答案。")
+        ids = [o.get("id") for o in opts if o.get("id")]
+        if len(ids) != len(set(ids)) or len(ids) != len(opts):
+            err("verdict_bad_options", "verdict", "指认选项的 id 缺失或重复。")
+        ending_ids = {e.get("id") for e in _endings(content) if e.get("id")}
+        feid = vd.get("fail_ending_id")
+        if feid and feid not in ending_ids:
+            err("verdict_bad_ending", "verdict", f"fail_ending_id={feid} 不是已知结局。")
+        gated = any((e.get("condition") or {}).get("required_flags", {}).get("verdict_solved")
+                    for e in _endings(content))
+        if not gated:
+            warn("verdict_ungated", "verdict",
+                 "没有任何结局以 verdict_solved 为条件——指认对了也换不来更好的结局。")
     return issues
 
 

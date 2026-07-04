@@ -177,6 +177,7 @@ DEFAULT_TUNING = {
     "turns_per_slot": 6,        # ⏳ turns per 时段 (晨/午/夜); a day = 3 slots. 0 = clock off
     "confront_base": 55,        # 🃏 evidence-confrontation base success %, + closeness//2
     "confront_cost": 3,         # 🃏 closeness cost of a successful confrontation (fail ×2, 大失败 ×3)
+    "mind_reader": 1,           # 📟 心象仪: characters' true inner state shown on bubbles (0 = off)
     "promise_keep_bonus": 6,    # 🤝 closeness for showing up to a promise (romantic: 心动 too)
     "promise_break_cost": 4,    # 🤝 closeness lost for standing someone up
 }
@@ -2218,7 +2219,118 @@ def compute_achievements(content: dict[str, Any], state: dict[str, Any]) -> list
         out.append({"id": "interrogator", "name": "铁齿铜牙", "desc": "三次对质撬开真相"})
     if tun["turns_per_slot"] > 0 and int((state.get("clock") or {}).get("day", 1) or 1) <= 2:
         out.append({"id": "swift", "name": "雷厉风行", "desc": "两天之内便抵达结局"})
+    if (state.get("flags") or {}).get("verdict_solved") \
+            and len(state.get("verdict_tried") or []) == 1:
+        out.append({"id": "sharp_eye", "name": "一锤定音", "desc": "第一次指认就命中真相"})
     return out
+
+
+# ── 🃏 万物铸卡 (card minting) ───────────────────────────────────────────────────
+# Hidden-Door-style cross-run assets: what a run BIRTHED (emergent characters, emergent
+# places) and its 名场面 (relationship highlights) mint into a permanent per-story card
+# collection. A character card can be carried into an NG+ run — an old acquaintance
+# from a previous life walks back in.
+def mint_cards(content: dict[str, Any], state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Cards this run has earned. Ids are stable so re-minting dedups; capped."""
+    cards: list[dict[str, Any]] = []
+    for c in _characters(content):
+        if c.get("generated") and c.get("name"):
+            cards.append({"id": f"char:{c.get('id')}", "kind": "character",
+                          "name": c["name"],
+                          "text": (c.get("persona_text") or c.get("role") or "")[:60],
+                          "payload": {"name": c.get("name"), "role": c.get("role") or "",
+                                      "persona_text": (c.get("persona_text") or "")[:200]}})
+    for l in _locations(content):
+        if l.get("generated") and l.get("name"):
+            cards.append({"id": f"place:{l.get('id')}", "kind": "place",
+                          "name": l["name"], "text": (l.get("detail") or "")[:60]})
+    names = {c.get("id"): c.get("name") for c in _characters(content)}
+    for cid, entries in (state.get("rel_log") or {}).items():
+        for e in entries or []:
+            if e.get("kind") in ("rel_up", "confront", "promise", "death"):
+                txt = (e.get("text") or "").strip()
+                cards.append({"id": f"m:{cid}:{e.get('act')}:{e.get('kind')}:{txt[:12]}",
+                              "kind": "moment", "name": names.get(cid) or "",
+                              "text": txt[:80]})
+    return cards[:20]
+
+
+# ── 🔍 指认结案 (the verdict) ────────────────────────────────────────────────────
+# Dead-Meat-style closure: ask anything, all game long — but the case ends with the
+# player FORMALLY committing to a conclusion, with limited attempts. Knowledge stops
+# being a scrapbook and becomes an exam. Authored per story (story.verdict):
+#   {prompt, options: [{id, label, correct, text?}], attempts, act_min,
+#    fail_ending_id}  — a correct call sets flags.verdict_solved (gate your 真结局 on
+# it); burning every attempt fires fail_ending_id (trigger:"verdict").
+def verdict_cfg(content: dict[str, Any]) -> dict[str, Any] | None:
+    v = (content.get("story") or {}).get("verdict") or {}
+    return v if (v.get("prompt") or "").strip() and (v.get("options") or []) else None
+
+
+def verdict_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
+    """What the UI shows: None until the act unlocks it; never leaks which option is
+    correct. Solved/failed runs see their outcome."""
+    v = verdict_cfg(content)
+    if not v or (state.get("mode") or "character") == "god":
+        return None
+    act_min = int(v.get("act_min") or 0) or _max_act_index(content)
+    if int(state.get("act", 1) or 1) < act_min:
+        return None
+    tried = list(state.get("verdict_tried") or [])
+    attempts = max(1, int(v.get("attempts") or 2))
+    return {"prompt": (v.get("prompt") or "").strip(),
+            "options": [{"id": o.get("id"), "label": (o.get("label") or "").strip()}
+                        for o in v.get("options") or [] if o.get("id")],
+            "attempts_left": max(0, attempts - len(tried)),
+            "tried": tried,
+            "solved": bool((state.get("flags") or {}).get("verdict_solved")),
+            "failed": bool(state.get("verdict_failed"))}
+
+
+def submit_verdict(content: dict[str, Any], state: dict[str, Any],
+                   option_id: str) -> dict[str, Any]:
+    """One formal accusation. Correct → flags.verdict_solved (endings gate on it) and
+    the authored reveal text. Wrong → an attempt burns; the last wrong one fires the
+    authored fail ending (trigger:"verdict"). Raises ValueError when not submittable."""
+    view = verdict_view(content, state)
+    if not view:
+        raise ValueError("还不到结案的时候")
+    if view["solved"]:
+        raise ValueError("你已经指认过了，案子结了")
+    if view["failed"] or view["attempts_left"] <= 0:
+        raise ValueError("你的机会用完了")
+    v = verdict_cfg(content)
+    opt = next((o for o in v.get("options") or [] if o.get("id") == option_id), None)
+    if not opt:
+        raise ValueError("没有这个选项")
+    if option_id in (state.get("verdict_tried") or []):
+        raise ValueError("这个结论你已经指认过了")
+    state["verdict_tried"] = list(state.get("verdict_tried") or []) + [option_id]
+    if opt.get("correct"):
+        flags = dict(state.get("flags") or {})
+        flags["verdict_solved"] = True
+        state["flags"] = flags
+        text = (opt.get("text") or "").strip() or "真相在这一刻拼合完整，再没有对不上的地方。"
+        return {"correct": True, "text": text, "attempts_left": view["attempts_left"] - 1,
+                "ending": None}
+    left = view["attempts_left"] - 1
+    text = (opt.get("text") or "").strip() or "不对。有什么地方对不上，这个结论立不住。"
+    ending = None
+    if left <= 0:
+        state["verdict_failed"] = True
+        authored = _ending_by_id(content, v.get("fail_ending_id")) or {}
+        ending = {"id": authored.get("id") or "verdict_fail",
+                  "kind": authored.get("kind", "bad"),
+                  "title": authored.get("title") or "错判",
+                  "text": authored.get("text") or "",
+                  "terminal": bool(authored.get("kind") == "death")}
+        achieved = set(state.get("achieved_endings") or [])
+        achieved.add(ending["id"])
+        state["achieved_endings"] = sorted(x for x in achieved if x)
+        state["ending"] = ending
+        if ending["terminal"]:
+            state["ended"] = True
+    return {"correct": False, "text": text, "attempts_left": left, "ending": ending}
 
 
 def _secret_has_newly(content: dict[str, Any], sid, newly) -> bool:
@@ -2841,6 +2953,13 @@ def run_turn_stream(
             prior_said = {_norm_line(s.get("text", "")) for s in said_this_turn}
             d_beats = [b for b in d_beats if _norm_line(b.get("text", "")) not in prior_said
                        and not _too_similar(b.get("text", ""), said_this_turn)]
+        # 📟 心象仪: the speaker's own judged inner state rides on their LAST line
+        mood = (directed.get("self_state") or "").strip()[:12]
+        if mood and tun["mind_reader"]:
+            for b in reversed(d_beats):
+                if b.get("type") == "dialogue":
+                    b["mood"] = mood
+                    break
         for b in d_beats:
             said_this_turn.append({
                 "speaker": b.get("speaker_name") or "旁白",
@@ -3383,6 +3502,7 @@ def run_turn_stream(
         "clock_view": clock_view(content, state),  # ⏳ {day,slot,label,deadline?} or None
         "promises": promises_view(content, state),  # 🤝 open appointments, soonest first
         "phone_unread": phone_threads_view(content, state)["unread"],  # 📱 badge count
+        "verdict": verdict_view(content, state),  # 🔍 case-closing panel (None until unlocked)
 
         "pending_choice": state.get("pending_choice"),  # unanswered key-moment decision
         "rel_deltas": rel_deltas,  # per-char ♥ movement this turn (UI floating chips)

@@ -16,7 +16,7 @@ from ..models import Run as RunModel
 from ..models import Story as StoryModel
 from ..models import StoryMeta, StorySnapshot, User
 from ..schemas import (Beat, ChooseIn, ConfrontIn, FollowIn, MoveIn, PhoneSendIn, PlayIn, Run,
-                       RunCreate, RunState, RunSummary)
+                       RunCreate, RunState, RunSummary, VerdictIn)
 from .stories import _to_secret, _to_story
 
 router = APIRouter(prefix="/runs", tags=["runs"])
@@ -64,6 +64,7 @@ def _to_run(r: RunModel) -> Run:
             clock=runtime.clock_view(r.pinned_content or {}, st),
             promises=runtime.promises_view(r.pinned_content or {}, st),
             phone_unread=runtime.phone_threads_view(r.pinned_content or {}, st)["unread"],
+            verdict=runtime.verdict_view(r.pinned_content or {}, st),
         ),
         cast=cast,
         created_at=r.created_at,
@@ -71,7 +72,8 @@ def _to_run(r: RunModel) -> Run:
 
 
 def _to_beat(b: BeatModel) -> Beat:
-    return Beat(id=b.id, type=b.type, speaker_name=b.speaker_name, text=b.text, author=b.author)
+    return Beat(id=b.id, type=b.type, speaker_name=b.speaker_name, text=b.text, author=b.author,
+                mood=b.mood)
 
 
 def _persona_dict(p: PersonaModel) -> dict:
@@ -198,6 +200,26 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
             base = runtime.relationships.new_scores()
             state["rel"] = {c["id"]: {**base, "closeness": base["closeness"] + runtime.VETERAN_CLOSENESS}
                             for c in (content.get("story") or {}).get("characters", []) if c.get("id")}
+    # 🃏 carry a minted character card in: they join the cast at the starting place
+    if body.carry_card_id:
+        meta = (db.query(StoryMeta)
+                .filter(StoryMeta.user_id == user.id, StoryMeta.story_id == story.id).first())
+        if not meta or not (meta.endings_achieved or []):
+            raise HTTPException(403, "先走到一个结局，才解锁二周目携带")
+        card = next((c for c in (meta.cards or [])
+                     if c.get("id") == body.carry_card_id and c.get("kind") == "character"), None)
+        if not card:
+            raise HTTPException(400, "没有这张可携带的人物卡")
+        p = card.get("payload") or {}
+        import uuid as _uuid
+        (content.get("story") or {}).setdefault("characters", []).append({
+            "id": f"gen_{_uuid.uuid4().hex[:8]}",
+            "name": p.get("name") or card.get("name") or "旧识",
+            "role": (p.get("role") or "上一世的旧识")[:24],
+            "persona_text": p.get("persona_text") or card.get("text") or "",
+            "relation_default": "friend",
+            "generated": True,
+        })
     run = RunModel(
         owner_id=user.id,
         story_id=story.id,
@@ -341,7 +363,7 @@ def play(
                     eb = BeatModel(
                         run_id=run_id, seq=seq, type=payload.get("type", "description"),
                         speaker_name=payload.get("speaker_name"), text=payload.get("text", ""),
-                        author="engine", present_ids=present_ids,
+                        author="engine", present_ids=present_ids, mood=payload.get("mood"),
                     )
                     db2.add(eb)
                     db2.commit()
@@ -374,6 +396,7 @@ def play(
                     yield _event({"event": "pressure", "pressure": final["pressure_view"]})
                 yield _event({"event": "place", "location": final.get("location")})
                 yield _event({"event": "promises", "promises": final.get("promises", [])})
+                yield _event({"event": "verdict", "verdict": final.get("verdict")})
                 if final.get("pending_choice"):
                     yield _event({"event": "choice", "choice": final["pending_choice"]})
                 if final.get("move_request"):
@@ -422,6 +445,11 @@ def _bump_story_meta(db2: Session, run: RunModel, content: dict, final: dict) ->
     new = [a for a in runtime.compute_achievements(content, state) if a["id"] not in have]
     if new:
         meta.achievements = list(meta.achievements or []) + new
+    # 🃏 mint this run's cards into the permanent collection (dedup by id, capped)
+    got = {c.get("id") for c in (meta.cards or [])}
+    minted = [c for c in runtime.mint_cards(content, state) if c["id"] not in got]
+    if minted:
+        meta.cards = (list(meta.cards or []) + minted)[-60:]
     db2.commit()
     return new
 
@@ -640,6 +668,50 @@ def choose(run_id: str, body: ChooseIn, user: User = Depends(current_user), db: 
     r.state = st
     db.commit()
     return {"label": res.get("label", ""), "flag": res.get("flag")}
+
+
+@router.post("/{run_id}/verdict")
+def verdict(run_id: str, body: VerdictIn, user: User = Depends(current_user),
+            db: Session = Depends(get_db)):
+    """🔍 指认结案: the player formally commits to a conclusion (limited attempts).
+    Correct sets flags.verdict_solved (endings gate on it); the last wrong attempt
+    fires the authored fail ending. The verdict scene is appended as beats."""
+    r = _own_run(run_id, user, db)
+    if (r.state or {}).get("ended"):
+        raise HTTPException(409, "这局已经结束了")
+    st = dict(r.state or {})
+    content = r.pinned_content or {}
+    try:
+        res = runtime.submit_verdict(content, st, body.option_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    seq = (r.beats[-1].seq + 1) if r.beats else 0
+    present_ids = [c.get("id") for c in runtime.scene_characters(content, st) if c.get("id")]
+    opt = next((o for o in (runtime.verdict_cfg(content) or {}).get("options", [])
+                if o.get("id") == body.option_id), {})
+    db.add(BeatModel(run_id=r.id, seq=seq, type="dialogue", speaker_name=None,
+                     text=f"（你正式指认：{opt.get('label', '')}）", author="player",
+                     present_ids=present_ids))
+    db.add(BeatModel(run_id=r.id, seq=seq + 1, type="description", speaker_name=None,
+                     text=res.get("text", ""), author="engine", present_ids=present_ids))
+    if res.get("ending"):
+        e = res["ending"]
+        head = "—— 你死了 ——" if e.get("kind") == "death" else "—— 坏结局 ——"
+        db.add(BeatModel(run_id=r.id, seq=seq + 2, type="description", speaker_name=None,
+                         text=f"{head}  {e.get('title', '')}".strip(), author="engine",
+                         present_ids=present_ids))
+        if e.get("text"):
+            db.add(BeatModel(run_id=r.id, seq=seq + 3, type="description", speaker_name=None,
+                             text=e["text"], author="engine", present_ids=present_ids))
+    r.state = st
+    flag_modified(r, "state")
+    db.commit()
+    if res.get("ending"):
+        try:
+            _bump_story_meta(db, r, content, {"ending": res["ending"], "state": st})
+        except Exception:
+            pass
+    return {**res, "verdict": runtime.verdict_view(content, st)}
 
 
 @router.post("/{run_id}/leave", status_code=204)
