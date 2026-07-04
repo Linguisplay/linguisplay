@@ -911,7 +911,7 @@ async function openInbox() {
   setPhoneBadge(inbox.unread || 0);
   const rows = (inbox.threads || []).map(t => {
     const dot = t.unread ? `<span class="appdot">${t.unread}</span>` : "";
-    const av = t.avatar_url ? `<img class="pav" src="${t.avatar_url}">`
+    const av = t.avatar_url ? `<img class="pav" src="${t.avatar_url}" onerror="this.style.display='none'">`
                             : `<span class="pav plet" style="background:${avatarColor(t.name)}">${escapeHtml((t.name||"?")[0])}</span>`;
     return `<div class="pthread" data-cid="${escapeHtml(t.char_id)}">${av}<div class="pmeta">
       <div class="pname">${t.dead ? "🕯 " : ""}${escapeHtml(t.name)}${dot}</div>
@@ -961,7 +961,7 @@ async function openContacts() {
   const extra = (cast || []).filter(c => c.id && !storyChars.some(s => s.id === c.id));
   const chars = storyChars.concat(extra);
   const rows = chars.map(c => {
-    const av = c.avatar_url ? `<img class="pav" src="${c.avatar_url}">`
+    const av = c.avatar_url ? `<img class="pav" src="${c.avatar_url}" onerror="this.style.display='none'">`
                             : `<span class="pav plet" style="background:${avatarColor(c.name)}">${escapeHtml((c.name||"?")[0])}</span>`;
     return `<div class="pthread" data-cid="${escapeHtml(c.id)}">${av}<div class="pmeta">
       <div class="pname">${escapeHtml(c.name||"")}</div>
@@ -1113,7 +1113,7 @@ async function openCharCard(cid) {
   const bio = (p.bio || []).map(b => `<div class="jfrag">${escapeHtml(b)}</div>`).join("")
     + (p.bio_next_at != null ? `<div class="jlocked">🔒 关系再近一点（亲近≥${p.bio_next_at}），你会更了解TA…</div>` : "");
   const nextTxt = rel.next && rel.next.name ? `<span class="jwho">（差${rel.next.to_next}到「${rel.next.name}」）</span>` : "";
-  const av = p.avatar_url ? `<img class="cportrait" src="${p.avatar_url}" alt="">`
+  const av = p.avatar_url ? `<img class="cportrait" src="${p.avatar_url}" alt="" onerror="this.style.display=\'none\'">`
                           : `<div class="cportrait cletter" style="background:${avatarColor(p.name)}">${escapeHtml((p.name||"?").slice(0,1))}</div>`;
   const followBtn = (!p.dead && playMode !== "god" && !p.is_lead)
     ? `<button class="ghost" style="font-size:12px;padding:5px 10px" onclick="toggleFollow('${p.id}', ${!p.following}); document.getElementById('charcard').remove()">${p.following ? "🚶同行中 · 分开走" : (p.can_follow ? "邀TA同行" : "🔒关系不够")}</button>` : "";

@@ -54,6 +54,43 @@ def _spawn_location_bg(content: dict, loc: dict | None) -> None:
     threading.Thread(target=work, daemon=True).start()
 
 
+# 🖼 conjured characters get faces too: any generated character without a portrait is
+# pointed at /scene/avatar/{id}.jpg and a daemon thread renders it — same art direction
+# as enrich_portraits.py, same graceful degradation (letter avatar until the image lands).
+_AV_DIR = __import__("pathlib").Path(__file__).resolve().parents[1] / "static" / "scene" / "avatar"
+
+
+def _ensure_char_avatars(content: dict) -> None:
+    story = content.get("story") or {}
+    world = ((story.get("world_long") or "").strip().replace("\n", " "))[:120]
+    for c in story.get("characters") or []:
+        cid, name = c.get("id"), c.get("name")
+        if not cid or not name or not c.get("generated"):
+            continue
+        c["avatar_url"] = f"/scene/avatar/{cid}.jpg"
+        path = _AV_DIR / f"{cid}.jpg"
+        if path.exists():
+            continue
+        bits = "，".join(b for b in (name, c.get("role") or "",
+                                     (c.get("persona_text") or "")[:160]) if b)
+        prompt = (f"{bits}。世界背景：{world}。电影质感人物肖像，胸像特写，正面微侧，"
+                  "目光看向镜头外，写实风格，柔和的侧光，背景虚化，情绪克制内敛，"
+                  "高细节，胶片颗粒感")
+
+        def work(p=path, pr=prompt):
+            try:
+                from ..engine.qwen import generate_image
+                img = generate_image(pr, size="768*768")
+                if img:
+                    _AV_DIR.mkdir(parents=True, exist_ok=True)
+                    p.write_bytes(img)
+            except Exception:
+                pass
+
+        import threading
+        threading.Thread(target=work, daemon=True).start()
+
+
 # ── converters / helpers ──────────────────────────────────
 def _to_run(r: RunModel) -> Run:
     st = r.state or {}
@@ -271,6 +308,8 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
             "relation_default": "friend",
             "generated": True,
         })
+    # 🖼 conjured cast (sandbox opening people, carried-in 旧识) get portraits rendering
+    _ensure_char_avatars(content)
     run = RunModel(
         owner_id=user.id,
         story_id=story.id,
@@ -428,6 +467,7 @@ def play(
                 run.state = final["state"]
                 if final.get("content_mutated"):
                     # the run grew an emergent character — persist its private story copy
+                    _ensure_char_avatars(content)   # 🖼 the newcomer's face starts rendering
                     run.pinned_content = content
                     flag_modified(run, "pinned_content")
                 db2.commit()
