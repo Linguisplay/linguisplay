@@ -893,6 +893,7 @@ async function openPhone() {
   const inner = `<div class="papps">
     <div class="papp" onclick="openInbox()">💬${msgBadge}<small>信息</small></div>
     <div class="papp" onclick="openContacts()">👥<small>通讯录</small></div>
+    <div class="papp" onclick="openBag()">🎒<small>背包</small></div>
     <div class="papp" onclick="openCalendar()">🗓<small>日历</small></div>
     <div class="papp" onclick="document.getElementById('phoneov').remove(); openJournal()">📔<small>备忘录</small></div>
   </div>`;
@@ -949,7 +950,11 @@ async function openContacts() {
   let story = null;
   try { story = await j(`/stories/${currentStoryId}`); } catch (e) {}
   const known = (cast || []).map(c => c.id);
-  const chars = ((story && story.characters) || []).filter(c => c.avatar_url || known.includes(c.id));
+  const storyChars = ((story && story.characters) || []).filter(c => c.avatar_url || known.includes(c.id));
+  // 涌现角色（沙盒开场人物、路上冒出来的人）只活在这一局里，不在发布剧本的名单上 —
+  // 通讯录必须把他们也算进来，不然沙盒的联络簿永远是空的
+  const extra = (cast || []).filter(c => c.id && !storyChars.some(s => s.id === c.id));
+  const chars = storyChars.concat(extra);
   const rows = chars.map(c => {
     const av = c.avatar_url ? `<img class="pav" src="${c.avatar_url}">`
                             : `<span class="pav plet" style="background:${avatarColor(c.name)}">${escapeHtml((c.name||"?")[0])}</span>`;
@@ -961,6 +966,25 @@ async function openContacts() {
   ov.querySelectorAll(".pthread").forEach(el => {
     el.onclick = () => { document.getElementById("phoneov").remove(); openCharCard(el.dataset.cid); };
   });
+}
+// 🎒 背包: what you carry + what you've stashed where (收纳一目了然)
+async function openBag() {
+  let jd = null;
+  try { jd = await j(`/runs/${runId}/journal`); } catch (e) { return; }
+  const inv = (jd.inventory || []).map(i =>
+    `<div class="pthread"><span class="pav plet" style="background:#3a3350">🎒</span><div class="pmeta">
+      <div class="pname">${escapeHtml(i.name||"")}</div>
+      <div class="plast">${escapeHtml(i.detail||"")}</div></div></div>`).join("")
+    || `<div class="jempty">身上空空如也。</div>`;
+  const stash = (jd.stashes || []).map(s =>
+    `<div class="jsec" style="margin-top:6px"><div class="jtitle">📦 存放在「${escapeHtml(s.location||"")}」</div>${
+      (s.items||[]).map(i=>`<div class="jfrag">${escapeHtml(i.name||"")}${i.detail?`<span class="jwho"> · ${escapeHtml(i.detail)}</span>`:""}</div>`).join("")
+    }</div>`).join("");
+  const tip = `<div class="jempty" style="margin-top:10px">收纳：在一个地方说「把××放在这里」；回到那里说「取回××」。</div>`;
+  phoneShell(`<div style="padding:4px 2px">
+    <div class="jtitle" style="margin:4px 0">🎒 随身带着（${(jd.inventory||[]).length}）</div>${inv}
+    ${stash ? `<div class="jtitle" style="margin:12px 0 4px">📦 存放的</div>${stash}` : ""}
+    ${tip}</div>`, "🎒 背包", "openPhone()");
 }
 function openCalendar() {
   const ck = curClock;
@@ -1465,12 +1489,21 @@ function paintBackground() {
     const locUrl = `/scene/bg/${curLocId}.jpg`;
     const im = new Image();
     im.onload = () => { bg.style.backgroundImage = `url(${locUrl})`; };
-    im.onerror = () => paintKeywordBg(scene);  // no AI image for this place → fall back
+    im.onerror = () => {
+      paintKeywordBg(scene);  // no AI image for this place (yet) → fall back
+      // an emergent place renders its background server-side (~10-30s) — check back
+      const lid = curLocId;
+      if (/^loc_(gen|start)_/.test(lid) && (bgRetry[lid] || 0) < 8) {
+        bgRetry[lid] = (bgRetry[lid] || 0) + 1;
+        setTimeout(() => { if (curLocId === lid) paintBackground(); }, 22000);
+      }
+    };
     im.src = locUrl;
   } else {
     paintKeywordBg(scene);
   }
 }
+let bgRetry = {};   // locId → poll attempts while its AI background is still rendering
 function paintKeywordBg(scene) {
   if (!scene || !scene.bg) return;  // gradient stays
   const stem = scene.night ? scene.bg + "_night" : scene.bg;

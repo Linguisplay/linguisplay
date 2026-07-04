@@ -45,6 +45,7 @@ SANDBOXES = [
         "world_facts": "这是一个由玩家在开局定义的世界；以运行时的【世界观/场景设定】为唯一事实基础。",
         "relations_overview": "所有人物都在你踏入这个世界之后才诞生，关系由你亲手织成。",
         "trope_tags": ["沙盒", "开放世界", "现实同步", "永不落幕"],
+        "phone": {"enabled": True, "device": "手机"},
         "tuning": {"world_event_every": 0, "max_new_characters": 12},
     },
     {
@@ -67,6 +68,7 @@ SANDBOXES = [
         "relations_overview": "城寨里的人物在你搬进来之后陆续与你相遇；谁把你当街坊、谁盯上你的押金，"
         "都看你怎么做人。",
         "trope_tags": ["九龙城寨", "港风", "市井", "沙盒", "现实同步"],
+        "phone": {"enabled": True, "device": "传呼机"},
         "tuning": {"world_event_every": 0, "max_new_characters": 12},
     },
     {
@@ -89,6 +91,7 @@ SANDBOXES = [
         "都可以发生。",
         "relations_overview": "同伴与心动对象都在冒险途中相遇；后宫不是白来的，每一份心动都要你亲手挣。",
         "trope_tags": ["异世界", "转生", "后宫", "轻小说", "沙盒"],
+        "phone": {"enabled": True, "device": "传讯水晶"},
         # 后宫向：心动涨幅的衰减放缓一点，其余同款
         "tuning": {"world_event_every": 0, "max_new_characters": 12, "rom_taper_den": 160},
     },
@@ -144,6 +147,7 @@ def main() -> None:
                 endings=[],      # a sandbox has no exits
                 locations=[],    # the start place is synthesized; the map grows emergently
                 sandbox={"enabled": True, "real_time": True},
+                phone=sb.get("phone"),
                 tuning=sb["tuning"],
                 visibility="public",
             )

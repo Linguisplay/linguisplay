@@ -1763,9 +1763,12 @@ class QwenLLM:
         JSON; degrades to {} (runtime seeds a deterministic stranger instead)."""
         wv = (prompt.get("worldview") or "").strip() or "一个由玩家亲手定义的世界。"
         sys = ("你为一个玩家自定义世界观的无尽沙盒剧情设计【开场人物】。只输出一个JSON对象，形如"
-               ' {"characters":[{"name":"名字","role":"身份(≤12字)","persona":"外貌、性格与说话方式(≤80字)"}]}'
+               ' {"characters":[{"name":"名字","role":"身份(≤12字)","persona":"外貌、性格与说话方式(≤80字)",'
+               '"items":["随身物件名|一句细节"]}]}'
                "，共2~3人。要求：人物必须从这个世界观里自然长出来（职业、立场、欲望各不相同），"
-               "至少一人与玩家的到来直接相关；名字要贴合世界观的语感。不要旁白，不要解释。")
+               "至少一人与玩家的到来直接相关；名字要贴合世界观的语感；"
+               "每人配1~2件贴身份的随身物件（它们会成为世界里可送、可换、可被抢的实体）。"
+               "不要旁白，不要解释。")
         try:
             resp = httpx.post(
                 self._url,

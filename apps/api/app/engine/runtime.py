@@ -399,9 +399,20 @@ def seed_sandbox_cast(content: dict[str, Any], llm: LLM | None = None) -> None:
         nm = str(c.get("name") or "").strip().strip("「」\"'")[:12]
         if not nm or any(nm == x.get("name") for x in chars):
             continue
+        # 🎒 conjured people carry real things: gift-able, trade-able, snatch-able
+        items = []
+        for raw in (c.get("items") or [])[:2]:
+            if isinstance(raw, dict):
+                inm, idt = str(raw.get("name") or "").strip(), str(raw.get("detail") or "").strip()
+            else:
+                inm, _, idt = str(raw).partition("|")
+                inm, idt = inm.strip(), idt.strip()
+            if inm:
+                items.append({"name": inm[:16], "detail": idt[:60]})
         chars.append({"id": f"gen_{_uuid.uuid4().hex[:8]}", "name": nm,
                       "role": str(c.get("role") or "").strip()[:24],
                       "persona_text": str(c.get("persona") or "").strip()[:240],
+                      "items": items,
                       "relation_default": "stranger", "generated": True,
                       "is_lead": not chars})
     if not chars:
@@ -620,7 +631,7 @@ def cast_for(content: dict[str, Any], act: int, exclude_id: str | None = None,
     """The addressable cast at this act (offstage/not-yet-arrived/dead excluded). In
     character mode `exclude_id` drops the embodied character (you don't talk to self)."""
     return [
-        {"id": c.get("id"), "name": c.get("name"),
+        {"id": c.get("id"), "name": c.get("name"), "role": c.get("role") or "",
          "is_lead": c.get("is_lead", False), "avatar_url": c.get("avatar_url")}
         for c in present_characters(content, act, _dead_ids(state or {}))
         if c.get("id") != exclude_id
@@ -785,10 +796,14 @@ def ensure_start_location(content: dict[str, Any], state: dict[str, Any],
         out = {}
     name = (out.get("name") or "").strip() or "此处"
     detail = (out.get("detail") or "").strip()
-    loc = {"id": "loc_start", "name": name, "detail": detail, "exits": [], "unlock": {}, "generated": True}
+    import uuid as _uuid
+    # unique per run: generated places get their own AI background image cached by id,
+    # so two different worlds must never share a "loc_start" face
+    lid = "loc_start_" + _uuid.uuid4().hex[:8]
+    loc = {"id": lid, "name": name, "detail": detail, "exits": [], "unlock": {}, "generated": True}
     story.setdefault("locations", []).append(loc)
     content["story"] = story
-    state["location_id"] = "loc_start"
+    state["location_id"] = lid
     return loc
 
 

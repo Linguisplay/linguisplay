@@ -132,19 +132,43 @@ def test_sandbox_cast_is_conjured_with_a_fallback():
     content = {"story": {"id": "s", "sandbox": {"enabled": True}, "characters": [],
                          "world_long": "海边小城"}, "secrets": []}
     runtime.seed_sandbox_cast(content, llm=CastLLM(
-        {"characters": [{"name": "阿箬", "role": "药铺学徒", "persona": "细声细气"},
+        {"characters": [{"name": "阿箬", "role": "药铺学徒", "persona": "细声细气",
+                         "items": ["药杵|磨得发亮", {"name": "碎银"}, "多余的|x"]},
                         {"name": "阿箬"},                    # dupe dropped
                         {"name": "老宋", "role": "码头管事"}]}))
     chars = content["story"]["characters"]
     assert [c["name"] for c in chars] == ["阿箬", "老宋"]
     assert chars[0]["is_lead"] and not chars[1]["is_lead"]
     assert all(c["generated"] for c in chars)
+    # 🎒 conjured people carry real, normalized things (capped at 2)
+    assert chars[0]["items"] == [{"name": "药杵", "detail": "磨得发亮"},
+                                 {"name": "碎银", "detail": ""}]
+    assert runtime.char_items(content, runtime.default_state(), chars[0]["id"])[0]["name"] == "药杵"
     # a silent model still leaves someone to meet
     content2 = {"story": {"id": "s", "sandbox": {"enabled": True}, "characters": []},
                 "secrets": []}
     runtime.seed_sandbox_cast(content2, llm=CastLLM({}))
     assert len(content2["story"]["characters"]) == 1
     assert content2["story"]["characters"][0]["is_lead"]
+
+
+def test_start_locations_are_unique_per_run():
+    # each mapless run gets its OWN start place id, so its AI background never
+    # collides with another world's
+    class PlaceLLM:
+        def generate(self, prompt):
+            assert prompt.get("start_place")
+            return {"name": "码头", "detail": "潮气很重"}
+
+    ids = set()
+    for _ in range(2):
+        content = {"story": {"id": "s", "characters": [], "acts": [{"index": 1}],
+                             "locations": []}, "secrets": []}
+        st = runtime.default_state()
+        loc = runtime.ensure_start_location(content, st, llm=PlaceLLM())
+        assert loc["generated"] and st["location_id"] == loc["id"]
+        ids.add(loc["id"])
+    assert len(ids) == 2
 
 
 def test_linter_warns_on_ignored_machinery():

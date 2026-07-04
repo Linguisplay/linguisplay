@@ -21,6 +21,38 @@ from .stories import _to_secret, _to_story
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
+# 🖼 emergent places deserve a face too: generated locations (sandbox start place,
+# 涌现地点) get an AI background rendered in a daemon thread — never blocks play,
+# skips silently without an API key or when the image is already on disk.
+_BG_DIR = __import__("pathlib").Path(__file__).resolve().parents[1] / "static" / "scene" / "bg"
+
+
+def _spawn_location_bg(content: dict, loc: dict | None) -> None:
+    if not loc or not loc.get("id") or not loc.get("generated"):
+        return
+    path = _BG_DIR / f"{loc['id']}.jpg"
+    if path.exists():
+        return
+    story = content.get("story") or {}
+    era = ((story.get("world_long") or story.get("world_facts") or "")
+           .strip().replace("\n", " "))[:140]
+    prompt = (f"{era} 场景：{loc.get('name', '')}。{(loc.get('detail') or '')[:200]} "
+              "电影感写实场景概念图，强烈氛围与光影，景深，电影级调色，横构图宽幅；"
+              "空镜，画面里没有任何人物，没有文字、字幕或水印。")
+
+    def work():
+        try:
+            from ..engine.qwen import generate_image
+            img = generate_image(prompt)
+            if img:
+                _BG_DIR.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(img)
+        except Exception:
+            pass
+
+    import threading
+    threading.Thread(target=work, daemon=True).start()
+
 
 # ── converters / helpers ──────────────────────────────────
 def _to_run(r: RunModel) -> Run:
@@ -194,7 +226,8 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
     # ARCHITECTURAL INVARIANT: every run has a current location, so the spatial system (place
     # anchor / movement / emergent locations) works for ALL stories — map-less ones get a
     # starting place synthesized from their opening setting.
-    runtime.ensure_start_location(content, state)
+    start_loc = runtime.ensure_start_location(content, state)
+    _spawn_location_bg(content, start_loc)
     # an authored key-moment decision on act 1 greets the player at the door
     state["pending_choice"] = runtime.choice_for_act(content, state, 1)
     # 🎒 the embodied character's authored pocket items start the run with the player
@@ -487,7 +520,8 @@ def move(run_id: str, body: MoveIn, user: User = Depends(current_user), db: Sess
         if body.generate:
             # emergent place: create it for real, wire it in, and move there. This mutates the
             # run's content, so we persist pinned_content below.
-            runtime.generate_and_move(content, st, body.location)
+            new_loc = runtime.generate_and_move(content, st, body.location)
+            _spawn_location_bg(content, new_loc)
             generated = True
         else:
             runtime.apply_move(content, st, body.location)
