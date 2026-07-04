@@ -1374,6 +1374,11 @@ function paintBackground() {
   const scene = curScene || {};
   const mood = scene.mood || "daily";
   bg.style.background = MOOD_GRAD[mood] || MOOD_GRAD.daily;  // gradient base, always set
+  // the shorthand above RESETS size/position/repeat inline (mobile showed the raw
+  // 1280px image pinned top-left) — restore the cover behavior explicitly
+  bg.style.backgroundSize = "cover";
+  bg.style.backgroundPosition = "center";
+  bg.style.backgroundRepeat = "no-repeat";
   if (curLocId) {
     const locUrl = `/scene/bg/${curLocId}.jpg`;
     const im = new Image();
