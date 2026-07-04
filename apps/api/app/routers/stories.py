@@ -159,6 +159,24 @@ def create_story(
     return _to_story(s)
 
 
+_PUBLIC_CHAR_KEYS = ("id", "name", "role", "avatar_url", "is_lead", "playable",
+                     "presence", "appears_from_act", "relation_default")
+
+
+def _public_story_view(out: Story) -> Story:
+    """SPOILER SHIELD: what a PLAYER may see of a story. The play UI needs names, faces
+    and roles — it must never receive the answer key (verdict.correct), ending prose,
+    future-act event scripts, or character agendas/bio layers. The pinned run content
+    keeps the full story server-side; only this public view is trimmed."""
+    out.verdict = None
+    out.endings = []
+    out.acts = [type(a)(index=a.index, title=a.title) for a in (out.acts or [])]
+    out.characters = [type(c)(**{k: getattr(c, k) for k in _PUBLIC_CHAR_KEYS})
+                      for c in (out.characters or [])]
+    out.pressure = None
+    return out
+
+
 @router.get("/{story_id}", response_model=Story)
 def get_story(
     story_id: str,
@@ -168,12 +186,15 @@ def get_story(
     s = db.get(StoryModel, story_id)
     if not s:
         raise HTTPException(404, "story not found")
+    viewer_id = read_session_token(lp_session) if lp_session else None
     # Public sees the published story; only the author may view an unpublished draft.
     if s.visibility != "public" or s.status != "published":
-        viewer_id = read_session_token(lp_session) if lp_session else None
         if viewer_id != s.owner_id:
             raise HTTPException(404, "story not found")
-    return _to_story(s)
+    out = _to_story(s)
+    if viewer_id != s.owner_id:
+        out = _public_story_view(out)
+    return out
 
 
 @router.get("/{story_id}/meta")

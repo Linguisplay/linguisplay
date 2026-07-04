@@ -447,7 +447,10 @@ def _bump_story_meta(db2: Session, run: RunModel, content: dict, final: dict) ->
         meta.achievements = list(meta.achievements or []) + new
     # 🃏 mint this run's cards into the permanent collection (dedup by id, capped)
     got = {c.get("id") for c in (meta.cards or [])}
-    minted = [c for c in runtime.mint_cards(content, state) if c["id"] not in got]
+    got_named = {(c.get("kind"), c.get("name")) for c in (meta.cards or [])}
+    minted = [c for c in runtime.mint_cards(content, state)
+              if c["id"] not in got
+              and not (c["kind"] == "character" and (c["kind"], c["name"]) in got_named)]
     if minted:
         meta.cards = (list(meta.cards or []) + minted)[-60:]
     db2.commit()
@@ -619,7 +622,8 @@ def confront(run_id: str, body: ConfrontIn, user: User = Depends(current_user),
                     eb = BeatModel(run_id=run_id, seq=seq, type=payload.get("type", "description"),
                                    speaker_name=payload.get("speaker_name"),
                                    text=payload.get("text", ""),
-                                   author="engine", present_ids=present_ids)
+                                   author="engine", present_ids=present_ids,
+                                   mood=payload.get("mood"))
                     db2.add(eb)
                     db2.commit()
                     db2.refresh(eb)

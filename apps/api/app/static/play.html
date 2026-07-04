@@ -824,7 +824,7 @@ async function openJournal() {
     ${(jd.stashes||[]).length ? `<div class="jh">📦 存放在各处</div>` + jd.stashes.map(st=>`<div class="jfrag">${escapeHtml(st.location||"")}：${st.items.map(i=>escapeHtml(i.name)).join("、")}</div>`).join("") : ""}
     ${(jd.deaths||[]).length ? `<div class="jh">🕯 逝者</div><div class="jfrag">${jd.deaths.map(escapeHtml).join("、")}</div>` : ""}
     ${(jd.promises||[]).length ? `<div class="jh">🤝 约定</div>` + jd.promises.map(p => {
-      const tag = p.status === "open" ? "⏳" : p.status === "kept" ? "✅" : "💔";
+      const tag = p.status === "open" ? "⏳" : p.status === "kept" ? "✅" : p.status === "void" ? "🕯" : "💔";
       return `<div class="jfrag">${tag} ${escapeHtml(p.when)} · ${escapeHtml(p.what)}<span class="jwho">（${escapeHtml(p.name)}）</span></div>`;
     }).join("") : ""}
     <div class="jh">已揭开的真相</div>${secs}${more}

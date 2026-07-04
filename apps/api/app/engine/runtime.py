@@ -392,6 +392,9 @@ def char_position(content: dict[str, Any], state: dict[str, Any],
     cid = c.get("id")
     if cid and cid in (state.get("following") or []):
         return state.get("location_id") or (locs[0] or {}).get("id")
+    sim0 = (state.get("char_sim") or {}).get(cid) or {}
+    if sim0.get("hp") == "dying" and sim0.get("pos"):
+        return sim0["pos"]  # the dying don't keep their appointments — they lie where they fell
     sched = char_home(c, int(state.get("act", 1) or 1), active_slot(content, state))
     if sched:
         return sched  # includes AWAY
@@ -1818,6 +1821,17 @@ def promises_view(content: dict[str, Any], state: dict[str, Any]) -> list[dict[s
     return out
 
 
+def void_promises_of(state: dict[str, Any], cid: str) -> list[dict[str, Any]]:
+    """A death cancels that character's open promises — no 爽约 penalties from the
+    grave. Returns the voided ones so the caller can mourn them in a beat."""
+    voided = []
+    for pr in state.get("promises") or []:
+        if pr.get("status") == "open" and pr.get("char_id") == cid:
+            pr["status"] = "void"
+            voided.append(pr)
+    return voided
+
+
 def make_promise(content: dict[str, Any], state: dict[str, Any], char: dict[str, Any],
                  pm: dict[str, Any], tun: dict[str, int]) -> dict[str, Any] | None:
     """Record a judged appointment. Refuses: clock off, empty/overlong intent, bad slot,
@@ -1843,8 +1857,16 @@ def make_promise(content: dict[str, Any], state: dict[str, Any], char: dict[str,
           "day": day, "slot": slot, "status": "open"}
     if _promise_index(pr) <= _time_index(state):
         return None  # the promised hour must lie ahead
-    dest = resolve_location(content, str(pm.get("place") or "").strip())
-    pr["location_id"] = dest.get("id") if dest else state.get("location_id")
+    # the meeting must be somewhere the character WILL be: their 作息 at that hour wins
+    # over whatever place was named; an hour they're AWAY can't host a promise at all
+    expected = char_home(char, int(state.get("act", 1) or 1), slot)
+    if expected == AWAY:
+        return None
+    if expected:
+        pr["location_id"] = expected
+    else:
+        dest = resolve_location(content, str(pm.get("place") or "").strip())
+        pr["location_id"] = dest.get("id") if dest else state.get("location_id")
     # a promise made at 暧昧/恋人 warmth is a DATE — the fulfillment scene plays as one
     scores = (state.get("rel") or {}).get(cid) or relationships.new_scores()
     pr["romantic"] = relationships.derive_mode(char, scores, tun) in ("flirt", "lover")
@@ -2579,7 +2601,14 @@ def _confront_gen(content, state, persona, secret, frag, next_locked, target, ll
         "clock": (clock_view(content, state) or {}).get("label", ""),
         "confrontation": {"evidence": ev, "title": title, "outcome": dice["outcome"]},
     })
-    for b in directed.get("beats", []):
+    conf_beats = list(directed.get("beats", []))
+    mood = (directed.get("self_state") or "").strip()[:12]
+    if mood and tun["mind_reader"]:
+        for b in reversed(conf_beats):
+            if b.get("type") == "dialogue":
+                b["mood"] = mood
+                break
+    for b in conf_beats:
         yield emit(b)
     # a successful confrontation may satisfy an act gate — let it open right here
     new_act = old_act
@@ -3163,6 +3192,8 @@ def run_turn_stream(
                         nxt = "dying" if ("重" in hl or "濒" in hl or cur_hp == "hurt") else "hurt"
                         if nxt != cur_hp:
                             set_char_hp(state, hid, nxt)
+                            if nxt == "dying" and state.get("location_id"):
+                                _sim(state, hid)["pos"] = state["location_id"]
                             moments.append({"kind": nxt, "name": hvictim.get("name")})
                             rel_log(state, hid, old_act, "hurt",
                                     f"{hvictim.get('name')} {'重伤濒死' if nxt == 'dying' else '受了伤'}。")
@@ -3176,6 +3207,8 @@ def run_turn_stream(
                                     or (died_ref in c["name"]))), None)
                 if victim and char_hp(state, victim.get("id")) != "dying":
                     set_char_hp(state, victim["id"], "dying")
+                    if state.get("location_id"):
+                        _sim(state, victim["id"])["pos"] = state["location_id"]
                     moments.append({"kind": "dying", "name": victim.get("name")})
                     rel_log(state, victim.get("id"), old_act, "hurt",
                             f"{victim.get('name')} 重伤濒死。")
@@ -3192,6 +3225,10 @@ def run_turn_stream(
                     moments.append({"kind": "death", "name": victim.get("name")})
                     rel_log(state, victim.get("id"), old_act, "death",
                             f"{victim.get('name')} 死了。")
+                    for _vp in void_promises_of(state, victim["id"]):
+                        yield emit({"type": "description", "speaker_name": None,
+                                    "text": f"（你们约好的（{_vp.get('what','')}），"
+                                            "再也没有人来赴了。）"})
             # 🚶 booked NPC moves: the model narrated someone setting off — validate and
             # BOOK it (the turn-end roster diff narrates the departure + destination)
             for mv in (directed.get("npc_moves") or [])[:2]:
@@ -3354,6 +3391,10 @@ def run_turn_stream(
                                           if f != _kid]
                     moments.append({"kind": "death", "name": _kc.get("name")})
                     rel_log(state, _kid, old_act, "death", f"{_kc.get('name')} 死了。")
+                    for _vp in void_promises_of(state, _kid):
+                        yield emit({"type": "description", "speaker_name": None,
+                                    "text": f"（你们约好的（{_vp.get('what','')}），"
+                                            "再也没有人来赴了。）"})
 
     affinity_delta = 0 if is_think else max(tun["affinity_clamp_min"],
                                             min(tun["affinity_clamp_max"], affinity_delta))
