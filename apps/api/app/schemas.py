@@ -309,6 +309,9 @@ class Unlock(BaseModel):
 
 
 class FragmentInput(BaseModel):
+    # authored/stable id (optional): cross-references (act gates, location props/unlocks,
+    # ending conditions) point at fragment ids, so authors may pin them; empty = generated
+    id: Optional[str] = None
     layer: int = 0
     content: str = ""
     retrieval_key: Optional[str] = None

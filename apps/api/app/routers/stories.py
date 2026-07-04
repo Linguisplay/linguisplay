@@ -314,6 +314,18 @@ def enrich(story_id: str, user: User = Depends(current_user), db: Session = Depe
     return {"story_id": s.id, "characters": len(chars), "enriched": enriched}
 
 
+# ── 🧪 story linter: the same logic-rigor checks the seeds run, for the studio ──
+@router.get("/{story_id}/lint")
+def lint_story_draft(story_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Run the engine's story linter on the CURRENT draft rows (owner only). Returns
+    {issues: [{severity, code, where, msg}]} — the studio shows them as a 体检 report."""
+    s = _own_story(story_id, user, db)
+    from ..engine import logic
+    content = {"story": _to_story(s).model_dump(),
+               "secrets": [_to_secret(x).model_dump() for x in s.secrets]}
+    return {"issues": logic.lint_story(content)}
+
+
 # ── secrets ───────────────────────────────────────────────
 @router.get("/{story_id}/secrets", response_model=list[Secret])
 def list_secrets(story_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
@@ -337,11 +349,13 @@ def create_secret(
     )
     sec.fragments = [
         FragmentModel(
+            **({"id": f.id} if f.id else {}),
             layer=f.layer,
             content=f.content,
             retrieval_key=f.retrieval_key,
             known_by_character_ids=f.known_by_character_ids,
             unlock=f.unlock.model_dump(),
+            cover=f.cover,
         )
         for f in body.fragments
     ]
@@ -374,11 +388,13 @@ def update_secret(
     # Replace fragments wholesale (M1 simplicity).
     sec.fragments = [
         FragmentModel(
+            **({"id": f.id} if f.id else {}),
             layer=f.layer,
             content=f.content,
             retrieval_key=f.retrieval_key,
             known_by_character_ids=f.known_by_character_ids,
             unlock=f.unlock.model_dump(),
+            cover=f.cover,
         )
         for f in body.fragments
     ]

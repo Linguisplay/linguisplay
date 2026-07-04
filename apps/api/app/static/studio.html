@@ -8,7 +8,7 @@
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
   body { margin: 0; font-family: system-ui, "Microsoft YaHei", sans-serif; background: #0d0d12; color: #e8e8ee; }
-  #app { max-width: 860px; margin: 0 auto; padding: 0 16px 60px; }
+  #app { max-width: 900px; margin: 0 auto; padding: 0 16px 60px; }
   header { display: flex; justify-content: space-between; align-items: center; padding: 14px 0; border-bottom: 1px solid #23232c; position: sticky; top: 0; background: #0d0d12; z-index: 5; }
   h1 { font-size: 17px; margin: 0; } h2 { font-size: 15px; margin: 22px 0 8px; color: #8ea2ff; border-bottom: 1px solid #23232c; padding-bottom: 5px; }
   h3 { font-size: 13px; margin: 0 0 6px; color: #bbb; }
@@ -19,8 +19,10 @@
   button.ghost { background: #23232c; color: #bbb; } button.sm { padding: 4px 9px; font-size: 12px; }
   button.del { background: #3a1c1c; color: #e88; }
   .card { background: #16161d; border: 1px solid #23232c; border-radius: 10px; padding: 14px; margin: 10px 0; }
+  .sub { margin: 8px 0; padding: 8px; border-left: 2px solid #2a3350; background: #12121a; border-radius: 0 8px 8px 0; }
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .row4 { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
   .chk { font-size: 12px; padding: 4px 8px; border-radius: 12px; border: 1px solid #2a3350; background: #14141a; color: #9fb0ff; cursor: pointer; }
   .chk.on { background: #2a3356; }
@@ -30,6 +32,14 @@
   .listitem { display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
   .tag { font-size: 11px; padding: 1px 7px; border-radius: 8px; background: #23232c; color: #aaa; }
   a { color: #8ea2ff; cursor: pointer; }
+  .fold > .foldbody { display: none; }
+  .fold.open > .foldbody { display: block; }
+  .foldhead { cursor: pointer; user-select: none; }
+  .issue { padding: 6px 10px; border-radius: 8px; margin: 4px 0; font-size: 12.5px; }
+  .issue.error { background: #2a1416; border: 1px solid #57272b; color: #ff9d9d; }
+  .issue.warn { background: #262112; border: 1px solid #55491f; color: #e8cf7a; }
+  .issue.ok { background: #14231a; border: 1px solid #275737; color: #9de8b3; }
+  code.id { font-size: 11px; color: #6d7590; background: #101017; padding: 1px 5px; border-radius: 5px; }
 </style>
 </head>
 <body>
@@ -63,10 +73,12 @@
       <a onclick="backToList()">← 我的剧本</a>
       <span class="bar">
         <span id="saveMsg" class="muted"></span>
+        <button class="ghost sm" onclick="lint()">🧪 体检</button>
         <button class="ghost" onclick="save(false)">保存草稿</button>
         <button onclick="save(true)">保存并发布</button>
       </span>
     </div>
+    <div id="lintBox"></div>
 
     <h2>基本信息</h2>
     <div class="card">
@@ -74,13 +86,16 @@
       <label>一句话简介（发现页卡片用）</label><input id="f_oneliner" oninput="story.one_liner=this.value" />
       <label>剧情梗概</label><textarea id="f_synopsis" oninput="story.synopsis=this.value"></textarea>
       <label>世界观 / 场景设定（开局旁白会用到）</label><textarea id="f_world" oninput="story.world_long=this.value"></textarea>
+      <label>世界硬事实（world_facts：空间结构、关键物件、不可违背的设定；每回合都喂给 AI，防跑偏）</label>
+      <textarea id="f_facts" oninput="story.world_facts=this.value"></textarea>
+      <label>人物关系总览（relations_overview，可选）</label><textarea id="f_rel" oninput="story.relations_overview=this.value"></textarea>
       <div class="row2">
         <div><label>题材标签（逗号分隔）</label><input id="f_tropes" oninput="story.trope_tags=this.value.split(/[,，]/).map(s=>s.trim()).filter(Boolean)" /></div>
         <div><label>可见性</label><select id="f_vis" onchange="story.visibility=this.value"><option value="private">私密</option><option value="public">公开</option></select></div>
       </div>
       <label style="display:flex;align-items:center;gap:8px;margin-top:8px;cursor:pointer">
         <input type="checkbox" id="f_mature" onchange="story.mature=this.checked" style="width:auto" />
-        🔞 成人内容（18+）—— 开启后角色可参与明确成人情节（玩家已在注册时年龄门控）
+        🔞 成人内容（18+）：开启后角色可参与明确成人情节（玩家已在注册时年龄门控）
       </label>
       <div style="margin-top:10px">
         <button class="sm" type="button" onclick="enrich()">🔍 智能增强（为每个角色生成背景知识）</button>
@@ -88,25 +103,53 @@
       </div>
     </div>
 
+    <h2>🗺 地点 <button class="sm" onclick="addLoc()">+ 加地点</button></h2>
+    <div class="muted">世界的物理地图。角色按作息待在地点里，玩家走过去才遇得到；地点上可以放「可搜查物证」。不配地图 = 所有角色随时在场（旧行为）。</div>
+    <div id="locs"></div>
+
     <h2>角色 <button class="sm" onclick="addChar()">+ 加角色</button></h2>
-    <div class="muted">主角（is_lead）是默认开口的人。每个角色可以挂不同的秘密。</div>
+    <div class="muted">主角（is_lead）是默认开口的人。每个角色可挂秘密、作息表、随身物品、与他人的旧关系。</div>
     <div id="chars"></div>
 
     <h2>幕 / 剧情事件 <button class="sm" onclick="addAct()">+ 加一幕</button></h2>
-    <div class="muted">进入新一幕时引擎会自动播该幕事件作为旁白，推动剧情。</div>
+    <div class="muted">进入新一幕时引擎自动播该幕事件；幕可以锚定故事时间（第几天·什么时段），进幕时钟只进不退。</div>
     <div id="acts"></div>
 
     <h2>秘密 / 门控碎片 <button class="sm" onclick="addSecret()">+ 加秘密</button></h2>
-    <div class="muted">核心玩法：秘密分层碎片，按「好感/章节/追问次数」解锁。retrieval_key 是给玩家追问时匹配的关键词（脱敏，别写剧透）。</div>
+    <div class="muted">核心玩法：秘密分层碎片，按「好感/章节/追问/地点/事件」解锁。retrieval_key 是玩家追问时匹配的关键词（脱敏）。「谎言口径」是真相解锁前所有知情者统一说的假话，对峙成功会当场戳穿。</div>
     <div id="secrets"></div>
 
     <h2>🖼 媒体（照片与背景）</h2>
-    <div class="muted">给角色上传照片、给地点上传背景图（JPG/PNG/WebP，≤5MB）——会替换 AI 生成的图。先保存草稿才有可上传的对象。</div>
+    <div class="muted">给角色上传照片、给地点上传背景图（JPG/PNG/WebP，≤5MB），会替换 AI 生成的图。先保存草稿才有可上传的对象。</div>
     <div id="media"></div>
 
     <h2>结局 <button class="sm" onclick="addEnding()">+ 加结局</button></h2>
-    <div class="muted">结局是<b>可达成的里程碑</b>，不是游戏结束——玩家在<b>最后一幕</b>按好感高低触发对应结局（取满足条件里最高级的：真＞普通＞坏），<b>之后仍能留在世界里继续探索、甚至养更高好感解锁更好的结局</b>。只有「死亡」是真正终结。死亡/坏结局也会在玩家做出致命举动时由 AI 当场触发。建议至少配一个「普通结局」兜底（好感≥0）。</div>
+    <div class="muted">结局是<b>可达成的里程碑</b>：默认在最后一幕按条件触发（真＞普通＞坏）。「机制触发」的结局（大限/危机/指认失败）不走条件匹配，只被对应机制点名。建议至少配一个好感≥0 的普通结局兜底。</div>
     <div id="endings"></div>
+
+    <h2>⏳ 时钟与大限</h2>
+    <div class="muted">时钟开着时，回合消耗时段（晨/午/夜），角色按作息挪动；配了大限，睡过截止日会直接触发对应结局。</div>
+    <div id="clockCard"></div>
+
+    <h2>⚠️ 危机压力表</h2>
+    <div class="muted">一条从 0 涨到 100 的全局威胁（谁的注视/暴露风险）。到达各刻度播报警示旁白；爆表触发指定结局。不配 = 关闭。</div>
+    <div id="pressureCard"></div>
+
+    <h2>📱 小手机</h2>
+    <div class="muted">不在场的角色能捎信来（提醒赴约、爽约质问、恋人余温），玩家也能主动发消息。device 是叫法：手机 / 传呼机 / 口信 / 纸鹤……</div>
+    <div id="phoneCard"></div>
+
+    <h2>🔍 指认结案</h2>
+    <div class="muted">给玩家一次「我知道真相了」的下注时刻：有限次数里指认正确答案。答对置 flags.verdict_solved（真结局可 gate 在它上面）；次数用光触发失败结局。</div>
+    <div id="verdictCard"></div>
+
+    <h2>🏖 无尽沙盒</h2>
+    <div class="muted">开启后这个剧本变成沙盒：玩家开局自定义世界观、开场人物按世界观现场生成、永不结束、玩家会死（死了只剩旁观）。时间与现实同步可单独关。</div>
+    <div id="sandboxCard"></div>
+
+    <h2>⚙️ 调参（tuning）</h2>
+    <div class="muted">留空 = 用引擎默认值（占位符里显示默认）。全部旋钮说明见 docs/tuning.md。</div>
+    <div id="tuningCard"></div>
   </div>
 </div>
 
@@ -114,9 +157,28 @@
 const API = "/api/v1";
 let story = blankStory();
 let secrets = [];
-function blankStory(){ return { id:null, title:"", one_liner:"", synopsis:"", world_long:"", trope_tags:[], visibility:"private", mature:false, characters:[], acts:[], endings:[] }; }
+const SLOT_NAMES = ["晨","午","夜"];
+const REL_MODES = [["","（默认：陌生人）"],["stranger","陌生人"],["elder","长辈"],["junior","小辈"],["peer","同级"],["friend","朋友"],["flirt","暧昧对象"],["lover","恋人"],["enemy","敌人"]];
+const TUNING_KNOBS = [
+  ["min_turns_per_act", 6, "每幕最少回合（防秒推）"],
+  ["world_event_every", 4, "冷场几回合后世界自己出事（0=关）"],
+  ["max_new_characters", 4, "涌现新角色上限"],
+  ["dice", 1, "🎲 命运骰（0=关）"],
+  ["mind_reader", 1, "📟 心象仪·情绪可见（0=关）"],
+  ["confront_base", 55, "🃏 对峙基础成功率 %"],
+  ["confront_cost", 3, "🃏 对峙成功的亲近代价"],
+  ["promise_keep_bonus", 6, "🤝 赴约的亲近奖励"],
+  ["promise_break_cost", 4, "🤝 爽约的亲近代价"],
+  ["affinity_taper_den", 100, "好感增益衰减分母"],
+  ["close_taper_den", 130, "亲近增益衰减分母"],
+  ["rom_taper_den", 110, "心动增益衰减分母（越大越易动心）"],
+  ["act_backstop_div", 12, "好感兜底推幕除数"],
+];
+function blankStory(){ return { id:null, title:"", one_liner:"", synopsis:"", world_long:"", world_facts:"", relations_overview:"",
+  trope_tags:[], visibility:"private", mature:false, characters:[], acts:[], endings:[], locations:[],
+  tuning:{}, pressure:null, clock:null, phone:null, verdict:null, sandbox:null }; }
 function gid(p){ return p + Math.random().toString(36).slice(2,8); }
-function esc(s){ return (s||"").replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function esc(s){ return (s||"").toString().replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 async function j(path, opts={}) {
   const r = await fetch(API+path, { credentials:"include", headers:{"Content-Type":"application/json"}, ...opts });
   if (!r.ok){ const b=await r.json().catch(()=>({})); throw new Error(b.detail||r.status); }
@@ -134,7 +196,6 @@ async function afterAuth(){
   if(wanted){ try{ await editStory(wanted); return; }catch(e){ /* fall back to list */ } }
   loadList();
 }
-// already logged in (shared lp_session cookie from /play)? jump straight in.
 afterAuth().catch(()=>{ show("auth"); });
 
 // ── story list ──
@@ -155,19 +216,416 @@ function backToList(){ loadList(); }
 function newStory(){ story=blankStory(); secrets=[]; openEditor(); }
 async function editStory(id){
   story = await j(`/stories/${id}`);
-  story.trope_tags = story.trope_tags||[]; story.characters=story.characters||[]; story.acts=story.acts||[]; story.endings=story.endings||[];
+  story.trope_tags=story.trope_tags||[]; story.characters=story.characters||[]; story.acts=story.acts||[];
+  story.endings=story.endings||[]; story.locations=story.locations||[]; story.tuning=story.tuning||{};
+  story.characters.forEach(c=>{ c.schedule=c.schedule||[]; c.ties=c.ties||[]; c.items=c.items||[]; c.bio_layers=c.bio_layers||[]; });
+  story.acts.forEach(a=>{ a.events=a.events||[]; a.advance=a.advance||{required_fragment_ids:[],required_event_ids:[],affinity_min:0};
+    a.advance.required_fragment_ids=a.advance.required_fragment_ids||[]; a.advance.required_event_ids=a.advance.required_event_ids||[];
+    a.events.forEach(e=>{ e.who_character_ids=e.who_character_ids||[]; e.kills_character_ids=e.kills_character_ids||[]; }); });
+  story.locations.forEach(l=>{ l.exits=l.exits||[]; l.props=l.props||[]; l.unlock=l.unlock||{act_min:0,affinity_min:0,required_fragment_ids:[]};
+    l.unlock.required_fragment_ids=l.unlock.required_fragment_ids||[]; });
+  story.endings.forEach(e=>{ e.condition=e.condition||{affinity_min:0,act_min:0,required_fragment_ids:[],required_flags:{}};
+    e.condition.required_fragment_ids=e.condition.required_fragment_ids||[]; e.condition.required_flags=e.condition.required_flags||{}; });
   secrets = await j(`/stories/${id}/secrets`);
+  secrets.forEach(s=>(s.fragments||[]).forEach(f=>{ f.unlock=f.unlock||{}; f.unlock.trigger_event_ids=f.unlock.trigger_event_ids||[]; }));
   openEditor();
 }
 function openEditor(){
-  hide("list"); show("editor"); saveMsg.textContent="";
+  hide("list"); show("editor"); saveMsg.textContent=""; lintBox.innerHTML="";
   f_title.value=story.title||""; f_oneliner.value=story.one_liner||""; f_synopsis.value=story.synopsis||"";
-  f_world.value=story.world_long||""; f_tropes.value=(story.trope_tags||[]).join(", "); f_vis.value=story.visibility||"private";
+  f_world.value=story.world_long||""; f_facts.value=story.world_facts||""; f_rel.value=story.relations_overview||"";
+  f_tropes.value=(story.trope_tags||[]).join(", "); f_vis.value=story.visibility||"private";
   f_mature.checked=!!story.mature;
-  renderChars(); renderActs(); renderSecrets(); renderEndings(); renderMedia();
+  renderAll();
+}
+function renderAll(){ renderLocs(); renderChars(); renderActs(); renderSecrets(); renderEndings(); renderSystems(); renderMedia(); }
+
+// ── shared option builders ──
+function allFrags(){ const out=[]; secrets.forEach(s=>(s.fragments||[]).forEach(f=>{ if(f.id) out.push({id:f.id,label:`${s.title||"秘密"}·L${f.layer}`}); })); return out; }
+function allEvents(){ const out=[]; (story.acts||[]).forEach(a=>(a.events||[]).forEach(e=>{ if(e.id) out.push({id:e.id,label:`第${a.index}幕·${(e.what_happens||"事件").slice(0,10)}`}); })); return out; }
+function charOptions(sel, blank){ return (blank?`<option value="">（无）</option>`:"") + story.characters.map(c=>`<option value="${c.id}" ${c.id===sel?"selected":""}>${esc(c.name||"?")}</option>`).join(""); }
+function locOptions(sel, blankLabel){ return `<option value="">${blankLabel||"（无）"}</option>` + (story.locations||[]).map(l=>`<option value="${l.id}" ${l.id===sel?"selected":""}>${esc(l.name||l.id)}</option>`).join(""); }
+function endingOptions(sel){ return `<option value="">（未指定）</option>` + (story.endings||[]).map(e=>`<option value="${e.id}" ${e.id===sel?"selected":""}>${esc(e.title||e.id)}</option>`).join(""); }
+function fragOptions(sel){ return `<option value="">（无）</option>` + allFrags().map(f=>`<option value="${f.id}" ${f.id===sel?"selected":""}>${esc(f.label)}</option>`).join(""); }
+function eventOptions(sel){ return `<option value="">（无）</option>` + allEvents().map(e=>`<option value="${e.id}" ${e.id===sel?"selected":""}>${esc(e.label)}</option>`).join(""); }
+// cb is a call prefix ending with the open paren + first args, e.g. "toggleAdvFrag(3,"
+function fragChips(selected, cb){ const fs=allFrags(); return fs.length ? fs.map(f=>`<span class="chk ${selected.includes(f.id)?"on":""}" onclick="${cb}'${f.id}')">${esc(f.label)}</span>`).join("") : "<span class='muted'>还没有碎片（先在下面加秘密）</span>"; }
+
+// ── 🗺 locations ──
+function addLoc(){ story.locations.push({id:gid("loc_"),name:"",detail:"",exits:[],unlock:{act_min:0,affinity_min:0,required_fragment_ids:[]},props:[]}); renderAll(); }
+function delLoc(i){ story.locations.splice(i,1); renderAll(); }
+function setLoc(i,k,v){ story.locations[i][k]=v; }
+function setLocUnlock(i,k,v){ story.locations[i].unlock[k]=parseInt(v||0); }
+function toggleExit(i,oi){ const me=story.locations[i], other=(story.locations[oi]||{}).name; if(!other) return;
+  const k=me.exits.indexOf(other); k<0?me.exits.push(other):me.exits.splice(k,1); renderLocs(); }
+function toggleLocFrag(i,fid){ const a=story.locations[i].unlock.required_fragment_ids; const k=a.indexOf(fid); k<0?a.push(fid):a.splice(k,1); renderLocs(); }
+function addProp(i){ story.locations[i].props.push({id:gid("p_"),name:"",detail:"",fragment_id:null,event_id:null}); renderLocs(); }
+function delProp(i,pi){ story.locations[i].props.splice(pi,1); renderLocs(); }
+function setProp(i,pi,k,v){ story.locations[i].props[pi][k]=v||null; }
+function renderLocs(){
+  const el=document.getElementById("locs"); el.innerHTML="";
+  story.locations.forEach((l,i)=>{
+    const d=document.createElement("div"); d.className="card";
+    const exits = story.locations.map((o,oi)=> oi===i?"":`<span class="chk ${l.exits.includes(o.name)?"on":""}" onclick="toggleExit(${i},${oi})">${esc(o.name||"?")}</span>`).join("") || "<span class='muted'>再加一个地点才能连通路</span>";
+    const props = l.props.map((p,pi)=>`<div class="sub">
+      <div class="row2">
+        <div><label>物证名（玩家搜查时报这个名字）</label><input value="${esc(p.name)}" oninput="setProp(${i},${pi},'name',this.value)"></div>
+        <div><label>翻查后看到什么（detail）</label><input value="${esc(p.detail||"")}" oninput="setProp(${i},${pi},'detail',this.value)"></div>
+      </div>
+      <div class="row2">
+        <div><label>搜到即解锁的碎片</label><select onchange="setProp(${i},${pi},'fragment_id',this.value)">${fragOptions(p.fragment_id)}</select></div>
+        <div><label>搜到即触发的事件</label><select onchange="setProp(${i},${pi},'event_id',this.value)">${eventOptions(p.event_id)}</select></div>
+      </div>
+      <button class="sm del" style="margin-top:6px" onclick="delProp(${i},${pi})">删物证</button></div>`).join("");
+    d.innerHTML=`<div class="bar" style="justify-content:space-between"><h3>📍 ${esc(l.name||"未命名地点")} <code class="id">${esc(l.id)}</code></h3><button class="sm del" onclick="delLoc(${i})">删地点</button></div>
+      <div class="row2">
+        <div><label>名字</label><input value="${esc(l.name)}" oninput="setLoc(${i},'name',this.value)"></div>
+        <div><label>陈设细节（具体可感的物件/光线/布局，防旁白空泛）</label><input value="${esc(l.detail)}" oninput="setLoc(${i},'detail',this.value)"></div>
+      </div>
+      <div class="muted" style="margin-top:6px">通路（从这里能走去哪）：</div><div class="chips">${exits}</div>
+      <div class="sub"><h3>🔓 出现条件（都满足才在地图上出现；留空=一开始就有）</h3>
+        <div class="row2">
+          <div><span class="muted">第几幕≥</span><input type="number" value="${l.unlock.act_min||0}" oninput="setLocUnlock(${i},'act_min',this.value)"></div>
+          <div><span class="muted">好感≥</span><input type="number" value="${l.unlock.affinity_min||0}" oninput="setLocUnlock(${i},'affinity_min',this.value)"></div>
+        </div>
+        <div class="muted" style="margin-top:4px">必须先挖到的碎片：</div>
+        <div class="chips">${fragChips(l.unlock.required_fragment_ids, `toggleLocFrag(${i},`)}</div>
+      </div>
+      <h3 style="margin-top:8px">🔎 可搜查物证</h3>${props}
+      <button class="sm ghost" onclick="addProp(${i})">+ 加物证</button>`;
+    el.appendChild(d);
+  });
 }
 
-// ── media uploads: your own photos & backdrops ──
+// ── characters ──
+function addChar(){ story.characters.push({id:gid("c_"),name:"",role:"",is_lead:story.characters.length===0,persona_text:"",background:"",avatar_url:"",presence:"present",appears_from_act:0,playable:false,relation_default:"",agenda:"",eq_style:"",home_location_id:null,schedule:[],ties:[],items:[],bio_layers:[]}); renderAll(); }
+function delChar(i){ story.characters.splice(i,1); renderAll(); }
+function setChar(i,k,v){ story.characters[i][k]=v; }
+function setCharNum(i,k,v){ story.characters[i][k]=parseInt(v||0); }
+function setLead(i){ story.characters.forEach((c,j)=>c.is_lead=(j===i)); renderChars(); }
+function addItem(i){ (story.characters[i].items=story.characters[i].items||[]).push({name:"",detail:""}); renderChars(); }
+function delItem(i,ii){ story.characters[i].items.splice(ii,1); renderChars(); }
+function setItem(i,ii,k,v){ story.characters[i].items[ii][k]=v; }
+function addSched(i){ (story.characters[i].schedule=story.characters[i].schedule||[]).push({from_act:1,location_id:"",slots:[]}); renderChars(); }
+function delSched(i,si){ story.characters[i].schedule.splice(si,1); renderChars(); }
+function setSched(i,si,k,v){ story.characters[i].schedule[si][k] = (k==="from_act")?parseInt(v||0):v; }
+function toggleSlot(i,si,slot){ const a=(story.characters[i].schedule[si].slots=story.characters[i].schedule[si].slots||[]); const k=a.indexOf(slot); k<0?a.push(slot):a.splice(k,1); renderChars(); }
+function addTie(i){ (story.characters[i].ties=story.characters[i].ties||[]).push({char_id:"",stance:0,label:""}); renderChars(); }
+function delTie(i,ti){ story.characters[i].ties.splice(ti,1); renderChars(); }
+function setTie(i,ti,k,v){ story.characters[i].ties[ti][k] = (k==="stance")?parseInt(v||0):v; }
+function addBio(i){ (story.characters[i].bio_layers=story.characters[i].bio_layers||[]).push({closeness_min:10,text:""}); renderChars(); }
+function delBio(i,bi){ story.characters[i].bio_layers.splice(bi,1); renderChars(); }
+function setBio(i,bi,k,v){ story.characters[i].bio_layers[bi][k] = (k==="closeness_min")?parseInt(v||0):v; }
+function renderChars(){
+  chars.innerHTML="";
+  story.characters.forEach((c,i)=>{
+    const d=document.createElement("div"); d.className="card fold open";
+    const scheds=(c.schedule||[]).map((s,si)=>`<div class="sub"><div class="row3">
+        <div><span class="muted">第几幕起</span><input type="number" value="${s.from_act||1}" oninput="setSched(${i},${si},'from_act',this.value)"></div>
+        <div><span class="muted">在哪</span><select onchange="setSched(${i},${si},'location_id',this.value)">${locOptions(s.location_id,"（选地点）")}</select></div>
+        <div><span class="muted">哪些时段（都不勾=全天）</span><div class="chips">${SLOT_NAMES.map(sl=>`<span class="chk ${(s.slots||[]).includes(sl)?"on":""}" onclick="toggleSlot(${i},${si},'${sl}')">${sl}</span>`).join("")}</div></div>
+      </div><button class="sm del" style="margin-top:4px" onclick="delSched(${i},${si})">删这条</button></div>`).join("");
+    const ties=(c.ties||[]).map((t,ti)=>`<div class="sub"><div class="row3">
+        <div><span class="muted">对谁</span><select onchange="setTie(${i},${ti},'char_id',this.value)">${charOptions(t.char_id,true)}</select></div>
+        <div><span class="muted">立场</span><select onchange="setTie(${i},${ti},'stance',this.value)">${[-2,-1,0,1,2].map(v=>`<option value="${v}" ${t.stance===v?"selected":""}>${({"-2":"仇怨 -2","-1":"不睦 -1","0":"平淡 0","1":"交好 +1","2":"莫逆 +2"})[v]}</option>`).join("")}</select></div>
+        <div><span class="muted">一句话（如：过命的交情）</span><input value="${esc(t.label||"")}" oninput="setTie(${i},${ti},'label',this.value)"></div>
+      </div><button class="sm del" style="margin-top:4px" onclick="delTie(${i},${ti})">删这条</button></div>`).join("");
+    const items=(c.items||[]).map((it,ii)=>`<div class="sub"><div class="row2">
+        <div><span class="muted">物件名</span><input value="${esc(it.name||"")}" oninput="setItem(${i},${ii},'name',this.value)"></div>
+        <div><span class="muted">细节（可选）</span><input value="${esc(it.detail||"")}" oninput="setItem(${i},${ii},'detail',this.value)"></div>
+      </div><button class="sm del" style="margin-top:4px" onclick="delItem(${i},${ii})">删物件</button></div>`).join("");
+    const bios=(c.bio_layers||[]).map((b,bi)=>`<div class="sub"><div class="row2">
+        <div><span class="muted">亲近≥</span><input type="number" value="${b.closeness_min||0}" oninput="setBio(${i},${bi},'closeness_min',this.value)"></div>
+        <div><span class="muted">解锁的小传内容</span><input value="${esc(b.text||"")}" oninput="setBio(${i},${bi},'text',this.value)"></div>
+      </div><button class="sm del" style="margin-top:4px" onclick="delBio(${i},${bi})">删这层</button></div>`).join("");
+    d.innerHTML=`
+      <div class="bar foldhead" style="justify-content:space-between" onclick="if(event.target.tagName!=='INPUT'&&event.target.tagName!=='BUTTON')this.parentElement.classList.toggle('open')">
+        <h3 style="margin:0">👤 ${esc(c.name||"未命名")} <code class="id">${esc(c.id)}</code></h3>
+        <span class="bar">
+          <label style="margin:0"><input type="radio" name="lead" ${c.is_lead?"checked":""} onclick="setLead(${i})" style="width:auto"> 主角</label>
+          <button class="sm del" onclick="delChar(${i})">删除</button>
+        </span>
+      </div>
+      <div class="foldbody">
+      <div class="row2">
+        <div><label>名字</label><input value="${esc(c.name)}" oninput="setChar(${i},'name',this.value)"></div>
+        <div><label>身份（role，一句话）</label><input value="${esc(c.role||"")}" oninput="setChar(${i},'role',this.value)"></div>
+      </div>
+      <label>人设（外貌、性格、说话方式，喂给 AI 演这个角色）</label><textarea oninput="setChar(${i},'persona_text',this.value)">${esc(c.persona_text)}</textarea>
+      <label>背景（可选）</label><textarea oninput="setChar(${i},'background',this.value)">${esc(c.background||"")}</textarea>
+      <label>TA 自己的目的（agenda：独立于玩家想要什么，驱动自主行为）</label><textarea oninput="setChar(${i},'agenda',this.value)">${esc(c.agenda||"")}</textarea>
+      <div class="row2">
+        <div><label>情绪表达方式（eq_style，可选）</label><input value="${esc(c.eq_style||"")}" oninput="setChar(${i},'eq_style',this.value)"></div>
+        <div><label>对玩家的初始关系</label><select onchange="setChar(${i},'relation_default',this.value)">${REL_MODES.map(([v,t])=>`<option value="${v}" ${(c.relation_default||"")===v?"selected":""}>${t}</option>`).join("")}</select></div>
+      </div>
+      <div class="row4">
+        <div><label>在场状态</label><select onchange="setChar(${i},'presence',this.value)">
+          <option value="present" ${(c.presence||"present")==="present"?"selected":""}>在场·可对话</option>
+          <option value="offstage" ${c.presence==="offstage"?"selected":""}>幕后·不直接对话</option></select></div>
+        <div><label>第几幕后登场（0=开局就在）</label><input type="number" value="${c.appears_from_act||0}" oninput="setCharNum(${i},'appears_from_act',this.value)"></div>
+        <div><label>常驻地点（不配=随处在场）</label><select onchange="setChar(${i},'home_location_id',this.value||null)">${locOptions(c.home_location_id,"（随处在场）")}</select></div>
+        <div><label style="margin-bottom:6px">可被玩家扮演</label><label style="display:flex;align-items:center;gap:6px;margin:0;cursor:pointer"><input type="checkbox" ${c.playable?"checked":""} onchange="setChar(${i},'playable',this.checked)" style="width:auto"> playable</label></div>
+      </div>
+      <h3 style="margin-top:10px">🕐 作息表（比常驻地点更细：第几幕起、什么时段、在哪；有作息但当前时段没排班 = 不知去向）</h3>
+      ${scheds}<button class="sm ghost" onclick="addSched(${i})">+ 加作息</button>
+      <h3 style="margin-top:10px">🕸 与其他角色的旧关系（ties，NPC 关系网初始值）</h3>
+      ${ties}<button class="sm ghost" onclick="addTie(${i})">+ 加关系</button>
+      <h3 style="margin-top:10px">🎒 随身物品（世界里的实体：可送、可换、可被抢；玩家扮演 TA 时作为初始背包）</h3>
+      ${items}<button class="sm ghost" onclick="addItem(${i})">+ 加物件</button>
+      <h3 style="margin-top:10px">📖 分层小传（亲近到一定程度，才让玩家看到的过往）</h3>
+      ${bios}<button class="sm ghost" onclick="addBio(${i})">+ 加一层</button>
+      ${c.knowledge?`<label style="margin-top:10px">🔍 背景知识（智能增强生成，可手改）</label><textarea oninput="setChar(${i},'knowledge',this.value)">${esc(c.knowledge)}</textarea>`:""}
+      </div>`;
+    chars.appendChild(d);
+  });
+}
+
+// ── acts ──
+function addAct(){ story.acts.push({id:gid("a_"),index:story.acts.length+1,title:"",goal:"",time:null,advance:{required_fragment_ids:[],required_event_ids:[],affinity_min:0},events:[],choice:null}); renderAll(); }
+function delAct(i){ story.acts.splice(i,1); story.acts.forEach((a,j)=>a.index=j+1); renderAll(); }
+function setAct(i,k,v){ story.acts[i][k]=v; }
+function setActTime(i,k,v){ const a=story.acts[i]; a.time=a.time||{day:0,slot:""}; a.time[k]=(k==="day")?parseInt(v||0):v; }
+function setAdvance(i,k,v){ story.acts[i].advance[k]=parseInt(v||0); }
+function toggleAdvEvent(i,eid){ const a=story.acts[i].advance.required_event_ids; const k=a.indexOf(eid); k<0?a.push(eid):a.splice(k,1); renderActs(); }
+function toggleAdvFrag(i,fid){ const a=story.acts[i].advance.required_fragment_ids; const k=a.indexOf(fid); k<0?a.push(fid):a.splice(k,1); renderActs(); }
+function addEvent(ai){ story.acts[ai].events.push({id:gid("e_"),what_happens:"",who_character_ids:[],kills_character_ids:[]}); renderAll(); }
+function delEvent(ai,ei){ story.acts[ai].events.splice(ei,1); renderAll(); }
+function setEvent(ai,ei,k,v){ story.acts[ai].events[ei][k]=v; }
+function toggleWho(ai,ei,cid){ const a=story.acts[ai].events[ei].who_character_ids; const k=a.indexOf(cid); k<0?a.push(cid):a.splice(k,1); renderActs(); }
+function toggleKills(ai,ei,cid){ const e=story.acts[ai].events[ei]; e.kills_character_ids=e.kills_character_ids||[]; const a=e.kills_character_ids; const k=a.indexOf(cid); k<0?a.push(cid):a.splice(k,1); renderActs(); }
+function toggleChoice(i,on){ story.acts[i].choice = on ? (story.acts[i].choice||{prompt:"",options:[]}) : null; renderActs(); }
+function setChoice(i,k,v){ story.acts[i].choice[k]=v; }
+function addChoiceOpt(i){ story.acts[i].choice.options.push({id:gid("o_"),label:"",flag:"",affinity_delta:0,character_id:null,closeness_delta:0,romance_delta:0}); renderActs(); }
+function delChoiceOpt(i,oi){ story.acts[i].choice.options.splice(oi,1); renderActs(); }
+function setChoiceOpt(i,oi,k,v){ const o=story.acts[i].choice.options[oi]; o[k]=(["affinity_delta","closeness_delta","romance_delta"].includes(k))?parseInt(v||0):(v||null); if(k==="label"||k==="flag") o[k]=v; }
+function renderActs(){
+  acts.innerHTML="";
+  story.acts.forEach((a,i)=>{
+    const d=document.createElement("div"); d.className="card";
+    let evs="";
+    a.events.forEach((e,ei)=>{
+      const who = story.characters.map(c=>`<span class="chk ${e.who_character_ids.includes(c.id)?"on":""}" onclick="toggleWho(${i},${ei},'${c.id}')">${esc(c.name||"?")}</span>`).join("");
+      const kills = story.characters.map(c=>`<span class="chk ${(e.kills_character_ids||[]).includes(c.id)?"on":""}" onclick="toggleKills(${i},${ei},'${c.id}')">${esc(c.name||"?")}</span>`).join("");
+      evs+=`<div class="sub">
+        <div class="bar" style="justify-content:space-between"><span class="muted">事件 <code class="id">${esc(e.id)}</code></span><button class="sm del" onclick="delEvent(${i},${ei})">删事件</button></div>
+        <textarea oninput="setEvent(${i},${ei},'what_happens',this.value)" placeholder="这一幕发生了什么（会作为旁白播出）">${esc(e.what_happens)}</textarea>
+        <div class="muted" style="margin-top:4px">涉及角色：</div><div class="chips">${who}</div>
+        <div class="muted" style="margin-top:4px">☠️ 这个事件杀死谁（引擎直接记死亡，无救治窗口）：</div><div class="chips">${kills}</div></div>`;
+    });
+    const t=a.time||{};
+    const choice = a.choice ? `
+      <label>抉择时刻的引导词</label><textarea oninput="setChoice(${i},'prompt',this.value)">${esc(a.choice.prompt||"")}</textarea>
+      ${(a.choice.options||[]).map((o,oi)=>`<div class="sub">
+        <div class="row2">
+          <div><span class="muted">选项文字（玩家以此发言/行动）</span><input value="${esc(o.label||"")}" oninput="setChoiceOpt(${i},${oi},'label',this.value)"></div>
+          <div><span class="muted">落 flag（结局可 gate 它）</span><input value="${esc(o.flag||"")}" oninput="setChoiceOpt(${i},${oi},'flag',this.value)"></div>
+        </div>
+        <div class="row4">
+          <div><span class="muted">好感±</span><input type="number" value="${o.affinity_delta||0}" oninput="setChoiceOpt(${i},${oi},'affinity_delta',this.value)"></div>
+          <div><span class="muted">影响谁</span><select onchange="setChoiceOpt(${i},${oi},'character_id',this.value)">${charOptions(o.character_id,true)}</select></div>
+          <div><span class="muted">亲近±</span><input type="number" value="${o.closeness_delta||0}" oninput="setChoiceOpt(${i},${oi},'closeness_delta',this.value)"></div>
+          <div><span class="muted">心动±</span><input type="number" value="${o.romance_delta||0}" oninput="setChoiceOpt(${i},${oi},'romance_delta',this.value)"></div>
+        </div>
+        <button class="sm del" style="margin-top:4px" onclick="delChoiceOpt(${i},${oi})">删选项</button></div>`).join("")}
+      <button class="sm ghost" onclick="addChoiceOpt(${i})">+ 加选项</button>` : "";
+    d.innerHTML=`<div class="bar" style="justify-content:space-between"><h3>第 ${a.index} 幕</h3><button class="sm del" onclick="delAct(${i})">删这幕</button></div>
+      <label>幕标题</label><input value="${esc(a.title)}" oninput="setAct(${i},'title',this.value)">
+      <label>🎯 这一幕玩家的小目标（指引显示给玩家）</label><input value="${esc(a.goal||"")}" oninput="setAct(${i},'goal',this.value)" placeholder="例：弄清楚停电的真正原因">
+      <div class="sub"><h3>⏳ 时间锚点（这场戏发生在故事的什么时候；进幕时钟只进不退。留空=不锚）</h3>
+        <div class="row2">
+          <div><span class="muted">第几天（0=不指定）</span><input type="number" value="${t.day||0}" oninput="setActTime(${i},'day',this.value)"></div>
+          <div><span class="muted">时段</span><select onchange="setActTime(${i},'slot',this.value)">
+            <option value="" ${!t.slot?"selected":""}>（不指定）</option>
+            ${SLOT_NAMES.map(sl=>`<option value="${sl}" ${t.slot===sl?"selected":""}>${sl}</option>`).join("")}</select></div>
+        </div></div>
+      ${evs}<button class="sm ghost" style="margin-top:6px" onclick="addEvent(${i})">+ 加事件</button>
+      <div class="sub" style="border-left-color:#4a5"><h3>🔒 推进硬门控（全部满足才能进下一幕；都留空=软推进兜底）</h3>
+        <label>好感 ≥</label><input type="number" value="${a.advance.affinity_min||0}" oninput="setAdvance(${i},'affinity_min',this.value)">
+        <div class="muted" style="margin-top:6px">必须触发的剧情事件：</div>
+        <div class="chips">${a.events.map(e=>`<span class="chk ${a.advance.required_event_ids.includes(e.id)?"on":""}" onclick="toggleAdvEvent(${i},'${e.id}')">${esc((e.what_happens||"事件").slice(0,12))}</span>`).join("")||"<span class='muted'>本幕暂无事件</span>"}</div>
+        <div class="muted" style="margin-top:6px">必须挖到的碎片：</div>
+        <div class="chips">${fragChips(a.advance.required_fragment_ids, `toggleAdvFrag(${i},`)}</div>
+      </div>
+      <div class="sub" style="border-left-color:#a63">
+        <label style="display:flex;align-items:center;gap:8px;margin:0;cursor:pointer">
+          <input type="checkbox" ${a.choice?"checked":""} onchange="toggleChoice(${i},this.checked)" style="width:auto">
+          ⚡ 进入本幕时给玩家一个关键抉择（VN 式选项，选了立刻落 flag / 动关系）
+        </label>
+        ${choice}
+      </div>`;
+    acts.appendChild(d);
+  });
+}
+
+// ── secrets ──
+function addSecret(){ secrets.push({character_id:(story.characters[0]||{}).id||"",title:"",sensitivity:"light",fragments:[]}); renderAll(); }
+function delSecret(i){ secrets.splice(i,1); renderAll(); }
+function setSecret(i,k,v){ secrets[i][k]=v; }
+function addFrag(si){ secrets[si].fragments.push({id:gid("f_"),layer:secrets[si].fragments.length+1,content:"",retrieval_key:"",cover:"",known_by_character_ids:[],unlock:{affinity_min:0,act_min:1,asks_min:1,trigger_event_ids:[],location_id:null}}); renderAll(); }
+function delFrag(si,fi){ secrets[si].fragments.splice(fi,1); renderAll(); }
+function setFrag(si,fi,k,v){ secrets[si].fragments[fi][k]=v; }
+function setUnlock(si,fi,k,v){ secrets[si].fragments[fi].unlock[k]=parseInt(v||0); }
+function setUnlockLoc(si,fi,v){ secrets[si].fragments[fi].unlock.location_id=v||null; }
+function toggleUnlockEvent(si,fi,eid){ const u=secrets[si].fragments[fi].unlock; u.trigger_event_ids=u.trigger_event_ids||[]; const a=u.trigger_event_ids; const k=a.indexOf(eid); k<0?a.push(eid):a.splice(k,1); renderSecrets(); }
+function toggleKnown(si,fi,cid){ const a=secrets[si].fragments[fi].known_by_character_ids; const k=a.indexOf(cid); k<0?a.push(cid):a.splice(k,1); renderSecrets(); }
+function renderSecrets(){
+  const el=document.getElementById("secrets"); el.innerHTML="";
+  secrets.forEach((s,i)=>{
+    const d=document.createElement("div"); d.className="card";
+    let frs="";
+    s.fragments.forEach((f,fi)=>{
+      const known = story.characters.map(c=>`<span class="chk ${f.known_by_character_ids.includes(c.id)?"on":""}" onclick="toggleKnown(${i},${fi},'${c.id}')">${esc(c.name||"?")}</span>`).join("");
+      const evs = allEvents().map(e=>`<span class="chk ${((f.unlock.trigger_event_ids)||[]).includes(e.id)?"on":""}" onclick="toggleUnlockEvent(${i},${fi},'${e.id}')">${esc(e.label)}</span>`).join("") || "<span class='muted'>（无事件可选）</span>";
+      frs+=`<div class="sub" style="border-left-color:#3a3270">
+        <div class="bar" style="justify-content:space-between"><h3>第 ${f.layer} 层碎片 <code class="id">${esc(f.id||"（保存后生成）")}</code></h3><button class="sm del" onclick="delFrag(${i},${fi})">删碎片</button></div>
+        <label>内容（真相正文，解锁后才会被角色说出，绝不进向量库）</label><textarea oninput="setFrag(${i},${fi},'content',this.value)">${esc(f.content)}</textarea>
+        <label>🗣 谎言口径（cover，可选：真相解锁前，知情者统一说的假话；对峙成功当场戳穿）</label><textarea oninput="setFrag(${i},${fi},'cover',this.value)">${esc(f.cover||"")}</textarea>
+        <label>retrieval_key（玩家追问时匹配的关键词，空格分隔，别写剧透）</label><input value="${esc(f.retrieval_key||"")}" oninput="setFrag(${i},${fi},'retrieval_key',this.value)">
+        <div class="muted" style="margin-top:4px">谁知道这条（known_by）：</div><div class="chips">${known}</div>
+        <label>解锁条件（全部满足才解锁）</label>
+        <div class="row4">
+          <div><span class="muted">好感≥</span><input type="number" value="${f.unlock.affinity_min||0}" oninput="setUnlock(${i},${fi},'affinity_min',this.value)"></div>
+          <div><span class="muted">第几幕≥</span><input type="number" value="${f.unlock.act_min||1}" oninput="setUnlock(${i},${fi},'act_min',this.value)"></div>
+          <div><span class="muted">追问≥</span><input type="number" value="${f.unlock.asks_min||0}" oninput="setUnlock(${i},${fi},'asks_min',this.value)"></div>
+          <div><span class="muted">必须身处</span><select onchange="setUnlockLoc(${i},${fi},this.value)">${locOptions(f.unlock.location_id,"（任何地方）")}</select></div>
+        </div>
+        <div class="muted" style="margin-top:4px">必须先发生的事件：</div><div class="chips">${evs}</div></div>`;
+    });
+    d.innerHTML=`<div class="bar" style="justify-content:space-between"><h3>秘密 ${i+1}</h3><button class="sm del" onclick="delSecret(${i})">删秘密</button></div>
+      <div class="row2">
+        <div><label>属于哪个角色</label><select onchange="setSecret(${i},'character_id',this.value)">${charOptions(s.character_id)}</select></div>
+        <div><label>敏感度</label><select onchange="setSecret(${i},'sensitivity',this.value)">
+          <option value="light" ${s.sensitivity==="light"?"selected":""}>轻</option>
+          <option value="medium" ${s.sensitivity==="medium"?"selected":""}>中</option>
+          <option value="heavy" ${s.sensitivity==="heavy"?"selected":""}>重</option></select></div>
+      </div>
+      <label>秘密标题（话题标签，可作暗示，别写正文）</label><input value="${esc(s.title)}" oninput="setSecret(${i},'title',this.value)">
+      ${frs}<button class="sm ghost" style="margin-top:6px" onclick="addFrag(${i})">+ 加碎片层</button>`;
+    el.appendChild(d);
+  });
+}
+
+// ── endings ──
+function addEnding(){ story.endings.push({id:gid("end_"),kind:"normal",trigger:null,title:"",text:"",condition:{affinity_min:0,act_min:0,required_fragment_ids:[],required_flags:{}}}); renderAll(); }
+function delEnding(i){ story.endings.splice(i,1); renderAll(); }
+function setEnd(i,k,v){ story.endings[i][k]=v; }
+function setEndTrigger(i,v){ story.endings[i].trigger=v||null; renderEndings(); }
+function setEndCond(i,k,v){ story.endings[i].condition[k]=parseInt(v||0); }
+function toggleEndFrag(i,fid){ const a=story.endings[i].condition.required_fragment_ids; const k=a.indexOf(fid); k<0?a.push(fid):a.splice(k,1); renderEndings(); }
+function setEndFlags(i,v){ const flags={}; v.split(/[,，\s]+/).map(x=>x.trim()).filter(Boolean).forEach(f=>flags[f]=true); story.endings[i].condition.required_flags=flags; }
+function renderEndings(){
+  const el=document.getElementById("endings"); el.innerHTML="";
+  story.endings.forEach((e,i)=>{
+    const c=e.condition||{};
+    const opt=(v,t)=>`<option value="${v}" ${e.kind===v?"selected":""}>${t}</option>`;
+    const trig=(v,t)=>`<option value="${v}" ${(e.trigger||"")===v?"selected":""}>${t}</option>`;
+    const d=document.createElement("div"); d.className="card";
+    const conds = e.trigger ? `<div class="muted">机制触发的结局不走条件匹配，只被对应机制点名（在时钟/危机/指认卡里选中它）。</div>` : `
+      <label>触发条件（全部满足才达成；好感越高越能拿到真结局）</label>
+      <div class="row2">
+        <div><span class="muted">好感≥</span><input type="number" value="${c.affinity_min||0}" oninput="setEndCond(${i},'affinity_min',this.value)"></div>
+        <div><span class="muted">第几幕≥（0=只在最后一幕）</span><input type="number" value="${c.act_min||0}" oninput="setEndCond(${i},'act_min',this.value)"></div>
+      </div>
+      <div class="muted" style="margin-top:4px">必须挖到的碎片：</div>
+      <div class="chips">${fragChips(c.required_fragment_ids||[], `toggleEndFrag(${i},`)}</div>
+      <label>必须落下的 flag（逗号分隔；来自幕抉择或 verdict_solved）</label>
+      <input value="${esc(Object.keys(c.required_flags||{}).join(", "))}" oninput="setEndFlags(${i},this.value)" placeholder="例：guarded_bones, verdict_solved">`;
+    d.innerHTML=`<div class="bar" style="justify-content:space-between"><h3>结局 <code class="id">${esc(e.id)}</code></h3><button class="sm del" onclick="delEnding(${i})">删结局</button></div>
+      <div class="row3">
+        <div><label>类型</label><select onchange="setEnd(${i},'kind',this.value)">
+          ${opt("true","真结局")}${opt("normal","普通结局")}${opt("bad","坏结局")}${opt("death","死亡结局")}</select></div>
+        <div><label>标题</label><input value="${esc(e.title)}" oninput="setEnd(${i},'title',this.value)"></div>
+        <div><label>触发方式</label><select onchange="setEndTrigger(${i},this.value)">
+          ${trig("","条件达成（默认）")}${trig("clock","⏳ 大限日过期")}${trig("pressure","⚠️ 危机爆表")}${trig("verdict","🔍 指认次数用光")}</select></div>
+      </div>
+      <label>结局旁白（玩家看到的收尾文字）</label><textarea oninput="setEnd(${i},'text',this.value)">${esc(e.text)}</textarea>
+      ${conds}`;
+    el.appendChild(d);
+  });
+}
+
+// ── ⏳/⚠️/📱/🔍/🏖/⚙️ system cards ──
+function ensureSys(){
+  story.clock=story.clock||{}; story.pressure=story.pressure||{levels:[]}; story.pressure.levels=story.pressure.levels||[];
+  story.phone=story.phone||{}; story.verdict=story.verdict||{options:[]}; story.verdict.options=story.verdict.options||[];
+  story.sandbox=story.sandbox||{}; story.tuning=story.tuning||{};
+}
+function setClock(k,v){ ensureSys(); story.clock[k]=(k==="deadline_day")?parseInt(v||0):v; }
+function setTuning(k,v){ ensureSys(); if(v==="") delete story.tuning[k]; else story.tuning[k]=parseInt(v); }
+function setPress(k,v){ ensureSys(); story.pressure[k]=v; }
+function addPLevel(){ ensureSys(); story.pressure.levels.push({at:35,note:""}); renderSystems(); }
+function delPLevel(i){ story.pressure.levels.splice(i,1); renderSystems(); }
+function setPLevel(i,k,v){ story.pressure.levels[i][k]=(k==="at")?parseInt(v||0):v; }
+function setPhone(k,v){ ensureSys(); story.phone[k]=v; }
+function setVerdict(k,v){ ensureSys(); story.verdict[k]=(["attempts","act_min"].includes(k))?parseInt(v||0):v; }
+function addVOpt(){ ensureSys(); story.verdict.options.push({id:gid("v_"),label:"",correct:false,text:""}); renderSystems(); }
+function delVOpt(i){ story.verdict.options.splice(i,1); renderSystems(); }
+function setVOpt(i,k,v){ story.verdict.options[i][k]=v; }
+function setVCorrect(i){ story.verdict.options.forEach((o,j)=>o.correct=(j===i)); renderSystems(); }
+function setSandbox(k,v){ ensureSys(); story.sandbox[k]=v; }
+function renderSystems(){
+  ensureSys();
+  const ck=story.clock, pr=story.pressure, ph=story.phone, vd=story.verdict, sb=story.sandbox, tn=story.tuning;
+  document.getElementById("clockCard").innerHTML=`<div class="card">
+    <div class="row3">
+      <div><label>每时段回合数（tuning.turns_per_slot；0=关时钟，默认6）</label><input type="number" placeholder="6" value="${tn.turns_per_slot!==undefined?tn.turns_per_slot:""}" oninput="setTuning('turns_per_slot',this.value)"></div>
+      <div><label>大限在第几天（0=无大限）</label><input type="number" value="${ck.deadline_day||0}" oninput="setClock('deadline_day',this.value)"></div>
+      <div><label>大限叫什么（如：月圆之夜/警队收网）</label><input value="${esc(ck.deadline_text||"")}" oninput="setClock('deadline_text',this.value)"></div>
+    </div>
+    <label>过期触发哪个结局（须是 trigger=⏳ 的结局）</label><select onchange="setClock('deadline_ending_id',this.value)">${endingOptions(ck.deadline_ending_id)}</select>
+  </div>`;
+  document.getElementById("pressureCard").innerHTML=`<div class="card">
+    <div class="row2">
+      <div><label>威胁叫什么（如：姥姥的注视/暴露风险；留空=关闭）</label><input value="${esc(pr.name||"")}" oninput="setPress('name',this.value)"></div>
+      <div><label>爆表触发哪个结局（须是 trigger=⚠️ 的结局）</label><select onchange="setPress('ending_id',this.value)">${endingOptions(pr.ending_id)}</select></div>
+    </div>
+    <label>什么会推高/回落（hint，喂给 AI 做判定）</label><textarea oninput="setPress('hint',this.value)">${esc(pr.hint||"")}</textarea>
+    <h3 style="margin-top:8px">刻度警示（涨过刻度时播报）</h3>
+    ${pr.levels.map((lv,i)=>`<div class="sub"><div class="row2">
+      <div><span class="muted">刻度（0~100）</span><input type="number" value="${lv.at||0}" oninput="setPLevel(${i},'at',this.value)"></div>
+      <div><span class="muted">警示旁白</span><input value="${esc(lv.note||"")}" oninput="setPLevel(${i},'note',this.value)"></div>
+    </div><button class="sm del" style="margin-top:4px" onclick="delPLevel(${i})">删刻度</button></div>`).join("")}
+    <button class="sm ghost" onclick="addPLevel()">+ 加刻度</button>
+  </div>`;
+  document.getElementById("phoneCard").innerHTML=`<div class="card">
+    <label style="display:flex;align-items:center;gap:8px;margin:0;cursor:pointer">
+      <input type="checkbox" ${ph.enabled||ph.device?"checked":""} onchange="setPhone('enabled',this.checked)" style="width:auto"> 开启小手机
+    </label>
+    <label>这个世界里它叫什么（device）</label><input value="${esc(ph.device||"")}" placeholder="手机 / 传呼机 / 口信 / 纸鹤…" oninput="setPhone('device',this.value)">
+  </div>`;
+  document.getElementById("verdictCard").innerHTML=`<div class="card">
+    <label>指认问题（如：第六个人究竟是谁？留空=关闭）</label><textarea oninput="setVerdict('prompt',this.value)">${esc(vd.prompt||"")}</textarea>
+    <div class="row3">
+      <div><label>允许指认几次</label><input type="number" value="${vd.attempts||0}" placeholder="2" oninput="setVerdict('attempts',this.value)"></div>
+      <div><label>第几幕起可指认</label><input type="number" value="${vd.act_min||0}" oninput="setVerdict('act_min',this.value)"></div>
+      <div><label>次数用光触发哪个结局（trigger=🔍）</label><select onchange="setVerdict('fail_ending_id',this.value)">${endingOptions(vd.fail_ending_id)}</select></div>
+    </div>
+    <h3 style="margin-top:8px">选项（单选一个为正确答案）</h3>
+    ${vd.options.map((o,i)=>`<div class="sub">
+      <div class="bar" style="justify-content:space-between">
+        <label style="margin:0;cursor:pointer"><input type="radio" name="vcorrect" ${o.correct?"checked":""} onclick="setVCorrect(${i})" style="width:auto"> ✓ 正确答案</label>
+        <button class="sm del" onclick="delVOpt(${i})">删选项</button></div>
+      <label>选项文字</label><input value="${esc(o.label||"")}" oninput="setVOpt(${i},'label',this.value)">
+      <label>选中后的判词（可选）</label><input value="${esc(o.text||"")}" oninput="setVOpt(${i},'text',this.value)">
+    </div>`).join("")}
+    <button class="sm ghost" onclick="addVOpt()">+ 加选项</button>
+  </div>`;
+  document.getElementById("sandboxCard").innerHTML=`<div class="card">
+    <label style="display:flex;align-items:center;gap:8px;margin:0;cursor:pointer">
+      <input type="checkbox" ${sb.enabled?"checked":""} onchange="setSandbox('enabled',this.checked); renderSystems()" style="width:auto"> 🏖 这是一个无尽沙盒
+    </label>
+    ${sb.enabled?`<label style="display:flex;align-items:center;gap:8px;margin-top:8px;cursor:pointer">
+      <input type="checkbox" ${sb.real_time!==false?"checked":""} onchange="setSandbox('real_time',this.checked)" style="width:auto"> ⏰ 时间与现实同步（关掉则回到回合制时钟）
+    </label>
+    <div class="muted" style="margin-top:6px">沙盒剧本建议：角色留空（按玩家世界观现场生成）、结局留空、tuning 里 world_event_every=0。</div>`:""}
+  </div>`;
+  document.getElementById("tuningCard").innerHTML=`<div class="card"><div class="row3">
+    ${TUNING_KNOBS.map(([k,dft,label])=>`<div><label>${label}<br><code class="id">${k}</code></label>
+      <input type="number" placeholder="${dft}" value="${tn[k]!==undefined?tn[k]:""}" oninput="setTuning('${k}',this.value)"></div>`).join("")}
+  </div></div>`;
+}
+
+// ── media uploads ──
 function mediaRow(kind, id, name, img){
   const cur = img ? `<img src="${img}?t=${Date.now()}" style="width:44px;height:44px;object-fit:cover;border-radius:8px;vertical-align:middle;margin-right:8px" onerror="this.style.display='none'">`
                   : `<span class="muted" style="margin-right:8px">（暂无图）</span>`;
@@ -181,12 +639,11 @@ function renderMedia(){
   if (!el) return;
   if (!story.id){ el.innerHTML = '<div class="muted">保存草稿后即可上传。</div>'; return; }
   let h = "<h3 style='margin:8px 0 2px'>角色照片</h3>";
-  h += (story.characters||[]).filter(c=>c.id).map(c=>mediaRow("avatar", c.id, c.name, c.avatar_url)).join("")
+  h += (story.characters||[]).filter(c=>c.id).map(c=>mediaRow("avatar", c.id, esc(c.name), c.avatar_url)).join("")
        || '<div class="muted">先添加角色。</div>';
   h += "<h3 style='margin:12px 0 2px'>地点背景</h3>";
-  const locs = story.locations || [];
-  h += locs.filter(l=>l.id).map(l=>mediaRow("bg", l.id, l.name, `/scene/bg/${l.id}.jpg`)).join("")
-       || '<div class="muted">这个剧本没有作者地图（地点目前在 seed 里配置）。</div>';
+  h += (story.locations||[]).filter(l=>l.id).map(l=>mediaRow("bg", l.id, esc(l.name), `/scene/bg/${l.id}.jpg`)).join("")
+       || '<div class="muted">先添加地点。</div>';
   el.innerHTML = h;
 }
 async function uploadMedia(kind, id, input){
@@ -206,145 +663,6 @@ async function uploadMedia(kind, id, input){
   } catch(e) { msg.textContent = "✗ " + e.message; }
 }
 
-// ── characters ──
-function addChar(){ story.characters.push({id:gid("c_"),name:"",is_lead:story.characters.length===0,persona_text:"",background:"",avatar_url:"",presence:"present",appears_from_act:0}); renderChars(); renderSecrets(); renderActs(); }
-function delChar(i){ story.characters.splice(i,1); renderChars(); renderSecrets(); renderActs(); }
-function setChar(i,k,v){ story.characters[i][k]=v; }
-function setCharNum(i,k,v){ story.characters[i][k]=parseInt(v||0); }
-function setLead(i){ story.characters.forEach((c,j)=>c.is_lead=(j===i)); renderChars(); }
-function renderChars(){
-  chars.innerHTML="";
-  story.characters.forEach((c,i)=>{
-    const d=document.createElement("div"); d.className="card";
-    d.innerHTML=`
-      <div class="bar" style="justify-content:space-between">
-        <label style="margin:0"><input type="radio" name="lead" ${c.is_lead?"checked":""} onclick="setLead(${i})" style="width:auto"> 主角</label>
-        <button class="sm del" onclick="delChar(${i})">删除</button>
-      </div>
-      <label>名字</label><input value="${esc(c.name)}" oninput="setChar(${i},'name',this.value)">
-      <label>人设（喂给 AI 演这个角色）</label><textarea oninput="setChar(${i},'persona_text',this.value)">${esc(c.persona_text)}</textarea>
-      <label>背景（可选）</label><input value="${esc(c.background||"")}" oninput="setChar(${i},'background',this.value)">
-      <div class="row2">
-        <div><label>在场状态</label><select onchange="setChar(${i},'presence',this.value)">
-          <option value="present" ${(c.presence||'present')==='present'?'selected':''}>在场·可对话</option>
-          <option value="offstage" ${c.presence==='offstage'?'selected':''}>幕后·不直接对话（鬼/缺席者，仅被提及/作怪）</option>
-        </select></div>
-        <div><label>第几幕后登场（0=一开始就在）</label><input type="number" value="${c.appears_from_act||0}" oninput="setCharNum(${i},'appears_from_act',this.value)"></div>
-      </div>`;
-    chars.appendChild(d);
-  });
-}
-
-// ── acts ──
-function addAct(){ story.acts.push({id:gid("a_"),index:story.acts.length+1,title:"",goal:"",advance:{required_fragment_ids:[],required_event_ids:[],affinity_min:0},events:[]}); renderActs(); }
-function delAct(i){ story.acts.splice(i,1); story.acts.forEach((a,j)=>a.index=j+1); renderActs(); }
-function setAct(i,k,v){ story.acts[i][k]=v; }
-function setAdvance(i,k,v){ if(!story.acts[i].advance) story.acts[i].advance={required_fragment_ids:[],required_event_ids:[],affinity_min:0}; story.acts[i].advance[k]=parseInt(v||0); }
-function toggleAdvEvent(i,eid){ const a=story.acts[i].advance||(story.acts[i].advance={required_fragment_ids:[],required_event_ids:[],affinity_min:0}); a.required_event_ids=a.required_event_ids||[]; const k=a.required_event_ids.indexOf(eid); k<0?a.required_event_ids.push(eid):a.required_event_ids.splice(k,1); renderActs(); }
-function addEvent(ai){ story.acts[ai].events.push({id:gid("e_"),what_happens:"",who_character_ids:[]}); renderActs(); }
-function delEvent(ai,ei){ story.acts[ai].events.splice(ei,1); renderActs(); }
-function setEvent(ai,ei,k,v){ story.acts[ai].events[ei][k]=v; }
-function toggleWho(ai,ei,cid){ const a=story.acts[ai].events[ei].who_character_ids; const k=a.indexOf(cid); k<0?a.push(cid):a.splice(k,1); renderActs(); }
-function renderActs(){
-  acts.innerHTML="";
-  story.acts.forEach((a,i)=>{
-    const d=document.createElement("div"); d.className="card";
-    let evs="";
-    a.events.forEach((e,ei)=>{
-      const who = story.characters.map(c=>`<span class="chk ${e.who_character_ids.includes(c.id)?'on':''}" onclick="toggleWho(${i},${ei},'${c.id}')">${esc(c.name||'?')}</span>`).join("");
-      evs+=`<div style="margin:6px 0; padding:6px; border-left:2px solid #2a3350">
-        <textarea oninput="setEvent(${i},${ei},'what_happens',this.value)" placeholder="这一幕发生了什么（会作为旁白播出）">${esc(e.what_happens)}</textarea>
-        <div class="muted" style="margin-top:4px">涉及角色：</div><div class="chips">${who}</div>
-        <button class="sm del" style="margin-top:6px" onclick="delEvent(${i},${ei})">删事件</button></div>`;
-    });
-    d.innerHTML=`<div class="bar" style="justify-content:space-between"><h3>第 ${a.index} 幕</h3><button class="sm del" onclick="delAct(${i})">删这幕</button></div>
-      <label>幕标题</label><input value="${esc(a.title)}" oninput="setAct(${i},'title',this.value)">
-      <label>🎯 这一幕玩家的小目标（会作为指引显示给玩家）</label><input value="${esc(a.goal||"")}" oninput="setAct(${i},'goal',this.value)" placeholder="例：弄清楚停电的真正原因">
-      ${evs}<button class="sm ghost" style="margin-top:6px" onclick="addEvent(${i})">+ 加事件</button>
-      <div style="margin-top:10px; padding:8px; border-left:2px solid #4a5; background:#10160f">
-        <h3 style="margin:0 0 4px">🔒 推进硬门控（满足才能进下一幕）</h3>
-        <div class="muted">程序判定、非 AI 拍脑袋。下面任一条件全满足才放行；都留空=用软推进兜底。</div>
-        <label>好感 ≥</label><input type="number" value="${(a.advance&&a.advance.affinity_min)||0}" oninput="setAdvance(${i},'affinity_min',this.value)">
-        <div class="muted" style="margin-top:6px">必须触发的剧情事件（勾选本幕事件）：</div>
-        <div class="chips">${a.events.map(e=>`<span class="chk ${((a.advance&&a.advance.required_event_ids)||[]).includes(e.id)?'on':''}" onclick="toggleAdvEvent(${i},'${e.id}')">${esc((e.what_happens||'事件').slice(0,12))}</span>`).join("")||"<span class='muted'>本幕暂无事件</span>"}</div>
-        <div class="muted" style="margin-top:6px">＊“必须挖到某个秘密”才放行的门控，目前请在种子脚本里配（工坊版即将支持）。</div>
-      </div>`;
-    acts.appendChild(d);
-  });
-}
-
-// ── secrets ──
-function addSecret(){ secrets.push({character_id:(story.characters[0]||{}).id||"",title:"",sensitivity:"light",fragments:[]}); renderSecrets(); }
-function delSecret(i){ secrets.splice(i,1); renderSecrets(); }
-function setSecret(i,k,v){ secrets[i][k]=v; }
-function addFrag(si){ secrets[si].fragments.push({layer:secrets[si].fragments.length+1,content:"",retrieval_key:"",known_by_character_ids:[],unlock:{affinity_min:0,act_min:1,asks_min:1}}); renderSecrets(); }
-function delFrag(si,fi){ secrets[si].fragments.splice(fi,1); renderSecrets(); }
-function setFrag(si,fi,k,v){ secrets[si].fragments[fi][k]=v; }
-function setUnlock(si,fi,k,v){ secrets[si].fragments[fi].unlock[k]=parseInt(v||0); }
-function toggleKnown(si,fi,cid){ const a=secrets[si].fragments[fi].known_by_character_ids; const k=a.indexOf(cid); k<0?a.push(cid):a.splice(k,1); renderSecrets(); }
-function charOptions(sel){ return story.characters.map(c=>`<option value="${c.id}" ${c.id===sel?"selected":""}>${esc(c.name||'?')}</option>`).join(""); }
-function renderSecrets(){
-  secrets_el().innerHTML="";
-  secrets.forEach((s,i)=>{
-    const d=document.createElement("div"); d.className="card";
-    let frs="";
-    s.fragments.forEach((f,fi)=>{
-      const known = story.characters.map(c=>`<span class="chk ${f.known_by_character_ids.includes(c.id)?'on':''}" onclick="toggleKnown(${i},${fi},'${c.id}')">${esc(c.name||'?')}</span>`).join("");
-      frs+=`<div style="margin:8px 0; padding:8px; border-left:2px solid #3a3270">
-        <h3>第 ${f.layer} 层碎片</h3>
-        <label>内容（真相正文，解锁后才会被角色说出，绝不进向量库）</label><textarea oninput="setFrag(${i},${fi},'content',this.value)">${esc(f.content)}</textarea>
-        <label>retrieval_key（玩家追问时匹配的关键词，空格分隔，别写剧透）</label><input value="${esc(f.retrieval_key||"")}" oninput="setFrag(${i},${fi},'retrieval_key',this.value)">
-        <div class="muted" style="margin-top:4px">谁知道这条（known_by）：</div><div class="chips">${known}</div>
-        <label>解锁条件（全部满足才解锁）</label>
-        <div class="row3">
-          <div><span class="muted">好感≥</span><input type="number" value="${f.unlock.affinity_min||0}" oninput="setUnlock(${i},${fi},'affinity_min',this.value)"></div>
-          <div><span class="muted">第几幕≥</span><input type="number" value="${f.unlock.act_min||1}" oninput="setUnlock(${i},${fi},'act_min',this.value)"></div>
-          <div><span class="muted">追问≥</span><input type="number" value="${f.unlock.asks_min||0}" oninput="setUnlock(${i},${fi},'asks_min',this.value)"></div>
-        </div>
-        <button class="sm del" style="margin-top:6px" onclick="delFrag(${i},${fi})">删碎片</button></div>`;
-    });
-    d.innerHTML=`<div class="bar" style="justify-content:space-between"><h3>秘密 ${i+1}</h3><button class="sm del" onclick="delSecret(${i})">删秘密</button></div>
-      <div class="row2">
-        <div><label>属于哪个角色</label><select onchange="setSecret(${i},'character_id',this.value)">${charOptions(s.character_id)}</select></div>
-        <div><label>敏感度</label><select onchange="setSecret(${i},'sensitivity',this.value)">
-          <option value="light" ${s.sensitivity==='light'?'selected':''}>轻</option>
-          <option value="medium" ${s.sensitivity==='medium'?'selected':''}>中</option>
-          <option value="heavy" ${s.sensitivity==='heavy'?'selected':''}>重</option></select></div>
-      </div>
-      <label>秘密标题（话题标签，可作暗示，别写正文）</label><input value="${esc(s.title)}" oninput="setSecret(${i},'title',this.value)">
-      ${frs}<button class="sm ghost" style="margin-top:6px" onclick="addFrag(${i})">+ 加碎片层</button>`;
-    secrets_el().appendChild(d);
-  });
-}
-function secrets_el(){ return document.getElementById("secrets"); }
-
-// ── endings ──
-function addEnding(){ story.endings.push({id:gid("end_"),kind:"normal",title:"",text:"",condition:{affinity_min:0,act_min:0}}); renderEndings(); }
-function delEnding(i){ story.endings.splice(i,1); renderEndings(); }
-function setEnd(i,k,v){ story.endings[i][k]=v; }
-function setEndCond(i,k,v){ story.endings[i].condition[k]=parseInt(v||0); }
-function renderEndings(){
-  const el=document.getElementById("endings"); el.innerHTML="";
-  story.endings.forEach((e,i)=>{
-    const c=e.condition||{};
-    const opt=(v,t)=>`<option value="${v}" ${e.kind===v?"selected":""}>${t}</option>`;
-    const d=document.createElement("div"); d.className="card";
-    d.innerHTML=`<div class="bar" style="justify-content:space-between"><h3>结局 ${i+1}</h3><button class="sm del" onclick="delEnding(${i})">删结局</button></div>
-      <div class="row2">
-        <div><label>类型</label><select onchange="setEnd(${i},'kind',this.value)">
-          ${opt("true","真结局")}${opt("normal","普通结局")}${opt("bad","坏结局")}${opt("death","死亡结局")}</select></div>
-        <div><label>标题</label><input value="${esc(e.title)}" oninput="setEnd(${i},'title',this.value)"></div>
-      </div>
-      <label>结局旁白（玩家看到的收尾文字）</label><textarea oninput="setEnd(${i},'text',this.value)">${esc(e.text)}</textarea>
-      <label>触发条件（在最后一幕时，满足下面两项才算达成；好感越高越能拿到真结局）</label>
-      <div class="row2">
-        <div><span class="muted">好感≥</span><input type="number" value="${c.affinity_min||0}" oninput="setEndCond(${i},'affinity_min',this.value)"></div>
-        <div><span class="muted">第几幕≥（0=只在最后一幕）</span><input type="number" value="${c.act_min||0}" oninput="setEndCond(${i},'act_min',this.value)"></div>
-      </div>`;
-    el.appendChild(d);
-  });
-}
-
 // ── 智能增强 ──
 async function enrich(){
   if (!story.id){ enrichMsg.textContent="请先保存草稿"; return; }
@@ -356,20 +674,57 @@ async function enrich(){
   }catch(e){ enrichMsg.textContent = "⚠️ 增强失败：" + (e.message||e); }
 }
 
+// ── 🧪 lint：把引擎的剧本体检跑在当前草稿上 ──
+async function lint(){
+  try{
+    await save(false);
+    if(!story.id) return;
+    lintBox.innerHTML = '<div class="muted" style="margin:8px 0">体检中…</div>';
+    const r = await j(`/stories/${story.id}/lint`);
+    const issues = r.issues||[];
+    if(!issues.length){ lintBox.innerHTML = '<div class="issue ok">✓ 体检通过：没有发现逻辑问题。</div>'; return; }
+    const errs = issues.filter(x=>x.severity==="error"), warns = issues.filter(x=>x.severity!=="error");
+    lintBox.innerHTML = `<div style="margin:8px 0">` +
+      errs.map(x=>`<div class="issue error">🛑 <b>${esc(x.code)}</b>（${esc(x.where)}）：${esc(x.msg)}</div>`).join("") +
+      warns.map(x=>`<div class="issue warn">⚠️ <b>${esc(x.code)}</b>（${esc(x.where)}）：${esc(x.msg)}</div>`).join("") +
+      `<div class="muted" style="margin-top:4px">🛑 会破坏运行，务必修；⚠️ 是设计提醒，可无视。</div></div>`;
+  }catch(e){ lintBox.innerHTML = `<div class="issue error">体检失败：${esc(e.message||e)}</div>`; }
+}
+
 // ── save / publish ──
+function _cleanup(){
+  (story.acts||[]).forEach(a=>{
+    if(a.time && !(parseInt(a.time.day)||0) && !a.time.slot) a.time=null;
+    if(a.choice && !(a.choice.options||[]).length && !(a.choice.prompt||"").trim()) a.choice=null;
+  });
+  const ck=story.clock||{}, pr=story.pressure||{}, ph=story.phone||{}, vd=story.verdict||{}, sb=story.sandbox||{};
+  return {
+    clock: (parseInt(ck.deadline_day)||0) > 0 ? ck : null,
+    pressure: (pr.name||"").trim() ? pr : null,
+    phone: (ph.enabled || (ph.device||"").trim()) ? ph : null,
+    verdict: (vd.options||[]).length ? vd : null,
+    sandbox: sb.enabled ? sb : null,
+  };
+}
 async function save(publish){
   try{
     saveMsg.textContent="保存中…";
+    const sys=_cleanup();
     const payload = { title:story.title, one_liner:story.one_liner, synopsis:story.synopsis, world_long:story.world_long,
-      trope_tags:story.trope_tags, visibility:story.visibility, mature:!!story.mature, characters:story.characters, acts:story.acts, endings:story.endings };
+      world_facts:story.world_facts, relations_overview:story.relations_overview,
+      trope_tags:story.trope_tags, visibility:story.visibility, mature:!!story.mature,
+      characters:story.characters, acts:story.acts, endings:story.endings, locations:story.locations,
+      tuning:story.tuning||{}, ...sys };
     if (!story.id){ const res=await j("/stories",{method:"POST",body:JSON.stringify(payload)}); story.id=res.id; }
     else { await j(`/stories/${story.id}`,{method:"PATCH",body:JSON.stringify(payload)}); }
-    // rewrite secrets: delete existing, recreate from the form
+    // rewrite secrets: delete existing, recreate from the form (fragment ids are pinned
+    // client-side so act gates / props / endings keep pointing at the right fragments)
     const existing = await j(`/stories/${story.id}/secrets`);
     for (const e of existing) await j(`/stories/${story.id}/secrets/${e.id}`,{method:"DELETE"});
     for (const s of secrets) await j(`/stories/${story.id}/secrets`,{method:"POST",body:JSON.stringify(s)});
     if (publish){ const r=await j(`/stories/${story.id}/publish`,{method:"POST"}); saveMsg.textContent=`已发布 v${r.version} ✓`; }
     else saveMsg.textContent="已保存草稿 ✓";
+    renderMedia();
   }catch(e){ saveMsg.textContent="出错: "+e.message; }
 }
 </script>
