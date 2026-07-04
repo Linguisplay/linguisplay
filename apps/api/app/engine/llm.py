@@ -88,6 +88,10 @@ class MockLLM:
         if prompt.get("opening_hook"):
             return {}
 
+        # 🌆 offscreen drama: mock stays quiet — no fabricated rumors in tests.
+        if prompt.get("offscreen"):
+            return {}
+
         # 📱 text-back: deterministic in-voice stub, no relationship movement.
         if prompt.get("phone_reply"):
             return {"msgs": ["嗯。"], "closeness": 0, "romance": 0}

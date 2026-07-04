@@ -439,6 +439,17 @@ def char_hp(state: dict[str, Any], cid: str | None) -> str:
     return ((state.get("char_sim") or {}).get(cid) or {}).get("hp") or "healthy"
 
 
+def _carried_mood(state: dict[str, Any], cid: str | None) -> str:
+    """🎭 the emotional state the last scene left this character in — carried into the
+    next one unless a full day has passed (time cools most things)."""
+    m = ((state.get("char_sim") or {}).get(cid) or {}).get("mood") or {}
+    if not m.get("text"):
+        return ""
+    if _time_index(state) - int(m.get("at", 0)) > len(SLOTS):
+        return ""  # a day later, the edge has dulled
+    return m["text"]
+
+
 def set_char_hp(state: dict[str, Any], cid: str, hp: str | None) -> None:
     sim = _sim(state, cid)
     if hp:
@@ -1771,6 +1782,73 @@ def npc_stance_line(content: dict[str, Any], state: dict[str, Any], sp_id: str,
     return "；".join(bits)
 
 
+def offscreen_drama(content: dict[str, Any], state: dict[str, Any],
+                    llm: LLM) -> dict[str, Any] | None:
+    """One beat of life WITHOUT the player: when the hour turns, two living NPCs who
+    stand in the same OTHER place have a moment — their tie shifts, and a RUMOR starts
+    circulating (someone in the player's next scene passes it on, once). The engine
+    rolls who; the model writes what; no model output, no drama (never fabricated)."""
+    if not _locations(content):
+        return None
+    pcid = state.get("player_character_id")
+    here = state.get("location_id")
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for c in present_characters(content, int(state.get("act", 1) or 1), _dead_ids(state)):
+        cid = c.get("id")
+        if not cid or cid == pcid or cid in (state.get("following") or []):
+            continue
+        pos = char_position(content, state, c)
+        if pos and pos != AWAY and pos != here:
+            groups.setdefault(pos, []).append(c)
+    spots = sorted((lid, cs) for lid, cs in groups.items() if len(cs) >= 2)
+    if not spots:
+        return None
+    lid, cs = spots[_rng.randint(0, len(spots) - 1)]
+    a, b = _rng.sample(cs, 2)
+    stance = npc_stance(state, a.get("id"), b.get("id")) or {}
+    try:
+        out = llm.generate({"offscreen": True,
+                            "place": (_location_by_id(content, lid) or {}).get("name") or "",
+                            "a": {"name": a.get("name"), "role": a.get("role") or "",
+                                  "persona": (a.get("persona_text") or "")[:80]},
+                            "b": {"name": b.get("name"), "role": b.get("role") or "",
+                                  "persona": (b.get("persona_text") or "")[:80]},
+                            "stance": stance.get("label") or "没什么交情"}) or {}
+    except Exception:
+        out = {}
+    rumor = (out.get("rumor") or "").strip()[:80]
+    if not rumor:
+        return None
+    delta = 1 if int(out.get("delta") or 0) > 0 else -1 if int(out.get("delta") or 0) < 0 else 0
+    if delta:
+        web = dict(state.get("npc_rel") or {})
+        key = _pair_key(a.get("id"), b.get("id"))
+        e = dict(web.get(key) or {"stance": 0, "label": None, "log": []})
+        ns = max(-2, min(2, int(e.get("stance") or 0) + delta))
+        if ns != int(e.get("stance") or 0):
+            e["stance"], e["label"] = ns, None
+            log = list(e.get("log") or [])
+            log.append({"act": int(state.get("act", 1) or 1), "delta": delta,
+                        "why": rumor[:60]})
+            e["log"] = log[-12:]
+            web[key] = e
+            state["npc_rel"] = web
+    rumors = list(state.get("rumors") or [])
+    rumors.append({"text": rumor, "at": (clock_view(content, state) or {}).get("label", ""),
+                   "heard": False})
+    state["rumors"] = rumors[-6:]
+    return {"a": a.get("name"), "b": b.get("name"), "rumor": rumor}
+
+
+def serve_rumor(state: dict[str, Any]) -> str:
+    """The next untold rumor (marks it told — a rumor is passed on exactly once)."""
+    for ru in state.get("rumors") or []:
+        if not ru.get("heard"):
+            ru["heard"] = True
+            return ru.get("text") or ""
+    return ""
+
+
 def npc_ties_of(content: dict[str, Any], state: dict[str, Any], char_id: str) -> list[dict[str, Any]]:
     """The dossier view: this character's charged stances toward people the player has MET
     (unmet names never leak). [{name, stance, label}] sorted worst-first."""
@@ -2222,6 +2300,9 @@ def character_profile(content: dict[str, Any], state: dict[str, Any],
         "where": where,
         "ties": npc_ties_of(content, state, char_id),  # 🕸 TA与其他人 (met-only, no leaks)
         "hp": char_hp(state, char_id),                 # healthy | hurt | dying | dead
+        "keepsakes": [k.get("name") for k in
+                      (((state.get("char_sim") or {}).get(char_id) or {})
+                       .get("keepsakes") or [])],       # 🎁 gifts they kept
         "log": list((state.get("rel_log") or {}).get(char_id) or []),
         "bio": [b for b in bio_open if b], "bio_next_at": bio_next,
         "closeness": closeness, "romance": int(scores.get("romance", 0)),
@@ -2599,7 +2680,10 @@ def _confront_gen(content, state, persona, secret, frag, next_locked, target, ll
         "mature": bool(state.get("mature")),
         "scene": current_act(content, old_act),
         "clock": (clock_view(content, state) or {}).get("label", ""),
-        "confrontation": {"evidence": ev, "title": title, "outcome": dice["outcome"]},
+        "confrontation": {"evidence": ev, "title": title, "outcome": dice["outcome"],
+                          # the authored lie this reveal just tore down (if one was told)
+                          "shattered": ((next_locked.get("cover") or "").strip()
+                                        if forced_id else "")},
     })
     conf_beats = list(directed.get("beats", []))
     mood = (directed.get("self_state") or "").strip()[:12]
@@ -3011,12 +3095,18 @@ def run_turn_stream(
             # 🤝 the player stood this speaker up — they hold it (voiced once, then let go)
             "broken_promise": next((p.get("what") for p in (state.get("promises") or [])
                                     if p.get("status") == "missed" and p.get("char_id") == sp_id), None),
+            # 🌆 a rumor from offscreen life, told once when the moment fits
+            "rumor": (serve_rumor(state) if is_primary and not observer else ""),
             # 📱 what you two texted lately — the scene remembers the phone
             "sms_tail": sms_tail_line(state, sp_id),
-            # the sim sheet: this character's own body state + standing intention
+            # the sim sheet: body state + standing intention + how the LAST scene left them
             "condition": {"hp": _HP_LABEL.get(char_hp(state, sp_id), ""),
                           "intent": (((state.get("char_sim") or {}).get(sp_id) or {})
-                                     .get("intent") or "")},
+                                     .get("intent") or ""),
+                          "mood": _carried_mood(state, sp_id),
+                          "keepsakes": [k.get("name") for k in
+                                        (((state.get("char_sim") or {}).get(sp_id) or {})
+                                         .get("keepsakes") or [])]},
             "cast": others,
             # in a broadcast, non-primary characters may stay silent and never narrate
             "group_mode": ("primary" if is_primary else "member") if broadcast else None,
@@ -3071,6 +3161,9 @@ def run_turn_stream(
             _sim(state, sp_id)["intent"] = _intent
         # 📟 心象仪: the speaker's own judged inner state rides on their LAST line
         mood = (directed.get("self_state") or "").strip()[:12]
+        # 🎭 …and PERSISTS: how this scene left them is how the next one finds them
+        if mood and sp_id:
+            _sim(state, sp_id)["mood"] = {"text": mood, "at": _time_index(state)}
         if mood and tun["mind_reader"]:
             for b in reversed(d_beats):
                 if b.get("type") == "dialogue":
@@ -3273,6 +3366,32 @@ def run_turn_stream(
                 log.append({"act": old_act, "text": idt})
                 state["identity_log"] = log
                 moments.append({"kind": "identity", "text": idt})
+            # 🎁 GIFT: the player handed the speaker something of theirs — the receiver
+            # decided (in character) whether to take it and how it landed; kept gifts
+            # become keepsakes they carry and remember
+            g_raw = (directed.get("gift") or "").strip()
+            if g_raw and not observer and sp_id:
+                g_item, _, g_rest = g_raw.partition("|")
+                g_taken = "拒" not in g_rest
+                g_liked = "喜" in g_rest
+                if _inv_find(state.get("inventory") or [], g_item.strip()) >= 0:
+                    if g_taken:
+                        it = _inv_remove(state, g_item.strip())
+                        ks = _sim(state, sp_id).setdefault("keepsakes", [])
+                        ks.append({"name": it.get("name"), "at": _time_index(state)})
+                        del ks[:-8]
+                        old_g = rel_all.get(sp_id) or relationships.new_scores()
+                        g_mode = relationships.derive_mode(sp, old_g, tun)
+                        rel_all[sp_id] = relationships.apply_deltas(
+                            old_g, 4 if g_liked else 1,
+                            (2 if g_mode in ("flirt", "lover") else 0) if g_liked else 0, tun)
+                        rel_log(state, sp_id, old_act, "gift",
+                                f"你把{it.get('name')}送给了TA{'，TA很喜欢' if g_liked else ''}。")
+                        moments.append({"kind": "gift", "name": sp_name,
+                                        "item": it.get("name"), "liked": g_liked})
+                    else:
+                        rel_log(state, sp_id, old_act, "gift",
+                                f"你想把{g_item.strip()}送给TA，被TA推回来了。")
             # 🎒 ITEMS: gained / lost / stashed at the current place
             if not observer:
                 g = (directed.get("gained") or "").strip()
@@ -3504,6 +3623,9 @@ def run_turn_stream(
             yield emit({"type": "description", "speaker_name": None,
                         "text": _SLOT_NARR[cv["slot"]].format(day=cv["day"])})
             yield ("clock", cv)
+            # 🌆 while the hour turned, life happened elsewhere too
+            if not observer:
+                offscreen_drama(content, state, llm)
         # authored deadline: crossing INTO the day warns loudly; letting it pass ends it
         dl = (cv or {}).get("deadline")
         if dl and dl["days_left"] == 0 and int(clk["day"]) > day_before:

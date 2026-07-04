@@ -90,6 +90,7 @@ def _to_secret(sec: SecretModel) -> Secret:
                     "retrieval_key": f.retrieval_key,
                     "known_by_character_ids": f.known_by_character_ids or [],
                     "unlock": f.unlock or {},
+                    "cover": f.cover,
                 }
                 for f in sec.fragments
             ],

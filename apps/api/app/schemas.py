@@ -303,6 +303,9 @@ class FragmentInput(BaseModel):
     retrieval_key: Optional[str] = None
     known_by_character_ids: list[str] = []
     unlock: Unlock = Unlock()
+    # 🗣 the AUTHORED cover story: told (consistently, by every knower) while this
+    # layer is locked; the truth replaces it on unlock; a confront shatters it
+    cover: Optional[str] = None
 
 
 class Fragment(FragmentInput):

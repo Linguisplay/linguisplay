@@ -279,6 +279,13 @@ ACTS = [
 ]
 
 # ⚠️ 危机系统: 卧底的暴露风险。言行出格会推高；爆表 = 身份败露，王九的刀不会等。
+# 🗣 统一口径（假话层）：真相解锁之前，知情者被问到就讲这一套——前后一致，可被对峙戳穿。
+COVERS = {
+    "fr_wonggau1": "王九？收数佬而已，跟大人物扯不上——城外谁都能来收数，见怪不怪。",
+    "fr_deal1": "大老板是正经来谈生意的，想合伙开发这片地皮，好事，谁不想住新楼。",
+    "fr_idsecret1": "小蔡就是个北边来讨生活的外来妹，投亲不着流落到这儿，没什么来头。",
+}
+
 PRESSURE = {
     "name": "暴露风险",
     "hint": "亮出警队背景、打探过急、言行不像走投无路的外来妹，都会推高；圆得回来、低调合群会回落",
@@ -534,7 +541,8 @@ def main() -> None:
             sec = Secret(story_id=story.id, character_id=char_id, title=title, sensitivity=sens)
             sec.fragments = [
                 Fragment(id=fid, layer=layer, content=content, retrieval_key=rkey,
-                         known_by_character_ids=known_by, unlock=unlock)
+                         known_by_character_ids=known_by, unlock=unlock,
+                         cover=COVERS.get(fid))
                 for (fid, layer, content, rkey, unlock) in frags
             ]
             db.add(sec)

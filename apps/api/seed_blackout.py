@@ -128,6 +128,13 @@ ACTS = [
     ]},
 ]
 
+# 🗣 统一口径（假话层）：解锁之前，知情者按这套讲——被证据当面对质才会崩。
+COVERS = {
+    "fr_record": "刷卡机老坏，少个把名字正常，物业早该修了。",
+    "fr_fifthname": "第五个名字？多半是哪个离职员工的卡没注销，别自己吓自己。",
+    "fr_substation": "配电间反锁是安全规定，钥匙在物业那儿，明早就来人。",
+}
+
 # ⚠️ 危机系统: 灵异逼近度。挑衅未知、直呼那个存在、落单冒进会推高；爆表 = 它不再躲了。
 PRESSURE = {
     "name": "灵异逼近",
@@ -357,7 +364,8 @@ def main() -> None:
             sec = Secret(story_id=story.id, character_id=char_id, title=title, sensitivity=sens)
             sec.fragments = [
                 Fragment(id=fid, layer=layer, content=content, retrieval_key=rkey,
-                         known_by_character_ids=known_by, unlock=unlock)
+                         known_by_character_ids=known_by, unlock=unlock,
+                         cover=COVERS.get(fid))
                 for (fid, layer, content, rkey, unlock) in frags
             ]
             db.add(sec)

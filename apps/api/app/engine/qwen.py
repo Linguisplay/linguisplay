@@ -212,13 +212,25 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append("")
         lines.append(f"【你们最近捎过的话（你记得，可自然接上，别当没发生过）】{sms}")
 
+    rumor = (prompt.get("rumor") or "").strip()
+    if rumor:
+        lines.append("")
+        lines.append(f"【你新近听来的传闻】{rumor}。若话头合适，用你自己的口吻自然带给对方"
+                     "（街坊闲话的讲法，别念播报）；话头不合适就先按下不提。")
+
     cond = prompt.get("condition") or {}
-    if cond.get("hp") or cond.get("intent"):
+    if cond.get("hp") or cond.get("intent") or cond.get("mood") or cond.get("keepsakes"):
         bits = []
         if cond.get("hp"):
             bits.append(f"你此刻{cond['hp']}——说话、动作、脾气都受伤势拖累，别演得生龙活虎")
+        if cond.get("mood"):
+            bits.append(f"上一场戏散场时，你心里是「{cond['mood']}」——这股情绪还没散，"
+                        "这一场开口时带着它（消气/回暖需要对方给台阶，不会凭空翻篇）")
         if cond.get("intent"):
             bits.append(f"你先前打定的主意：{cond['intent']}。除非情势已变，顺着它行动，别凭空改弦更张")
+        if cond.get("keepsakes"):
+            bits.append(f"你一直带着TA送你的{'、'.join(cond['keepsakes'][:3])}"
+                        "（在合适的时刻可以自然提起或摩挲它，不要刻意）")
         lines.append("")
         lines.append("【你自己的状态】" + "；".join(bits) + "。")
 
@@ -274,6 +286,9 @@ def _build_system(prompt: dict[str, Any]) -> str:
             f"【对峙时刻】「{player_name}」刚刚把证据当面摆了出来（TA确实已经掌握：{conf.get('evidence','')}），"
             f"逼你把「{conf.get('title','')}」说清楚。{verdict}"
         )
+        if (conf.get("shattered") or "").strip():
+            lines.append(f"你此前对外的那套说辞（{conf['shattered']}）就此被当面拆穿——"
+                         "把说辞崩塌的那个瞬间演出来：一秒的僵住、找补的话说到一半自己停了。")
 
     if prompt.get("act_locked"):
         lines.append("")
@@ -310,6 +325,15 @@ def _build_system(prompt: dict[str, Any]) -> str:
         "【铁律】你只能基于下面明确列出的「可透露信息」来回应。"
         "除此之外的任何内幕、秘密、真相，你都【不知道】，绝不能编造、暗示或承认。",
     ]
+
+    covers = (prompt.get("context") or {}).get("covers") or []
+    if covers:
+        lines.append("")
+        lines.append("【你对外的统一口径（编好的假话，不是真相）】被问到下面这些事时，你讲的是这个假版本："
+                     "讲得笃定、自然、前后一致，细节别越编越多；除非下方明确要求你吐露真相，"
+                     "绝不偏离这个口径，也绝不承认它是假的：")
+        for cv in covers[:4]:
+            lines.append(f"- 关于「{cv.get('secret_title','')}」：{cv.get('content','')}")
 
     if new_reveal:
         lines.append("")
@@ -506,6 +530,11 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                               "若玩家失去/交出/用掉了随身物品，填物品名（须在TA随身物品之列）；否则空字符串"}
         props["item_stashed"] = {"type": "string", "description":
                                  "若玩家把随身物品存放/藏在当前地点，填物品名；否则空字符串"}
+        if prompt.get("player_items"):
+            props["gift_received"] = {"type": "string", "description":
+                                      "若玩家这一轮把TA的随身物品【送给你】（递给你/塞给你/请你收下），"
+                                      "由你按人设和你们的关系决定收不收、喜不喜欢，填"
+                                      "「物品名|收|喜」「物品名|收|平」或「物品名|拒」；没有则空字符串"}
     # 🕸 NPC↔NPC judgment: did this scene genuinely move two present characters
     # closer / further apart (a quarrel, a debt repaid, a betrayal witnessed)?
     cast_n = [str(n).strip() for n in (prompt.get("cast") or []) if str(n).strip()]
@@ -914,6 +943,8 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
         out["self_intent"] = str(d.get("self_intent") or "").strip()
     if "character_harmed" in d:
         out["harmed"] = str(d.get("character_harmed") or "").strip()
+    if "gift_received" in d:
+        out["gift"] = str(d.get("gift_received") or "").strip()
     if "npc_moves" in d:
         out["npc_moves"] = [{"who": str(m.get("who") or "").strip(),
                              "to": str(m.get("to") or "").strip()}
@@ -1485,6 +1516,40 @@ class QwenLLM:
                 line = body
         return {"narration": narration, "line": line}
 
+    def _offscreen(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🌆 幕后戏: two NPCs had a moment while the player was elsewhere. Output = a
+        stance direction + ONE line of neighborhood-gossip rumor. Degrades to {}."""
+        a, b = prompt.get("a") or {}, prompt.get("b") or {}
+        sys = ("你在为互动剧情游戏生成一段【玩家不在场时】两个角色之间发生的小事，"
+               "并把它压成一句会在街坊嘴里流传的传闻。\n"
+               f"甲：{a.get('name','')}（{a.get('role','')}）{a.get('persona','')}\n"
+               f"乙：{b.get('name','')}（{b.get('role','')}）{b.get('persona','')}\n"
+               f"两人的交情：{prompt.get('stance','')}；事发地：{prompt.get('place','')}\n"
+               "只输出两行：\n变化：近 或 僵 或 无（这件事让两人关系更近/闹僵/没变化）\n"
+               "传闻：一句话（30字内，像闲话——谁听见谁看见了什么，具体、有画面，不用破折号）")
+        try:
+            resp = httpx.post(
+                self._url,
+                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
+                json={"model": self._model, "messages": [{"role": "system", "content": sys},
+                      {"role": "user", "content": "输出那两行："}], "max_tokens": 80,
+                      "temperature": 0.95},
+                timeout=20,
+            )
+            resp.raise_for_status()
+            txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+        except Exception:
+            return {}
+        delta, rumor = 0, ""
+        for ln in txt.splitlines():
+            t = ln.strip()
+            body = t.split("：", 1)[-1].split(":", 1)[-1].strip()
+            if t.startswith("变化"):
+                delta = 1 if "近" in body else -1 if "僵" in body else 0
+            elif t.startswith("传闻"):
+                rumor = body
+        return {"delta": delta, "rumor": rumor} if rumor else {}
+
     def _farewell(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """One short in-voice goodbye line for a character whose 作息 is pulling them
         away — may name where they're headed, may leave a hook. Degrades to {}."""
@@ -1559,6 +1624,9 @@ class QwenLLM:
             f"TA不在你身边，是通过{device}给你捎话。你在忙你自己的事，回不回、回多少、什么语气，全凭你此刻的心情和你们的关系。",
             "【铁律】你只能基于下面列出的「可透露信息」谈及内情；此外的任何秘密你都不知道，绝不能写出来——"
             "被追问就回避、岔开，或干脆不回。" if (reveal or has_hidden) else "",
+            ("【你对外的统一口径（假话，别偏离）】" + "；".join(
+                f"关于「{c.get('secret_title','')}」：{c.get('content','')}"
+                for c in (ctx.get("covers") or [])[:3])) if ctx.get("covers") else "",
             ("【你已经告诉过TA的】" + "；".join((r.get("content") or "")[:60] for r in reveal[:4])) if reveal else "",
             "输出格式：写0~3条短消息，每条一行（口语，短，像真的在发消息；可以只回一个字，也可以连发两三条）。"
             "如果你此刻不想回（心情/性格/在气头上），就只输出：【已读】",
@@ -1714,6 +1782,8 @@ class QwenLLM:
             return self._farewell(prompt)
         if prompt.get("opening_hook"):
             return self._opening_hook(prompt)
+        if prompt.get("offscreen"):
+            return self._offscreen(prompt)
         if prompt.get("risk_judge"):
             return self._risk(prompt)
         speaker = prompt.get("speaker_name") or "角色"

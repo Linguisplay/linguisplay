@@ -169,6 +169,9 @@ class Fragment(Base):
     layer: Mapped[int] = mapped_column(Integer, default=0)
     content: Mapped[str] = mapped_column(Text, default="")  # full text — NEVER embedded raw
     retrieval_key: Mapped[str | None] = mapped_column(Text, nullable=True)  # sanitized; embedded
+    # 🗣 the AUTHORED lie: what the knower tells while this layer is LOCKED — one
+    # coherent cover story instead of improvised fibs. Safe to speak by design.
+    cover: Mapped[str | None] = mapped_column(Text, nullable=True)
     known_by_character_ids: Mapped[list] = mapped_column(JSON, default=list)
 
     # unlock conditions (all ANDed). Kept as JSON for M1; engine reads in M2.

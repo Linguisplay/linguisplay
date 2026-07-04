@@ -121,6 +121,7 @@ def build_context(
     newly = set(newly_ids or [])
     reveal: list[dict[str, str]] = []
     new_reveal: list[dict[str, str]] = []
+    covers: list[dict[str, str]] = []
     hint_titles: set[str] = set()
     has_hidden = False
 
@@ -133,14 +134,23 @@ def build_context(
             reveal.append(item)
             if f.get("id") in newly:
                 new_reveal.append(item)
-        elif guard == "hint":
-            hint_titles.add(f.get("secret_title", ""))
         else:
-            has_hidden = True
+            # 🗣 an AUTHORED cover story may speak while the layer is locked: one
+            # coherent lie, told the same way by every knower, until the truth (or a
+            # confront) replaces it. The cover text is written to be spoken — it never
+            # contains the locked content itself.
+            if (f.get("cover") or "").strip():
+                covers.append({"secret_title": f.get("secret_title", ""),
+                               "content": f["cover"].strip()})
+            if guard == "hint":
+                hint_titles.add(f.get("secret_title", ""))
+            else:
+                has_hidden = True
 
     return {
         "reveal": reveal,             # all unlocked fragment bodies the NPC may use
         "new_reveal": new_reveal,     # unlocked THIS turn — voice these as the step
+        "covers": covers,             # authored lies to tell while the truth is locked
         "hint_topics": sorted(t for t in hint_titles if t),  # topics to tease only
         "has_hidden": has_hidden,     # if true, NPC should deflect probes naturally
     }

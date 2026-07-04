@@ -266,6 +266,14 @@ SECRETS = [
     ]),
 ]
 
+# 🗣 统一口径（假话层）：真相之前，人人按这套说——直到你拿证据当面拆穿。
+COVERS = {
+    "q_night1": "小倩自称寺侧人家的女儿，爹娘睡得早，她夜里睡不着才出来走走。",
+    "q_coerce1": "她说白杨树下住的是她相依为命的姥姥，年纪大了脾气孤拐，不喜见生人。",
+    "y_sword1": "燕赤霞自称走镖的粗人，匣子里是趟子手的家伙什，看家吃饭用的。",
+    "q_bones1": "她说她家在北边村里，过些日子农忙完了自然要回去的。",
+}
+
 # Authored endings — the true one demands BOTH the deed (迁骨) and the stand (护骨).
 ENDINGS = [
     {"id": "end_true", "kind": "true", "title": "魂归故里",
@@ -387,7 +395,8 @@ def main() -> None:
             sec = Secret(story_id=story.id, character_id=char_id, title=title, sensitivity=sens)
             sec.fragments = [
                 Fragment(id=fid, layer=layer, content=content, retrieval_key=rkey,
-                         known_by_character_ids=known_by, unlock=unlock)
+                         known_by_character_ids=known_by, unlock=unlock,
+                         cover=COVERS.get(fid))
                 for (fid, layer, content, rkey, unlock) in frags
             ]
             db.add(sec)
