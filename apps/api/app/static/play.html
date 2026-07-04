@@ -338,6 +338,10 @@
   <div id="role" class="card hidden">
     <div class="bar" style="justify-content:space-between"><h3 style="margin:0">选择玩法</h3><span class="bar"><a onclick="editCurrentStory()">✏️ 编辑这个剧本</a><a onclick="backToStories()">← 换剧本</a></span></div>
     <div id="storyMeta"></div>
+    <div id="wvWrap" class="hidden">
+      <p class="muted" style="margin:6px 0 4px">🏖 这是一个无尽沙盒：世界观由你定义，时间和现实一致，剧情永不落幕。你也可能死，死了就只剩下看。</p>
+      <textarea id="wvInput" rows="4" style="width:100%; background:#101018; border:1px solid #26262f; border-radius:8px; color:#e7e9f0; padding:8px; font:inherit; resize:vertical" placeholder="写下你想要的世界观：什么时代、什么地方、住着什么样的人、正在酝酿什么。留空则由世界自己决定。"></textarea>
+    </div>
     <p class="muted" style="margin:6px 0 4px">扮演其中一个角色，亲自下场：</p>
     <div id="roleChars"></div>
     <p class="muted" style="border-top:1px solid #23232c; padding-top:12px; margin-top:12px">或者：</p>
@@ -483,6 +487,8 @@ async function afterAuth() {
 async function chooseRole(storyId) {
   currentStoryId = storyId;
   const story = await j(`/stories/${storyId}`);
+  const sandbox = !!(story.sandbox && story.sandbox.enabled);
+  document.getElementById("wvWrap").classList.toggle("hidden", !sandbox);
   const all = (story.characters || []).filter(c => (c.presence || "present") !== "offstage");
   // only author-designated playable roles; if the story flags none, fall back to all (legacy)
   const flagged = all.filter(c => c.playable);
@@ -496,7 +502,9 @@ async function chooseRole(storyId) {
     b.onclick = () => startRun(storyId, "character", c.id, c.name);
     roleChars.appendChild(b);
   });
-  if (!chars.length) roleChars.innerHTML = "<p class='muted'>这个剧本还没有可扮演的角色。</p>";
+  if (!chars.length) roleChars.innerHTML = sandbox
+    ? "<p class='muted'>这个世界的人物，会在你踏入之后才诞生。</p>"
+    : "<p class='muted'>这个剧本还没有可扮演的角色。</p>";
   renderStoryMeta(storyId);
   hide("pick"); show("role");
 }
@@ -550,7 +558,8 @@ function editCurrentStory() { if (currentStoryId) location.href = `/studio?story
 async function startRun(storyId, mode="character", playerCharacterId=null, playerCharacterName=null) {
   const run = await j("/runs", { method:"POST", body: JSON.stringify({
     story_id: storyId, persona_id: personaId, mode, player_character_id: playerCharacterId,
-    perk: chosenPerk, carry_card_id: chosenCarry }) });
+    perk: chosenPerk, carry_card_id: chosenCarry,
+    worldview: ((document.getElementById("wvInput") || {}).value || "").trim() }) });
   if (chosenPerk) pushToast(`🌱 二周目优势生效：${chosenPerk === "veteran" ? "故人" : "直觉"}`, "t-act", 400);
   await enterRun(run);
 }
@@ -1131,7 +1140,10 @@ function updatePlaceholder() {
 
 function renderState(st) {
   if (!st) return;
-  state.innerHTML = `第 <b>${st.act}</b> 幕 · 好感 <b>${st.affinity}</b> · 已解锁碎片 <b>${(st.unlocked_fragment_ids||[]).length}</b>`;
+  if (st.player_hp !== undefined) renderPlayerHp(st.player_hp);
+  const hpBit = { hurt: " · 🩹 带伤", dying: " · 🆘 <b style='color:#ff9d9d'>重伤濒死</b>",
+                  dead: " · 💀 <b style='color:#ff9d9d'>你已死去</b>" }[st.player_hp] || "";
+  state.innerHTML = `第 <b>${st.act}</b> 幕 · 好感 <b>${st.affinity}</b> · 已解锁碎片 <b>${(st.unlocked_fragment_ids||[]).length}</b>${hpBit}`;
   if (st.goal !== undefined) renderGoal(st.goal);
   if (st.progress !== undefined) renderProgress(st.progress);
   if (st.location !== undefined) renderPlace(st.location);
@@ -1139,6 +1151,21 @@ function renderState(st) {
   if (st.phone_unread !== undefined) setPhoneBadge(st.phone_unread);
   if (st.verdict !== undefined) renderVerdictBar(st.verdict);
 }
+// 💀 the player's own body (sandbox): dead strips 说/做 — watching (想) remains
+let playerHp = "healthy";
+function renderPlayerHp(hp) {
+  hp = hp || "healthy";
+  const changed = hp !== playerHp;
+  playerHp = hp;
+  const dead = hp === "dead";
+  if (channel) {
+    [...channel.options].forEach(o => { if (o.value !== "think") o.disabled = dead; });
+    if (dead) channel.value = "think";
+  }
+  if (dead) msg.placeholder = "你已经死了。只能看着这个世界继续（可留空）";
+  else if (changed) updatePlaceholder();
+}
+
 function clockChip() {
   if (!curClock || !curClock.label) return "";
   let s = `<span class="clock">🕐 ${escapeHtml(curClock.label)}</span>`;
@@ -1590,6 +1617,11 @@ function showMoments(moments, relDeltas) {
     else if (m.kind === "death") pushToast(`☠️ ${m.name || "有人"} 死了`, "t-press", i++ * 650);
     else if (m.kind === "arrival") pushToast(`👋 新面孔登场：${m.name || ""}`, "t-act", i++ * 650);
     else if (m.kind === "identity") pushToast(`🎖 你的身份变了：${m.text || ""}`, "t-end", i++ * 650);
+    else if (m.kind === "player_hp") pushToast(
+      m.hp === "dead" ? "💀 你死了。「说」与「做」已被剥夺，你只能旁观" :
+      m.hp === "dying" ? "🆘 你重伤濒死" :
+      m.hp === "hurt" ? "🩹 你受伤了" : "💚 你缓过来了",
+      m.hp === "healthy" ? "t-unlock" : "t-press", i++ * 650);
     else if (m.kind === "item") pushToast(
       m.verb === "gained" ? `🎒 获得：${m.name}` :
       m.verb === "stashed" ? `📦 已存放：${m.name}` :

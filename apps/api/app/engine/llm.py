@@ -88,6 +88,10 @@ class MockLLM:
         if prompt.get("opening_hook"):
             return {}
 
+        # 🏖 sandbox opening cast: mock defers to the deterministic stranger.
+        if prompt.get("sandbox_cast"):
+            return {}
+
         # 🌆 offscreen drama: mock stays quiet — no fabricated rumors in tests.
         if prompt.get("offscreen"):
             return {}

@@ -117,3 +117,12 @@
 ```json
 {"tuning": {"stuck_push": 4, "flirt_t": 40, "affinity_clamp_max": 5}}
 ```
+
+## 🏖 无尽沙盒（story.sandbox）
+
+`sandbox: {"enabled": true, "real_time": true}` 把一个剧本变成无尽沙盒：
+
+- **世界观玩家定**：开新局时玩家写下世界观（RunCreate.worldview），这一局的私有副本以它为唯一事实；开场人物由模型从世界观里现场生成（模型失灵时保底生成一位「迎面而来的陌生人」）。
+- **时间与现实同步**（real_time，默认开）：故事时钟就是墙上的钟。第 N 天 = 开局后的第 N 个自然日；晨 05~11 / 午 12~17 / 夜 18~04。回合不消耗时间，time_skip 不生效；「明晚见」的约定要等到真正的明晚。时钟标签带真实 HH:MM。
+- **永不结束**：结局机制整体停摆（模型不被提供 ending 字段，引擎也不认）；authored endings / verdict / deadline 会被 linter 警告闲置。
+- **玩家会死**：新判定字段 player_harm（轻伤/重伤/好转），与 NPC 同一套两段式阶梯 healthy→hurt→dying→dead——致命一击最多打到濒死，总有救回的窗口。死亡不是结局：**「说」和「做」被剥夺**（引擎强制改判为旁观，UI 锁通道、手机禁发），世界继续运转，你只能看。

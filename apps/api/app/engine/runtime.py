@@ -327,6 +327,11 @@ def clock_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]
         return None
     day = int((state.get("clock") or {}).get("day", 1) or 1)
     view: dict[str, Any] = {"day": day, "slot": slot, "label": f"第{day}天·{slot}"}
+    if real_time_on(content):
+        now = _now()
+        view["real"] = True
+        view["hhmm"] = f"{now.hour:02d}:{now.minute:02d}"
+        view["label"] = f"第{day}天·{slot} {view['hhmm']}"
     ccfg = clock_cfg(content)
     try:
         dd = int(ccfg.get("deadline_day") or 0)
@@ -336,6 +341,75 @@ def clock_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]
         view["deadline"] = {"text": (ccfg.get("deadline_text") or "").strip() or "大限",
                             "days_left": dd - day}
     return view
+
+
+def sandbox_on(content: dict[str, Any]) -> bool:
+    """🏖 无尽沙盒: the player defines the WORLD at run start, the plot generates
+    forever (no endings), and the player's own body can break — the dead lose 说/做."""
+    return bool(((content.get("story") or {}).get("sandbox") or {}).get("enabled"))
+
+
+def real_time_on(content: dict[str, Any]) -> bool:
+    """⏰ 现实同步 (sandbox default): story time IS wall-clock time. Turns spend
+    nothing; the world's hour is whatever the player's real hour is when they show up."""
+    sb = (content.get("story") or {}).get("sandbox") or {}
+    return bool(sb.get("enabled")) and sb.get("real_time") is not False
+
+
+def _now():
+    """Wall clock (北京时间), injectable for tests."""
+    from datetime import datetime, timedelta, timezone
+    return datetime.now(timezone(timedelta(hours=8)))
+
+
+def sync_real_clock(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
+    """⏰ Mirror the real world into the story clock: day = real days since the run began
+    (day 1 = the day it started), slot = 晨 05~11 / 午 12~17 / 夜 18~04. Everything
+    downstream (作息, promises, moods, phone labels) reads the synced clock unchanged, so
+    a promise for 明晚 literally means: come back tomorrow evening."""
+    from datetime import date
+    now = _now()
+    try:
+        d0 = date.fromisoformat(state.get("real_epoch") or "")
+    except (TypeError, ValueError):
+        d0 = now.date()
+        state["real_epoch"] = d0.isoformat()
+    day = max(1, (now.date() - d0).days + 1)
+    slot = 0 if 5 <= now.hour < 12 else (1 if 12 <= now.hour < 18 else 2)
+    state["clock"] = {"day": day, "slot": slot, "turns_in_slot": 0}
+    return clock_view(content, state)
+
+
+def seed_sandbox_cast(content: dict[str, Any], llm: LLM | None = None) -> None:
+    """🏖 the sandbox opens ALIVE: conjure a small starting cast from the player's
+    worldview (this run's private copy owns them; more will be born in play).
+    Deterministic fallback guarantees at least one person to meet."""
+    story = content.get("story") or {}
+    if story.get("characters"):
+        return
+    llm = llm or get_llm()
+    try:
+        out = llm.generate({"sandbox_cast": True,
+                            "worldview": (story.get("world_long") or "")[:1200]}) or {}
+    except Exception:
+        out = {}
+    import uuid as _uuid
+    chars: list[dict[str, Any]] = []
+    for c in (out.get("characters") or [])[:4]:
+        nm = str(c.get("name") or "").strip().strip("「」\"'")[:12]
+        if not nm or any(nm == x.get("name") for x in chars):
+            continue
+        chars.append({"id": f"gen_{_uuid.uuid4().hex[:8]}", "name": nm,
+                      "role": str(c.get("role") or "").strip()[:24],
+                      "persona_text": str(c.get("persona") or "").strip()[:240],
+                      "relation_default": "stranger", "generated": True,
+                      "is_lead": not chars})
+    if not chars:
+        chars = [{"id": f"gen_{_uuid.uuid4().hex[:8]}", "name": "迎面而来的陌生人",
+                  "role": "这个世界最先注意到你的人",
+                  "persona_text": "对生面孔有超出寻常的兴趣，话不多，但每一句都像已经认识你很久。",
+                  "relation_default": "stranger", "generated": True, "is_lead": True}]
+    story.setdefault("characters", []).extend(chars)
 
 
 def align_clock_to_act(content: dict[str, Any], state: dict[str, Any],
@@ -2188,6 +2262,8 @@ def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str
     text = (text or "").strip()
     if not text:
         raise ValueError("说点什么吧")
+    if state.get("player_hp") == "dead":
+        raise ValueError("你已经死了，发不出任何消息")
     tun = tuning_for(content)
     now_label = (clock_view(content, state) or {}).get("label", "")
     th = _thread(state, char_id)
@@ -2828,6 +2904,23 @@ def run_turn_stream(
     # so the location gating dimension always sees where they truly stand
     state["location_id"] = (current_location(content, state) or {}).get("id")
     tun = tuning_for(content)
+    # ⏰ 现实同步: the real hour walks in with the player; a turned hour narrates below
+    real_slot_turned = None
+    if real_time_on(content):
+        prev_rt = (int((state.get("clock") or {}).get("day", 1) or 1),
+                   int((state.get("clock") or {}).get("slot", 0) or 0))
+        cv_rt = sync_real_clock(content, state)
+        if state.get("real_seen") and cv_rt \
+                and prev_rt != (state["clock"]["day"], state["clock"]["slot"]):
+            real_slot_turned = cv_rt
+        state["real_seen"] = True
+    # 💀 the dead have neither voice nor hands: 说/做 are refused; watching remains
+    ghost = sandbox_on(content) and (state.get("player_hp") == "dead")
+    if ghost and channel in ("say", "do"):
+        yield ("beat", dedash_beat({
+            "type": "description", "speaker_name": None,
+            "text": "（你已经死了。喉咙发不出声，手也穿不过任何东西。你所能做的，只剩下看。）"}))
+        channel = "think"
     _ensure_npc_rel(content, state)  # 🕸 authored ties come alive on first touch
     # who stands in the scene as the turn OPENS — the closing diff narrates arrivals/exits
     here_before = {c.get("id") for c in scene_characters(content, state) if c.get("id")}
@@ -3140,6 +3233,13 @@ def run_turn_stream(
             "scene": current_act(content, old_act),
             "next_act_title": (next_act or {}).get("title", "") if next_act else "",
             "clock": clock_line,                  # ⏳ 第几天·什么时段 (+ deadline countdown)
+            # 🏖 sandbox: never-ending world, real-hour sync, the player's own body
+            "sandbox": sandbox_on(content),
+            "real_time": real_time_on(content),
+            "player_dead": ghost,
+            "player_hp_label": ({"hurt": "受了伤，行动吃力", "dying": "重伤濒死，命悬一线"}
+                                .get(state.get("player_hp") or "", "")
+                                if sandbox_on(content) else ""),
             # 🕸 this speaker's charged stances toward who else is in the scene
             "npc_stances": npc_stance_line(content, state, sp_id,
                                            [c for c in all_chars if c.get("id") != sp_id]),
@@ -3263,6 +3363,12 @@ def run_turn_stream(
             advance = True
         if is_primary:
             model_ending = directed.get("ending")  # only the addressed scene can end the run
+            if sandbox_on(content):
+                mk = (model_ending or {}).get("kind") if isinstance(model_ending, dict) \
+                    else (model_ending or "")
+                if "death" in str(mk) and not (directed.get("player_harm") or "").strip():
+                    directed["player_harm"] = "重伤"
+                model_ending = None  # 🏖 the sandbox has no exits
             # a character may ASK to lead the player elsewhere — captured here, surfaced as a
             # confirm prompt (never auto-applied; the player relocates via /move on a yes).
             primary_invite = directed.get("move_invite")
@@ -3321,6 +3427,35 @@ def run_turn_stream(
                         moments.append({"kind": "pressure", "note": lv["note"], "value": p_new})
                 if p_new >= 100:
                     pressure_blown = True
+            # 💀 THE PLAYER'S OWN BODY (sandbox): judged wounds on the same two-stage
+            # ladder as everyone else — a killing blow on the healthy leaves them 濒死,
+            # never instantly dead. Death is not an ending here: the world keeps
+            # running; the dead lose 说 and 做, and can only watch.
+            ph_ref = (directed.get("player_harm") or "").strip()
+            if ph_ref and sandbox_on(content) and not observer \
+                    and (state.get("player_hp") or "healthy") != "dead":
+                cur_php = state.get("player_hp") or "healthy"
+                if any(w in ph_ref for w in ("好转", "救", "包扎", "缓")):
+                    nxt_php = {"dying": "hurt", "hurt": "healthy"}.get(cur_php)
+                    if nxt_php:
+                        state["player_hp"] = nxt_php
+                        moments.append({"kind": "player_hp", "hp": nxt_php})
+                        yield emit({"type": "description", "speaker_name": None,
+                                    "text": "（你缓过来一些了。还疼，但死神松了手。）"
+                                            if nxt_php == "hurt"
+                                            else "（伤势稳住了。你重新站稳了脚。）"})
+                else:
+                    heavy = any(w in ph_ref for w in ("重", "濒", "毙", "致命", "死"))
+                    nxt_php = ("dead" if cur_php == "dying" and heavy else
+                               "dying" if (cur_php in ("hurt", "dying") or heavy) else "hurt")
+                    if nxt_php != cur_php:
+                        state["player_hp"] = nxt_php
+                        moments.append({"kind": "player_hp", "hp": nxt_php})
+                        yield emit({"type": "description", "speaker_name": None, "text": {
+                            "hurt": "（你挂了彩。不致命，但每动一下，伤口都在提醒你。）",
+                            "dying": "（你眼前发黑，力气一丝丝往外漏。再没有人管你，你就交代在这了。）",
+                            "dead": "（世界没有停下来。只是你再也发不出声音，再也碰不到任何东西。"
+                                    "从这一刻起，你成了看客。）"}[nxt_php]})
             # 🩸 HARM: judged wounds move ONE step on the graded ladder (轻伤/重伤/好转)
             harm_ref = (directed.get("harmed") or "").strip()
             if harm_ref:
@@ -3567,6 +3702,8 @@ def run_turn_stream(
             "place": place,
             "knowledge": (observe_target or {}).get("knowledge", "") if observe_target else "",
             "mature": bool(state.get("mature")),
+            "sandbox": sandbox_on(content),
+            "player_dead": ghost,
             # observe = the PLAYER looking around → the player's own full view (they witnessed
             # everything they did); their private digest.
             "history": (history_for(beat_log, pcid) if beat_log is not None else (history or [])),
@@ -3733,22 +3870,25 @@ def run_turn_stream(
         clk = dict(state.get("clock") or {})
         clk.setdefault("day", 1); clk.setdefault("slot", 0); clk.setdefault("turns_in_slot", 0)
         day_before = int(clk["day"])
-        skip = "" if time_skip in ("无", "没有", "none") else time_skip
-        if skip:
-            steps = (len(SLOTS) - int(clk["slot"])) if ("次日" in skip or "天亮" in skip) else 1
-            clk["turns_in_slot"] = 0
+        if real_time_on(content):
+            steps = 0    # ⏰ real time cannot be spent — or slept away — by turns
         else:
-            clk["turns_in_slot"] = int(clk["turns_in_slot"]) + 1
-            steps = 1 if clk["turns_in_slot"] >= tun["turns_per_slot"] else 0
-            if steps:
+            skip = "" if time_skip in ("无", "没有", "none") else time_skip
+            if skip:
+                steps = (len(SLOTS) - int(clk["slot"])) if ("次日" in skip or "天亮" in skip) else 1
                 clk["turns_in_slot"] = 0
+            else:
+                clk["turns_in_slot"] = int(clk["turns_in_slot"]) + 1
+                steps = 1 if clk["turns_in_slot"] >= tun["turns_per_slot"] else 0
+                if steps:
+                    clk["turns_in_slot"] = 0
         for _ in range(steps):
             clk["slot"] = int(clk["slot"]) + 1
             if clk["slot"] >= len(SLOTS):
                 clk["slot"], clk["day"] = 0, int(clk["day"]) + 1
         state["clock"] = clk
         cv = clock_view(content, state)
-        if steps and cv:
+        if (steps or real_slot_turned) and cv:
             yield emit({"type": "description", "speaker_name": None,
                         "text": _SLOT_NARR[cv["slot"]].format(day=cv["day"])})
             yield ("clock", cv)

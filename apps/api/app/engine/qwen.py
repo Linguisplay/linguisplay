@@ -201,6 +201,20 @@ def _build_system(prompt: dict[str, Any]) -> str:
     if ck:
         lines.append("")
         lines.append(f"【此刻的时间】{ck}。旁白与对话必须贴合这个时辰——天光、街面动静、人的作息。")
+    if prompt.get("real_time"):
+        lines.append("【时间与现实同步】上面的时间就是玩家此刻的真实时间。剧情里的约定（明晚见、明早再来）"
+                     "对应真实的日子；角色像真的在过日子，玩家离开的这段时间里你也在生活。")
+    if prompt.get("sandbox"):
+        lines.append("")
+        lines.append("【无尽沙盒】这个世界没有终点：绝不要写大结局、不要收束剧情、不要替故事画句号。"
+                     "以【世界观/场景设定】为唯一事实基础，顺着玩家的言行让世界自然长出新的人物、"
+                     "新的地方、新的事端；世界不迁就玩家，该有的后果就让它发生。")
+    if prompt.get("player_dead"):
+        lines.append("【玩家已死】玩家已经死了。任何角色都听不见、看不见玩家，绝不能回应玩家的话；"
+                     "写这个世界在没有玩家之后如何继续运转。")
+    elif (prompt.get("player_hp_label") or "").strip():
+        lines.append(f"【玩家的身体状态】玩家此刻{prompt['player_hp_label']}。"
+                     "在场的人看得见这一点，言行要与之相符。")
 
     stances = (prompt.get("npc_stances") or "").strip()
     if stances:
@@ -497,7 +511,7 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                                 "没有新打算就填空字符串"}
     if has_map and not is_member and not is_think:
         props["move_invite"] = {"type": "string", "description": "若你这轮提出或答应带玩家去某处，填那个地点名（可以是【可去通路】里的，也可以是对话里自然浮现的新地点；旁白只写到起身相邀为止）；否则填空字符串"}
-    if not observer and not is_member and not is_think:
+    if not observer and not is_member and not is_think and not prompt.get("sandbox"):
         props["ending"] = {"type": "string", "description": "默认空字符串；只有玩家本人此刻被你弄死填 death，走到不可挽回的坏结局填 bad"}
     # DYNAMIC WORLD judgments (all optional; empty string = nothing happened):
     # death / a brand-new character entering / the player's identity shifting / items.
@@ -564,10 +578,17 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
             "description": "仅当这一轮剧情让【在场两个角色彼此之间】（都不是玩家）的关系发生实质变化"
                            "（争执翻脸/冰释前嫌/一起扛过事）才填，最多2条；名字只能原样抄写在场角色名。"
                            "通常填空数组[]。"}
-    if (prompt.get("clock") or "").strip() and not is_member and not is_think:
+    if (prompt.get("clock") or "").strip() and not is_member and not is_think \
+            and not prompt.get("real_time"):
         props["time_skip"] = {"type": "string", "description":
                               "默认空字符串。仅当这一轮剧情明确跨过了大段时间才填："
                               "睡了一觉/到第二天→填「次日」；一直等到下一个时段（等到天黑/晌午）→填「下一时段」。"}
+    if prompt.get("sandbox") and not observer and not is_member and not is_think \
+            and not prompt.get("player_dead"):
+        props["player_harm"] = {"type": "string", "description":
+                                "默认空字符串。仅当这一轮剧情让【玩家本人】伤势变化才填："
+                                "受了伤填「轻伤」，遭重创/致命打击填「重伤」，"
+                                "被救治或自行缓过来填「好转」。"}
         if not observer:
             props["promise_made"] = {
                 "type": "object",
@@ -685,6 +706,11 @@ def _build_observe_system(prompt: dict[str, Any]) -> str:
         "你是这个互动故事里的旁白叙述者。用中文，文笔要有画面感、质感与节奏。",
         _ANTI_ASSISTANT,
     ]
+    if prompt.get("player_dead"):
+        lines.append("【玩家已死】玩家已经死了，此刻是一缕无形的视角：任何人都感知不到玩家。"
+                     "把这个世界在没有玩家之后如何继续，具体地写给玩家看。")
+    if prompt.get("sandbox"):
+        lines.append("【无尽沙盒】这个世界没有终点，不要收束剧情，不要总结抒情。")
     if world:
         lines.append(f"【世界观/场景设定】{world}")
     facts = (prompt.get("world_facts") or "").strip()
@@ -973,6 +999,8 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
         out["taken"] = str(d.get("item_taken") or "").strip()
     if "item_traded" in d:
         out["trade"] = str(d.get("item_traded") or "").strip()
+    if "player_harm" in d:
+        out["player_harm"] = str(d.get("player_harm") or "").strip()
     if "npc_moves" in d:
         out["npc_moves"] = [{"who": str(m.get("who") or "").strip(),
                              "to": str(m.get("to") or "").strip()}
@@ -1730,6 +1758,32 @@ class QwenLLM:
         return {"beats": [{"type": "description", "speaker_name": None, "text": txt}],
                 "affinity_delta": 0, "advance_act": False, "ending": None}
 
+    def _sandbox_cast(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🏖 conjure the sandbox's opening cast from the player's worldview. Strict
+        JSON; degrades to {} (runtime seeds a deterministic stranger instead)."""
+        wv = (prompt.get("worldview") or "").strip() or "一个由玩家亲手定义的世界。"
+        sys = ("你为一个玩家自定义世界观的无尽沙盒剧情设计【开场人物】。只输出一个JSON对象，形如"
+               ' {"characters":[{"name":"名字","role":"身份(≤12字)","persona":"外貌、性格与说话方式(≤80字)"}]}'
+               "，共2~3人。要求：人物必须从这个世界观里自然长出来（职业、立场、欲望各不相同），"
+               "至少一人与玩家的到来直接相关；名字要贴合世界观的语感。不要旁白，不要解释。")
+        try:
+            resp = httpx.post(
+                self._url,
+                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
+                json={"model": self._model,
+                      "messages": [{"role": "system", "content": sys},
+                                   {"role": "user", "content": f"世界观：{wv}"}],
+                      "max_tokens": 420, "temperature": 0.9,
+                      "response_format": {"type": "json_object"}},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            import json as _json
+            data = _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
     def _parting(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """悬念离场: ONE cliffhanger narration when the player leaves mid-run — an unfinished
         beat that pulls them back. Spoiler-safe: may point at a topic LABEL, never content."""
@@ -1798,6 +1852,8 @@ class QwenLLM:
             return self._describe_place(prompt)
         if prompt.get("start_place"):
             return self._start_place(prompt)
+        if prompt.get("sandbox_cast"):
+            return self._sandbox_cast(prompt)
         if prompt.get("parting"):
             return self._parting(prompt)
         if prompt.get("arrive"):

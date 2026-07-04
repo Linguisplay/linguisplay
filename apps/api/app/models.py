@@ -110,6 +110,8 @@ class Story(Base):
     # 🔍 指认结案 config {prompt, options:[{id,label,correct,text?}], attempts, act_min,
     # fail_ending_id}; None = the story runs no verdict
     verdict: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 🏖 无尽沙盒 {enabled, real_time}; None = a normal authored story
+    sandbox: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # 18+ flag. When on, the engine permits explicit adult content (still refusing
     # minors). Players are already age-gated 18+ at signup (DOB gate).

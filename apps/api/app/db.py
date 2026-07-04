@@ -45,7 +45,7 @@ def _ensure_columns() -> None:
                           ("locations", "JSON DEFAULT '[]'"), ("mature", "INTEGER DEFAULT 0"),
                           ("tuning", "JSON DEFAULT '{}'"), ("pressure", "JSON"),
                           ("clock", "JSON"), ("phone", "JSON"),
-                          ("verdict", "JSON")],
+                          ("verdict", "JSON"), ("sandbox", "JSON")],
               "beats": [("present_ids", "JSON"), ("mood", "TEXT")],
               "story_meta": [("cards", "JSON DEFAULT '[]'")],
               "fragments": [("cover", "TEXT")]}

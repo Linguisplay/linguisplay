@@ -58,6 +58,7 @@ def _to_run(r: RunModel) -> Run:
             pending_choice=st.get("pending_choice"),
             player_character_name=(runtime._char_name(r.pinned_content or {}, pcid) if pcid else None),
             pressure=int(st.get("pressure", 0) or 0),
+            player_hp=st.get("player_hp", "healthy"),
             identity=st.get("identity"),
             inventory=list(st.get("inventory") or []),
             pressure_name=((runtime.pressure_cfg(r.pinned_content or {}) or {}).get("name")),
@@ -161,6 +162,15 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
     # locations), and we must never mutate the shared published snapshot.
     content = copy.deepcopy(content)
 
+    # 🏖 sandbox: the player DEFINES the world at run start — their private copy runs on
+    # that worldview, and opens with a small cast conjured from it (grows forever in play)
+    if runtime.sandbox_on(content):
+        if (body.worldview or "").strip():
+            wv = body.worldview.strip()[:2000]
+            content["story"]["world_long"] = wv
+            content["story"]["world_facts"] = wv[:400]
+        runtime.seed_sandbox_cast(content)
+
     # validate the chosen role (character mode) against the story's PLAYABLE characters —
     # the story is authored from the protagonist's POV; embodying an antagonist/late-arrival
     # breaks the plot, so only author-designated roles are allowed.
@@ -173,6 +183,11 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
     state = {**runtime.default_state(), "scene": runtime.opening_scene(content),
              "mode": body.mode, "player_character_id": pcid}
     state["goal"] = runtime.current_goal(content, 1)
+    if runtime.sandbox_on(content) and (body.worldview or "").strip():
+        state["worldview"] = body.worldview.strip()[:2000]
+    # ⏰ 现实同步 runs open at the player's real hour
+    if runtime.real_time_on(content):
+        runtime.sync_real_clock(content, state)
     # 18+ permission pinned at run start (story is mature AND player is age-gated 18+ at
     # signup). Stored on the run so the engine can permit adult content this playthrough.
     state["mature"] = bool((content.get("story") or {}).get("mature"))

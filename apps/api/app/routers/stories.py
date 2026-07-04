@@ -58,6 +58,7 @@ def _to_story(s: StoryModel) -> Story:
         clock=s.clock,
         phone=s.phone,
         verdict=s.verdict,
+        sandbox=s.sandbox,
         completion=_completion(s),
     )
 

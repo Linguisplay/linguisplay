@@ -264,6 +264,19 @@ def lint_story(content: dict[str, Any]) -> list[Issue]:
             warn("deadline_no_clock", "clock",
                  "设了 deadline_day 但时钟已关闭 (tuning.turns_per_slot=0) —— 大限永远不会到。")
 
+    # — 🏖 sandbox —
+    if (_story(content).get("sandbox") or {}).get("enabled"):
+        if _endings(content):
+            warn("sandbox_endings", "sandbox",
+                 "沙盒永不结束：authored endings 不会触发（玩家死亡是状态，不是结局）。")
+        if _story(content).get("verdict"):
+            warn("sandbox_verdict", "sandbox", "沙盒不跑指认结案，verdict 配置会被闲置。")
+        if (_story(content).get("clock") or {}).get("deadline_day"):
+            warn("sandbox_deadline", "sandbox",
+                 "沙盒与现实同步、永不结束，deadline_day 不会生效。")
+        if len(acts) > 1:
+            warn("sandbox_acts", "sandbox", "沙盒只有无尽的一幕，多余的幕不会被推进。")
+
     # — ⏳ act time anchors —
     try:
         _ddl = int((_story(content).get("clock") or {}).get("deadline_day") or 0)

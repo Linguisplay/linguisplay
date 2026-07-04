@@ -250,6 +250,7 @@ class StoryInput(BaseModel):
     clock: Optional[dict] = None  # ⏳ {deadline_day, deadline_text, deadline_ending_id}
     phone: Optional[dict] = None  # 📱 {enabled, device: "手机"|"传呼机"|"口信"…}
     verdict: Optional[dict] = None  # 🔍 {prompt, options, attempts, act_min, fail_ending_id}
+    sandbox: Optional[dict] = None  # 🏖 {enabled, real_time} 无尽沙盒：玩家开局自定义世界观
 
 
 class Story(BaseModel):
@@ -275,6 +276,7 @@ class Story(BaseModel):
     clock: Optional[dict] = None
     phone: Optional[dict] = None
     verdict: Optional[dict] = None
+    sandbox: Optional[dict] = None
     completion: float = 0.0
 
 
@@ -368,6 +370,7 @@ class RunState(BaseModel):
     promises: list[dict[str, Any]] = []  # 🤝 open appointments [{name,what,when,place,romantic}]
     phone_unread: int = 0  # 📱 unread incoming messages (badge)
     verdict: Optional[dict[str, Any]] = None  # 🔍 the case-closing panel (None until unlocked)
+    player_hp: str = "healthy"  # 💀 sandbox: healthy/hurt/dying/dead（dead = 说/做被剥夺）
 
 
 class Run(BaseModel):
@@ -412,6 +415,9 @@ class RunCreate(BaseModel):
     # 🃏 a character card (from the cross-run collection) to carry into this run —
     # an old acquaintance from a previous life walks back in. NG+ only.
     carry_card_id: Optional[str] = None
+    # 🏖 sandbox only: the worldview the player defines at run start (their private
+    # copy of the story runs on it; ignored for normal authored stories)
+    worldview: str = ""
 
 
 class Beat(BaseModel):
