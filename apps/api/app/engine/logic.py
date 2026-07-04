@@ -264,6 +264,39 @@ def lint_story(content: dict[str, Any]) -> list[Issue]:
             warn("deadline_no_clock", "clock",
                  "设了 deadline_day 但时钟已关闭 (tuning.turns_per_slot=0) —— 大限永远不会到。")
 
+    # — ⏳ act time anchors —
+    try:
+        _ddl = int((_story(content).get("clock") or {}).get("deadline_day") or 0)
+    except (TypeError, ValueError):
+        _ddl = 0
+    last_day = 0
+    for a in acts:
+        at = a.get("time") or {}
+        if not at:
+            continue
+        where = f"act:{a.get('index')}"
+        sl = (at.get("slot") or "").strip()
+        try:
+            day = int(at.get("day") or 0)
+        except (TypeError, ValueError):
+            day = -1
+        if (sl and sl not in _SLOTS) or day < 0:
+            err("bad_act_time", where,
+                f"第{a.get('index')}幕的时间锚点不合法（slot 可用：{'、'.join(_SLOTS)}；day 需为正整数）。")
+            continue
+        if not _clock_on(content):
+            warn("act_time_no_clock", where,
+                 f"第{a.get('index')}幕设了时间锚点，但本剧关闭了时钟"
+                 "(tuning.turns_per_slot=0) —— 锚点不会生效。")
+        if day:
+            if day < last_day:
+                err("act_time_backwards", where,
+                    f"第{a.get('index')}幕锚在第{day}天，早于前面某幕的第{last_day}天。时间只能向前。")
+            last_day = max(last_day, day)
+            if _ddl and day > _ddl:
+                warn("act_time_past_deadline", where,
+                     f"第{a.get('index')}幕锚在第{day}天，已越过大限（第{_ddl}天）。进幕即触发时限结局。")
+
     # — events that kill —
     char_ids_l = {c.get("id") for c in chars if c.get("id")}
     for a in acts:

@@ -338,6 +338,41 @@ def clock_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]
     return view
 
 
+def align_clock_to_act(content: dict[str, Any], state: dict[str, Any],
+                       act_index: int) -> dict[str, Any] | None:
+    """⏳ 幕锚定时间 (act.time = {day?, slot?}): entering an act snaps the clock FORWARD
+    to where the script says this scene happens — never backward. 剧本写「第3天夜里」，
+    进幕就真的是第3天夜里：🕐 时辰、人物作息、旁白口径从此对得上。A bare slot means
+    「这场戏发生在下一个这样的时辰」(same day if still ahead, else the next one).
+    Returns the fresh clock_view when the snap actually moved time; None otherwise."""
+    if tuning_for(content)["turns_per_slot"] <= 0:
+        return None
+    anchor = (current_act(content, act_index) or {}).get("time") or {}
+    want_slot = (anchor.get("slot") or "").strip()
+    try:
+        want_day = int(anchor.get("day") or 0)
+    except (TypeError, ValueError):
+        want_day = 0
+    target = SLOTS.index(want_slot) if want_slot in SLOTS else None
+    if not want_day and target is None:
+        return None
+    clk = dict(state.get("clock") or {})
+    clk.setdefault("day", 1); clk.setdefault("slot", 0); clk.setdefault("turns_in_slot", 0)
+    before = (int(clk["day"]), int(clk["slot"]))
+    if want_day > int(clk["day"]):
+        clk["day"], clk["slot"] = want_day, (target if target is not None else 0)
+    elif target is not None:
+        while int(clk["slot"]) != target:
+            clk["slot"] = int(clk["slot"]) + 1
+            if int(clk["slot"]) >= len(SLOTS):
+                clk["slot"], clk["day"] = 0, int(clk["day"]) + 1
+    if (int(clk["day"]), int(clk["slot"])) == before:
+        return None
+    clk["turns_in_slot"] = 0
+    state["clock"] = clk
+    return clock_view(content, state)
+
+
 def char_home(c: dict[str, Any], act: int, slot: str | None = None) -> str | None:
     """Where this character is RIGHT NOW (作息表): among schedule entries with
     from_act <= act that cover the current 时段 (an entry may carry slots: ["夜"] —
@@ -972,8 +1007,11 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
     start = current_location(content, state)
     if start and start.get("id"):
         state["location_id"] = start["id"]
+    # ⏳ the story opens at ITS hour, not at a default 晨 (夜戏 opens at night)
+    align_clock_to_act(content, state, 1)
     directed = llm.generate({
         "intro": True,
+        "clock": (clock_view(content, state) or {}).get("label", ""),
         "mode": mode,
         "player_char": player_char,
         "world": (content.get("story") or {}).get("world_long", "") or "",
@@ -1053,6 +1091,7 @@ def build_act_transition(content: dict[str, Any], state: dict[str, Any], old_act
     prev = current_act(content, old_act) or {}
     directed = llm.generate({
         "transition": True,
+        "clock": (clock_view(content, state) or {}).get("label", ""),
         "mode": mode,
         "player_char": player_char,
         "world": (content.get("story") or {}).get("world_long", "") or "",
@@ -3657,6 +3696,21 @@ def run_turn_stream(
             state["pending_choice"] = nc
         yield emit({"type": "description", "speaker_name": None,
                     "text": f"✦ 第{new_act}幕 · {nxt.get('title', '')} ✦"})
+        # ⏳ the act anchors the clock: 剧本说这场戏在第几天什么时辰，进幕就到那个时辰。
+        # Snap BEFORE the transition prose so it narrates the right hour, and void any
+        # judged time_skip this turn (the anchor already placed us).
+        day_pre = int((state.get("clock") or {}).get("day", 1) or 1)
+        cv_snap = align_clock_to_act(content, state, new_act)
+        if cv_snap:
+            time_skip = ""
+            yield emit({"type": "description", "speaker_name": None,
+                        "text": _SLOT_NARR[cv_snap["slot"]].format(day=cv_snap["day"])})
+            yield ("clock", cv_snap)
+            dl_s = cv_snap.get("deadline")
+            if dl_s and dl_s["days_left"] == 0 and cv_snap["day"] > day_pre:
+                yield emit({"type": "description", "speaker_name": None,
+                            "text": f"（已经是第{cv_snap['day']}天，「{dl_s['text']}」就在今天。）"})
+                moments.append({"kind": "deadline", "text": dl_s["text"]})
         for b in build_act_transition(content, state, old_act, new_act, persona, llm):
             yield emit(b)
 

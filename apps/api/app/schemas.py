@@ -158,6 +158,14 @@ class ActChoice(BaseModel):
     options: list[ChoiceOption] = []
 
 
+class ActTime(BaseModel):
+    """⏳ 时间锚点: when this act happens in STORY time. Entering the act snaps the run's
+    clock FORWARD to here (never backward), so the 🕐 chip, everyone's 作息 and the prose
+    all tell the same hour. day = 第几天 (0 = keep current), slot = 晨/午/夜 ("" = keep)."""
+    day: int = 0
+    slot: str = ""
+
+
 class Act(BaseModel):
     id: Optional[str] = None
     index: int = 0
@@ -166,6 +174,7 @@ class Act(BaseModel):
     advance: AdvanceCondition = AdvanceCondition()  # hard requirements to leave this act
     events: list[StoryEvent] = []
     choice: Optional[ActChoice] = None  # key-moment explicit decision on entering this act
+    time: Optional[ActTime] = None  # ⏳ story-time anchor: 这一幕发生在第几天、什么时段
 
 
 class LocationUnlock(BaseModel):

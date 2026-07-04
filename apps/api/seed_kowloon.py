@@ -217,7 +217,8 @@ CHARACTERS = [
 ]
 
 ACTS = [
-    {"id": "a1", "index": 1, "title": "初入城寨",
+    # ⏳ 七天大限（警队收网），六幕各锚一天：白天入寨立足，夜里交心，围城之夜在第6夜
+    {"id": "a1", "index": 1, "title": "初入城寨", "time": {"day": 1, "slot": "晨"},
      "goal": "别露馅，先在城寨落脚——弄清楚这座三不管的城，到底谁说了算",
      # 推进需要：挖到「谁是话事人」的底 + 已经和城寨的人混出一点交情（好感门槛），
      # 不再是开场随口问两句就翻幕。
@@ -226,7 +227,7 @@ ACTS = [
         {"id": "e_enter", "what_happens": "你揣着线人的纸条，踩着满地污水钻进城寨的暗巷。头顶电线像蛛网压下来，常年不见天日，叫卖、麻将、婴儿啼哭混成一片。", "who_character_ids": []},
         {"id": "e_haircut", "what_happens": "刚钻进暗巷没几步，蓝信一就斜倚在墙边拦住了你，似笑非笑地上下打量：生面孔，来城寨做什么。巷子尽头那间亮着灯的小理发店，是龙卷风的地盘；几个后生仔围在门口矮凳上抽烟，十二少也在其中。", "who_character_ids": ["shin"]},
      ]},
-    {"id": "a2", "index": 2, "title": "立足",
+    {"id": "a2", "index": 2, "title": "立足", "time": {"day": 2, "slot": "晨"},
      "goal": "光知道谁是话事人不够——你得让城寨四子里至少有一个，真把你当回事",
      # HARD gate: earn a brother's trust before the city opens up to you
      "advance": {"required_fragment_ids": ["fr_twelfth"], "affinity_min": 8},
@@ -234,7 +235,7 @@ ACTS = [
         {"id": "e_settle", "what_happens": "四仔把你领到大牌档，边吃边给你讲城寨的规矩；谁是谁、哪条巷子不能走，他门儿清。", "who_character_ids": ["sei"]},
         {"id": "e_test", "what_happens": "一桩小麻烦找上门，十二少头一个跳出来；事后他嘴硬，眼神却在掂量：你到底站哪边。", "who_character_ids": ["twelfth"]},
      ]},
-    {"id": "a3", "index": 3, "title": "暗流",
+    {"id": "a3", "index": 3, "title": "暗流", "time": {"day": 3, "slot": "午"},
      "goal": "王九带人上门了——查清这把'刀'真正的来意，城外的人到底图什么",
      # HARD gate: surface what 王九 is really here for
      "advance": {"required_fragment_ids": ["fr_wonggau2"], "affinity_min": 13},
@@ -242,7 +243,7 @@ ACTS = [
         {"id": "e_wonggau", "what_happens": "一阵骚动，王九带着人堵在巷口，整条街瞬间噤声，连孩子都被捂住了嘴。", "who_character_ids": ["wonggau"]},
         {"id": "e_standoff", "what_happens": "龙卷风慢慢走出理发店，挡在所有人前面。两边对峙，谁都没先动手——可你看得出，这事远没完。", "who_character_ids": ["cyclone", "wonggau"]},
      ]},
-    {"id": "a4", "index": 4, "title": "旧账",
+    {"id": "a4", "index": 4, "title": "旧账", "time": {"day": 4, "slot": "午"},
      "goal": "大老板亲自进了城寨——查清他和龙卷风之间，几十年前到底结下了什么",
      # HARD gate: uncover the old feud between 龙卷风 and 大老板
      "advance": {"required_fragment_ids": ["fr_deal2"], "affinity_min": 18},
@@ -250,7 +251,7 @@ ACTS = [
         {"id": "e_boss", "what_happens": "大老板亲自进了城寨。西装笔挺、笑意吟吟，给龙卷风递上一根烟，开口却句句是几十年前的旧账。", "who_character_ids": ["boss", "cyclone"]},
         {"id": "e_doubt", "what_happens": "蓝信一把你堵在窄巷里，似笑非笑：你那张纸条，他好像在哪儿见过——你到底是谁派来的。", "who_character_ids": ["shin"]},
      ]},
-    {"id": "a5", "index": 5, "title": "龙头",
+    {"id": "a5", "index": 5, "title": "龙头", "time": {"day": 5, "slot": "夜"},
      "goal": "查清城寨庇护无身份者的真正门路——那条'龙头'，也正是你奉命来查的东西",
      # HARD gate: the city's core secret (layered) must be uncovered
      "advance": {"required_fragment_ids": ["fr_idsecret2"], "affinity_min": 23},
@@ -258,7 +259,7 @@ ACTS = [
         {"id": "e_shin_open", "what_happens": "夜深，蓝信一难得没了那副吊儿郎当，跟你说起他欠龙卷风的那条命。", "who_character_ids": ["shin"]},
         {"id": "e_reveal", "what_happens": "龙卷风把你单独叫进理发店，剃刀在皮带上荡了两下，像是下了某种决心，要让你看一样东西。", "who_character_ids": ["cyclone"]},
      ]},
-    {"id": "a6", "index": 6, "title": "围城",
+    {"id": "a6", "index": 6, "title": "围城", "time": {"day": 6, "slot": "夜"},
      "goal": "围城将至，你得在警队的收网指令和城寨的人心之间，选一边站",
      "events": [
         {"id": "e_siege", "what_happens": "大老板的人马封死了城寨所有出口。龙卷风没退半步，守在理发店门前，城寨上下第一次为同一件事拧成一股绳。", "who_character_ids": ["cyclone"]},

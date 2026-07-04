@@ -119,14 +119,15 @@ CHARACTERS = [
 ]
 
 ACTS = [
-    {"id": "a1", "index": 1, "title": "借宿兰若",
+    # ⏳ 四天：夜1借宿·敲窗 → 天2寻坟 → 天3剑匣起骨 → 天4月圆之夜（大限）
+    {"id": "a1", "index": 1, "title": "借宿兰若", "time": {"day": 1, "slot": "夜"},
      "goal": "在荒寺安顿下来，摸清同住的都是什么人",
      "advance": {"required_fragment_ids": ["q_night1"]},
      "events": [
          {"id": "e_qin", "what_happens": "三更天，后园荷池方向飘来一缕极轻的琴声，转瞬又没了。",
           "who_character_ids": []},
      ]},
-    {"id": "a2", "index": 2, "title": "夜半敲窗",
+    {"id": "a2", "index": 2, "title": "夜半敲窗", "time": {"slot": "夜"},
      "goal": "弄清那个夜里的女子想要什么——以及她为什么下不去手",
      "advance": {"required_fragment_ids": ["q_coerce1"], "required_event_ids": ["e_lan_dead"]},
      "events": [
@@ -136,14 +137,14 @@ ACTS = [
                                               "身上没有半点伤，只脚心一个针眼似的小孔，细细地渗着血。",
           "who_character_ids": ["lan"], "kills_character_ids": ["lan"]},
      ]},
-    {"id": "a3", "index": 3, "title": "孤坟何处",
+    {"id": "a3", "index": 3, "title": "孤坟何处", "time": {"day": 2, "slot": "晨"},
      "goal": "让小倩把身世和埋骨之处托付给你",
      "advance": {"required_fragment_ids": ["q_bones1"]},
      "events": [
          {"id": "e_wind", "what_happens": "满园的白杨叶无风自动，哗哗地响，像谁在头顶翻一本很旧的书。",
           "who_character_ids": []},
      ]},
-    {"id": "a4", "index": 4, "title": "剑匣与古树",
+    {"id": "a4", "index": 4, "title": "剑匣与古树", "time": {"day": 3, "slot": "晨"},
      "goal": "说动燕赤霞出手，弄清姥姥的弱点，亲自去白杨树下起出她的骸骨",
      # 掘骨必须发生在古树之下：q_bones2 是 location-gated 的物证，去了、挖了，才算
      "advance": {"required_fragment_ids": ["y_weak1", "q_bones2"]},
@@ -151,7 +152,7 @@ ACTS = [
          {"id": "e_box", "what_happens": "南院的剑匣毫无征兆地嗡鸣起来，声震屋瓦——燕赤霞霍然睁眼。",
           "who_character_ids": ["yan"]},
      ]},
-    {"id": "a5", "index": 5, "title": "月圆之夜",
+    {"id": "a5", "index": 5, "title": "月圆之夜", "time": {"day": 4, "slot": "夜"},
      "goal": "在姥姥收魂之前，护住骸骨，送她走",
      "advance": {},
      "choice": {

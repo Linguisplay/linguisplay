@@ -761,6 +761,9 @@ def _build_intro_system(prompt: dict[str, Any]) -> str:
     if place:
         lines.append("【开场所在·空间锚点】（开场就把玩家放在这个具体地点，照它的真实陈设来写，"
                      "让画面立得住）：\n" + place)
+    ck = (prompt.get("clock") or "").strip()
+    if ck:
+        lines.append(f"【此刻的时间】{ck}。开场的天光、灯火、街面动静、人的状态都要贴合这个时辰。")
     if prompt.get("mature"):
         lines.append("（本剧情为成人向 18+，开场可带有相应的成熟基调，但开场无需直接写露骨内容。）")
     if act_events:
@@ -827,6 +830,10 @@ def _build_transition_system(prompt: dict[str, Any]) -> str:
     place = (prompt.get("place") or "").strip()
     if place:
         lines.append("【当前所在·空间锚点】（照这个具体地点的真实陈设来写）：\n" + place)
+    ck = (prompt.get("clock") or "").strip()
+    if ck:
+        lines.append(f"【此刻的时间】{ck}。这一幕就发生在这个时辰，天光、灯火、人的作息都要贴合；"
+                     "若距上一幕跨了时间，用一两笔把跨过的时间自然交代出来。")
     memory = (prompt.get("memory") or "").strip()
     if memory:
         lines.append(f"【前情梗概】（用来承接前文，不要逐句复述）：\n{memory}")

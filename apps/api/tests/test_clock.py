@@ -137,6 +137,69 @@ def test_deadline_warns_then_ends():
     assert runtime.evaluate_ending(content, runtime.default_state(), None) is None
 
 
+def test_act_anchor_snaps_time_forward():
+    # 剧本说第二幕发生在第2天夜里 → 进幕时钟就到第2天夜里，并播报时辰
+    content = _story(tuning={"turns_per_slot": 9, "min_turns_per_act": 0})
+    content["story"]["acts"] = [{"index": 1, "title": "一"},
+                                {"index": 2, "title": "二",
+                                 "time": {"day": 2, "slot": "夜"}}]
+    out = runtime.run_turn(content, runtime.default_state(), {"name": "我"}, "走",
+                           channel="say", llm=ClockLLM(advance_act=True))
+    assert out["state"]["act"] == 2
+    clk = out["state"]["clock"]
+    assert (clk["day"], clk["slot"]) == (2, 2)
+    assert out["clock_view"]["label"] == "第2天·夜"
+    assert any("夜幕" in b.get("text", "") for b in out["beats"])   # the hour is narrated
+
+
+def test_act_anchor_only_flows_forward():
+    # an anchor BEHIND the current day never rewinds; a bare-slot 晨 lands on the NEXT 晨
+    content = _story(tuning={"turns_per_slot": 9, "min_turns_per_act": 0})
+    content["story"]["acts"] = [{"index": 1, "title": "一"},
+                                {"index": 2, "title": "二",
+                                 "time": {"day": 1, "slot": "晨"}}]
+    st = runtime.default_state()
+    st["clock"] = {"day": 3, "slot": 1, "turns_in_slot": 0}          # 第3天·午
+    out = runtime.run_turn(content, st, {"name": "我"}, "走", channel="say",
+                           llm=ClockLLM(advance_act=True))
+    clk = out["state"]["clock"]
+    assert (clk["day"], clk["slot"]) == (4, 0)                       # 次日晨, not day 1
+
+
+def test_opening_aligns_to_act_one_anchor():
+    # a night story OPENS at night — and the intro prose is told the hour
+    content = _story(tuning={"turns_per_slot": 9})
+    content["story"]["acts"] = [{"index": 1, "title": "一", "time": {"slot": "夜"}}]
+
+    class Spy(ClockLLM):
+        def generate(self, prompt):
+            self.prompts.append(prompt)
+            return super().generate(prompt)
+
+    st = runtime.default_state()
+    llm = Spy()
+    runtime.build_opening(content, st, llm=llm)
+    assert st["clock"]["slot"] == 2
+    intro = next(p for p in llm.prompts if p.get("intro"))
+    assert "第1天·夜" in (intro.get("clock") or "")
+
+
+def test_linter_flags_bad_act_time():
+    content = _story(tuning={"turns_per_slot": 2},
+                     clock={"deadline_day": 2, "deadline_text": "大限"})
+    content["story"]["acts"] = [
+        {"index": 1, "title": "一", "time": {"day": 1, "slot": "黄昏"}},   # no such slot
+        {"index": 2, "title": "二", "time": {"day": 2}},
+        {"index": 3, "title": "三", "time": {"day": 1}},                   # time rewinds
+        {"index": 4, "title": "四", "time": {"day": 3}},                   # past the deadline
+    ]
+    codes = {i["code"] for i in logic.lint_story(content)}
+    assert {"bad_act_time", "act_time_backwards", "act_time_past_deadline"} <= codes
+    content2 = _story(tuning={"turns_per_slot": 0})
+    content2["story"]["acts"] = [{"index": 1, "title": "一", "time": {"slot": "夜"}}]
+    assert "act_time_no_clock" in {i["code"] for i in logic.lint_story(content2)}
+
+
 def test_linter_flags_bad_slots_and_deadline():
     content = _story(schedule=[{"from_act": 1, "location_id": "hall", "slots": ["半夜"]}],
                      clock={"deadline_day": 2, "deadline_ending_id": "nope"})
