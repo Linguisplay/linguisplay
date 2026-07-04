@@ -113,3 +113,32 @@ def test_intent_persists_into_the_next_scene():
     runtime.run_turn(STORY, st, {"name": "我"}, "想好了吗", channel="say", llm=llm2)
     cond = next(p.get("condition") for p in llm2.prompts if p.get("speaker_name") == "甲")
     assert cond["intent"] == "今夜去查配电间"
+
+
+def test_authored_event_kills_and_future_acts_stay_shut():
+    story = {"story": {"id": "s", "tuning": {"turns_per_slot": 0},
+                       "characters": [{"id": "a", "name": "甲", "is_lead": True},
+                                      {"id": "b", "name": "乙"}],
+                       "acts": [
+                           {"index": 1, "title": "一"},
+                           {"index": 2, "title": "二", "events": [
+                               {"id": "e_die", "what_happens": "乙忽然栽倒，气息全无。",
+                                "who_character_ids": ["b"], "kills_character_ids": ["b"]}]},
+                       ],
+                       "locations": [{"id": "hall", "name": "门厅", "detail": "x", "exits": []}]},
+             "secrets": []}
+    # act 1: talking about the future event does NOT detonate it (keyword scope = reached acts)
+    st = runtime.default_state()
+    st["location_id"] = "hall"
+    out = runtime.run_turn(story, st, {"name": "我"}, "乙会不会忽然栽倒气息全无？",
+                           channel="say", llm=SimLLM(next_speakers=[]))
+    assert "e_die" not in out["state"]["triggered_event_ids"]
+    assert "b" not in out["state"]["dead_character_ids"]
+    # act 2: the event fires (keyword) and its kill is BOOKED — dead for real, no ladder
+    st2 = out["state"]
+    st2["act"] = 2
+    out2 = runtime.run_turn(story, st2, {"name": "我"}, "乙栽倒了，气息全无！",
+                            channel="say", llm=SimLLM(next_speakers=[]))
+    assert "e_die" in out2["state"]["triggered_event_ids"]
+    assert "b" in out2["state"]["dead_character_ids"]
+    assert any(m["kind"] == "death" and m["name"] == "乙" for m in out2["moments"])

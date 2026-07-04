@@ -130,9 +130,9 @@ ACTS = [
      "events": [
          {"id": "e_gold", "what_happens": "窗台上不知何时多了一锭黄澄澄的金子，在月光下泛着不干净的光。",
           "who_character_ids": ["qian"]},
-         {"id": "e_lan_dead", "what_happens": "清晨，东厢传来惊叫——兰溪生死在榻上，面色灰败如纸，"
-                                              "身上没有半点伤，只脚心一个针眼似的小孔。",
-          "who_character_ids": ["lan"]},
+         {"id": "e_lan_dead", "what_happens": "兰溪生忽然一头栽倒，面色灰败如纸，气息全无——"
+                                              "身上没有半点伤，只脚心一个针眼似的小孔，细细地渗着血。",
+          "who_character_ids": ["lan"], "kills_character_ids": ["lan"]},
      ]},
     {"id": "a3", "index": 3, "title": "孤坟何处",
      "goal": "让小倩把身世和埋骨之处托付给你",
@@ -142,14 +142,12 @@ ACTS = [
           "who_character_ids": []},
      ]},
     {"id": "a4", "index": 4, "title": "剑匣与古树",
-     "goal": "说动燕赤霞出手，弄清姥姥的弱点，趁夜起出白杨树下的骸骨",
-     "advance": {"required_fragment_ids": ["y_weak1"], "required_event_ids": ["e_dig"]},
+     "goal": "说动燕赤霞出手，弄清姥姥的弱点，亲自去白杨树下起出她的骸骨",
+     # 掘骨必须发生在古树之下：q_bones2 是 location-gated 的物证，去了、挖了，才算
+     "advance": {"required_fragment_ids": ["y_weak1", "q_bones2"]},
      "events": [
          {"id": "e_box", "what_happens": "南院的剑匣毫无征兆地嗡鸣起来，声震屋瓦——燕赤霞霍然睁眼。",
           "who_character_ids": ["yan"]},
-         {"id": "e_dig", "what_happens": "白杨树下，锹头碰到了硬物。一方朽烂的薄棺露了出来，"
-                                         "棺中白骨纤细，腕上还套着一只褪色的银镯。",
-          "who_character_ids": []},
      ]},
     {"id": "a5", "index": 5, "title": "月圆之夜",
      "goal": "在姥姥收魂之前，护住骸骨，送她走",
@@ -237,8 +235,10 @@ SECRETS = [
          "'若有人肯为我迁骨，葬于清白之地……我做牛做马，来世相报。'",
          "埋骨 白杨 坟 迁骨 骸骨", {"asks_min": 1, "affinity_min": 16, "act_min": 3}),
         ("q_bones2", 2,
-         "坟土近来被翻动过——姥姥起过疑心，已经查验过骨殖还在不在。留给你们的时间，比想的更少。",
-         "新土 翻动 查验", {"act_min": 3, "location_id": "loc_tomb"}),
+         "你们在白杨树下动了土。锹头触到硬物：一方朽烂的薄棺，棺中白骨纤细，"
+         "腕上还套着一只褪色的银镯——是她。骨殖起出的那一刻，满树的叶子死一样地静了。",
+         # asks_min 挡住"到达即自动解锁"——必须动手翻查土坟（物证直通）或在坟前追问
+         "掘骨 薄棺 白骨 银镯 起出", {"asks_min": 1, "act_min": 3, "location_id": "loc_tomb"}),
     ]),
     ("兰溪生的死", "yan", "medium", ["yan", "qian"], [
         ("l_death1", 1,

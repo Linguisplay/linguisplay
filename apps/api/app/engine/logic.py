@@ -264,6 +264,15 @@ def lint_story(content: dict[str, Any]) -> list[Issue]:
             warn("deadline_no_clock", "clock",
                  "设了 deadline_day 但时钟已关闭 (tuning.turns_per_slot=0) —— 大限永远不会到。")
 
+    # — events that kill —
+    char_ids_l = {c.get("id") for c in chars if c.get("id")}
+    for a in acts:
+        for ev in a.get("events") or []:
+            for kid in ev.get("kills_character_ids") or []:
+                if kid not in char_ids_l:
+                    err("bad_kill", f"event:{ev.get('id')}",
+                        f"kills_character_ids 指向不存在的角色：{kid}")
+
     # — 🔍 verdict —
     vd = _story(content).get("verdict") or {}
     if vd:

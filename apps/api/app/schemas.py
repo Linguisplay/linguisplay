@@ -124,6 +124,9 @@ class StoryEvent(BaseModel):
     what_happens: str = ""
     who_character_ids: list[str] = []
     linked_secret_ids: list[str] = []
+    # ☠️ characters this event kills the moment it fires (authored deaths are final —
+    # the engine books them dead, no two-stage ladder)
+    kills_character_ids: list[str] = []
 
 
 class AdvanceCondition(BaseModel):

@@ -1417,10 +1417,14 @@ def _detect_asks(content: dict[str, Any], player_input: str) -> list[str]:
 
 def _apply_event_triggers(content: dict[str, Any], state: dict, player_input: str) -> None:
     """PROVISIONAL pass: fire a story event when the player's words overlap its keywords.
-    The primary director call then judges which events truly occurred (occurred_events);
-    keyword guesses it denies are rolled back — see the reconciliation in run_turn_stream."""
+    Only events of acts ALREADY REACHED are eligible — merely TALKING about a future
+    act's event must never detonate it (the sticky-unlock hazard). The primary director
+    call then judges which events truly occurred; denied guesses are rolled back."""
     triggered = set(state.get("triggered_event_ids") or [])
+    cur_act = int(state.get("act", 1) or 1)
     for act in (content.get("story") or {}).get("acts", []) or []:
+        if int(act.get("index") or 0) > cur_act:
+            continue
         for ev in act.get("events", []) or []:
             eid = ev.get("id")
             kws = [w for w in _keywords(ev.get("what_happens", "")) if len(w) >= 2]
@@ -3330,6 +3334,26 @@ def run_turn_stream(
                     moments.append({"kind": "event", "label": ev["what_happens"][:40]})
                     state["world_pulse"] = 0
                     break
+
+    # authored events may KILL (剧本说他死了，引擎里他就真的死了): every event confirmed
+    # THIS turn applies its kills_character_ids — the author's word bypasses the
+    # two-stage ladder. Rolled-back keyword guesses never reach here.
+    _new_evs = set(state.get("triggered_event_ids") or []) - _ev_before
+    if _new_evs:
+        _ev_by_id = {e.get("id"): e
+                     for a in (content.get("story") or {}).get("acts", []) or []
+                     for e in a.get("events", []) or []}
+        for _eid in sorted(_new_evs):
+            for _kid in (_ev_by_id.get(_eid) or {}).get("kills_character_ids") or []:
+                _kc = _char_by_id(content, _kid)
+                if _kc and _kid not in _dead_ids(state) and _kid != pcid:
+                    _deads = _dead_ids(state)
+                    _deads.add(_kid)
+                    state["dead_character_ids"] = sorted(_deads)
+                    state["following"] = [f for f in (state.get("following") or [])
+                                          if f != _kid]
+                    moments.append({"kind": "death", "name": _kc.get("name")})
+                    rel_log(state, _kid, old_act, "death", f"{_kc.get('name')} 死了。")
 
     affinity_delta = 0 if is_think else max(tun["affinity_clamp_min"],
                                             min(tun["affinity_clamp_max"], affinity_delta))
