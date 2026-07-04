@@ -222,6 +222,7 @@
 .dice.lose { border-color:#8a3c3c; } .dice.lose b:last-child { color:#ff9a8f; }
 
 /* ── mobile: uncramp the pinned stack, bigger readable text ── */
+#barsToggle { display: none; }  /* mobile-only strip; desktop keeps the full bars */
 @media (max-width: 640px) {
   header { padding: 8px 10px; }
   header b { font-size: 14px; }
@@ -246,6 +247,19 @@
   .collapsible { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
   .collapsible.open { white-space: normal; overflow: visible; }
   #pressurebar.collapsible { display: flex; }  /* the meter keeps its flex layout */
+  /* 📱 chat stays UNOBSTRUCTED: the whole info stack lives behind ONE slim strip */
+  #bars { display: none; }
+  #bars.open { display: block; }
+  #barsToggle { display: flex; align-items: center; gap: 6px; margin: 3px 8px 0;
+    padding: 5px 10px; border-radius: 9px; background: #14141bcc; border: 1px solid #26262f;
+    color: #aeb6c8; font-size: 11.5px; cursor: pointer; }
+  #barsToggle.hidden { display: none; }
+  #barsToggle .stripbits { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #barsToggle .chev { color: #5d647a; flex: 0 0 auto; }
+  #barsToggle .alert { color: #ff9d9d; font-weight: 700; }
+  #state { display: none; }
+  #suggest { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .chip { flex: 0 0 auto; }
 }
 .av img { width:100%; height:100%; object-fit:cover; border-radius:50%; }
 .castitem .cinfo { color:#8a93a8; margin-left:3px; cursor:pointer; font-style:normal; }
@@ -334,13 +348,16 @@
   <!-- chat -->
   <div id="play" class="hidden" style="flex:1; display:flex; flex-direction:column; min-height:0">
     <div id="cast"></div>
-    <div id="placebar" class="hidden"></div>
-    <div id="promisebar" class="hidden"></div>
-    <div id="verdictbar" class="hidden"></div>
-    <div id="goalbar" class="hidden"></div>
-    <div id="hintbar" class="hidden"></div>
-    <div id="pressurebar" class="hidden"></div>
-    <div id="clues" class="hidden"></div>
+    <div id="barsToggle" class="hidden" onclick="toggleBars()"></div>
+    <div id="bars">
+      <div id="placebar" class="hidden"></div>
+      <div id="promisebar" class="hidden"></div>
+      <div id="verdictbar" class="hidden"></div>
+      <div id="goalbar" class="hidden"></div>
+      <div id="hintbar" class="hidden"></div>
+      <div id="pressurebar" class="hidden"></div>
+      <div id="clues" class="hidden"></div>
+    </div>
     <div id="chat"></div>
     <div id="suggest"></div>
     <div id="moveask" class="hidden"></div>
@@ -1011,6 +1028,8 @@ function showDice(d) {
 
 // ⚠️ pressure meter (暴露值/灵异度…): color shifts as it climbs
 function renderPressure(p) {
+  lastPressure = p || null;
+  queueMicrotask(refreshStrip);
   const el = document.getElementById("pressurebar");
   if (!p || !p.name) { el.classList.add("hidden"); return; }
   const v = Math.max(0, Math.min(100, p.value || 0));
@@ -1132,6 +1151,7 @@ function renderClock(cv, announce) {
   renderPlace(curLocData);
 }
 function renderPlace(loc) {
+  queueMicrotask(refreshStrip);
   curLocData = loc || null;
   // track the current place so the background can use its AI-generated image
   const newLocId = (loc && loc.id) || null;
@@ -1153,9 +1173,40 @@ function renderPlace(loc) {
   }
   el.classList.remove("hidden");
 }
+// 📱 one slim strip summarizes every info bar on mobile; tap to unfold the stack
+let barsOpen = false, lastPressure = null;
+function toggleBars() {
+  barsOpen = !barsOpen;
+  document.getElementById("bars").classList.toggle("open", barsOpen);
+  refreshStrip();
+}
+function refreshStrip() {
+  const el = document.getElementById("barsToggle");
+  if (!el) return;
+  const bits = [];
+  if (curClock && curClock.label) {
+    let t = "🕐" + curClock.label;
+    if (curClock.deadline && curClock.deadline.days_left >= 0)
+      t += " ⏳" + (curClock.deadline.days_left === 0 ? "今天" : curClock.deadline.days_left + "天");
+    bits.push(escapeHtml(t));
+  }
+  if (curLocData && curLocData.name) bits.push("📍" + escapeHtml(curLocData.name));
+  const goal = (document.getElementById("goalbar").textContent || "").replace(/^🎯?\s*/, "").trim();
+  if (goal) bits.push("🎯" + escapeHtml(goal.slice(0, 14)) + (goal.length > 14 ? "…" : ""));
+  if (lastPromises && lastPromises.length) bits.push("🤝" + lastPromises.length);
+  if (lastPressure && lastPressure.name) bits.push("⚠️" + escapeHtml(String(lastPressure.value || 0)));
+  if (!document.getElementById("hintbar").classList.contains("hidden")) bits.push("💡");
+  if (curVerdict && !curVerdict.solved && !curVerdict.failed && curVerdict.attempts_left)
+    bits.push('<span class="alert">🔍 可结案</span>');
+  if (!bits.length) { el.classList.add("hidden"); return; }
+  el.classList.remove("hidden");
+  el.innerHTML = `<span class="stripbits">${bits.join("　")}</span><span class="chev">${barsOpen ? "▲ 收起" : "▼ 详情"}</span>`;
+}
+
 // 🔍 指认结案: the case can be CLOSED — the player commits, with limited attempts
 let curVerdict = null;
 function renderVerdictBar(v) {
+  queueMicrotask(refreshStrip);
   curVerdict = v || null;
   const el = document.getElementById("verdictbar");
   if (!v || v.solved || v.failed || !v.attempts_left) { el.classList.add("hidden"); return; }
@@ -1200,6 +1251,7 @@ async function submitVerdict(oid, label) {
 // 🤝 open appointments hang visibly in the bar — the come-back hook you can't unsee
 let lastPromises = [];
 function renderPromises(list) {
+  queueMicrotask(refreshStrip);
   lastPromises = list || [];
   const el = document.getElementById("promisebar");
   if (!list || !list.length) { el.classList.add("hidden"); return; }
@@ -1213,11 +1265,13 @@ function renderPromises(list) {
   el.classList.remove("hidden");
 }
 function renderGoal(goal) {
+  queueMicrotask(refreshStrip);
   const el = document.getElementById("goalbar");
   if (goal) { el.innerHTML = `🎯 <b>当前目标</b>：${escapeHtml(goal)}`; el.classList.remove("hidden"); }
   else el.classList.add("hidden");
 }
 function renderHint(hint) {
+  queueMicrotask(refreshStrip);
   const el = document.getElementById("hintbar");
   if (hint) { el.innerHTML = `💡 <b>线索</b>：${escapeHtml(hint)}`; el.classList.remove("hidden"); }
   else el.classList.add("hidden");
