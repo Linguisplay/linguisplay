@@ -1785,18 +1785,21 @@ _rng = random.Random()  # module-level so tests can monkeypatch/seed
 
 
 def _roll_check(risk: int) -> dict[str, Any]:
-    """🎲 fate roll against a 0~99 risk (success chance %). Crit success on the top
-    tenth of the success band; crit fail on a 97+ miss."""
-    roll = _rng.randint(1, 100)
-    if roll <= max(1, risk // 10):
+    """🎲 d20 fate roll. `risk` is still the judged success chance % (0~99); it maps
+    onto the twenty-die as a DC (each face worth 5%): succeed on roll >= dc. A natural
+    20 always triumphs, a natural 1 always bites — the tabletop rule players know."""
+    roll = _rng.randint(1, 20)
+    faces = max(1, min(19, round(int(risk) / 5)))  # how many faces succeed
+    dc = 21 - faces
+    if roll == 20:
         outcome = "crit_success"
-    elif roll <= risk:
-        outcome = "success"
-    elif roll >= 97:
+    elif roll == 1:
         outcome = "crit_fail"
+    elif roll >= dc:
+        outcome = "success"
     else:
         outcome = "fail"
-    return {"risk": int(risk), "roll": roll, "outcome": outcome}
+    return {"risk": int(risk), "roll": roll, "dc": dc, "die": 20, "outcome": outcome}
 
 
 def pressure_cfg(content: dict[str, Any]) -> dict[str, Any] | None:

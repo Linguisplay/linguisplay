@@ -143,6 +143,10 @@
     <div class="muted">给玩家一次「我知道真相了」的下注时刻：有限次数里指认正确答案。答对置 flags.verdict_solved（真结局可 gate 在它上面）；次数用光触发失败结局。</div>
     <div id="verdictCard"></div>
 
+    <h2>🎲 命运骰</h2>
+    <div class="muted">「做」有风险的动作时掷一枚 20 面骰定成败，结果强制写进剧情。</div>
+    <div id="diceCard"></div>
+
     <h2>🏖 无尽沙盒</h2>
     <div class="muted">开启后这个剧本变成沙盒：玩家开局自定义世界观、开场人物按世界观现场生成、永不结束、玩家会死（死了只剩旁观）。时间与现实同步可单独关。</div>
     <div id="sandboxCard"></div>
@@ -163,7 +167,6 @@ const TUNING_KNOBS = [
   ["min_turns_per_act", 6, "每幕最少回合（防秒推）"],
   ["world_event_every", 4, "冷场几回合后世界自己出事（0=关）"],
   ["max_new_characters", 4, "涌现新角色上限"],
-  ["dice", 1, "🎲 命运骰（0=关）"],
   ["mind_reader", 1, "📟 心象仪·情绪可见（0=关）"],
   ["confront_base", 55, "🃏 对峙基础成功率 %"],
   ["confront_cost", 3, "🃏 对峙成功的亲近代价"],
@@ -609,6 +612,14 @@ function renderSystems(){
       <label>选中后的判词（可选）</label><input value="${esc(o.text||"")}" oninput="setVOpt(${i},'text',this.value)">
     </div>`).join("")}
     <button class="sm ghost" onclick="addVOpt()">+ 加选项</button>
+  </div>`;
+  document.getElementById("diceCard").innerHTML=`<div class="card">
+    <label style="display:flex;align-items:center;gap:8px;margin:0;cursor:pointer">
+      <input type="checkbox" ${tn.dice===0?"":"checked"} onchange="setTuning('dice', this.checked ? '' : '0')" style="width:auto">
+      🎲 开启命运骰（d20）
+    </label>
+    <div class="muted" style="margin-top:6px">开启：AI 裁判先给动作定难度，换算成 d20 需要的点数；掷到 20 大成功、掷到 1 大失败，成败强制进旁白。
+    关闭：动作不掷骰，全按 AI 自行演出。</div>
   </div>`;
   document.getElementById("sandboxCard").innerHTML=`<div class="card">
     <label style="display:flex;align-items:center;gap:8px;margin:0;cursor:pointer">

@@ -48,13 +48,28 @@ class FunLLM:
 
 
 def test_roll_check_mapping():
-    runtime._rng = random.Random(7)  # deterministic sequence
-    seen = set()
-    for _ in range(300):
-        seen.add(runtime._roll_check(60)["outcome"])
+    class FixedRng:
+        def __init__(self, v):
+            self.v = v
+
+        def randint(self, a, b):
+            assert (a, b) == (1, 20)              # the fate die is a d20 now
+            return self.v
+
+    # risk 60% → 12 of 20 faces succeed → DC 9; nat 20/1 override everything
+    for v, want in ((20, "crit_success"), (1, "crit_fail"), (9, "success"), (8, "fail")):
+        runtime._rng = FixedRng(v)
+        d = runtime._roll_check(60)
+        assert d["dc"] == 9 and d["die"] == 20 and d["outcome"] == want
+    # near-impossible: only the natural 20 lands it
+    runtime._rng = FixedRng(19)
+    assert runtime._roll_check(1)["outcome"] == "fail"
+    runtime._rng = FixedRng(20)
+    assert runtime._roll_check(1)["outcome"] == "crit_success"
+    # a real sequence shows the full spread
+    runtime._rng = random.Random(7)
+    seen = {runtime._roll_check(60)["outcome"] for _ in range(300)}
     assert seen == {"crit_success", "success", "fail", "crit_fail"}
-    d = runtime._roll_check(60)
-    assert (d["roll"] <= 60) == (d["outcome"] in ("success", "crit_success"))
 
 
 def test_risky_do_action_rolls_and_briefs_the_director():
@@ -63,7 +78,8 @@ def test_risky_do_action_rolls_and_briefs_the_director():
     out = runtime.run_turn(BASE, runtime.default_state(), {"name": "我"}, "我翻墙进去",
                            channel="do", llm=llm)
     d = out["dice"]
-    assert d and d["risk"] == 55 and 1 <= d["roll"] <= 100
+    assert d and d["risk"] == 55 and 1 <= d["roll"] <= 20 and d["die"] == 20
+    assert 2 <= d["dc"] <= 20
     assert llm.prompts[0].get("check") == d          # the director must narrate the result
 
 

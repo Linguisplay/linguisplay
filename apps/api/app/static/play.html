@@ -1021,11 +1021,10 @@ function showDice(d) {
   row.className = "dice";
   const label = { crit_success: "大成功！", success: "成功", fail: "失败", crit_fail: "大失败！" }[d.outcome] || "";
   const cls = (d.outcome === "success" || d.outcome === "crit_success") ? "win" : "lose";
-  row.innerHTML = `🎲 命运判定 · 需要 ≤${d.risk} <b class="roll">--</b>`;
+  row.innerHTML = `🎲 命运判定 d20 · 需要 ≥${d.dc || "?"} <b class="roll">--</b>`;
   chat.appendChild(row); chat.scrollTop = chat.scrollHeight;
   const rollEl = row.querySelector(".roll");
-  let n = 0;
-  const t = setInterval(() => { rollEl.textContent = 1 + Math.floor(Math.random() * 100); }, 55);
+  const t = setInterval(() => { rollEl.textContent = 1 + Math.floor(Math.random() * 20); }, 55);
   setTimeout(() => {
     clearInterval(t);
     rollEl.textContent = d.roll;

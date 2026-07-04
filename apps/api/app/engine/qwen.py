@@ -433,7 +433,7 @@ def _build_system(prompt: dict[str, Any]) -> str:
                            "success": "成功——如愿做成了",
                            "fail": "失败——没做成，并付出一点小代价或引来注意",
                            "crit_fail": "大失败——不但没成，还出了岔子、把局面搞得更糟"}.get(chk.get("outcome"), "")
-                lines.append(f"【命运判定已掷出（成功率{chk.get('risk')}%，掷出{chk.get('roll')}）：{verdict}】"
+                lines.append(f"【命运判定已掷出（d20 掷出 {chk.get('roll')}，需要 ≥{chk.get('dc') or '?'}）：{verdict}】"
                              "旁白必须严格按这个结果演出，不许翻案、不许淡化。")
 
     lines.append("")
