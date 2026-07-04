@@ -152,6 +152,7 @@ CHARACTERS = [
                      {"from_act": 6, "location_id": "loc_barber"}],
         "relation_default": "stranger",
         "relation_allowed": ["stranger", "peer", "friend", "enemy"],
+        "items": [{"name": "翻烂的小本子", "detail": "记满了城寨大小消息的宝贝，他的吃饭家伙。"}],
         "name": "四仔",
         "bio_layers": [
             {"closeness_min": 0, "text": "大牌档老板兼包打听，兜里揣个翻烂的小本子，城寨里大小事没他不知道的。"},

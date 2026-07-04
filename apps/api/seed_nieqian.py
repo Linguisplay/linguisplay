@@ -76,6 +76,8 @@ CHARACTERS = [
         "ties": [{"char_id": "laolao", "stance": -2, "label": "追杀多年的死仇"},
                  {"char_id": "qian", "stance": -1, "label": "妖物，本该一剑了断"}],
         "name": "燕赤霞",
+        "items": [{"name": "酒葫芦", "detail": "从不离手，酒气里混着一点药味。"},
+                  {"name": "辟邪的剑穗", "detail": "旧剑穗，据说浸过雄黄。"}],
         "role": "借住南院的剑客",
         "relation_default": "stranger",
         "relation_allowed": ["stranger", "peer", "friend", "elder"],
