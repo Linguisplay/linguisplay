@@ -140,6 +140,9 @@
   .smeta .ccard small { color: #8a839c; font-size: 9.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .smeta .ccard.k-moment { border-color: #4a3f2e; background: #2a2620; color: #e8dcc2; }
   .smeta .ccard.k-place { border-color: #2c4233; background: #1f2a20; color: #cfe6d4; }
+  .castitem { position: relative; }
+  .castitem .hpdot { position: absolute; top: -2px; right: 2px; font-size: 11px; filter: drop-shadow(0 0 2px #000); }
+  .castitem .hpdot.dying { animation: pulsed 1.2s ease infinite; }
   /* relationship tag + follow control under each in-scene character */
   .castitem .rel { font-size: 10px; padding: 0 4px; border-radius: 6px; line-height: 1.5; white-space: nowrap; }
   .rel-stranger { color:#9aa0ad; background:#2a2d36; } .rel-peer { color:#cfd6e6; background:#2b3142; }
@@ -657,6 +660,11 @@ function renderCast() {
     d.className = "castitem" + (target === c.id ? " sel" : "");
     d.dataset.cid = c.id;
     d.appendChild(avatarEl(c.name, c.avatar_url));
+    if (c.hp === "hurt" || c.hp === "dying") {
+      const w = document.createElement("span"); w.className = "hpdot " + c.hp;
+      w.title = c.hp === "dying" ? "重伤濒死" : "带着伤"; w.textContent = "🩸";
+      d.appendChild(w);
+    }
     const nm = document.createElement("small"); nm.textContent = c.name;
     const info = document.createElement("a"); info.className = "cinfo"; info.textContent = "ⓘ";
     info.onclick = (e) => { e.stopPropagation(); openCharCard(c.id); };
@@ -1059,6 +1067,7 @@ async function openCharCard(cid) {
       ${p.role ? `<div class="jwho">${escapeHtml(p.role)}</div>` : ""}
       <div class="cdesc">${escapeHtml((p.persona_text || "").slice(0, 90))}${(p.persona_text||"").length>90?"…":""}</div>
       ${p.where ? `<div class="jwho">📍 ${escapeHtml(p.where)}</div>` : ""}
+      ${p.hp === "hurt" ? `<div class="jwho">🩸 带着伤</div>` : p.hp === "dying" ? `<div class="jwho" style="color:#ff7a7a">🩸 重伤濒死，需要救治</div>` : ""}
       ${followBtn}
     </div></div>
     ${p.dead ? `<div class="jlocked">TA 已不在人世。</div>` : `
@@ -1526,6 +1535,9 @@ function showMoments(moments, relDeltas) {
       crit_fail: `🃏 弄巧成拙：${m.name}反将你一军` }[m.outcome] || "🃏 对质", m.outcome === "fail" || m.outcome === "crit_fail" ? "t-press" : "t-unlock", i++ * 650);
     else if (m.kind === "deadline") pushToast(`⏳ ${m.text || "大限"}：就在今天`, "t-press", i++ * 650);
     else if (m.kind === "npc_rel") pushToast(m.delta > 0 ? `🤝 ${m.a}和${m.b}走近了` : `⚡ ${m.a}和${m.b}闹僵了`, m.delta > 0 ? "t-rel" : "t-press", i++ * 650);
+    else if (m.kind === "dying") pushToast(`🩸 ${m.name || "有人"} 重伤濒死，还来得及救`, "t-press", i++ * 650);
+    else if (m.kind === "hurt") pushToast(`🩸 ${m.name || "有人"} 受了伤`, "t-press", i++ * 650);
+    else if (m.kind === "recover") pushToast(`💚 ${m.name || "有人"} 的伤势缓过来了`, "t-rel", i++ * 650);
     else if (m.kind === "promise") pushToast(
       m.status === "made" ? `${m.romantic ? "💞" : "🤝"} ${m.name}和你约好了：${m.when || ""}·${m.what || ""}` :
       m.status === "kept" ? `${m.romantic ? "💞 心动赴约" : "🤝 如约而至"}：${m.what || ""}` :

@@ -370,22 +370,93 @@ def char_home(c: dict[str, Any], act: int, slot: str | None = None) -> str | Non
     return c.get("home_location_id")
 
 
+# ── character simulation sheet (程序层的角色细节) ────────────────────────────────
+# Per-character DETERMINISTIC state the engine owns: an actual tracked position, a
+# graded life state, a persisted intent. The model narrates and REQUESTS changes; the
+# engine validates and books them. This kills the "characters feel random" problem:
+# nobody is everywhere, nobody dies in one breath, nobody forgets their own plan.
+def _sim(state: dict[str, Any], cid: str) -> dict[str, Any]:
+    return state.setdefault("char_sim", {}).setdefault(cid, {})
+
+
+def char_position(content: dict[str, Any], state: dict[str, Any],
+                  c: dict[str, Any]) -> str | None:
+    """The character's ACTUAL current location id. Resolution order: following the
+    player → the player's spot; an authored 作息 for this act+slot → that place (the
+    author is boss; AWAY = unreachable this hour); a tracked sim position (a validated,
+    booked move) → there; otherwise the story's OPENING location — in a story with a
+    map, nobody is 'everywhere' anymore. None = mapless story (legacy behavior)."""
+    locs = _locations(content)
+    if not locs:
+        return None
+    cid = c.get("id")
+    if cid and cid in (state.get("following") or []):
+        return state.get("location_id") or (locs[0] or {}).get("id")
+    sched = char_home(c, int(state.get("act", 1) or 1), active_slot(content, state))
+    if sched:
+        return sched  # includes AWAY
+    pos = ((state.get("char_sim") or {}).get(cid) or {}).get("pos")
+    if pos:
+        return pos
+    return (locs[0] or {}).get("id")
+
+
+def apply_char_move(content: dict[str, Any], state: dict[str, Any], name_ref: str,
+                    dest_ref: str) -> dict[str, Any] | None:
+    """Book a model-requested NPC move. The mover must be a LIVING character standing in
+    the player's scene (the model just narrated them setting off), not following, and
+    not owned by an authored 作息 for this hour; the destination must be a real authored
+    place. Returns {name, to_name} or None when refused."""
+    name_ref = (name_ref or "").strip()
+    if not name_ref:
+        return None
+    mover = next((c for c in scene_characters(content, state)
+                  if c.get("id") != state.get("player_character_id") and c.get("name")
+                  and (c["name"] == name_ref or c["name"] in name_ref or name_ref in c["name"])),
+                 None)
+    if not mover or mover.get("id") in (state.get("following") or []):
+        return None
+    if char_home(mover, int(state.get("act", 1) or 1), active_slot(content, state)):
+        return None  # the author's schedule owns this character's feet
+    dest = resolve_location(content, dest_ref)
+    if not dest or not dest.get("id") or dest["id"] == state.get("location_id"):
+        return None
+    _sim(state, mover["id"])["pos"] = dest["id"]
+    return {"name": mover.get("name"), "to_name": dest.get("name")}
+
+
+# graded life state: absent = healthy; "hurt" walks and talks; "dying" is one breath
+# from the ledger — and the ONLY state a death can strike from (two-stage deaths).
+_HP_LABEL = {"hurt": "带着伤", "dying": "重伤濒死"}
+
+
+def char_hp(state: dict[str, Any], cid: str | None) -> str:
+    if cid in _dead_ids(state):
+        return "dead"
+    return ((state.get("char_sim") or {}).get(cid) or {}).get("hp") or "healthy"
+
+
+def set_char_hp(state: dict[str, Any], cid: str, hp: str | None) -> None:
+    sim = _sim(state, cid)
+    if hp:
+        sim["hp"] = hp
+    else:
+        sim.pop("hp", None)
+
+
 def _is_here(c: dict[str, Any], state: dict[str, Any], cur_loc_id: str | None,
-             slot: str | None = None) -> bool:
-    """Is this character in the player's CURRENT scene? A character pinned to a place
-    (per-act/per-slot schedule, else home location) is only here when the player is AT
-    that place, OR when the character is currently following the player. AWAY = off
-    somewhere this hour, encounterable nowhere. A character with no place at all is
-    ubiquitous (present everywhere in their act — backward-compatible)."""
+             content: dict[str, Any] | None = None) -> bool:
+    """Is this character in the player's CURRENT scene? Their tracked position must BE
+    this place. Mapless stories keep the legacy everyone-everywhere behavior."""
     cid = c.get("id")
     if cid and cid in (state.get("following") or []):
         return True
-    home = char_home(c, int(state.get("act", 1) or 1), slot)
-    if home == AWAY:
-        return False
-    if not home:
+    pos = char_position(content or {}, state, c)
+    if pos is None:
         return True
-    return cur_loc_id == home
+    if pos == AWAY:
+        return False
+    return cur_loc_id == pos
 
 
 def scene_characters(content: dict[str, Any], state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -396,9 +467,8 @@ def scene_characters(content: dict[str, Any], state: dict[str, Any]) -> list[dic
     # resolve the effective location (None → the opening/first place, as current_location does)
     cur = current_location(content, state)
     cur_id = cur.get("id") if cur else state.get("location_id")
-    slot = active_slot(content, state)
     return [c for c in present_characters(content, act, _dead_ids(state))
-            if _is_here(c, state, cur_id, slot)]
+            if _is_here(c, state, cur_id, content)]
 
 
 def playable_roles(content: dict[str, Any]) -> list[dict[str, Any]]:
@@ -433,7 +503,12 @@ def _physical_roster(content: dict[str, Any], state: dict[str, Any], persona: di
     mode = state.get("mode") or "character"
     pcid = state.get("player_character_id")
     present = scene_characters(content, state)  # only who is in THIS scene right now
-    living = [c.get("name") for c in present if c.get("name") and c.get("id") != pcid]
+    living = []
+    for c in present:
+        if not c.get("name") or c.get("id") == pcid:
+            continue
+        tag = _HP_LABEL.get(char_hp(state, c.get("id")))
+        living.append(c["name"] + (f"（{tag}）" if tag else ""))
     # the player is a body in the scene (except in god/observer mode)
     if mode == "god":
         player_label = None
@@ -1212,7 +1287,7 @@ def _exit_dest(content: dict[str, Any], state: dict[str, Any],
     """Where a departing character is headed: (speakable destination name or None,
     narration tail). A discovered place gets named (探索钩子); an UNDISCOVERED one is
     hinted without spoiling geography; AWAY admits nobody knows."""
-    home = char_home(c, int(state.get("act", 1) or 1), active_slot(content, state))
+    home = char_position(content, state, c)
     loc = _location_by_id(content, home) if (home and home != AWAY) else None
     if loc and location_available(content, state, loc):
         return loc.get("name"), f"，往{loc.get('name')}那边去了"
@@ -1547,11 +1622,10 @@ def map_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
     avail = {l.get("id"): location_available(content, state, l) for l in locs}
     name_to_id = {l.get("name"): l.get("id") for l in locs if l.get("name")}
     at: dict[str, list[str]] = {}
-    slot = active_slot(content, state)
     for c in present_characters(content, act, _dead_ids(state)):
         if c.get("id") == pcid:
             continue
-        lid = cur if c.get("id") in following else char_home(c, act, slot)
+        lid = cur if c.get("id") in following else char_position(content, state, c)
         if lid and lid != AWAY and avail.get(lid) and c.get("name"):
             at.setdefault(lid, []).append(c["name"])
     nodes = []
@@ -2095,7 +2169,7 @@ def character_profile(content: dict[str, Any], state: dict[str, Any],
         else:
             hidden += 1
     # where they are right now (only if the place is discovered)
-    home = char_home(c, act, active_slot(content, state))
+    home = char_position(content, state, c)
     loc = _location_by_id(content, home) if (home and home != AWAY) else None
     where = (loc.get("name") if (loc and location_available(content, state, loc)) else None)
     if home == AWAY:
@@ -2121,6 +2195,7 @@ def character_profile(content: dict[str, Any], state: dict[str, Any],
         "secrets": secrets, "secrets_hidden": hidden,
         "where": where,
         "ties": npc_ties_of(content, state, char_id),  # 🕸 TA与其他人 (met-only, no leaks)
+        "hp": char_hp(state, char_id),                 # healthy | hurt | dying | dead
         "log": list((state.get("rel_log") or {}).get(char_id) or []),
         "bio": [b for b in bio_open if b], "bio_next_at": bio_next,
         "closeness": closeness, "romance": int(scores.get("romance", 0)),
@@ -2905,6 +2980,10 @@ def run_turn_stream(
                                     if p.get("status") == "missed" and p.get("char_id") == sp_id), None),
             # 📱 what you two texted lately — the scene remembers the phone
             "sms_tail": sms_tail_line(state, sp_id),
+            # the sim sheet: this character's own body state + standing intention
+            "condition": {"hp": _HP_LABEL.get(char_hp(state, sp_id), ""),
+                          "intent": (((state.get("char_sim") or {}).get(sp_id) or {})
+                                     .get("intent") or "")},
             "cast": others,
             # in a broadcast, non-primary characters may stay silent and never narrate
             "group_mode": ("primary" if is_primary else "member") if broadcast else None,
@@ -2953,6 +3032,10 @@ def run_turn_stream(
             prior_said = {_norm_line(s.get("text", "")) for s in said_this_turn}
             d_beats = [b for b in d_beats if _norm_line(b.get("text", "")) not in prior_said
                        and not _too_similar(b.get("text", ""), said_this_turn)]
+        # the sim sheet remembers what this character SAID they'd do next
+        _intent = (directed.get("self_intent") or "").strip()[:40]
+        if _intent and sp_id:
+            _sim(state, sp_id)["intent"] = _intent
         # 📟 心象仪: the speaker's own judged inner state rides on their LAST line
         mood = (directed.get("self_state") or "").strip()[:12]
         if mood and tun["mind_reader"]:
@@ -3055,14 +3138,47 @@ def run_turn_stream(
                         moments.append({"kind": "pressure", "note": lv["note"], "value": p_new})
                 if p_new >= 100:
                     pressure_blown = True
-            # ☠️ DEATH: a character died this turn — gone for good, remembered by everyone
+            # 🩸 HARM: judged wounds move ONE step on the graded ladder (轻伤/重伤/好转)
+            harm_ref = (directed.get("harmed") or "").strip()
+            if harm_ref:
+                hname, _, hlevel = harm_ref.partition("|")
+                hvictim = next((c for c in scene_characters(content, state)
+                                if c.get("id") != pcid and (c.get("name") or "")
+                                and (c["name"] in hname or hname.strip() in c["name"])), None)
+                if hvictim and hvictim.get("id") not in _dead_ids(state):
+                    hid, cur_hp = hvictim["id"], char_hp(state, hvictim.get("id"))
+                    hl = hlevel.strip()
+                    if "好转" in hl or "包扎" in hl or "救" in hl:
+                        nxt = {"dying": "hurt", "hurt": None}.get(cur_hp, None)
+                        if cur_hp in ("dying", "hurt"):
+                            set_char_hp(state, hid, nxt)
+                            moments.append({"kind": "recover", "name": hvictim.get("name")})
+                            rel_log(state, hid, old_act, "hurt",
+                                    f"{hvictim.get('name')} 的伤势缓过来了。")
+                    else:
+                        nxt = "dying" if ("重" in hl or "濒" in hl or cur_hp == "hurt") else "hurt"
+                        if nxt != cur_hp:
+                            set_char_hp(state, hid, nxt)
+                            moments.append({"kind": nxt, "name": hvictim.get("name")})
+                            rel_log(state, hid, old_act, "hurt",
+                                    f"{hvictim.get('name')} {'重伤濒死' if nxt == 'dying' else '受了伤'}。")
+            # ☠️ DEATH is TWO-STAGE: only the already-dying can die. A killing blow on a
+            # healthy body books them as 濒死 instead — there is always a window to save.
             died_ref = (directed.get("died") or "").strip()
             if died_ref:
                 victim = next((c for c in scene_characters(content, state)
                                if c.get("id") != pcid and (c.get("name") or "")
                                and ((c["name"] == died_ref) or (c["name"] in died_ref)
                                     or (died_ref in c["name"]))), None)
-                if victim:
+                if victim and char_hp(state, victim.get("id")) != "dying":
+                    set_char_hp(state, victim["id"], "dying")
+                    moments.append({"kind": "dying", "name": victim.get("name")})
+                    rel_log(state, victim.get("id"), old_act, "hurt",
+                            f"{victim.get('name')} 重伤濒死。")
+                    yield emit({"type": "description", "speaker_name": None,
+                                "text": f"（{victim.get('name')}还吊着一口气，气若游丝。"
+                                        "现在施救，或许还来得及。）"})
+                elif victim:
                     deads = _dead_ids(state)
                     deads.add(victim["id"])
                     state["dead_character_ids"] = sorted(deads)
@@ -3072,6 +3188,11 @@ def run_turn_stream(
                     moments.append({"kind": "death", "name": victim.get("name")})
                     rel_log(state, victim.get("id"), old_act, "death",
                             f"{victim.get('name')} 死了。")
+            # 🚶 booked NPC moves: the model narrated someone setting off — validate and
+            # BOOK it (the turn-end roster diff narrates the departure + destination)
+            for mv in (directed.get("npc_moves") or [])[:2]:
+                if isinstance(mv, dict):
+                    apply_char_move(content, state, mv.get("who", ""), mv.get("to", ""))
             # 👋 EMERGENT CHARACTER: the story brought in a brand-new face — make them real
             nc_raw = (directed.get("new_char") or "").strip()
             if nc_raw and gen_count < tun["max_new_characters"]:
@@ -3528,6 +3649,7 @@ def scene_cast(content: dict[str, Any], state: dict[str, Any],
         out.append({"id": c.get("id"), "name": c.get("name"),
                     "is_lead": c.get("is_lead", False), "avatar_url": c.get("avatar_url"),
                     "following": c.get("id") in following,
+                    "hp": char_hp(state, c.get("id")),  # 🩸 graded life state for the bar
                     "can_follow": relationships.can_follow(c, scores, tun)})  # 好感够不够请动
     return out
 

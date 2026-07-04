@@ -212,6 +212,16 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append("")
         lines.append(f"【你们最近捎过的话（你记得，可自然接上，别当没发生过）】{sms}")
 
+    cond = prompt.get("condition") or {}
+    if cond.get("hp") or cond.get("intent"):
+        bits = []
+        if cond.get("hp"):
+            bits.append(f"你此刻{cond['hp']}——说话、动作、脾气都受伤势拖累，别演得生龙活虎")
+        if cond.get("intent"):
+            bits.append(f"你先前打定的主意：{cond['intent']}。除非情势已变，顺着它行动，别凭空改弦更张")
+        lines.append("")
+        lines.append("【你自己的状态】" + "；".join(bits) + "。")
+
     deaths = [str(n) for n in (prompt.get("deaths") or []) if str(n).strip()]
     if deaths:
         lines.append("")
@@ -456,6 +466,9 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
         props["self_state"] = {"type": "string", "description":
                                "三五个字：这句话说完，你【内心真实】的状态（可与表面相反），"
                                "如：强装镇定、心里发虚、被戳中了、动了真情、起了杀心；平静无波就填空字符串"}
+        props["self_intent"] = {"type": "string", "description":
+                                "一句话（15字内）：这一场之后你打算做什么（会被记住、约束你之后的言行）；"
+                                "没有新打算就填空字符串"}
     if has_map and not is_member and not is_think:
         props["move_invite"] = {"type": "string", "description": "若你这轮提出或答应带玩家去某处，填那个地点名（可以是【可去通路】里的，也可以是对话里自然浮现的新地点；旁白只写到起身相邀为止）；否则填空字符串"}
     if not observer and not is_member and not is_think:
@@ -465,8 +478,18 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
     if not is_member and not is_think:
         cand = [speaker] + [str(n).strip() for n in (prompt.get("cast") or []) if str(n).strip()]
         props["character_died"] = {"type": "string", "description":
-                                   "若这一轮剧情里确实有角色【当场死亡且不可挽回】（被杀/意外），"
-                                   "填死者名字（只能从：" + "、".join(cand) + "）；没有则填空字符串"}
+                                   "只有【已经重伤濒死】的角色才可能死去：若这一轮TA确实咽了气，填名字"
+                                   "（只能从：" + "、".join(cand) + "）。健康的人挨了再重的一击也不会当场死"
+                                   "——那种情况改填 character_harmed，并把TA写成倒地重伤。没有则空字符串"}
+        props["character_harmed"] = {"type": "string", "description":
+                                     "若这一轮有角色受伤/伤势变化，填「名字|轻伤」「名字|重伤」或"
+                                     "「名字|好转」（名字只能从：" + "、".join(cand) + "）；没有则空字符串"}
+        props["npc_moves"] = {"type": "array", "maxItems": 2,
+                              "items": {"type": "object", "properties": {
+                                  "who": {"type": "string"}, "to": {"type": "string"}},
+                                  "required": ["who", "to"]},
+                              "description": "若这一轮有在场角色【确实起身离开、去了别处】（你在叙述里写了TA走），"
+                                             "填 who=名字、to=去处地名；通常填空数组[]"}
         if prompt.get("can_new_char"):
             props["new_character"] = {"type": "string", "description":
                                       "若剧情此刻确实需要一个此前不存在的新人物登场（推门进来/被引见/"
@@ -887,6 +910,14 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
         out["time_skip"] = str(d.get("time_skip") or "").strip()
     if "self_state" in d:
         out["self_state"] = str(d.get("self_state") or "").strip()
+    if "self_intent" in d:
+        out["self_intent"] = str(d.get("self_intent") or "").strip()
+    if "character_harmed" in d:
+        out["harmed"] = str(d.get("character_harmed") or "").strip()
+    if "npc_moves" in d:
+        out["npc_moves"] = [{"who": str(m.get("who") or "").strip(),
+                             "to": str(m.get("to") or "").strip()}
+                            for m in (d.get("npc_moves") or []) if isinstance(m, dict)]
     if "npc_rel_shifts" in d:
         shifts = []
         for s in (d.get("npc_rel_shifts") or []):

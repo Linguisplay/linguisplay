@@ -38,6 +38,8 @@ class WorldLLM:
 
 def test_death_removes_from_scene_and_is_remembered():
     st = runtime.default_state()
+    # deaths are TWO-STAGE now (char_sim): the first blow books 濒死, the second is final
+    runtime.set_char_hp(st, "b", "dying")
     out = runtime.run_turn(STORY, st, {"name": "我"}, "动手吧", channel="say",
                            llm=WorldLLM(died="乙", next_speakers=[]))
     st = out["state"]
