@@ -544,9 +544,10 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
         props["item_gained"] = {"type": "string", "description":
                                 "若玩家这一轮确实把某件具体物品拿到手（捡起/受赠/收起），填物品名；否则空字符串"}
         props["item_lost"] = {"type": "string", "description":
-                              "若玩家失去/交出/用掉了随身物品，填物品名（须在TA随身物品之列）；否则空字符串"}
+                              "若玩家失去/交出/用掉了随身物品，填物品名（须在TA随身物品之列）。"
+                              "注意：存放/收纳/藏起来【不是失去】，那要填 item_stashed；否则空字符串"}
         props["item_stashed"] = {"type": "string", "description":
-                                 "若玩家把随身物品存放/藏在当前地点，填物品名；否则空字符串"}
+                                 "若玩家把随身物品存放/收纳/寄存/藏在当前地点，填物品名；否则空字符串"}
         if prompt.get("player_items"):
             props["gift_received"] = {"type": "string", "description":
                                       "若玩家这一轮把TA的随身物品【送给你】（递给你/塞给你/请你收下），"

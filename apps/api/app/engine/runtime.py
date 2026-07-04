@@ -2366,11 +2366,44 @@ def _inv_remove(state: dict[str, Any], name: str) -> dict[str, Any] | None:
     return it
 
 
+_STASH_WORDS = ("放在", "搁在", "留在", "藏在", "藏到", "藏好", "存放", "寄存",
+                "收纳", "放下", "收在", "存到", "埋在")
+
+
+def stash_items(content: dict[str, Any], state: dict[str, Any],
+                player_input: str, channel: str = "say") -> list[dict[str, Any]]:
+    """📦 收纳: saying/doing 「把X放在这里/藏好/寄存」 with X in the pocket books it into
+    THIS place's stash. DETERMINISTIC twin of retrieve_stash — the engine keeps the
+    ledger itself instead of hoping the model fills the right judgment field (it used
+    to reach for item_lost and the thing simply vanished)."""
+    if channel not in ("do", "say"):
+        return []
+    text = (player_input or "").strip()
+    lid = state.get("location_id")
+    if not text or not lid or not any(w in text for w in _STASH_WORDS):
+        return []
+    # handing something TO someone is a gift/trade, not a stash — leave it to judgment
+    if any(w in text for w in ("送", "给你", "给他", "给她", "递给", "交给", "还给", "换")):
+        return []
+    put = []
+    for it in list(state.get("inventory") or []):
+        nm = (it.get("name") or "").strip()
+        if nm and nm in text:
+            _inv_remove(state, nm)
+            stashes = dict(state.get("stashes") or {})
+            stashes.setdefault(lid, []).append(it)
+            state["stashes"] = stashes
+            put.append(it)
+    return put
+
+
 def retrieve_stash(content: dict[str, Any], state: dict[str, Any],
                    player_input: str, channel: str = "say") -> list[dict[str, Any]]:
-    """取回寄存: naming an item you stashed at THIS place (做/看 channel) puts it back in
-    your pocket. Deterministic, mirrors search_props."""
-    if channel not in ("do", "think"):
+    """取回寄存: naming an item you stashed at THIS place puts it back in your pocket.
+    Deterministic, mirrors search_props. 说/做/看 all count — 「取回它」 is usually said."""
+    if channel not in ("do", "think", "say"):
+        return []
+    if not any(w in (player_input or "") for w in ("取回", "拿回", "取出", "拿出", "取走", "带上")):
         return []
     loc = current_location(content, state)
     if not loc:
@@ -2969,6 +3002,7 @@ def run_turn_stream(
     found_props = search_props(content, state, player_input, channel)
     prop_frag_ids = [pf["fragment_id"] for pf in found_props if pf.get("fragment_id")]
     retrieved = retrieve_stash(content, state, player_input, channel)
+    stashed_now = stash_items(content, state, player_input, channel)  # 📦 deterministic 收纳
     for pf in found_props:   # 🎒 a takeable prop goes straight into the pocket
         if pf.get("take"):
             _inv_add(state, pf.get("name", ""), pf.get("detail", ""))
@@ -3202,6 +3236,10 @@ def run_turn_stream(
     for it in retrieved:
         yield emit({"type": "description", "speaker_name": None,
                     "text": f"（你取回了之前放在这里的{it.get('name','')}。）"})
+    for it in stashed_now:
+        moments.append({"kind": "item", "verb": "stashed", "name": it.get("name")})
+        yield emit({"type": "description", "speaker_name": None,
+                    "text": f"（你把{it.get('name','')}收放在了这里。想用时回到这里说一声取回。）"})
 
     # searching paid off → narrate the physical evidence BEFORE anyone reacts to it
     for pf in found_props:
@@ -3670,9 +3708,9 @@ def run_turn_stream(
                     if it:
                         moments.append({"kind": "item", "verb": "lost", "name": it.get("name")})
                 st_ref = (directed.get("stashed") or "").strip()
-                if st_ref:
+                if st_ref and state.get("location_id"):   # never remove without a shelf
                     it = _inv_remove(state, st_ref)
-                    if it and state.get("location_id"):
+                    if it:
                         stashes = dict(state.get("stashes") or {})
                         stashes.setdefault(state["location_id"], []).append(it)
                         state["stashes"] = stashes

@@ -103,6 +103,29 @@ def test_trade_swaps_both_ends_for_real():
     assert out2["state"]["inventory"] == []
 
 
+def test_stash_is_deterministic_and_retrieve_hears_speech():
+    # 「把X放在这里」books the stash by ENGINE, no model judgment needed
+    out = runtime.run_turn(STORY, _st(["黄铜怀表", "麻绳"]), {"name": "我"},
+                           "我把黄铜怀表放在这里，藏好", channel="do",
+                           llm=ActLLM(next_speakers=[]))
+    st = out["state"]
+    assert [i["name"] for i in st["inventory"]] == ["麻绳"]
+    assert st["stashes"]["hall"][0]["name"] == "黄铜怀表"
+    assert any(m.get("verb") == "stashed" for m in out["moments"])
+    assert any("收放在了这里" in b.get("text", "") for b in out["beats"])
+    # …and 说「取回」 works too (the backpack tip says to just say it)
+    out2 = runtime.run_turn(STORY, st, {"name": "我"}, "取回黄铜怀表", channel="say",
+                            llm=ActLLM(next_speakers=[]))
+    st2 = out2["state"]
+    assert any(i["name"] == "黄铜怀表" for i in st2["inventory"]) and not st2["stashes"]
+    # handing over is NOT stashing: the gift phrasing stays with the judgment path
+    out3 = runtime.run_turn(STORY, _st(["银簪"]), {"name": "我"},
+                            "我把银簪放在你手里，送给你", channel="say",
+                            llm=ActLLM(next_speakers=[]))
+    assert [i["name"] for i in out3["state"]["inventory"]] == ["银簪"]
+    assert not out3["state"].get("stashes")
+
+
 def test_possessions_visible_on_the_dossier():
     st = _st()
     prof = runtime.character_profile(STORY, st, "a")
