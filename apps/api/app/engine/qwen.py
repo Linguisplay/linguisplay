@@ -141,7 +141,10 @@ def _build_system(prompt: dict[str, Any]) -> str:
         "· 话像人说的：短句、口语、可以打断或半句咽回去；留潜台词（生气的人说「没事，我挺好的」）；"
         "用动作和停顿代替形容词；每句话都得干活——推动剧情、揭示你是谁、或给到情绪，客套和废话删掉。",
         f"· 声音只属于你：用词、节奏、口头禅要让人一句就认出是「{speaker}」，绝不和别的角色撞腔调。"
-        + (f"你的方式：{eq_style}（冷的人有冷的体贴——情商不等于嘴甜，而是真的看见了对方。）" if eq_style else ""),
+        + (f"你的方式：{eq_style}（冷的人有冷的体贴——情商不等于嘴甜，而是真的看见了对方。）" if eq_style else "")
+        + (("你的台词范例（语气、句长、分寸以此为准，绝不照抄原句）：'"
+            + "' / '".join(str(x)[:60] for x in prompt["examples"][:5]) + "'")
+           if prompt.get("examples") else ""),
         f"· 经得起推敲：直接回应{whom}这一句和刚刚发生的事，与你之前说过、做过的保持一致；"
         f"只用「{speaker}」真该知道的去推理，拿不准就含糊或反问，绝不凭空编细节、不答非所问。",
         "· 忌机器腔：不用破折号（——）和省略号（……）做停顿；不写「嘴角勾起弧度」「眼中闪过一丝」"
@@ -1707,7 +1710,9 @@ class QwenLLM:
                          for m in (prompt.get("thread_tail") or [])) or "（这是你们第一次这样捎话）"
         sys = (f"你是「{ch.get('name','')}」（{ch.get('role','')}）。人设：{ch.get('persona_text','')}\n"
                f"表达方式：{ch.get('eq_style','')}\n"
-               f"你与对方的关系：{prompt.get('relation','')}。\n"
+               + (("你的台词范例（语气分寸以此为准，不照抄）：'"
+                   + "' / '".join(ch["examples"]) + "'\n") if ch.get("examples") else "")
+               + f"你与对方的关系：{prompt.get('relation','')}。\n"
                f"你此刻不在对方身边，要通过{device}给TA捎话。情境：{prompt.get('hint','')}\n"
                "写1~2条【短消息】：每条一行、口语、短（20字内最好），必须一眼就是你的声音——"
                "你的口头禅、你的脾气、你的分寸。不要旁白、不要引号、不要署名，只输出消息本身。不用破折号。"
@@ -1746,6 +1751,8 @@ class QwenLLM:
         sys_lines = [
             f"你是「{ch.get('name','')}」（{ch.get('role','')}）。人设：{ch.get('persona_text','')}",
             f"表达方式：{ch.get('eq_style','')}",
+            ("你的台词范例（语气分寸以此为准，不照抄）：'" + "' / '".join(ch["examples"]) + "'")
+            if ch.get("examples") else "",
             f"你自己的盘算：{ch.get('agenda','')}" if ch.get("agenda") else "",
             f"你与{pl}的关系：{prompt.get('relation','')}。{prompt.get('relationship_playbook','')}",
             f"你们此前的经历（你的记忆）：{(prompt.get('memory') or '')[:400]}" if prompt.get("memory") else "",
@@ -1821,7 +1828,9 @@ class QwenLLM:
         ch = prompt.get("char") or {}
         sys = (f"你是「{ch.get('name','')}」（{ch.get('role','')}）。人设：{ch.get('persona_text','')}\n"
                f"表达方式：{ch.get('eq_style','')}\n"
-               f"你与收信人的关系：{prompt.get('relation','')}。\n"
+               + (("你的台词范例（语气分寸以此为准，不照抄）：'"
+                   + "' / '".join(ch["examples"]) + "'\n") if ch.get("examples") else "")
+               + f"你与收信人的关系：{prompt.get('relation','')}。\n"
                f"你们此前的经历（你的记忆）：{(prompt.get('memory') or '')[:400]}\n"
                f"情境：{prompt.get('hint','')}\n"
                "写一封【信】：第一行是信的标题（≤12字，像你会写的，不要「无题」）；"

@@ -2352,7 +2352,9 @@ def compose_message(content: dict[str, Any], state: dict[str, Any], char: dict[s
         out = llm.generate({"compose_msg": True, "device": phone_device(content),
                             "char": {"name": char.get("name"), "role": char.get("role") or "",
                                      "persona_text": (char.get("persona_text") or "")[:160],
-                                     "eq_style": (char.get("eq_style") or "")[:120]},
+                                     "eq_style": (char.get("eq_style") or "")[:120],
+                                     "examples": [str(x)[:60] for x in
+                                                  (char.get("examples") or [])][:4]},
                             "relation": relationships.name_of(
                                 relationships.derive_mode(char, scores, tun)),
                             "reason": reason, "hint": hint,
@@ -2534,6 +2536,7 @@ def _phone_exchange(content: dict[str, Any], state: dict[str, Any], persona: dic
                         "char": {"name": c.get("name"), "role": c.get("role") or "",
                                  "persona_text": (c.get("persona_text") or "")[:200],
                                  "eq_style": (c.get("eq_style") or "")[:150],
+                                 "examples": [str(x)[:60] for x in (c.get("examples") or [])][:4],
                                  "agenda": (c.get("agenda") or "")[:100]},
                         "relation": relationships.name_of(mode),
                         "relationship_playbook": relationships.playbook_block(
@@ -2660,7 +2663,9 @@ def compose_letter(content: dict[str, Any], state: dict[str, Any], char: dict[st
         out = llm.generate({"compose_letter": True, "device": phone_device(content),
                             "char": {"name": char.get("name"), "role": char.get("role") or "",
                                      "persona_text": (char.get("persona_text") or "")[:200],
-                                     "eq_style": (char.get("eq_style") or "")[:120]},
+                                     "eq_style": (char.get("eq_style") or "")[:120],
+                                     "examples": [str(x)[:60] for x in
+                                                  (char.get("examples") or [])][:4]},
                             "relation": relationships.name_of(
                                 relationships.derive_mode(char, scores, tun)),
                             "reason": reason, "hint": hint,
@@ -3775,6 +3780,8 @@ def run_turn_stream(
             "roster": _physical_roster(content, state, persona),  # deterministic headcount
             "place": place,                       # concrete current-location anchor (if authored)
             "eq_style": sp.get("eq_style", ""),   # how THIS character reads/expresses emotion
+            # 台词范例 (mes_example): lines that ARE this voice — the most durable 去AI味 lever
+            "examples": [str(x) for x in (sp.get("examples") or [])][:5],
             "agenda": sp.get("agenda", ""),       # this character's OWN goal/will (autonomy)
             "relationship_playbook": rel_playbook,  # current relationship mode toward player
             "player_emotion": state.get("player_emotion", ""),  # prior emotional read (continuity)
