@@ -21,10 +21,55 @@ from .stories import _to_secret, _to_story
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
-# 🖼 emergent places deserve a face too: generated locations (sandbox start place,
-# 涌现地点) get an AI background rendered in a daemon thread — never blocks play,
-# skips silently without an API key or when the image is already on disk.
+# 🖼 emergent art (sandbox start place, 涌现地点, conjured characters): rendered OFF the
+# request path through ONE serialized worker. DashScope allows very few concurrent image
+# tasks — parallel submissions at run creation silently lost every task but the first
+# (the "bg rendered, avatars never did" bug) — so a single queue renders jobs in order,
+# skips what's already on disk, dedupes, and retries a transient failure once.
 _BG_DIR = __import__("pathlib").Path(__file__).resolve().parents[1] / "static" / "scene" / "bg"
+_AV_DIR = __import__("pathlib").Path(__file__).resolve().parents[1] / "static" / "scene" / "avatar"
+
+import queue as _imgqueue  # noqa: E402
+import threading as _imgthreading  # noqa: E402
+
+_IMG_Q: "_imgqueue.Queue" = _imgqueue.Queue()
+_IMG_PENDING: set = set()
+_IMG_LOCK = _imgthreading.Lock()
+_IMG_WORKER: list = []
+
+
+def _img_worker():
+    from ..engine.qwen import generate_image
+    while True:
+        prompt, path, size = _IMG_Q.get()
+        try:
+            if not path.exists():
+                img = generate_image(prompt, size=size)
+                if not img:      # throttled / transient → one measured retry
+                    import time
+                    time.sleep(6)
+                    img = generate_image(prompt, size=size)
+                if img:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(img)
+        except Exception:
+            pass
+        finally:
+            with _IMG_LOCK:
+                _IMG_PENDING.discard(str(path))
+            _IMG_Q.task_done()
+
+
+def _enqueue_image(prompt: str, path, size: str) -> None:
+    with _IMG_LOCK:
+        if str(path) in _IMG_PENDING:
+            return
+        _IMG_PENDING.add(str(path))
+        if not _IMG_WORKER:
+            t = _imgthreading.Thread(target=_img_worker, daemon=True)
+            _IMG_WORKER.append(t)
+            t.start()
+    _IMG_Q.put((prompt, path, size))
 
 
 def _spawn_location_bg(content: dict, loc: dict | None) -> None:
@@ -39,35 +84,23 @@ def _spawn_location_bg(content: dict, loc: dict | None) -> None:
     prompt = (f"{era} 场景：{loc.get('name', '')}。{(loc.get('detail') or '')[:200]} "
               "电影感写实场景概念图，强烈氛围与光影，景深，电影级调色，横构图宽幅；"
               "空镜，画面里没有任何人物，没有文字、字幕或水印。")
-
-    def work():
-        try:
-            from ..engine.qwen import generate_image
-            img = generate_image(prompt)
-            if img:
-                _BG_DIR.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(img)
-        except Exception:
-            pass
-
-    import threading
-    threading.Thread(target=work, daemon=True).start()
+    _enqueue_image(prompt, path, "1280*720")
 
 
-# 🖼 conjured characters get faces too: any generated character without a portrait is
-# pointed at /scene/avatar/{id}.jpg and a daemon thread renders it — same art direction
-# as enrich_portraits.py, same graceful degradation (letter avatar until the image lands).
-_AV_DIR = __import__("pathlib").Path(__file__).resolve().parents[1] / "static" / "scene" / "avatar"
-
-
-def _ensure_char_avatars(content: dict) -> None:
+def _ensure_char_avatars(content: dict) -> bool:
+    """Point every generated character at /scene/avatar/{id}.jpg and queue any missing
+    portrait. Returns True when an avatar_url was newly written (caller persists)."""
     story = content.get("story") or {}
     world = ((story.get("world_long") or "").strip().replace("\n", " "))[:120]
+    changed = False
     for c in story.get("characters") or []:
         cid, name = c.get("id"), c.get("name")
         if not cid or not name or not c.get("generated"):
             continue
-        c["avatar_url"] = f"/scene/avatar/{cid}.jpg"
+        url = f"/scene/avatar/{cid}.jpg"
+        if c.get("avatar_url") != url:
+            c["avatar_url"] = url
+            changed = True
         path = _AV_DIR / f"{cid}.jpg"
         if path.exists():
             continue
@@ -76,19 +109,8 @@ def _ensure_char_avatars(content: dict) -> None:
         prompt = (f"{bits}。世界背景：{world}。电影质感人物肖像，胸像特写，正面微侧，"
                   "目光看向镜头外，写实风格，柔和的侧光，背景虚化，情绪克制内敛，"
                   "高细节，胶片颗粒感")
-
-        def work(p=path, pr=prompt):
-            try:
-                from ..engine.qwen import generate_image
-                img = generate_image(pr, size="768*768")
-                if img:
-                    _AV_DIR.mkdir(parents=True, exist_ok=True)
-                    p.write_bytes(img)
-            except Exception:
-                pass
-
-        import threading
-        threading.Thread(target=work, daemon=True).start()
+        _enqueue_image(prompt, path, "768*768")
+    return changed
 
 
 # ── converters / helpers ──────────────────────────────────
@@ -467,9 +489,16 @@ def play(
             # persist final state + emit the trailing meta events
             if final is not None:
                 run.state = final["state"]
-                if final.get("content_mutated"):
-                    # the run grew an emergent character — persist its private story copy
-                    _ensure_char_avatars(content)   # 🖼 the newcomer's face starts rendering
+                # 🖼 every turn is a backfill chance: runs from before portraits shipped
+                # (or whose renders got throttled) pick their faces up here
+                av_changed = False
+                try:
+                    av_changed = _ensure_char_avatars(content)
+                except Exception:
+                    pass
+                if final.get("content_mutated") or av_changed:
+                    # the run grew an emergent character (or gained avatar urls) —
+                    # persist its private story copy
                     run.pinned_content = content
                     flag_modified(run, "pinned_content")
                 db2.commit()
