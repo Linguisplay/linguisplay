@@ -301,6 +301,7 @@
   <header>
     <b>LinguisPlay <span class="muted" style="font-weight:400">· AI 虚构内容</span></b>
     <span style="display:flex; gap:8px; align-items:center">
+      <button id="langBtn" class="iconbtn" title="界面语言 / UI language" onclick="toggleLang()">🌐</button>
       <button id="phoneBtn" class="iconbtn hidden" title="小手机：消息、日历、通讯录" onclick="openPhone()">📱<span id="phoneBadge" class="pbadge hidden"></span></button>
       <button id="mapBtn" class="iconbtn hidden" title="地图：已发现的地点与去处" onclick="openMap()">🗺</button>
       <button id="journalBtn" class="iconbtn hidden" title="档案：已揭开的真相与结局图鉴" onclick="openJournal()">📔</button>
@@ -394,6 +395,87 @@
 
 <script>
 const API = "/api/v1";
+// ── 🌐 UI language ────────────────────────────────────────────────────────────
+// "zh" (default) | "en". Explicit choice sticks in localStorage; playing an en story
+// auto-switches for the session (one-way zh→en; the toggle reloads to go back).
+// Story CONTENT is never translated here — the engine performs it in story.language.
+let uiLang = localStorage.getItem("lp_lang") || "zh";
+function toggleLang() {
+  localStorage.setItem("lp_lang", uiLang === "en" ? "zh" : "en");
+  location.reload();
+}
+const EN = {
+  "· AI 虚构内容": "· AI fiction",
+  "退出": "Log out", "← 剧本": "← Stories",
+  "登录 / 注册": "Log in / Sign up", "登录": "Log in", "注册（18+）": "Sign up (18+)",
+  "密码（≥8位）": "Password (8+ chars)",
+  "提示：直接点「注册」就能用上面的默认账号开玩。": "Tip: just hit Sign up to play with the demo account above.",
+  "今晚，走进谁的生命？": "Whose life will you step into tonight?",
+  "继续你的故事": "Continue your stories", "选择玩法": "Choose how to play",
+  "✏️ 编辑这个剧本": "✏️ Edit this story", "← 换剧本": "← Back",
+  "扮演其中一个角色，亲自下场：": "Step in as one of them:",
+  "或者：": "Or:",
+  "🚶 以你自己的身份走进故事（不扮演任何角色）": "🚶 Enter as yourself (play no one)",
+  "👁 上帝模式 · 旁观（看角色们彼此互动）": "👁 God mode · watch them interact",
+  "说": "Say", "做": "Do", "看/想": "Look",
+  "说点什么…": "Say something…", "发送": "Send",
+  "再玩一局 / 换个剧本": "Play again / pick another story",
+  "正在输入…": "typing…",
+  "对所有人说…（点上方头像可单独对一个人说）": "Speak to the room… (tap an avatar to address one person)",
+  "观察四周…（这是哪、什么情况，可留空）": "Look around… (where am I — can be empty)",
+  "你已经死了。只能看着这个世界继续（可留空）": "You are dead. All you can do is watch (can be empty)",
+  "你已经死了": "You are dead",
+  "（对方已读，没有回。）": "(Read. No reply.)",
+  "📞 电话那头没有回应。": "📞 No answer on the other end.",
+  "先在输入框里写下你开口要说的话，再按 📞": "Type what you'll say first, then hit 📞",
+  "💬 信息": "💬 Messages", "📮 信箱": "📮 Mail", "👥 通讯录": "👥 Contacts",
+  "💞 回忆": "💞 Memories", "🎒 背包": "🎒 Bag", "🗓 日历": "🗓 Calendar",
+  "信息": "Messages", "信箱": "Mail", "通讯录": "Contacts", "回忆": "Memories",
+  "背包": "Bag", "日历": "Calendar", "备忘录": "Dossier", "合上": "Close", "‹ 返回": "‹ Back",
+  "📱 小手机": "📱 Phone",
+  "还没有人给你捎过话。": "No one has reached out yet.",
+  "关系近了，TA们会主动来找你的。": "Get closer — they'll come to you.",
+  "还没说过话，发一条试试。": "No messages yet. Say something.",
+  "TA已不在人世，这个对话停在了这里。": "They are gone. This thread ends here.",
+  "信箱里还是空的。": "The mailbox is empty.",
+  "有些话，TA们只会写在信里。": "Some things they will only put in a letter.",
+  "还没有值得裱起来的瞬间。": "No moments worth framing yet.",
+  "它们会在你意想不到的时候降临。": "They arrive when you least expect them.",
+  "通讯录空空如也。": "No contacts yet.",
+  "日历上暂时没有约定。": "No promises on the calendar.",
+  "身上空空如也。": "Your pockets are empty.",
+  "🗺 地图": "🗺 Map", "📔 档案": "📔 Dossier",
+};
+function t(s) { return uiLang === "en" ? (EN[s] || s) : s; }
+// translate a rendered subtree: text nodes + placeholder/title attributes, exact-match
+function translateNode(root) {
+  if (uiLang !== "en" || !root) return root;
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let n;
+  while ((n = w.nextNode())) {
+    const s = n.nodeValue.trim();
+    if (s && EN[s]) n.nodeValue = n.nodeValue.replace(s, EN[s]);
+  }
+  root.querySelectorAll && root.querySelectorAll("[placeholder],[title]").forEach(el => {
+    if (el.placeholder && EN[el.placeholder]) el.placeholder = EN[el.placeholder];
+    if (el.title && EN[el.title]) el.title = EN[el.title];
+  });
+  return root;
+}
+function applyUiLang() {
+  if (uiLang !== "en") return;
+  document.documentElement.lang = "en";
+  const heroT = document.querySelector(".hero-t"), heroS = document.querySelector(".hero-s");
+  if (heroT) heroT.textContent = "Everyone here has something they won't tell you.";
+  if (heroS) heroS.textContent = "Unless you walk into their life.";
+  const heroP = document.querySelector(".hero-p");
+  if (heroP) heroP.innerHTML =
+    `<span>🔒 Every character keeps <b>truly locked secrets</b> — asking isn't enough; you earn them</span>
+     <span>💗 Relationships are <b>earned</b>: they remember what you said, every date kept and broken</span>
+     <span>🌙 The world <b>moves on its own</b> — hours turn, people come and go, and they text you first</span>`;
+  translateNode(document.body);
+}
+applyUiLang();
 let runId = null, personaId = null, myName = "我";
 let soundOn = true, curBgmMood = null;
 // 聊天头像: name → portrait url (built from the story's full cast so replayed bubbles of
@@ -454,7 +536,7 @@ async function afterAuth() {
     const runs = await j("/runs");
     if (runs.length) {
       const h = document.createElement("p");
-      h.className = "muted"; h.style.margin = "4px 0"; h.textContent = "继续你的故事";
+      h.className = "muted"; h.style.margin = "4px 0"; h.textContent = t("继续你的故事");
       stories.appendChild(h);
       runs.slice(0, 8).forEach(r => {
         const div = document.createElement("div");
@@ -500,6 +582,10 @@ async function afterAuth() {
 async function chooseRole(storyId) {
   currentStoryId = storyId;
   const story = await j(`/stories/${storyId}`);
+  // 🌐 an English story flips the UI for the session (unless the player chose a language)
+  if (story.language === "en" && uiLang !== "en" && !localStorage.getItem("lp_lang")) {
+    uiLang = "en"; applyUiLang(); updatePlaceholder && updatePlaceholder();
+  }
   const sandbox = !!(story.sandbox && story.sandbox.enabled);
   document.getElementById("wvWrap").classList.toggle("hidden", !sandbox);
   const all = (story.characters || []).filter(c => (c.presence || "present") !== "offstage");
@@ -510,7 +596,7 @@ async function chooseRole(storyId) {
   chars.forEach(c => {
     const b = document.createElement("button");
     b.className = "ghost"; b.style.cssText = "width:100%; text-align:left; margin:4px 0";
-    b.innerHTML = `扮演 <b>${escapeHtml(c.name||"?")}</b>${c.is_lead?" · 主角":""}` +
+    b.innerHTML = `${uiLang === "en" ? "Play as" : "扮演"} <b>${escapeHtml(c.name||"?")}</b>${c.is_lead ? (uiLang === "en" ? " · lead" : " · 主角") : ""}` +
       (c.role ? `<span class="muted"> — ${escapeHtml(c.role)}</span>` : "");
     b.onclick = () => startRun(storyId, "character", c.id, c.name);
     roleChars.appendChild(b);
@@ -897,6 +983,7 @@ function phoneShell(inner, title, backTo) {
     <div class="pbar">${back}<b>${escapeHtml(title)}</b>
       <button class="ghost" onclick="document.getElementById('phoneov').remove()">合上</button></div>
     <div class="pbody">${inner}</div></div>`;
+  translateNode(ov);
   return ov;
 }
 async function openPhone() {
@@ -985,10 +1072,10 @@ function renderThread(th) {
   const dead = th.dead;
   const composer = dead
     ? `<div class="jempty">TA已不在人世，这个对话停在了这里。</div>`
-    : `<div class="pcompose"><input id="pmsgIn" placeholder="发条${escapeHtml(th.device||"消息")}…"
+    : `<div class="pcompose"><input id="pmsgIn" placeholder="${uiLang === "en" ? `Text ${escapeHtml(th.device || "them")}…` : `发条${escapeHtml(th.device || "消息")}…`}"
          onkeydown="if(event.key==='Enter')sendPhoneMsg('${escapeHtml(th.char_id)}')">
-       <button onclick="sendPhoneMsg('${escapeHtml(th.char_id)}')">发送</button>
-       <button class="ghost" title="拨过去，实时说话" onclick="sendPhoneCall('${escapeHtml(th.char_id)}')">📞</button></div>`;
+       <button onclick="sendPhoneMsg('${escapeHtml(th.char_id)}')">${t("发送")}</button>
+       <button class="ghost" title="${uiLang === "en" ? "Call them — talk live" : "拨过去，实时说话"}" onclick="sendPhoneCall('${escapeHtml(th.char_id)}')">📞</button></div>`;
   const ov = phoneShell(`<div class="pmsgs" id="pmsgs">${bubbles}</div>${composer}`,
                         `${escapeHtml(th.name)}`, "openInbox()");
   const box = ov.querySelector("#pmsgs"); if (box) box.scrollTop = box.scrollHeight;
@@ -1005,7 +1092,7 @@ async function sendPhoneMsg(cid) {
   try {
     const th = await j(`/runs/${runId}/phone/${cid}`, { method:"POST", body: JSON.stringify({ text }) });
     renderThread(th);
-    if (!th.replied) pushToast("（对方已读，没有回。）", "", 2400);
+    if (!th.replied) pushToast(t("（对方已读，没有回。）"), "", 2400);
     toastUnlocked(th);
   } catch (e) { pushToast("⚠️ " + escapeHtml(e.message), "", 3000); if (inp) inp.disabled = false; }
 }
@@ -1013,12 +1100,12 @@ async function sendPhoneMsg(cid) {
 async function sendPhoneCall(cid) {
   const inp = document.getElementById("pmsgIn");
   const text = (inp && inp.value || "").trim();
-  if (!text) { pushToast("先在输入框里写下你开口要说的话，再按 📞", "", 2600); return; }
+  if (!text) { pushToast(t("先在输入框里写下你开口要说的话，再按 📞"), "", 2600); return; }
   inp.value = ""; inp.disabled = true;
   try {
     const th = await j(`/runs/${runId}/phone/${cid}/call`, { method:"POST", body: JSON.stringify({ text }) });
     renderThread(th);
-    if (!th.replied) pushToast("📞 电话那头没有回应。", "", 2400);
+    if (!th.replied) pushToast(t("📞 电话那头没有回应。"), "", 2400);
     toastUnlocked(th);
   } catch (e) { pushToast("⚠️ " + escapeHtml(e.message), "", 3000); if (inp) inp.disabled = false; }
 }
@@ -1231,14 +1318,21 @@ function pulseCast(relDeltas) {
 function updatePlaceholder() {
   const c = cast.find(x => x.id === target);
   if (playMode === "god") {
-    msg.placeholder = c ? `把镜头给${c.name}…（引导这场戏）` : "给这场戏一个引导，如「让他们聊聊过去」（留空也能继续看）";
+    msg.placeholder = c
+      ? (uiLang === "en" ? `Point the camera at ${c.name}… (direct the scene)` : `把镜头给${c.name}…（引导这场戏）`)
+      : (uiLang === "en" ? "Give the scene a nudge, e.g. “have them talk about the past” (empty = keep watching)"
+                         : "给这场戏一个引导，如「让他们聊聊过去」（留空也能继续看）");
     return;
   }
   if (channel && channel.value === "think") {
-    msg.placeholder = c ? `打量${c.name}…（看 TA 的神情/状态，可留空）` : "观察四周…（这是哪、什么情况，可留空）";
+    msg.placeholder = c
+      ? (uiLang === "en" ? `Study ${c.name}… (their look, their state — can be empty)` : `打量${c.name}…（看 TA 的神情/状态，可留空）`)
+      : t("观察四周…（这是哪、什么情况，可留空）");
     return;
   }
-  msg.placeholder = c ? `单独对${c.name}说…` : "对所有人说…（点上方头像可单独对一个人说）";
+  msg.placeholder = c
+    ? (uiLang === "en" ? `To ${c.name}…` : `单独对${c.name}说…`)
+    : t("对所有人说…（点上方头像可单独对一个人说）");
 }
 
 function renderState(st) {
@@ -1293,7 +1387,7 @@ function renderPlayerHp(hp) {
     [...channel.options].forEach(o => { if (o.value !== "think") o.disabled = dead; });
     if (dead) channel.value = "think";
   }
-  if (dead) msg.placeholder = "你已经死了。只能看着这个世界继续（可留空）";
+  if (dead) msg.placeholder = t("你已经死了。只能看着这个世界继续（可留空）");
   else if (changed) updatePlaceholder();
 }
 
@@ -1472,12 +1566,12 @@ function showEnding(ending) {
     + `<h2>${escapeHtml(ending.title || "")}</h2>`
     + (ending.text ? `<p>${escapeHtml(ending.text)}</p>` : "");
   const btn = document.createElement("button");
-  btn.textContent = "再玩一局 / 换个剧本"; btn.onclick = backToPick;
+  btn.textContent = t("再玩一局 / 换个剧本"); btn.onclick = backToPick;
   card.appendChild(btn);
   chat.appendChild(card); chat.scrollTop = chat.scrollHeight;
   msg.disabled = true; sendBtn.disabled = true; channel.disabled = true;
   suggest.innerHTML = "";
-  msg.placeholder = "你已经死了";
+  msg.placeholder = t("你已经死了");
 }
 function resetEnded() { ended = false; msg.disabled = false; channel.disabled = false; sendBtn.disabled = false; }
 
