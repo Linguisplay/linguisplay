@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LinguisPlay · 技术架构可视化</title>
+<style>
+  :root {
+    --bg: #0c0c14; --panel: #12121c; --card: #191926; --line: #2a2a3a;
+    --ink: #e2e5ee; --dim: #8b93a7; --faint: #565d72;
+    --blue: #8ea2ff; --gold: #b9975b; --green: #6fbf8a; --red: #e0574f; --pink: #d98cb3;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.7 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 28px 20px 80px; }
+  h1 { font-size: 26px; margin: 8px 0 2px; }
+  h1 small { color: var(--dim); font-size: 13px; font-weight: 400; margin-left: 10px; }
+  h2 { font-size: 18px; margin: 46px 0 6px; padding-left: 10px; border-left: 3px solid var(--blue); }
+  h2 .n { color: var(--faint); font-size: 12px; margin-right: 6px; }
+  .sub { color: var(--dim); font-size: 12.5px; margin: 0 0 16px 13px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+
+  /* 顶部统计 */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 18px; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  .stat b { display: block; font-size: 22px; color: var(--blue); }
+  .stat.gold b { color: var(--gold); } .stat.green b { color: var(--green); } .stat.pink b { color: var(--pink); }
+  .stat span { color: var(--dim); font-size: 12px; }
+
+  /* 通用盒子 */
+  .box { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .box b { font-size: 13.5px; }
+  .box .d { color: var(--dim); font-size: 12px; line-height: 1.6; }
+  .tag { display: inline-block; font-size: 10.5px; color: var(--faint); border: 1px solid var(--line);
+         border-radius: 6px; padding: 0 6px; margin-left: 6px; vertical-align: 1px; }
+
+  /* 系统拓扑：三列 */
+  .topo { display: grid; grid-template-columns: 1fr 34px 1.35fr 34px 1fr; gap: 10px; align-items: stretch; }
+  .topo .col { display: flex; flex-direction: column; gap: 10px; }
+  .arrowcol { display: flex; align-items: center; justify-content: center; color: var(--faint); font-size: 20px; }
+  .colhead { text-align: center; color: var(--faint); font-size: 11.5px; letter-spacing: 2px; margin-bottom: 2px; }
+  .box.hero { border-color: #39395a; background: #171728; }
+  .box.ext { border-style: dashed; }
+  .edge { color: var(--faint); font-size: 11px; text-align: center; }
+
+  /* 回合流水线 */
+  .pipe { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; }
+  .pipe .step { flex: 1 1 150px; min-width: 150px; background: var(--card); border: 1px solid var(--line);
+                border-radius: 10px; padding: 9px 11px; position: relative; }
+  .pipe .step em { display: block; font-style: normal; color: var(--faint); font-size: 10.5px; }
+  .pipe .step b { font-size: 13px; }
+  .pipe .step .d { color: var(--dim); font-size: 11.5px; line-height: 1.55; margin-top: 2px; }
+  .pipe .step::after { content: "→"; position: absolute; right: -10px; top: 42%; color: var(--faint); z-index: 2; }
+  .pipe .step:last-child::after { content: ""; }
+  .sse { margin-top: 14px; color: var(--dim); font-size: 12px; }
+  .sse code { background: #1d1d2c; border: 1px solid var(--line); border-radius: 5px; padding: 0 5px;
+              font-size: 11px; color: var(--blue); }
+
+  /* 门控 */
+  .gate { display: grid; grid-template-columns: 1.1fr 40px 1fr 40px 1.1fr; gap: 10px; align-items: center; }
+  .gate .cond { border-left: 3px solid var(--gold); }
+  .gate .verdicts { display: flex; flex-direction: column; gap: 8px; }
+  .v-reveal { border-left: 3px solid var(--green); }
+  .v-hint { border-left: 3px solid var(--gold); }
+  .v-hide { border-left: 3px solid var(--red); }
+  .guards { margin-top: 14px; display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+  .guards .box { border-top: 3px solid var(--red); }
+
+  /* 子系统网格 */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 10px; }
+  .grid .box { border-top: 3px solid var(--line); }
+  .grid .romance { border-top-color: var(--pink); }
+  .grid .world { border-top-color: var(--green); }
+  .grid .game { border-top-color: var(--gold); }
+  .grid .logic { border-top-color: var(--blue); }
+  .legend { color: var(--dim); font-size: 12px; margin: 0 0 12px 13px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 4px 0 14px; vertical-align: -1px; }
+
+  /* 数据模型 */
+  .er { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+  .er .box b { color: var(--blue); }
+  .er .k { color: var(--gold); }
+
+  /* LOC 条形图 */
+  .bars .row { display: grid; grid-template-columns: 220px 1fr 64px; gap: 10px; align-items: center; margin: 7px 0; }
+  .bars .name { text-align: right; font-size: 12.5px; color: var(--dim); }
+  .bars .name b { color: var(--ink); font-weight: 600; }
+  .bars .track { background: #15151f; border-radius: 5px; height: 16px; overflow: hidden; }
+  .bars .fill { height: 100%; border-radius: 5px; background: linear-gradient(90deg, #3d4a8f, var(--blue)); }
+  .bars .fill.gold { background: linear-gradient(90deg, #6e5a33, var(--gold)); }
+  .bars .fill.green { background: linear-gradient(90deg, #35603f, var(--green)); }
+  .bars .num { font-size: 12px; color: var(--faint); }
+
+  /* 部署 */
+  .deploy { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .deploy .box { flex: 1 1 180px; }
+  .deploy .a { color: var(--faint); }
+  footer { margin-top: 60px; color: var(--faint); font-size: 11.5px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>🎭 LinguisPlay <small>门控叙事引擎 · 技术架构总览 · 2026-07-05 @ fab7165</small></h1>
+  <div class="sub">AI 互动剧情游戏：角色藏着不会告诉你的事，引擎保证它们瞒得住、也撬得开。</div>
+
+  <div class="stats">
+    <div class="stat"><b>13.6k</b><span>后端+前端代码行</span></div>
+    <div class="stat green"><b>206</b><span>测试全绿</span></div>
+    <div class="stat gold"><b>9</b><span>线上剧本（6 授权 + 3 沙盒）</span></div>
+    <div class="stat"><b>7</b><span>引擎模块</span></div>
+    <div class="stat pink"><b>~20</b><span>玩法子系统</span></div>
+    <div class="stat"><b>1</b><span>每回合主 LLM 调用*</span></div>
+  </div>
+
+  <h2><span class="n">01</span>系统拓扑</h2>
+  <div class="sub">单体 FastAPI + 纯函数引擎；模型/图像/搜索全部外置，可整体替换。</div>
+  <div class="panel">
+    <div class="topo">
+      <div class="col">
+        <div class="colhead">客户端</div>
+        <div class="box"><b>play.html</b><span class="tag">1827 行 vanilla JS</span>
+          <div class="d">聊天流 + 打字机、场景背景/BGM、小手机（信息/通话/信箱/回忆/背包/日历）、地图、档案卡、指认、no-cache</div></div>
+        <div class="box"><b>studio.html</b><span class="tag">746 行</span>
+          <div class="d">剧本工坊：角色/幕/秘密碎片/地点物证/结局/时钟/调参全量编辑 + 🧪体检(lint)</div></div>
+        <div class="box"><b>同事的新前端</b><span class="tag">contract-first</span>
+          <div class="d">按 openapi.yaml 开发，phone_mock 域先行</div></div>
+      </div>
+      <div class="arrowcol">⇄</div>
+      <div class="col">
+        <div class="colhead">服务端 · 腾讯云 :8100 · systemd</div>
+        <div class="box hero"><b>FastAPI 路由层</b><span class="tag">runs.py 979 行</span>
+          <div class="d">auth（httpOnly cookie + 18禁 DOB 门）· stories/publish 快照 · runs/play <b>SSE 流</b> · move/follow/confront/choose/verdict/phone/mail/reincarnate · _public_story_view 防剧透盾</div></div>
+        <div class="box hero"><b>engine/ 纯函数引擎</b><span class="tag">无 DB 依赖</span>
+          <div class="d"><b>runtime.py</b>(回合编排 4791 行) · <b>gating.py</b>(安全边界) · <b>qwen.py</b>(提示词+解析 2200 行) · <b>relationships.py</b>(双轴关系) · <b>logic.py</b>(三层严谨) · <b>scene.py</b>(氛围分类) · <b>llm.py</b>(Protocol + Mock)</div></div>
+        <div class="box"><b>SQLite</b><span class="tag">SQLAlchemy 2.0</span>
+          <div class="d">data/linguisplay.db · _ensure_columns 增量迁移 · Postgres/pgvector 留待后续</div></div>
+        <div class="box"><b>/scene 静态资产</b>
+          <div class="d">bg/avatar 按 id 键控（AI 生成与上传共路径）· bgm/sfx 本地 DSP 生成 · 出图走全局单工位队列 _IMG_Q</div></div>
+      </div>
+      <div class="arrowcol">→</div>
+      <div class="col">
+        <div class="colhead">外部服务</div>
+        <div class="box ext"><b>DeepSeek</b><span class="tag">deepseek-chat</span>
+          <div class="d">所有对话/旁白/判定：render_turn 工具调用 + prose 双通道解析</div></div>
+        <div class="box ext"><b>DashScope</b>
+          <div class="d">通义万相：地点背景图 + 角色立绘；qwen：智能增强知识合成</div></div>
+        <div class="box ext"><b>Tavily</b>
+          <div class="d">联网搜索，喂给角色知识块（IP 考据）</div></div>
+        <div class="edge">LLM Protocol 一行切换<br>mock / qwen / deepseek</div>
+      </div>
+    </div>
+  </div>
+
+  <h2><span class="n">02</span>一次回合的生命周期 <span class="tag">runtime.run_turn_stream · 生成器，逐角色流出</span></h2>
+  <div class="sub">玩家一句话进来，走完 10 站流水线；首个角色 2~3 秒开口，其余边算边流。</div>
+  <div class="panel">
+    <div class="pipe">
+      <div class="step"><em>0</em><b>回归检测</b><div class="d">离开 &gt;6h？💌离线脉冲：想你的人来电/来信；沙盒对表真实时钟</div></div>
+      <div class="step"><em>1</em><b>意图结算</b><div class="d">asks 探问计数、事件关键词（临时）、物证搜查、收纳取回、🎲风险判骰</div></div>
+      <div class="step"><em>2</em><b>门控评估</b><div class="d">gating.evaluate_unlocks：谁的哪层秘密此刻解锁（详见 03）</div></div>
+      <div class="step"><em>3</em><b>选谁说话</b><div class="d">@指名 &gt; 被点名 &gt; 秘密归属 &gt; 上个说话人 &gt; 主角；广播由 primary 判定 next_speakers</div></div>
+      <div class="step"><em>4</em><b>逐角色生成</b><div class="d">每人独立门控上下文 + 亲历史 + 私有记忆摘要；said_this_turn 防复读</div></div>
+      <div class="step"><em>5</em><b>判定落账</b><div class="d">好感/心动、死伤两段、金钱差事、物品赠礼、NPC 互迁、身份、场面事实——引擎校验后才生效</div></div>
+      <div class="step"><em>6</em><b>推进检查</b><div class="d">硬门控幕(can_advance) &gt; 软推进+回合下限；卡关升级提示</div></div>
+      <div class="step"><em>7</em><b>世界自转</b><div class="d">时钟滚动/作息进出场/爽约结算/幕外戏码/世界脉冲事件/✨金色瞬间掷骰</div></div>
+      <div class="step"><em>8</em><b>手机递送</b><div class="d">约定提醒/爽约委屈/恋人来电/情书入信箱（每回合 cap 2）</div></div>
+      <div class="step"><em>9</em><b>结局评估</b><div class="d">压力爆表/期限已过/授权条件/致命判定；里程碑不封盘，仅死亡终局</div></div>
+    </div>
+    <div class="sse">SSE 事件流：<code>dice</code> <code>beat</code> <code>clock</code> <code>phone</code> <code>state</code> <code>scene</code> <code>cast</code> <code>here</code> <code>moments</code> <code>goal</code> <code>progress</code> <code>hint</code> <code>pressure</code> <code>place</code> <code>promises</code> <code>verdict</code> <code>choice</code> <code>move_request</code> <code>suggest</code> <code>ending</code> <code>achievements</code> <code>done</code></div>
+  </div>
+
+  <h2><span class="n">03</span>门控安全边界 <span class="tag">gating.py · 核心差异化 · 纯函数</span></h2>
+  <div class="sub">秘密的锁在程序里不在提示词里：锁住的内容从不进入模型上下文，所以再会套话的模型也漏不出来。</div>
+  <div class="panel">
+    <div class="gate">
+      <div class="box cond"><b>Fragment.unlock：五条件 AND</b>
+        <div class="d">affinity_min 好感 ∧ act_min 幕 ∧ asks_min 追问次数 ∧ trigger_event_ids 事件 ∧ location_id 到场<br>解锁 <b>sticky</b> 永不回锁；对峙成功可无视门槛强开下一层</div></div>
+      <div class="arrowcol">→</div>
+      <div class="verdicts">
+        <div class="box v-reveal"><b>reveal</b><div class="d">碎片正文进入提示词，new_reveal 必须当场说出口</div></div>
+        <div class="box v-hint"><b>hint</b><div class="d">只差一个条件：只给秘密「标题」，角色欲言又止</div></div>
+        <div class="box v-hide"><b>hide</b><div class="d">正文不存在于上下文；有 cover 则统一口径说谎</div></div>
+      </div>
+      <div class="arrowcol">→</div>
+      <div class="box"><b>知情面过滤</b>
+        <div class="d"><b>known_by_character_ids</b>：只有知情者能说；per-witness 历史（present_ids）+ 分角色记忆摘要——在暗巷告诉信一的话，理发店的龙卷风不知道。短信/通话走同一套门。</div></div>
+    </div>
+    <div class="guards">
+      <div class="box"><b>① 剧本 linter</b><div class="d">作者时：门控死锁、悬空引用、不可达地点、无结局……studio 🧪一键体检</div></div>
+      <div class="box"><b>② 运行时校验</b><div class="d">verify_turn：缺席者开口、≥14 字锁文泄露、越权移动 → 带错重写一次，仍错则 scrub 消毒</div></div>
+      <div class="box"><b>③ 推理脚手架</b><div class="d">inner_read 隐藏字段：写词前先自查「谁在场、我真正知道什么、TA话里的情绪」</div></div>
+      <div class="box"><b>④ Mock 即警报器</b><div class="d">MockLLM 只会复述门控给它的内容——任何泄露测试立刻变红（206 例中多例专测此不变量）</div></div>
+    </div>
+  </div>
+
+  <h2><span class="n">04</span>玩法子系统地图 <span class="tag">全部剧本无关 · 剧本内容只活在 seed</span></h2>
+  <p class="legend">图例：<i style="background:var(--pink)"></i>恋爱留存 <i style="background:var(--green)"></i>活的世界 <i style="background:var(--gold)"></i>游戏机制 <i style="background:var(--blue)"></i>逻辑与记忆</p>
+  <div class="panel">
+    <div class="grid">
+      <div class="box romance"><b>💞 双轴关系</b><div class="d">亲近×心动独立流动，8 种关系档位各带行为剧本，升档庆祝</div></div>
+      <div class="box romance"><b>🤝 约定系统</b><div class="d">角色主动邀约、赴约=约会名场面、爽约留怨（记一次）</div></div>
+      <div class="box romance"><b>📱 小手机一期</b><div class="d">主动来讯（提醒/委屈/想念）、随时回信、已读不回、场景记得聊天</div></div>
+      <div class="box romance"><b>📞📮 小手机二期</b><div class="d">实时通话+背景音、恋人来电、情书/长信信箱、短信套话挖秘密</div></div>
+      <div class="box romance"><b>💌 你不在的时候</b><div class="d">回归回合，最想你的人先开口；离开 48h+ 收到长信</div></div>
+      <div class="box romance"><b>✨ 金色瞬间</b><div class="d">4%/回合稀有奇遇掉落，写给最亲密者，自动入册</div></div>
+      <div class="box romance"><b>💗 回忆相册</b><div class="d">名场面收藏（奇遇/升档/约会/结局）+ 离场下幕预告</div></div>
+      <div class="box world"><b>⏳ 时钟与作息</b><div class="d">晨午夜×天、角色按 schedule 迁移/离场、幕时间锚点、期限结局</div></div>
+      <div class="box world"><b>🧬 char_sim 仿真表</b><div class="d">程序层位置/两段式生死/存续意图/心情延续/纪念品</div></div>
+      <div class="box world"><b>🗺 地点玩法</b><div class="d">地点门控在场揭示、物证搜查、地图旅行、涌现新地点(对话生成)</div></div>
+      <div class="box world"><b>🌊 世界自转</b><div class="d">冷场自触发事件、幕外 NPC 戏码生传闻、离线世界新闻</div></div>
+      <div class="box world"><b>🕸 NPC 关系网</b><div class="d">授权立场 + 每回合 ±1 演化，说话人携带对在场者的过节交情</div></div>
+      <div class="box world"><b>🏖 无尽沙盒</b><div class="d">玩家世界观开局、真实时间同步、永不结局、死亡旁观、🔄转生</div></div>
+      <div class="box game"><b>🎲 命运骰</b><div class="d">风险判定折 DC 的 d20，自然 20/1 大成大败，导演必须照骰演</div></div>
+      <div class="box game"><b>⚠️ 压力表</b><div class="d">0~100 危机值，越级警告，爆表强制终局</div></div>
+      <div class="box game"><b>🔍 指认结案</b><div class="d">有限次数正式指认，答对开真结局，烧完触发败局</div></div>
+      <div class="box game"><b>🃏 证据对峙</b><div class="d">出示已解锁线索明牌掷骰，成功当场撬开下一层</div></div>
+      <div class="box game"><b>🌱 NG+ 与卡牌</b><div class="d">跨局结局图鉴/成就/万物铸卡，旧识带入二周目</div></div>
+      <div class="box game"><b>💰 生计四件套</b><div class="d">硬账本金钱、限期差事、物品赠礼交易、收纳存取</div></div>
+      <div class="box logic"><b>🧠 分层记忆</b><div class="d">14 回合原文窗 + 分角色滚动摘要，情感线显式保留</div></div>
+      <div class="box logic"><b>🎭 表演宪章</b><div class="d">~900 字精简人格块（EQ/台词手艺/去AI味），拒绝提示词堆料</div></div>
+      <div class="box logic"><b>🌍 场面事实账本</b><div class="d">砸坏的门永远是坏的：持久物理事实按地点落账回注</div></div>
+      <div class="box logic"><b>✨ 金手指契约</b><div class="d">沙盒宣告的能力引擎认账，禁止世界发明「压制」</div></div>
+      <div class="box logic"><b>🖼 资产管线</b><div class="d">万相出图单工位队列去重重试；BGM musicgen + SFX numpy DSP</div></div>
+    </div>
+  </div>
+
+  <h2><span class="n">05</span>数据模型 <span class="tag">models.py · 9 张表</span></h2>
+  <div class="sub">发布=不可变快照；运行=快照的私有深拷贝——作者改稿永不打断进行中的局，涌现内容只长在自己局里。</div>
+  <div class="panel">
+    <div class="er">
+      <div class="box"><b>User</b><div class="d"><span class="k">DOB 18+门</span> · settings 内联 · 拥有一切</div></div>
+      <div class="box"><b>Persona</b><div class="d">玩家面具：称谓/背景（与剧本角色分离）</div></div>
+      <div class="box"><b>Story</b><div class="d">characters/acts/locations/endings/秘密树 + clock/pressure/verdict/phone/sandbox/tuning JSON 列 · <span class="k">_ensure_columns 增量迁移</span></div></div>
+      <div class="box"><b>Secret ▸ Fragment</b><div class="d">分层真相：unlock 五条件 · known_by · cover 谎言层 · retrieval_key</div></div>
+      <div class="box"><b>StorySnapshot</b><div class="d"><span class="k">publish 冻结</span>：玩家永远玩快照，never 草稿</div></div>
+      <div class="box"><b>Run</b><div class="d"><span class="k">pinned_content 深拷贝</span> + state JSON（关系/时钟/手机/相册/仿真表/账本…全在这）</div></div>
+      <div class="box"><b>Beat</b><div class="d">对话节拍 · <span class="k">present_ids 见证人</span>（信息隔离的地基）· mood 心象</div></div>
+      <div class="box"><b>StoryMeta</b><div class="d">user×story 跨局：结局图鉴/成就/卡牌收藏/NG+ 权益</div></div>
+    </div>
+  </div>
+
+  <h2><span class="n">06</span>模块体量 <span class="tag">wc -l · 2026-07-05</span></h2>
+  <div class="panel bars">
+    <div class="row"><div class="name"><b>engine/runtime.py</b> 回合编排</div><div class="track"><div class="fill" style="width:100%"></div></div><div class="num">4791</div></div>
+    <div class="row"><div class="name"><b>engine/qwen.py</b> 提示词+解析</div><div class="track"><div class="fill" style="width:46%"></div></div><div class="num">2200</div></div>
+    <div class="row"><div class="name"><b>static/play.html</b> 玩家端</div><div class="track"><div class="fill gold" style="width:38%"></div></div><div class="num">1827</div></div>
+    <div class="row"><div class="name"><b>routers/runs.py</b> 对局 API</div><div class="track"><div class="fill green" style="width:20%"></div></div><div class="num">979</div></div>
+    <div class="row"><div class="name"><b>static/studio.html</b> 工坊</div><div class="track"><div class="fill gold" style="width:16%"></div></div><div class="num">746</div></div>
+    <div class="row"><div class="name"><b>routers/stories.py</b> 剧本 API</div><div class="track"><div class="fill green" style="width:10%"></div></div><div class="num">490</div></div>
+    <div class="row"><div class="name"><b>schemas.py</b> 契约</div><div class="track"><div class="fill green" style="width:10%"></div></div><div class="num">484</div></div>
+    <div class="row"><div class="name"><b>engine/logic.py</b> 逻辑三层</div><div class="track"><div class="fill" style="width:9%"></div></div><div class="num">444</div></div>
+    <div class="row"><div class="name"><b>engine/relationships.py</b> 关系</div><div class="track"><div class="fill" style="width:6%"></div></div><div class="num">298</div></div>
+    <div class="row"><div class="name"><b>models.py</b> 9 张表</div><div class="track"><div class="fill green" style="width:5%"></div></div><div class="num">257</div></div>
+    <div class="row"><div class="name"><b>engine/gating.py</b> 安全边界</div><div class="track"><div class="fill" style="width:3%"></div></div><div class="num">156</div></div>
+    <div class="row"><div class="name">其余（auth/me/personas/scene/llm/config…）</div><div class="track"><div class="fill" style="width:20%"></div></div><div class="num">~950</div></div>
+  </div>
+
+  <h2><span class="n">07</span>交付与运行</h2>
+  <div class="panel">
+    <div class="deploy">
+      <div class="box"><b>本地 Windows</b><div class="d">git 仓库（本地）· .venv · 206 测试 · seed 脚本 ×7</div></div>
+      <div class="a">— tar over ssh →</div>
+      <div class="box"><b>腾讯云 CentOS</b><div class="d">/opt/linguisplay · python3.11 venv · SQLite</div></div>
+      <div class="a">→</div>
+      <div class="box"><b>systemd</b><div class="d">linguisplay.service · Restart=always · 开机自启 · journalctl 看日志</div></div>
+      <div class="a">→</div>
+      <div class="box"><b>:8100 公网</b><div class="d">http://106.54.1.82:8100/play · /studio · /docs<br><span style="color:var(--red)">待办：HTTPS+域名 · 备份 · git remote</span></div></div>
+    </div>
+    <div class="sse" style="margin-top:12px">* 每回合 1 次主模型调用（导演制单人场景）；广播场景 = primary + 其判定的 0~2 位插话者。旁支小调用（判骰/建议/短信）按需触发、可降级、永不 500。</div>
+  </div>
+
+  <footer>LinguisPlay 技术架构可视化 · 生成于 2026-07-05 · 基于 commit fab7165 · docs/architecture.html（单文件，无外部依赖，可直接分享）</footer>
+</div>
+</body>
+</html>
