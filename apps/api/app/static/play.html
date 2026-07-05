@@ -815,10 +815,7 @@ function renderCast() {
       }
     }
     // follow control (the lead is always with you; others can be invited / dismissed)
-    if (c.is_lead) {
-      const core = document.createElement("span"); core.className = "core"; core.textContent = "核心";
-      d.appendChild(core);
-    } else if (playMode !== "god") {
+    if (!c.is_lead && playMode !== "god") {
       const on = following.includes(c.id);
       const canFollow = on || c.can_follow !== false;  // needs 好感 to invite (unless already along)
       const b = document.createElement("span");
@@ -1290,7 +1287,7 @@ async function openCharCard(cid) {
   const followBtn = (!p.dead && playMode !== "god" && !p.is_lead)
     ? `<button class="ghost" style="font-size:12px;padding:5px 10px" onclick="toggleFollow('${p.id}', ${!p.following}); document.getElementById('charcard').remove()">${p.following ? B("🚶同行中 · 分开走", "🚶Together · part ways") : (p.can_follow ? B("邀TA同行", "Invite along") : B("🔒关系不够", "🔒Not close enough"))}</button>` : "";
   ov.innerHTML = `<div class="jcard" onclick="event.stopPropagation()">
-    <div class="jbar"><b>${p.dead ? "🕯 " : ""}${escapeHtml(p.name)}${p.is_lead ? B(" · 核心", " · lead") : ""}</b>
+    <div class="jbar"><b>${p.dead ? "🕯 " : ""}${escapeHtml(p.name)}</b>
       <button class="ghost" onclick="document.getElementById('charcard').remove()">${B("关闭", "Close")}</button></div>
     <div class="chead">${av}<div class="cmeta">
       ${p.role ? `<div class="jwho">${escapeHtml(p.role)}</div>` : ""}
