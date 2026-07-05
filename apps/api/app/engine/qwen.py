@@ -91,7 +91,9 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append(
             "【上帝/旁观模式】此刻有一位看不见的旁观者在观看这场戏，但 TA 不在场景里、"
             "你看不见也感知不到 TA。你要做的，是和在场的其他人自然地互动、对话、推进彼此的关系，"
-            "就当没有任何观众。绝不能对旁观者说话或承认有人在看。"
+            "就当没有任何观众。绝不能对旁观者说话或承认有人在看；"
+            "旁白里也不能有任何人「仿佛感到什么」「若有所觉地抬头」「对着空气说话」——"
+            "没有人知道有观众，一丝一毫都不知道。"
         )
     else:
         lines.append(f"你正在与「{player_name}」对话。{player_bg}")
@@ -1742,16 +1744,26 @@ class QwenLLM:
         plist = "\n".join(
             f"- {p.get('name','')}（{p.get('role','')}；与玩家的关系：{p.get('relation','')}）：{p.get('look','')}"
             for p in people) or "（这里此刻没有别人）"
-        sys = ("你在为互动剧情游戏写【玩家刚走进一个地方】的到达旁白。写2~4句，第三人称：\n"
-               "① 先写一眼看到的空间——光线、声响、气味，必须扣住给出的地点细节，不要泛泛；\n"
-               "② 再写此刻在场的每个人【正在做什么】——具体的动作、姿态、注意力所在，贴合各自的身份和长相，"
-               "一人一笔，谁都不能只是'站在那里'；\n"
-               "③ 最后写谁最先注意到玩家进来、那一瞬的反应（一个眼神/动作即可，不写对话）。\n"
-               "不要替玩家做动作或说话，不要剧透，不要总结抒情。只输出旁白本身。" + _STYLE_PUNCT)
-        u = (f"地点：{prompt.get('place','')}（{prompt.get('detail','')}）\n"
-             f"时间：{prompt.get('slot','') or '不明'}\n"
-             f"走进来的人：{prompt.get('player_name') or '玩家'}\n"
-             f"此刻在场：\n{plist}")
+        if prompt.get("observer"):
+            sys = ("你在为互动剧情游戏写【无形旁观视角切到一个地方】的到达旁白。写2~4句，第三人称：\n"
+                   "① 先写一眼看到的空间——光线、声响、气味，必须扣住给出的地点细节，不要泛泛；\n"
+                   "② 再写此刻在场的每个人【正在做什么】——具体的动作、姿态、注意力所在，一人一笔。\n"
+                   "这是一位看不见的观众在换机位：场景里【没有任何人到来】，绝不能有人抬头、察觉、"
+                   "感到被注视或对空气说话。不要剧透，不要总结抒情。只输出旁白本身。" + _STYLE_PUNCT)
+            u = (f"地点：{prompt.get('place','')}（{prompt.get('detail','')}）\n"
+                 f"时间：{prompt.get('slot','') or '不明'}\n"
+                 f"此刻在场：\n{plist}")
+        else:
+            sys = ("你在为互动剧情游戏写【玩家刚走进一个地方】的到达旁白。写2~4句，第三人称：\n"
+                   "① 先写一眼看到的空间——光线、声响、气味，必须扣住给出的地点细节，不要泛泛；\n"
+                   "② 再写此刻在场的每个人【正在做什么】——具体的动作、姿态、注意力所在，贴合各自的身份和长相，"
+                   "一人一笔，谁都不能只是'站在那里'；\n"
+                   "③ 最后写谁最先注意到玩家进来、那一瞬的反应（一个眼神/动作即可，不写对话）。\n"
+                   "不要替玩家做动作或说话，不要剧透，不要总结抒情。只输出旁白本身。" + _STYLE_PUNCT)
+            u = (f"地点：{prompt.get('place','')}（{prompt.get('detail','')}）\n"
+                 f"时间：{prompt.get('slot','') or '不明'}\n"
+                 f"走进来的人：{prompt.get('player_name') or '玩家'}\n"
+                 f"此刻在场：\n{plist}")
         try:
             resp = httpx.post(
                 self._url,
@@ -1899,13 +1911,24 @@ class QwenLLM:
         player_input = prompt.get("player_input", "")
         history = prompt.get("history") or []
 
+        is_observer = bool(prompt.get("observer"))
         messages = [{"role": "system", "content": system}]
         if not intro and not transition:
-            messages += history[-14:]  # recent turns for continuity (matches MEMORY_WINDOW)
+            hist = history[-14:]  # recent turns for continuity (matches MEMORY_WINDOW)
+            if is_observer:
+                # 👁 god mode: the viewer's lines are STAGE DIRECTIONS, never audible —
+                # mark every one (current AND past) so no character ever "hears" them
+                hist = [dict(m, content=f"（画外引导，场景里无人听见：{m.get('content', '')}）")
+                        if m.get("role") == "user" and m.get("content")
+                        and not str(m.get("content", "")).startswith("（画外引导")
+                        else m for m in hist]
+            messages += hist
         # observe/intro/transition is a one-off narration; nudge with a neutral cue
         cue = ("（开场）" if intro else "（进入新的一幕）" if transition else
                "（观察四周）" if not prompt.get("observe_target") else "（打量这个人）")
         user_content = player_input or cue
+        if is_observer and player_input:
+            user_content = f"（画外引导，场景里无人听见：{player_input}）"
         # DEPTH INJECTION (SillyTavern @Depth trick): besides the full world_facts/place in
         # the system prompt (which history pushes far from the generation point), restate a
         # SHORT physical anchor right next to the user's turn. Adjacency makes the model

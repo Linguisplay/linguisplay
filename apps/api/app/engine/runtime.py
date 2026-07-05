@@ -1525,6 +1525,8 @@ def arrival_narration(content: dict[str, Any], state: dict[str, Any], persona: d
                             "place": loc.get("name") or "", "detail": (loc.get("detail") or "")[:160],
                             "slot": (clock_view(content, state) or {}).get("label", ""),
                             "people": people,
+                            # 👁 god mode: an unseen viewpoint drifts in — nobody may notice
+                            "observer": (state.get("mode") or "character") == "god",
                             "player_name": (persona or {}).get("name") or ""}) or {}
         txt = next((b.get("text", "") for b in out.get("beats") or []
                     if b.get("type") == "description" and (b.get("text") or "").strip()), "")

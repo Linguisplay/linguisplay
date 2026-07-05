@@ -171,6 +171,30 @@ def test_start_locations_are_unique_per_run():
     assert len(ids) == 2
 
 
+def test_god_mode_arrival_is_an_unseen_viewpoint():
+    content = {"story": {"id": "s",
+                         "characters": [{"id": "a", "name": "甲", "is_lead": True}],
+                         "acts": [{"index": 1, "title": "一"}],
+                         "locations": [{"id": "L", "name": "堂屋", "detail": "x",
+                                        "exits": []}]},
+               "secrets": []}
+
+    class Spy:
+        def __init__(self):
+            self.p = None
+
+        def generate(self, prompt):
+            self.p = prompt
+            return {}
+
+    st = runtime.default_state()
+    st["mode"] = "god"
+    st["location_id"] = "L"
+    spy = Spy()
+    runtime.arrival_narration(content, st, {"name": "我"}, llm=spy)
+    assert spy.p and spy.p.get("arrive") and spy.p.get("observer") is True
+
+
 def test_mature_playbook_carries_craft_and_arc():
     from app.engine import relationships
     # every stage on a mature run gets the arc-pacing line (except enemies)
