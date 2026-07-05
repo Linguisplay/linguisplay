@@ -1503,28 +1503,59 @@ class QwenLLM:
         ctx = prompt.get("sugg") or {}
         pc = (ctx.get("player_name") or "").strip()
         pc_desc = (ctx.get("player_desc") or "").strip()
-        who = f"「{pc}」（{pc_desc}）" if pc and pc_desc else (f"「{pc}」" if pc else "你扮演的主角")
-        sys = (
-            f"你在为一个互动剧情游戏生成【下一步行动建议】。玩家扮演的是 {who}。"
-            "★铁律：每一条建议都必须站在玩家扮演的这个角色的视角、用这个角色的身份和口吻写——"
-            "是这个角色接下来会亲口说的一句话、或会亲手做的一个动作，用第一人称（我…）。"
-            "绝不能写成旁观者、系统或别的角色对主角发出的外部指令。"
-            "对比：外部命令口吻“去问对方昨晚的事”“上前查看”是错的；"
-            "主角亲口/亲手的“你昨晚究竟去了哪？”“让我走近看看”才是对的。"
-            "只输出 3 条，每行一条，不要编号、不要解释。每条都要：紧扣刚发生的对话与此刻处境、"
-            "具体可操作、贴合这个角色的性格与说话方式、尽量精炼（十来个字最好，最多一句话说完）。"
-            "★建议只能落在【当前地点、此刻在场的人、可去的地方】上——绝不要提任何不在场的人、"
-            "不在眼前的东西。不要剧透隐藏真相，只点方向。"
-        ) + _lang_rule(prompt)
-        u = (
-            f"你（{pc or '主角'}）此刻在：{ctx.get('place') or '（未知地点）'}\n"
-            f"你刚才对{ctx.get('speaker','对方')}说：{ctx.get('player_input','')}\n"
-            f"{ctx.get('speaker','对方')}回应：{ctx.get('reply','')}\n"
-            f"此刻在场：{ '、'.join(ctx.get('present') or []) or '只有你'}\n"
-            f"可以去的地方：{ '、'.join(ctx.get('exits') or []) or '暂无'}\n"
-            f"这一章你还想弄清：{ '、'.join(ctx.get('topics') or []) or '随你探索'}\n"
-            f"你和{ctx.get('speaker','对方')}此刻的关系：{ctx.get('relation','普通')}"
-        )
+        if (prompt.get("language") or "zh") == "en":
+            # full English variant — an appended directive isn't reliable enough here
+            # (the zh examples pull the model back to Chinese chips)
+            who_en = (f"“{pc}” ({pc_desc})" if pc and pc_desc
+                      else (f"“{pc}”" if pc else "the protagonist"))
+            sys = (
+                f"You write NEXT-ACTION suggestions for an interactive fiction game. "
+                f"The player plays {who_en}. "
+                "★Iron rule: every suggestion must be written FROM this character's own "
+                "point of view and voice — a line they would say out loud, or an action "
+                "they would take, in first person. Never an external instruction like "
+                "'go ask about last night' — instead: “Where were you last night, really?” "
+                "or “Let me take a closer look.” "
+                "Output exactly 3 lines, one suggestion per line, no numbering, no "
+                "explanations. Each must: follow directly from what was just said, be "
+                "concrete and doable, fit this character's personality, and stay short "
+                "(under a dozen words if possible). "
+                "★Only reference the CURRENT place, people PRESENT right now, and exits "
+                "you can actually take — never absent people or unseen things. "
+                "Do not spoil hidden truths; point directions only. Write in English."
+            )
+            u = (
+                f"You ({pc or 'the protagonist'}) are at: {ctx.get('place') or '(unknown)'}\n"
+                f"You just said to {ctx.get('speaker','them')}: {ctx.get('player_input','')}\n"
+                f"{ctx.get('speaker','They')} replied: {ctx.get('reply','')}\n"
+                f"Present: {', '.join(ctx.get('present') or []) or 'just the two of you'}\n"
+                f"Places you can go: {', '.join(ctx.get('exits') or []) or 'none'}\n"
+                f"Still to untangle this chapter: {', '.join(ctx.get('topics') or []) or 'explore freely'}\n"
+                f"Your relationship with {ctx.get('speaker','them')}: {ctx.get('relation','')}"
+            )
+        else:
+            who = f"「{pc}」（{pc_desc}）" if pc and pc_desc else (f"「{pc}」" if pc else "你扮演的主角")
+            sys = (
+                f"你在为一个互动剧情游戏生成【下一步行动建议】。玩家扮演的是 {who}。"
+                "★铁律：每一条建议都必须站在玩家扮演的这个角色的视角、用这个角色的身份和口吻写——"
+                "是这个角色接下来会亲口说的一句话、或会亲手做的一个动作，用第一人称（我…）。"
+                "绝不能写成旁观者、系统或别的角色对主角发出的外部指令。"
+                "对比：外部命令口吻“去问对方昨晚的事”“上前查看”是错的；"
+                "主角亲口/亲手的“你昨晚究竟去了哪？”“让我走近看看”才是对的。"
+                "只输出 3 条，每行一条，不要编号、不要解释。每条都要：紧扣刚发生的对话与此刻处境、"
+                "具体可操作、贴合这个角色的性格与说话方式、尽量精炼（十来个字最好，最多一句话说完）。"
+                "★建议只能落在【当前地点、此刻在场的人、可去的地方】上——绝不要提任何不在场的人、"
+                "不在眼前的东西。不要剧透隐藏真相，只点方向。"
+            )
+            u = (
+                f"你（{pc or '主角'}）此刻在：{ctx.get('place') or '（未知地点）'}\n"
+                f"你刚才对{ctx.get('speaker','对方')}说：{ctx.get('player_input','')}\n"
+                f"{ctx.get('speaker','对方')}回应：{ctx.get('reply','')}\n"
+                f"此刻在场：{ '、'.join(ctx.get('present') or []) or '只有你'}\n"
+                f"可以去的地方：{ '、'.join(ctx.get('exits') or []) or '暂无'}\n"
+                f"这一章你还想弄清：{ '、'.join(ctx.get('topics') or []) or '随你探索'}\n"
+                f"你和{ctx.get('speaker','对方')}此刻的关系：{ctx.get('relation','普通')}"
+            )
         try:
             resp = httpx.post(
                 self._url,

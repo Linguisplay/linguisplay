@@ -1583,7 +1583,12 @@ def _smart_suggestions(llm, all_beats, player_input, primary, content, state, lo
             "player_name": player_name, "player_desc": player_desc,
             "place": (location or {}).get("name") or "",
         }})
-        return [dedash(s) for s in (out.get("suggestions") or []) if s][:3]
+        outs = [dedash(s) for s in (out.get("suggestions") or []) if s][:3]
+        # en story hard backstop: a chip that came back in Chinese never reaches the UI
+        # (drop it — the deterministic English fallback covers the gap)
+        if lang_of(content) == "en":
+            outs = [s for s in outs if not re.search(r"[一-鿿]", s)]
+        return outs
     except Exception:
         return []
 
@@ -1731,6 +1736,12 @@ def arrival_narration(content: dict[str, Any], state: dict[str, Any], persona: d
         txt = ""
     if txt:
         return dedash(txt)
+    if lang_of(content) == "en":
+        bits = [_first_sentence(loc.get("detail") or "", 60)]
+        for p in people:
+            who = "; ".join(b for b in (p["role"], p["look"]) if b)
+            bits.append(f"{p['name']} is here{(' (' + who + ')') if who else ''}")
+        return "(" + ". ".join(b for b in bits if b) + ".)" if any(bits) else ""
     bits = [_first_sentence(loc.get("detail") or "", 60)]
     for p in people:
         who = "，".join(b for b in (p["role"], p["look"]) if b)
@@ -1759,13 +1770,15 @@ def arrival_suggestions(content: dict[str, Any], state: dict[str, Any],
             False)
         if smart:
             return smart
-    det: list[str] = [f"和{c.get('name')}搭话" for c in here[:2] if c.get("name")]
+    en = lang_of(content) == "en"
+    det: list[str] = [(f"Talk to {c.get('name')}" if en else f"和{c.get('name')}搭话")
+                      for c in here[:2] if c.get("name")]
     searched = set(state.get("searched_prop_ids") or [])
     prop = next((p.get("name") for p in (loc.get("props") or [])
                  if p.get("name") and p.get("id") not in searched), None)
     if prop:
-        det.append(f"翻查{prop}")
-    det.append("看看四周")
+        det.append(f"Search the {prop}" if en else f"翻查{prop}")
+    det.append("Look around" if en else "看看四周")
     return det[:3]
 
 
