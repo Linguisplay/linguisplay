@@ -821,9 +821,9 @@ function renderCast() {
     info.onclick = (e) => { e.stopPropagation(); openCharCard(c.id); };
     nm.appendChild(info);
     d.appendChild(nm);
-    // relationship tag (skip the lead — the spine character has no flowing mode)
+    // relationship tag — the lead flows through the same modes as everyone else
     const rel = relations[c.id];
-    if (rel && rel.mode_name && !c.is_lead) {
+    if (rel && rel.mode_name) {
       const t = document.createElement("span");
       t.className = "rel rel-" + (MODE_CLASS[rel.mode_name] || "stranger");
       t.textContent = rel.mode_name + ((rel.romance|0) >= 25 ? " ♥" : "");
@@ -835,8 +835,8 @@ function renderCast() {
         d.appendChild(nx);
       }
     }
-    // follow control (the lead is always with you; others can be invited / dismissed)
-    if (!c.is_lead && playMode !== "god") {
+    // follow control — leads have schedules too, so they can be invited like anyone
+    if (playMode !== "god") {
       const on = following.includes(c.id);
       const canFollow = on || c.can_follow !== false;  // needs 好感 to invite (unless already along)
       const b = document.createElement("span");
@@ -1305,7 +1305,7 @@ async function openCharCard(cid) {
   const nextTxt = rel.next && rel.next.name ? `<span class="jwho">${B(`（差${rel.next.to_next}到「${rel.next.name}」）`, ` (${rel.next.to_next} to “${rel.next.name}”)`)}</span>` : "";
   const av = p.avatar_url ? `<img class="cportrait" src="${p.avatar_url}" alt="" onerror="this.style.display=\'none\'">`
                           : `<div class="cportrait cletter" style="background:${avatarColor(p.name)}">${escapeHtml((p.name||"?").slice(0,1))}</div>`;
-  const followBtn = (!p.dead && playMode !== "god" && !p.is_lead)
+  const followBtn = (!p.dead && playMode !== "god")
     ? `<button class="ghost" style="font-size:12px;padding:5px 10px" onclick="toggleFollow('${p.id}', ${!p.following}); document.getElementById('charcard').remove()">${p.following ? B("🚶同行中 · 分开走", "🚶Together · part ways") : (p.can_follow ? B("邀TA同行", "Invite along") : B("🔒关系不够", "🔒Not close enough"))}</button>` : "";
   ov.innerHTML = `<div class="jcard" onclick="event.stopPropagation()">
     <div class="jbar"><b>${p.dead ? "🕯 " : ""}${escapeHtml(p.name)}</b>
