@@ -36,6 +36,29 @@ def main() -> int:
             title = (content.get("story") or {}).get("title", story.id)
             print(f"\n=== 《{title}》 ({story.id}) ===")
             print(logic.format_issues(issues))
+
+        # ── GLOBAL pass: character/location ids must be unique ACROSS stories ──
+        # /scene/avatar/{char_id}.jpg and /scene/bg/{loc_id}.jpg are a SHARED namespace:
+        # two stories using the same id show each other's art (陈妈 wearing 陈工's face).
+        # Convention: prefix ids per story (mw_gu, kl_cyclone, …).
+        all_stories = db.query(StoryModel).all()
+        owners: dict[tuple, list[str]] = {}
+        for s in all_stories:
+            for c in s.characters or []:
+                if c.get("id"):
+                    owners.setdefault(("char", c["id"]), []).append(s.title or s.id)
+            for l in s.locations or []:
+                if l.get("id"):
+                    owners.setdefault(("loc", l["id"]), []).append(s.title or s.id)
+        clashes = {k: v for k, v in owners.items() if len(v) > 1}
+        if clashes:
+            print("\n=== 🌐 跨剧本 id 冲突（美术资源按 id 共享，会互相顶脸/顶背景）===")
+            for (kind, cid), titles in sorted(clashes.items()):
+                print(f"  ✗ [{'角色' if kind == 'char' else '地点'}:{cid}] "
+                      f"被 {len(titles)} 个剧本共用：{'、'.join(f'《{t}》' for t in titles)}")
+            total_errors += len(clashes)
+        elif len(sys.argv) <= 1:
+            print("\n🌐 跨剧本 id 检查：无冲突。")
         return 1 if total_errors else 0
     finally:
         db.close()
