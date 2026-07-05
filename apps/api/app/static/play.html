@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>LinguisPlay · 试玩</title>
+<title>LinguisPlay</title>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
@@ -303,9 +303,9 @@
     <span style="display:flex; gap:8px; align-items:center">
       <button id="langBtn" class="iconbtn" title="界面语言 / UI language" onclick="toggleLang()">🌐</button>
       <button id="phoneBtn" class="iconbtn hidden" title="小手机：消息、日历、通讯录" onclick="openPhone()">📱<span id="phoneBadge" class="pbadge hidden"></span></button>
-      <button id="mapBtn" class="iconbtn hidden" title="地图：已发现的地点与去处" onclick="openMap()">🗺</button>
-      <button id="journalBtn" class="iconbtn hidden" title="档案：已揭开的真相与结局图鉴" onclick="openJournal()">📔</button>
-      <button id="soundBtn" class="iconbtn hidden" title="背景音乐开关" onclick="toggleSound()">🔊</button>
+      <button id="mapBtn" class="iconbtn hidden" title="地图" onclick="openMap()">🗺</button>
+      <button id="journalBtn" class="iconbtn hidden" title="档案" onclick="openJournal()">📔</button>
+      <button id="soundBtn" class="iconbtn hidden" title="背景音乐" onclick="toggleSound()">🔊</button>
       <button id="backBtn" class="ghost hidden" style="padding:5px 10px" onclick="backToPick()">← 剧本</button>
       <span id="who" class="muted"></span>
       <a id="logoutBtn" class="hidden" style="font-size:13px" onclick="doLogout()">退出</a>
@@ -332,7 +332,7 @@
     </div>
     <p id="authErr" style="color:#e66"></p>
     <p class="muted">提示：直接点「注册」就能用上面的默认账号开玩。</p>
-    <p class="muted" style="border-top:1px solid #23232c; padding-top:10px; margin-top:14px; line-height:1.6">
+    <p id="disclaimer" class="muted" style="border-top:1px solid #23232c; padding-top:10px; margin-top:14px; line-height:1.6">
       ⚠️ 本产品所有剧情与角色对白均由 <b>AI 生成</b>，纯属虚构，不代表真实人物或事件，仅供 18 岁以上用户娱乐。<br>
       如果你正经历情绪困扰或危机：中国大陆心理援助热线 <b>400-161-9995</b>；美国可拨打/发短信 <b>988</b>。
     </p>
@@ -445,7 +445,26 @@ const EN = {
   "日历上暂时没有约定。": "No promises on the calendar.",
   "身上空空如也。": "Your pockets are empty.",
   "🗺 地图": "🗺 Map", "📔 档案": "📔 Dossier",
+  "小手机：消息、日历、通讯录": "Phone: messages, calendar, contacts",
+  "地图": "Map", "档案": "Dossier", "背景音乐": "Music", "界面语言 / UI language": "UI language",
+  "开一段新的": "Start something new",
+  "还没有已发布的剧本。": "No published stories yet.",
+  "身上空空如也。": "Your pockets are empty.",
+  "🏖 这是一个无尽沙盒：世界观由你定义，时间和现实一致，剧情永不落幕。你也可能死，死了就只剩下看。":
+    "🏖 An endless sandbox: you define the world, time runs with reality, the story never ends. You can die — and then all you can do is watch.",
+  "写下你想要的世界观：什么时代、什么地方、住着什么样的人、正在酝酿什么。留空则由世界自己决定。":
+    "Describe the world you want: the era, the place, who lives there, what's brewing. Leave empty and the world decides.",
+  "✨ 金手指（可选，一行一个，最多4个）：写下你要的超能力，这个世界会承认它们真实有效。例：状态之眼：看穿他人状态与好感 / 每日一次的抽卡":
+    "✨ Powers (optional, one per line, max 4): abilities this world will treat as REAL. e.g. Status Eye: see others' state and affection / One gacha pull per day",
+  "🔞 成人模式（18+：亲密内容正面描写，不再回避淡化）": "🔞 Mature mode (18+: intimate content written plainly, not faded out)",
 };
+function _applyEnExtras() {
+  document.title = "LinguisPlay";
+  const disc = document.getElementById("disclaimer");
+  if (disc) disc.innerHTML =
+    `⚠️ All plot and dialogue in this product is <b>AI-generated</b> fiction; it depicts no real persons or events. 18+ entertainment only.<br>
+     If you are in distress or crisis: in the US, call or text <b>988</b>; in mainland China, call <b>400-161-9995</b>.`;
+}
 function t(s) { return uiLang === "en" ? (EN[s] || s) : s; }
 const B = (zh, en) => uiLang === "en" ? en : zh;
 // translate a rendered subtree: text nodes + placeholder/title attributes, exact-match
@@ -474,6 +493,7 @@ function applyUiLang() {
     `<span>🔒 Every character keeps <b>truly locked secrets</b> — asking isn't enough; you earn them</span>
      <span>💗 Relationships are <b>earned</b>: they remember what you said, every date kept and broken</span>
      <span>🌙 The world <b>moves on its own</b> — hours turn, people come and go, and they text you first</span>`;
+  _applyEnExtras();
   translateNode(document.body);
 }
 applyUiLang();
@@ -542,34 +562,34 @@ async function afterAuth() {
       runs.slice(0, 8).forEach(r => {
         const div = document.createElement("div");
         div.className = "card runcard"; div.style.margin = "8px 0"; div.style.cursor = "pointer";
-        const who = r.mode === "god" ? "旁观" : (r.player_character_name ? `扮演${r.player_character_name}` : "");
-        const tag = r.ended ? "（已完结·可回看）" : `第${r.act}幕`;
+        const who = r.mode === "god" ? B("旁观", "watching") : (r.player_character_name ? B(`扮演${r.player_character_name}`, `as ${r.player_character_name}`) : "");
+        const tag = r.ended ? B("（已完结·可回看）", "(finished · replayable)") : B(`第${r.act}幕`, `Act ${r.act}`);
         const prev = (r.last_beat_preview || "").slice(0, 42);
         div.innerHTML = `<b>${escapeHtml(r.story_title)}</b> <span class="muted">${escapeHtml(who)} · ${escapeHtml(tag)}</span>` +
           `<div class="muted" style="margin-top:4px">${escapeHtml(prev)}${(r.last_beat_preview||"").length>42?"…":""}</div>`;
         const del = document.createElement("a");
-        del.textContent = "✕"; del.title = "删除这段进度";
+        del.textContent = "✕"; del.title = B("删除这段进度", "Delete this run");
         del.style.cssText = "float:right; color:#7b8296; padding:0 4px";
         del.onclick = async (e) => { e.stopPropagation();
-          if (!confirm(`删除《${r.story_title}》的这段进度？关系和已揭开的真相都会丢失。`)) return;
+          if (!confirm(B(`删除《${r.story_title}》的这段进度？关系和已揭开的真相都会丢失。`, `Delete this run of “${r.story_title}”? Relationships and uncovered truths will be lost.`))) return;
           await j(`/runs/${r.id}`, { method:"DELETE" }); div.remove(); };
         div.prepend(del);
         div.onclick = () => resumeRun(r.id);
         stories.appendChild(div);
       });
       const h2 = document.createElement("p");
-      h2.className = "muted"; h2.style.margin = "14px 0 4px"; h2.textContent = "开一段新的";
+      h2.className = "muted"; h2.style.margin = "14px 0 4px"; h2.textContent = t("开一段新的");
       stories.appendChild(h2);
     }
   } catch (e) {}
-  if (!page.items.length) { stories.innerHTML += "<p class='muted'>还没有已发布的剧本。</p>"; show("pick"); return; }
+  if (!page.items.length) { stories.innerHTML += `<p class='muted'>${t("还没有已发布的剧本。")}</p>`; show("pick"); return; }
   page.items.forEach(s => {
     const div = document.createElement("div");
     div.className = "card"; div.style.margin = "10px 0"; div.style.cursor = "pointer";
     const stats = [];
-    if (s.secrets_count) stats.push(`🔒 ${s.secrets_count} 个秘密`);
-    if (s.endings_count) stats.push(`🏆 ${s.endings_count} 种结局`);
-    if (s.characters_count) stats.push(`👥 ${s.characters_count} 个角色`);
+    if (s.secrets_count) stats.push(B(`🔒 ${s.secrets_count} 个秘密`, `🔒 ${s.secrets_count} secrets`));
+    if (s.endings_count) stats.push(B(`🏆 ${s.endings_count} 种结局`, `🏆 ${s.endings_count} endings`));
+    if (s.characters_count) stats.push(B(`👥 ${s.characters_count} 个角色`, `👥 ${s.characters_count} characters`));
     div.innerHTML = `<b>${escapeHtml(s.title)}</b>` +
       (stats.length ? `<div class="scStats">${stats.join("　")}</div>` : "") +
       `<div class="muted" style="margin-top:4px">${escapeHtml(s.one_liner||"")}</div>`;
@@ -603,8 +623,8 @@ async function chooseRole(storyId) {
     roleChars.appendChild(b);
   });
   if (!chars.length) roleChars.innerHTML = sandbox
-    ? "<p class='muted'>这个世界的人物，会在你踏入之后才诞生。</p>"
-    : "<p class='muted'>这个剧本还没有可扮演的角色。</p>";
+    ? `<p class='muted'>${B("这个世界的人物，会在你踏入之后才诞生。", "This world's people will be born only after you step in.")}</p>`
+    : `<p class='muted'>${B("这个剧本还没有可扮演的角色。", "This story has no playable roles yet.")}</p>`;
   renderStoryMeta(storyId);
   hide("pick"); show("role");
 }
@@ -616,13 +636,13 @@ async function renderStoryMeta(storyId) {
   let m;
   try { m = await j(`/stories/${storyId}/meta`); } catch (e) { return; }
   const bits = [];
-  if (m.endings_total) bits.push(`🏆 结局图鉴 ${m.endings_achieved.length}/${m.endings_total}`);
+  if (m.endings_total) bits.push(B(`🏆 结局图鉴 ${m.endings_achieved.length}/${m.endings_total}`, `🏆 Endings ${m.endings_achieved.length}/${m.endings_total}`));
   if ((m.achievements || []).length)
     bits.push(m.achievements.map(a => `<span class="badge" title="${escapeHtml(a.desc||"")}">🏅${escapeHtml(a.name)}</span>`).join(" "));
   let perks = "";
   if (m.ng_plus) {
-    perks = `<div class="perks"><span class="muted">🌱 二周目优势：</span>` +
-      [{ id: null, name: "无", desc: "原汁原味再来一局" }].concat(m.perks || []).map(p =>
+    perks = `<div class="perks"><span class="muted">${B("🌱 二周目优势：", "🌱 NG+ perk: ")}</span>` +
+      [{ id: null, name: B("无", "None"), desc: B("原汁原味再来一局", "Play it straight again") }].concat(m.perks || []).map(p =>
         `<label class="perk"><span><input type="radio" name="perk" ${p.id===null?"checked":""} data-perk="${p.id||""}">` +
         `${escapeHtml(p.name)}</span><small>${escapeHtml(p.desc||"")}</small></label>`).join("") + `</div>`;
   }
@@ -633,13 +653,13 @@ async function renderStoryMeta(storyId) {
     const K = { character: "👤", place: "📍", moment: "✨" };
     const chips = cards.map(c =>
       `<span class="ccard k-${c.kind}" title="${escapeHtml(c.text||"")}">${K[c.kind]||"🃏"} ${escapeHtml(c.name)}${c.kind==="moment" ? `<small>${escapeHtml((c.text||"").slice(0,18))}</small>` : ""}</span>`).join("");
-    cardsHtml = `<div class="cwall"><span class="muted">🃏 你在这个故事里铸下的（${cards.length}）：</span>${chips}</div>`;
+    cardsHtml = `<div class="cwall"><span class="muted">${B(`🃏 你在这个故事里铸下的（${cards.length}）：`, `🃏 Cards this story minted for you (${cards.length}): `)}</span>${chips}</div>`;
     const carriable = cards.filter(c => c.kind === "character");
     if (m.ng_plus && carriable.length) {
-      cardsHtml += `<div class="perks"><span class="muted">👤 带一位旧识入局：</span>` +
-        [{ id: null, name: "不带" }].concat(carriable).map(c =>
+      cardsHtml += `<div class="perks"><span class="muted">${B("👤 带一位旧识入局：", "👤 Bring an old acquaintance: ")}</span>` +
+        [{ id: null, name: B("不带", "No one") }].concat(carriable).map(c =>
           `<label class="perk"><span><input type="radio" name="carry" ${c.id===null?"checked":""} data-cid="${c.id||""}">` +
-          `${escapeHtml(c.name)}</span><small>${escapeHtml((c.text||"上一世的旧识").slice(0,20))}</small></label>`).join("") + `</div>`;
+          `${escapeHtml(c.name)}</span><small>${escapeHtml((c.text||B("上一世的旧识", "a face from a past run")).slice(0,20))}</small></label>`).join("") + `</div>`;
     }
   }
   if (!bits.length && !perks && !cardsHtml) return;
@@ -662,8 +682,8 @@ async function startRun(storyId, mode="character", playerCharacterId=null, playe
     worldview: ((document.getElementById("wvInput") || {}).value || "").trim(),
     powers: ((document.getElementById("wvPowers") || {}).value || "").trim(),
     mature: !!(document.getElementById("wvMature") || {}).checked }) });
-  if ((document.getElementById("wvMature") || {}).checked) pushToast("🔞 本局已开启成人模式", "t-act", 400);
-  if (chosenPerk) pushToast(`🌱 二周目优势生效：${chosenPerk === "veteran" ? "故人" : "直觉"}`, "t-act", 400);
+  if ((document.getElementById("wvMature") || {}).checked) pushToast(B("🔞 本局已开启成人模式", "🔞 Mature mode is on for this run"), "t-act", 400);
+  if (chosenPerk) pushToast(B(`🌱 二周目优势生效：${chosenPerk === "veteran" ? "故人" : "直觉"}`, `🌱 NG+ perk active: ${chosenPerk === "veteran" ? "Old Friend" : "Instinct"}`), "t-act", 400);
   await enterRun(run);
 }
 // resume a previous run — pick up exactly where the story left off (the parting
@@ -700,7 +720,7 @@ async function enterRun(run) {
     try {
       const jd = await j(`/runs/${runId}/journal`);
       const n = (jd.secrets_untouched || 0) + (jd.secrets || []).length;
-      if (n > 0) pushToast(`🔒 这个故事里藏着 <b>${n}</b> 个秘密，没有人会主动告诉你。`, "t-unlock", 1500);
+      if (n > 0) pushToast(B(`🔒 这个故事里藏着 <b>${n}</b> 个秘密，没有人会主动告诉你。`, `🔒 This story hides <b>${n}</b> secrets. No one will volunteer them.`), "t-unlock", 1500);
     } catch (e) {}
   }
   curClock = (run.state && run.state.clock) || null;
@@ -742,7 +762,7 @@ function avatarEl(name, url){
 function renderBeat(b) {
   let node;
   if (b.author === "player") {
-    if (b.type === "think") { node = document.createElement("div"); node.className = "beat think"; node.textContent = "（观察）" + b.text; }
+    if (b.type === "think") { node = document.createElement("div"); node.className = "beat think"; node.textContent = B("（观察）", "(Observing) ") + b.text; }
     else { node = makeRow("right", myName, b.text); }
   } else if (b.type === "description") {
     node = document.createElement("div"); node.className = "desc"; node.textContent = b.text;
@@ -772,7 +792,8 @@ function makeRow(side, name, text, withWho, spoken) {
   row.appendChild(bub);
   return row;
 }
-const MODE_CLASS = { "陌生人":"stranger","同级":"peer","朋友":"friend","暧昧对象":"flirt","恋人":"lover","敌人":"enemy","长辈":"elder","小辈":"junior" };
+const MODE_CLASS = { "陌生人":"stranger","同级":"peer","朋友":"friend","暧昧对象":"flirt","恋人":"lover","敌人":"enemy","长辈":"elder","小辈":"junior",
+  "Stranger":"stranger","Peer":"peer","Friend":"friend","Something More":"flirt","Lover":"lover","Enemy":"enemy","Elder":"elder","Junior":"junior" };
 function renderCast() {
   const el = document.getElementById("cast");
   if (!cast.length && playMode !== "god") { el.classList.add("hidden"); return; }
@@ -792,7 +813,7 @@ function renderCast() {
     d.appendChild(avatarEl(c.name, c.avatar_url));
     if (c.hp === "hurt" || c.hp === "dying") {
       const w = document.createElement("span"); w.className = "hpdot " + c.hp;
-      w.title = c.hp === "dying" ? "重伤濒死" : "带着伤"; w.textContent = "🩸";
+      w.title = c.hp === "dying" ? B("重伤濒死", "Dying") : B("带着伤", "Wounded"); w.textContent = "🩸";
       d.appendChild(w);
     }
     const nm = document.createElement("small"); nm.textContent = c.name;
@@ -810,7 +831,7 @@ function renderCast() {
       // proximity hook: "差X→朋友" — the daily "one more step" pull
       if (rel.next && rel.next.name) {
         const nx = document.createElement("span"); nx.className = "nextrel";
-        nx.textContent = `差${rel.next.to_next}→${rel.next.name}`;
+        nx.textContent = B(`差${rel.next.to_next}→${rel.next.name}`, `${rel.next.to_next} to ${rel.next.name}`);
         d.appendChild(nx);
       }
     }
@@ -820,8 +841,8 @@ function renderCast() {
       const canFollow = on || c.can_follow !== false;  // needs 好感 to invite (unless already along)
       const b = document.createElement("span");
       b.className = "follow" + (on ? " on" : "") + (canFollow ? "" : " locked");
-      b.textContent = on ? "🚶同行中" : (canFollow ? "邀同行" : "🔒邀同行");
-      b.title = canFollow ? "" : "关系还不够近，多聊聊再请 TA 同行";
+      b.textContent = on ? B("🚶同行中", "🚶Together") : (canFollow ? B("邀同行", "Invite") : B("🔒邀同行", "🔒Invite"));
+      b.title = canFollow ? "" : B("关系还不够近，多聊聊再请 TA 同行", "Not close enough yet — talk more, then invite them");
       b.onclick = (e) => { e.stopPropagation(); toggleFollow(c.id, !on); };
       d.appendChild(b);
     }
@@ -1017,7 +1038,7 @@ async function openMailbox() {
   let box;
   try { box = await j(`/runs/${runId}/mail`); } catch (e) { return; }
   const rows = (box.mail || []).map(m => {
-    const dot = m.read ? "" : `<span class="appdot">新</span>`;
+    const dot = m.read ? "" : `<span class="appdot">${B("新", "new")}</span>`;
     const av = m.avatar_url ? `<img class="pav" src="${m.avatar_url}" onerror="this.style.display='none'">`
                             : `<span class="pav plet" style="background:${avatarColor(m.name)}">${escapeHtml((m.name||"?")[0])}</span>`;
     return `<div class="pthread" data-mid="${escapeHtml(m.id)}">${av}<div class="pmeta">
@@ -1145,7 +1166,7 @@ async function openBag() {
       <div class="plast">${escapeHtml(i.detail||"")}</div></div></div>`).join("")
     || `<div class="jempty">身上空空如也。</div>`;
   const stash = (jd.stashes || []).map(s =>
-    `<div class="jsec" style="margin-top:6px"><div class="jtitle">📦 存放在「${escapeHtml(s.location||"")}」</div>${
+    `<div class="jsec" style="margin-top:6px"><div class="jtitle">${B(`📦 存放在「${escapeHtml(s.location||"")}」`, `📦 Stashed at “${escapeHtml(s.location||"")}”`)}</div>${
       (s.items||[]).map(i=>`<div class="jfrag">${escapeHtml(i.name||"")}${i.detail?`<span class="jwho"> · ${escapeHtml(i.detail)}</span>`:""}</div>`).join("")
     }</div>`).join("");
   const tip = `<div class="jempty" style="margin-top:10px">${B("收纳：在一个地方说「把××放在这里」；回到那里说「取回××」。", "Stashing: say “leave the X here” at a place; come back and say “take back the X”.")}</div>`;
@@ -1161,13 +1182,13 @@ function openCalendar() {
   let ddl = "";
   if (ck && ck.deadline) {
     const d = ck.deadline;
-    ddl = `<div class="pcalddl">⏳ ${escapeHtml(d.text)}：${d.days_left > 0 ? `还剩 <b>${d.days_left}</b> 天` : d.days_left === 0 ? "<b>就在今天</b>" : "已经过去"}</div>`;
+    ddl = `<div class="pcalddl">⏳ ${escapeHtml(d.text)}${B("：", ": ")}${d.days_left > 0 ? B(`还剩 <b>${d.days_left}</b> 天`, `<b>${d.days_left}</b> day(s) left`) : d.days_left === 0 ? B("<b>就在今天</b>", "<b>today</b>") : B("已经过去", "passed")}</div>`;
   }
   const prs = (lastPromises || []).map(p =>
     `<div class="pcalitem">${p.romantic ? "💞" : "🤝"} <b>${escapeHtml(p.when)}</b>${p.place ? " · " + escapeHtml(p.place) : ""} · ${escapeHtml(p.what)}<span class="jwho">（${escapeHtml(p.name)}）</span></div>`
   ).join("") || `<div class="jempty">日历上暂时没有约定。</div>`;
   const qs = (curQuests || []).filter(q => q.status === "open").map(q =>
-    `<div class="pcalitem">📋 ${escapeHtml(q.title||"")}${q.reward ? `（酬 ${q.reward}${escapeHtml(curCurrency)}）` : ""}${q.deadline_day ? ` · 限第${q.deadline_day}天内` : ""}<span class="jwho">（${escapeHtml(q.giver||"")}）</span></div>`
+    `<div class="pcalitem">📋 ${escapeHtml(q.title||"")}${q.reward ? B(`（酬 ${q.reward}${escapeHtml(curCurrency)}）`, ` (pay ${q.reward}${escapeHtml(curCurrency)})`) : ""}${q.deadline_day ? B(` · 限第${q.deadline_day}天内`, ` · by day ${q.deadline_day}`) : ""}<span class="jwho">（${escapeHtml(q.giver||"")}）</span></div>`
   ).join("");
   phoneShell(`${now}${ddl}<div class="jh">${B("约定", "Promises")}</div>${prs}${qs ? `<div class="jh">${B("在办的差事", "Open jobs")}</div>${qs}` : ""}`, "🗓 日历", "openPhone()");
 }
@@ -1348,12 +1369,17 @@ function renderState(st) {
   renderRebirth(!!st.can_reincarnate);
   if (st.money != null) { curMoney = st.money; curCurrency = st.currency || ""; }
   if (st.quests !== undefined) curQuests = st.quests || [];
-  const hpBit = { hurt: " · 🩹 带伤", dying: " · 🆘 <b style='color:#ff9d9d'>重伤濒死</b>",
-                  dead: " · 💀 <b style='color:#ff9d9d'>你已死去</b>" }[st.player_hp] || "";
+  const hpBit = (uiLang === "en"
+    ? { hurt: " · 🩹 hurt", dying: " · 🆘 <b style='color:#ff9d9d'>dying</b>",
+        dead: " · 💀 <b style='color:#ff9d9d'>dead</b>" }
+    : { hurt: " · 🩹 带伤", dying: " · 🆘 <b style='color:#ff9d9d'>重伤濒死</b>",
+        dead: " · 💀 <b style='color:#ff9d9d'>你已死去</b>" })[st.player_hp] || "";
   const moneyBit = st.money != null ? ` · 💰 <b>${st.money}</b>${escapeHtml(st.currency||"")}` : "";
   const openQ = (st.quests||[]).filter(q=>q.status==="open").length;
-  const questBit = openQ ? ` · 📋 在办 <b>${openQ}</b>` : "";
-  state.innerHTML = `第 <b>${st.act}</b> 幕 · 好感 <b>${st.affinity}</b> · 已解锁碎片 <b>${(st.unlocked_fragment_ids||[]).length}</b>${moneyBit}${questBit}${hpBit}`;
+  const questBit = openQ ? B(` · 📋 在办 <b>${openQ}</b>`, ` · 📋 jobs <b>${openQ}</b>`) : "";
+  state.innerHTML = B(`第 <b>${st.act}</b> 幕 · 好感 <b>${st.affinity}</b> · 已解锁碎片 <b>${(st.unlocked_fragment_ids||[]).length}</b>`,
+                      `Act <b>${st.act}</b> · Affinity <b>${st.affinity}</b> · Truths <b>${(st.unlocked_fragment_ids||[]).length}</b>`)
+    + `${moneyBit}${questBit}${hpBit}`;
   if (st.goal !== undefined) renderGoal(st.goal);
   if (st.progress !== undefined) renderProgress(st.progress);
   if (st.location !== undefined) renderPlace(st.location);
@@ -1370,17 +1396,17 @@ function renderRebirth(on) {
   el = document.createElement("div");
   el.id = "rebirth";
   el.style.cssText = "margin:4px 8px";
-  el.innerHTML = `<button style="width:100%" onclick="doReincarnate()">🔄 转生：以新的面孔回到这个世界（前尘往事化作传闻）</button>`;
+  el.innerHTML = `<button style="width:100%" onclick="doReincarnate()">${B("🔄 转生：以新的面孔回到这个世界（前尘往事化作传闻）", "🔄 Reincarnate: return as a new face (your past becomes rumor)")}</button>`;
   const f = document.querySelector("footer");
   f.parentNode.insertBefore(el, f);
 }
 async function doReincarnate() {
-  if (!confirm("转生后：身体、钱财、关系、身份全部从头来过；这个世界与它记得的一切都会保留。确定？")) return;
+  if (!confirm(B("转生后：身体、钱财、关系、身份全部从头来过；这个世界与它记得的一切都会保留。确定？", "Reincarnation resets your body, money, relationships and identity. The world, and everything it remembers, stays. Continue?"))) return;
   try {
     const run = await j(`/runs/${runId}/reincarnate`, { method: "POST" });
-    pushToast("🔄 你转生了。这个世界不认识现在的你", "t-act", 300);
+    pushToast(B("🔄 你转生了。这个世界不认识现在的你", "🔄 You are reborn. This world doesn't know you now"), "t-act", 300);
     await enterRun(run);
-  } catch (e) { pushToast("转生失败：" + e.message, "t-press", 300); }
+  } catch (e) { pushToast(B("转生失败：", "Reincarnation failed: ") + e.message, "t-press", 300); }
 }
 
 // 💀 the player's own body (sandbox): dead strips 说/做 — watching (想) remains
@@ -1402,8 +1428,8 @@ function clockChip() {
   if (!curClock || !curClock.label) return "";
   let s = `<span class="clock">🕐 ${escapeHtml(curClock.label)}</span>`;
   const dl = curClock.deadline;
-  if (dl && dl.days_left === 0) s += `<span class="clock ddl">⏳ ${escapeHtml(dl.text)} · 就在今天</span>`;
-  else if (dl && dl.days_left > 0) s += `<span class="clock${dl.days_left <= 1 ? " ddl" : ""}">⏳ ${escapeHtml(dl.text)} · 还剩${dl.days_left}天</span>`;
+  if (dl && dl.days_left === 0) s += `<span class="clock ddl">⏳ ${escapeHtml(dl.text)}${B(" · 就在今天", " · today")}</span>`;
+  else if (dl && dl.days_left > 0) s += `<span class="clock${dl.days_left <= 1 ? " ddl" : ""}">⏳ ${escapeHtml(dl.text)}${B(` · 还剩${dl.days_left}天`, ` · ${dl.days_left} day(s) left`)}</span>`;
   return s;
 }
 function renderClock(cv, announce) {
@@ -1749,7 +1775,7 @@ async function send() {
   if (!text && !canEmpty) return;
   msg.value = ""; sendBtn.disabled = true; suggest.innerHTML = "";
   if (text) {
-    if (playMode === "god") renderBeat({ author:"player", type:"description", text:"（旁观指引）"+text });
+    if (playMode === "god") renderBeat({ author:"player", type:"description", text: B("（旁观指引）", "(Direction) ") + text });
     else renderBeat({ author:"player", type: channel.value==="think"?"think":"dialogue", text });
   }
   showTyping("");
@@ -1804,13 +1830,13 @@ async function streamTurn(url, bodyObj) {
         else if (ev.event === "move_request") { afterPlay.moveReq = ev.move_request; }
         else if (ev.event === "suggest") { afterPlay.suggest = ev.suggestions; }
         else if (ev.event === "ending") { afterPlay.ending = ev.ending; }
-        else if (ev.event === "achievements") { (ev.achievements||[]).forEach((a,k) => pushToast(`🏅 成就达成：「${a.name}」— ${a.desc||""}`, "t-end", 900 + k*700)); }
+        else if (ev.event === "achievements") { (ev.achievements||[]).forEach((a,k) => pushToast(B(`🏅 成就达成：「${a.name}」— ${a.desc||""}`, `🏅 Achievement: “${a.name}” — ${a.desc||""}`), "t-end", 900 + k*700)); }
       }
     }
   } catch(e){
     // nothing streamed yet (e.g. a 400 validation reason) → a toast reads better than a beat
     if (firstBeat) pushToast("⚠️ " + escapeHtml(e.message), "", 3200);
-    else { playQ.push({author:"engine",type:"description",text:"[出错] "+e.message}); pump(); }
+    else { playQ.push({author:"engine",type:"description",text: B("[出错] ", "[error] ") + e.message}); pump(); }
   }
   hideTyping();
   streamDone = true;
