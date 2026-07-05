@@ -215,6 +215,13 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append("【无尽沙盒】这个世界没有终点：绝不要写大结局、不要收束剧情、不要替故事画句号。"
                      "以【世界观/场景设定】为唯一事实基础，顺着玩家的言行让世界自然长出新的人物、"
                      "新的地方、新的事端；世界不迁就玩家，该有的后果就让它发生。")
+    powers = [str(p) for p in (prompt.get("player_powers") or []) if str(p).strip()]
+    if powers:
+        lines.append("【玩家的金手指·这个世界承认的真实能力】" + "；".join(powers) + "。"
+                     "这些能力【确实存在、确实生效】：玩家动用它们时，让它在其描述的范围内真的起作用，"
+                     "在场者亲眼所见就要有相应的震动与反应；可以有代价、消耗或边界，"
+                     "但绝不能凭空发明「力量被压制」「此地无效」之类的理由让它失灵。"
+                     "超出描述范围的夸大用法，才可以打折扣或失败。")
     if prompt.get("player_dead"):
         lines.append("【玩家已死】玩家已经死了。任何角色都听不见、看不见玩家，绝不能回应玩家的话；"
                      "写这个世界在没有玩家之后如何继续运转。")
@@ -1556,9 +1563,12 @@ class QwenLLM:
         action = (prompt.get("action") or "")[:200]
         place = (prompt.get("place") or "")[:60]
         world = (prompt.get("world_facts") or "").replace("\n", " ")[:200]
+        powers = "；".join(str(p) for p in (prompt.get("powers") or []) if str(p).strip())
         sys = ("你是动作难度裁判。给玩家这个动作在此情境下的成功概率打分，只输出一个0~100的整数，"
                "不要任何其他文字。日常、无风险、必然做得到的动作=100；有点难度或代价=60~90；"
-               "很悬=30~59；近乎不可能=1~29。判断现实可行性，不考虑剧情需要。")
+               "很悬=30~59；近乎不可能=1~29。判断现实可行性，不考虑剧情需要。"
+               + (f"玩家拥有真实生效的超能力：{powers}。动用这些能力的动作按能力范围内评估"
+                  "（范围内=大概率成，范围外才按常人算）。" if powers else ""))
         u = f"情境：{place}。{world}\n玩家动作：{action}\n成功概率（0~100）："
         try:
             resp = httpx.post(

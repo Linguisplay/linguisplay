@@ -3163,6 +3163,8 @@ def run_turn_stream(
     if channel == "do" and tun["dice"] and (state.get("mode") or "character") != "god":
         rj = llm.generate({"risk_judge": True, "action": player_input,
                            "place": (current_location(content, state) or {}).get("name") or "",
+                           # ✨ declared powers count as real capability when judging odds
+                           "powers": list(state.get("powers") or []),
                            "world_facts": (content.get("story") or {}).get("world_facts") or ""}) or {}
         try:
             risk = max(0, min(100, int(rj.get("risk", 100))))
@@ -3445,6 +3447,9 @@ def run_turn_stream(
             "player_hp_label": ({"hurt": "受了伤，行动吃力", "dying": "重伤濒死，命悬一线"}
                                 .get(state.get("player_hp") or "", "")
                                 if sandbox_on(content) else ""),
+            # ✨ 金手指: the player's declared powers are REAL in this world
+            "player_powers": (list(state.get("powers") or [])
+                              if sandbox_on(content) and not observer else []),
             # 💰 hard cash + 📋 open errands + 🌊 the world's own news (told once)
             "player_money": ({"amount": int(state.get("money") or 0),
                               "currency": currency_of(content)}

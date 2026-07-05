@@ -378,6 +378,7 @@ class RunState(BaseModel):
     currency: Optional[str] = None  # 💰 what money is called in this world
     quests: list[dict[str, Any]] = []  # 📋 [{title,reward,deadline_day,giver,status}]
     can_reincarnate: bool = False  # 🔄 dead in a sandbox → the world offers a second life
+    powers: list[str] = []  # ✨ 金手指 the world acknowledges as real
 
 
 class Run(BaseModel):
@@ -428,6 +429,9 @@ class RunCreate(BaseModel):
     # 🔞 sandbox only: per-run 18+ opt-in (players are already DOB-gated 18+ at signup;
     # authored stories keep using their story-level mature flag instead)
     mature: bool = False
+    # ✨ sandbox only: the player's declared 金手指 (one per line, ≤4) — abilities THIS
+    # world acknowledges as real; empty = the story's default powers (if authored)
+    powers: str = ""
 
 
 class Beat(BaseModel):

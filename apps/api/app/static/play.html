@@ -341,6 +341,7 @@
     <div id="wvWrap" class="hidden">
       <p class="muted" style="margin:6px 0 4px">🏖 这是一个无尽沙盒：世界观由你定义，时间和现实一致，剧情永不落幕。你也可能死，死了就只剩下看。</p>
       <textarea id="wvInput" rows="4" style="width:100%; background:#101018; border:1px solid #26262f; border-radius:8px; color:#e7e9f0; padding:8px; font:inherit; resize:vertical" placeholder="写下你想要的世界观：什么时代、什么地方、住着什么样的人、正在酝酿什么。留空则由世界自己决定。"></textarea>
+      <textarea id="wvPowers" rows="2" style="width:100%; margin-top:8px; background:#101018; border:1px solid #26262f; border-radius:8px; color:#e7e9f0; padding:8px; font:inherit; resize:vertical" placeholder="✨ 金手指（可选，一行一个，最多4个）：写下你要的超能力，这个世界会承认它们真实有效。例：状态之眼：看穿他人状态与好感 / 每日一次的抽卡"></textarea>
       <label style="display:flex;align-items:center;gap:8px;margin-top:8px;cursor:pointer;color:#aeb6c8;font-size:13px">
         <input type="checkbox" id="wvMature" style="width:auto"> 🔞 成人模式（18+：亲密内容正面描写，不再回避淡化）
       </label>
@@ -563,6 +564,7 @@ async function startRun(storyId, mode="character", playerCharacterId=null, playe
     story_id: storyId, persona_id: personaId, mode, player_character_id: playerCharacterId,
     perk: chosenPerk, carry_card_id: chosenCarry,
     worldview: ((document.getElementById("wvInput") || {}).value || "").trim(),
+    powers: ((document.getElementById("wvPowers") || {}).value || "").trim(),
     mature: !!(document.getElementById("wvMature") || {}).checked }) });
   if ((document.getElementById("wvMature") || {}).checked) pushToast("🔞 本局已开启成人模式", "t-act", 400);
   if (chosenPerk) pushToast(`🌱 二周目优势生效：${chosenPerk === "veteran" ? "故人" : "直觉"}`, "t-act", 400);

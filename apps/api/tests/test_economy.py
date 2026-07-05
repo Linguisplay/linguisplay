@@ -126,3 +126,32 @@ def test_rebirth_resets_the_player_never_the_world():
     assert st["place_facts"]["hall"][0]["text"] == "正门被撞开了一道缝"
     assert st["world_news"] and st["dead_character_ids"] == ["b"]
     assert any("转生" in b["text"] for b in beats)
+
+
+def test_declared_powers_reach_the_scene_and_the_judge(monkeypatch):
+    _at(monkeypatch, 4)
+    st = _st()
+    st["powers"] = ["状态之眼：看穿他人好感", "每日一次的抽卡"]
+    llm = EcoLLM(next_speakers=[])
+    runtime.run_turn(STORY, st, {"name": "我"}, "我用状态之眼看她", channel="say", llm=llm)
+    assert llm.prompts[0].get("player_powers") == st["powers"]
+
+    class Judge:
+        def __init__(self):
+            self.risk_prompt = None
+
+        def generate(self, prompt):
+            if prompt.get("risk_judge"):
+                self.risk_prompt = prompt
+                return {"risk": 90}
+            if prompt.get("intro") or prompt.get("observe") or prompt.get("suggest") \
+                    or prompt.get("arrive") or prompt.get("farewell") \
+                    or prompt.get("offscreen") or prompt.get("world_news"):
+                return {}
+            return {"beats": [{"type": "dialogue", "speaker_name": prompt.get("speaker_name"),
+                               "text": "嗯"}], "affinity_delta": 0, "advance_act": False,
+                    "ending": None, "next_speakers": []}
+
+    j = Judge()
+    runtime.run_turn(STORY, st, {"name": "我"}, "发动抽卡", channel="do", llm=j)
+    assert j.risk_prompt and j.risk_prompt.get("powers") == st["powers"]

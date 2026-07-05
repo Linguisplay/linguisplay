@@ -95,7 +95,10 @@ SANDBOXES = [
         "relations_overview": "同伴与心动对象都在冒险途中相遇；后宫不是白来的，每一份心动都要你亲手挣。",
         "trope_tags": ["异世界", "转生", "后宫", "轻小说", "沙盒"],
         "phone": {"enabled": True, "device": "传讯水晶"},
-        "sandbox_extra": {"currency": "铜币", "start_money": 50},
+        "sandbox_extra": {"currency": "铜币", "start_money": 50,
+                          # 转生特典：留空金手指时默认生效的能力
+                          "default_powers": ["状态之眼：能看见他人的状态、情绪与好感",
+                                             "转生者天赋：任何技艺一学就会，快得离谱"]},
         # 后宫向：心动涨幅的衰减放缓一点，其余同款
         "tuning": {"world_event_every": 0, "max_new_characters": 12, "rom_taper_den": 160},
     },

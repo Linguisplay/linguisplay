@@ -156,6 +156,7 @@ def _to_run(r: RunModel) -> Run:
             quests=list(st.get("quests") or []),
             can_reincarnate=bool(runtime.sandbox_on(r.pinned_content or {})
                                  and st.get("player_hp") == "dead" and not st.get("ended")),
+            powers=list(st.get("powers") or []),
             identity=st.get("identity"),
             inventory=list(st.get("inventory") or []),
             pressure_name=((runtime.pressure_cfg(r.pinned_content or {}) or {}).get("name")),
@@ -290,6 +291,12 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
     if runtime.sandbox_on(content):
         sb_cfg = (content.get("story") or {}).get("sandbox") or {}
         state["money"] = runtime._to_int(sb_cfg.get("start_money"), 0, 99999) or 100
+        # ✨ 金手指: the player's declared powers are REAL in their world (engine-honored);
+        # blank falls back to the story's authored default powers
+        declared = [ln.strip()[:40] for ln in (body.powers or "").replace("；", "\n").splitlines()
+                    if ln.strip()][:4]
+        state["powers"] = declared or [str(p).strip()[:40]
+                                       for p in (sb_cfg.get("default_powers") or []) if str(p).strip()][:4]
     # ⏰ 现实同步 runs open at the player's real hour
     if runtime.real_time_on(content):
         runtime.sync_real_clock(content, state)
