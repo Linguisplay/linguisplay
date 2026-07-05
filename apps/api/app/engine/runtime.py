@@ -102,6 +102,11 @@ def default_state() -> dict[str, Any]:
         "inventory": [],                # 🎒 pocket: [{name, detail?}] carried items
         "stashes": {},                  # {location_id: [{name,...}]} items left somewhere
         "place_facts": {},              # 🌍 {location_id: [{text,label}]} lasting physical changes
+        "money": None,                  # 💰 cash balance (None = economy off for this run)
+        "money_log": [],                # 💰 [{delta, why, label}] the last 20 bookings
+        "quests": [],                   # 📋 [{id,title,reward,deadline_day,giver,status}]
+        "world_news": [],               # 🌊 [{day,text,heard}] what the world did on its own
+        "past_lives": [],               # 🔄 archived lives (sandbox rebirth)
         "met_ids": [],                  # characters the player has already met (首次见面 log)
         "rel_log": {},                  # 关系大事记: {char_id: [{act, kind, text}]}
         "pending_choice": None,         # an authored decision awaiting the player's pick
@@ -355,6 +360,124 @@ def real_time_on(content: dict[str, Any]) -> bool:
     nothing; the world's hour is whatever the player's real hour is when they show up."""
     sb = (content.get("story") or {}).get("sandbox") or {}
     return bool(sb.get("enabled")) and sb.get("real_time") is not False
+
+
+def currency_of(content: dict[str, Any]) -> str:
+    """💰 what money is CALLED in this world (sandbox.currency; 元 by default)."""
+    sb = (content.get("story") or {}).get("sandbox") or {}
+    return (sb.get("currency") or "").strip() or "元"
+
+
+def economy_on(state: dict[str, Any]) -> bool:
+    return state.get("money") is not None
+
+
+def _to_int(s, lo: int = -999999, hi: int = 999999) -> int:
+    try:
+        digits = "".join(ch for ch in str(s) if ch.isdigit())
+        v = int(digits) if digits else 0
+        if "-" in str(s):
+            v = -v
+        return max(lo, min(hi, v))
+    except (TypeError, ValueError):
+        return 0
+
+
+def book_money(content: dict[str, Any], state: dict[str, Any], delta: int,
+               why: str) -> int:
+    """💰 hard-ledger a payment/earning. Spending clamps at the balance (you cannot pay
+    what you don't have). Returns the APPLIED delta (0 = nothing happened)."""
+    if not economy_on(state):
+        return 0
+    delta = max(-9999, min(9999, int(delta)))
+    if delta < 0:
+        delta = -min(-delta, int(state.get("money") or 0))
+    if not delta:
+        return 0
+    state["money"] = int(state.get("money") or 0) + delta
+    log = list(state.get("money_log") or [])
+    log.append({"delta": delta, "why": (why or "").strip()[:30],
+                "label": (clock_view(content, state) or {}).get("label", "")})
+    state["money_log"] = log[-20:]
+    return delta
+
+
+def serve_news(state: dict[str, Any]) -> str:
+    """🌊 the next untold piece of world news (told exactly once, like rumors)."""
+    for nw in state.get("world_news") or []:
+        if not nw.get("heard"):
+            nw["heard"] = True
+            return nw.get("text") or ""
+    return ""
+
+
+def mint_world_news(content: dict[str, Any], state: dict[str, Any], llm: LLM,
+                    days_gone: int) -> None:
+    """🌊 世界自转: for each real day the player was away (capped at 2), the sandbox
+    world makes one piece of its own news — grounded in the worldview, the cast and
+    the standing place facts, served to the player once through whoever tells it."""
+    story = content.get("story") or {}
+    names = [c.get("name") for c in _characters(content) if c.get("name")][:6]
+    facts: list[str] = []
+    for lst in (state.get("place_facts") or {}).values():
+        facts += [f.get("text") for f in lst if f.get("text")]
+    news = list(state.get("world_news") or [])
+    day = int((state.get("clock") or {}).get("day", 1) or 1)
+    for _ in range(max(0, min(2, int(days_gone)))):
+        try:
+            out = llm.generate({"world_news": True,
+                                "worldview": (story.get("world_long") or "")[:600],
+                                "cast": names, "facts": facts[-6:],
+                                "recent": [x.get("text") for x in news[-3:]]}) or {}
+        except Exception:
+            out = {}
+        txt = dedash(str(out.get("text") or "").strip())[:80]
+        if txt:
+            news.append({"day": day, "text": txt, "heard": False})
+    state["world_news"] = news[-10:]
+
+
+def reincarnate(content: dict[str, Any], state: dict[str, Any]) -> list[dict[str, Any]]:
+    """🔄 沙盒转生: the dead player returns as a NEW face in the SAME world. Everything
+    the world lived through stays (facts, news, people and their lives, deaths); the
+    player's own side is reborn: body, pockets, money, name, every relationship. The
+    former life becomes a rumor the world may pass around."""
+    sb = (content.get("story") or {}).get("sandbox") or {}
+    ident = (state.get("identity") or "").strip()
+    lives = list(state.get("past_lives") or [])
+    lives.append({"identity": ident,
+                  "day": int((state.get("clock") or {}).get("day", 1) or 1),
+                  "affinity": int(state.get("affinity") or 0)})
+    state["past_lives"] = lives[-5:]
+    who = ident or "一个外来的面孔"
+    rumors = list(state.get("rumors") or [])
+    rumors.append({"text": f"听说前阵子{who}没了。人没了，事还挂在人们嘴上。", "heard": False})
+    state["rumors"] = rumors[-6:]
+    # body-side reset — the world's ledgers (place_facts / world_news / npc_rel /
+    # char_sim / dead_character_ids) all survive untouched
+    state["player_hp"] = "healthy"
+    state["inventory"] = []
+    state["identity"] = None
+    state["identity_log"] = []
+    state["affinity"] = 0
+    state["rel"] = {}
+    state["rel_log"] = {}
+    state["met_ids"] = []
+    state["following"] = []
+    state["promises"] = []
+    state["quests"] = []
+    state["phone"] = {"threads": {}}
+    state["memory"] = ""
+    state["memory_by_char"] = {}
+    if economy_on(state):
+        state["money"] = _to_int(sb.get("start_money"), 0, 99999) or 100
+        state["money_log"] = []
+    return [dedash_beat({"type": "description", "speaker_name": None, "text": "✦ 转生 ✦"}),
+            dedash_beat({"type": "description", "speaker_name": None,
+                         "text": "（黑暗褪去。你在一具陌生的身体里睁开眼：这个世界一切如旧，"
+                                 "只是再没有人认得现在的你。"
+                                 + (f"关于{who}的传闻，还在街上飘着。" if ident else "")
+                                 + "）"})]
 
 
 def _now():
@@ -2985,6 +3108,11 @@ def run_turn_stream(
         if state.get("real_seen") and cv_rt \
                 and prev_rt != (state["clock"]["day"], state["clock"]["slot"]):
             real_slot_turned = cv_rt
+        # 🌊 世界自转: every real day the player stayed away, the world made news
+        if state.get("real_seen") and sandbox_on(content):
+            days_gone = int(state["clock"]["day"]) - int(prev_rt[0])
+            if days_gone > 0:
+                mint_world_news(content, state, llm, days_gone)
         state["real_seen"] = True
     # 💀 the dead have neither voice nor hands: 说/做 are refused; watching remains
     ghost = sandbox_on(content) and (state.get("player_hp") == "dead")
@@ -3317,6 +3445,15 @@ def run_turn_stream(
             "player_hp_label": ({"hurt": "受了伤，行动吃力", "dying": "重伤濒死，命悬一线"}
                                 .get(state.get("player_hp") or "", "")
                                 if sandbox_on(content) else ""),
+            # 💰 hard cash + 📋 open errands + 🌊 the world's own news (told once)
+            "player_money": ({"amount": int(state.get("money") or 0),
+                              "currency": currency_of(content)}
+                             if economy_on(state) and not observer else None),
+            "player_quests": [
+                f"{q.get('title', '')}（报酬{q.get('reward') or 0}{currency_of(content)}"
+                + (f"，限第{q['deadline_day']}天之内" if q.get("deadline_day") else "") + "）"
+                for q in (state.get("quests") or []) if q.get("status") == "open"][:4],
+            "news": (serve_news(state) if is_primary and not observer else ""),
             # 🕸 this speaker's charged stances toward who else is in the scene
             "npc_stances": npc_stance_line(content, state, sp_id,
                                            [c for c in all_chars if c.get("id") != sp_id]),
@@ -3718,6 +3855,62 @@ def run_turn_stream(
                     else:
                         rel_log(state, sp_id, old_act, "gift",
                                 f"你想把{g_item.strip()}送给TA，被TA推回来了。")
+            # 💰 MONEY: judged payments/earnings hit a HARD ledger — spending clamps
+            # at the balance, every booking is logged with its reason and hour
+            md = (directed.get("money_delta") or "").strip()
+            if md and not observer and economy_on(state):
+                amt_s, _, m_why = md.partition("|")
+                applied = book_money(content, state, _to_int(amt_s, -9999, 9999), m_why)
+                if applied:
+                    moments.append({"kind": "money", "delta": applied,
+                                    "why": (m_why or "").strip()[:30],
+                                    "balance": state["money"]})
+            # 📋 QUEST accepted: a paid errand agreed to in dialogue, booked with a
+            # REAL deadline (real-time sandbox: N days literally means N days)
+            qa = (directed.get("quest_accepted") or "").strip()
+            if qa and not observer:
+                q_parts = qa.split("|")
+                q_title = q_parts[0].strip()[:30]
+                q_reward = _to_int(q_parts[1], 0, 9999) if len(q_parts) > 1 else 0
+                q_days = _to_int(q_parts[2], 0, 30) if len(q_parts) > 2 else 0
+                open_qs = [q for q in (state.get("quests") or []) if q.get("status") == "open"]
+                if q_title and len(open_qs) < 4 and \
+                        all(logic._norm(q.get("title", "")) != logic._norm(q_title) for q in open_qs):
+                    import uuid as _uuid_q
+                    day_now_q = int((state.get("clock") or {}).get("day", 1) or 1)
+                    quests = list(state.get("quests") or [])
+                    quests.append({"id": f"q_{_uuid_q.uuid4().hex[:6]}", "title": q_title,
+                                   "reward": q_reward, "giver": sp_name, "status": "open",
+                                   "deadline_day": (day_now_q + q_days) if q_days else None})
+                    state["quests"] = quests[-8:]
+                    moments.append({"kind": "quest", "status": "open", "title": q_title,
+                                    "reward": q_reward, "days": q_days})
+                    yield emit({"type": "description", "speaker_name": None,
+                                "text": f"（你应下了这桩事：{q_title}。"
+                                        + (f"讲好的酬劳是{q_reward}{currency_of(content)}。"
+                                           if q_reward else "")
+                                        + (f"限{q_days}天之内。" if q_days else "") + "）"})
+            # 📋 QUEST delivered: the errand is done for real — the reward pays out
+            qd = (directed.get("quest_done") or "").strip()
+            if qd and not observer:
+                for q in (state.get("quests") or []):
+                    if q.get("status") == "open" and (
+                            logic._norm(q.get("title", "")) in logic._norm(qd)
+                            or logic._norm(qd) in logic._norm(q.get("title", ""))):
+                        q["status"] = "done"
+                        q_pay = book_money(content, state, int(q.get("reward") or 0),
+                                           q.get("title", "")) if q.get("reward") else 0
+                        moments.append({"kind": "quest", "status": "done",
+                                        "title": q.get("title"), "reward": q_pay})
+                        if q_pay:
+                            moments.append({"kind": "money", "delta": q_pay,
+                                            "why": q.get("title", ""),
+                                            "balance": state["money"]})
+                        yield emit({"type": "description", "speaker_name": None,
+                                    "text": f"（{q.get('title')}，办成了。"
+                                            + (f"{q_pay}{currency_of(content)}的酬劳落进了口袋。"
+                                               if q_pay else "") + "）"})
+                        break
             # 🌍 场面事实账本: a judged PERSISTENT physical change to this place gets
             # booked and served back forever (the smashed door stays smashed) — the
             # world's memory is engine-owned, not vibes
@@ -4011,6 +4204,14 @@ def run_turn_stream(
                 yield emit({"type": "description", "speaker_name": None,
                             "text": f"（你猛然想起，和{pr.get('char_name','')}约好的"
                                     f"（{pr.get('what','')}）已经过了时辰。）"})
+        # 📋 差事黄了: an open quest whose deadline day has slipped past fails for real
+        for q in (state.get("quests") or []):
+            if q.get("status") == "open" and q.get("deadline_day") \
+                    and int(clk["day"]) > int(q["deadline_day"]):
+                q["status"] = "failed"
+                moments.append({"kind": "quest", "status": "failed", "title": q.get("title")})
+                yield emit({"type": "description", "speaker_name": None,
+                            "text": f"（{q.get('title')}的期限过了。这单，黄了。）"})
 
     # 5d. people come and go with the hour and the act — never silently. Anyone the
     #     roster diff shows arriving gets a concrete line (looks + role); anyone leaving

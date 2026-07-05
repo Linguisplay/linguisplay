@@ -46,6 +46,7 @@ SANDBOXES = [
         "relations_overview": "所有人物都在你踏入这个世界之后才诞生，关系由你亲手织成。",
         "trope_tags": ["沙盒", "开放世界", "现实同步", "永不落幕"],
         "phone": {"enabled": True, "device": "手机"},
+        "sandbox_extra": {"currency": "元", "start_money": 300},
         "tuning": {"world_event_every": 0, "max_new_characters": 12},
     },
     {
@@ -69,6 +70,8 @@ SANDBOXES = [
         "都看你怎么做人。",
         "trope_tags": ["九龙城寨", "港风", "市井", "沙盒", "现实同步"],
         "phone": {"enabled": True, "device": "传呼机"},
+        # 押金交了、口袋见底：生存压力就是浮生的开场戏
+        "sandbox_extra": {"currency": "港纸", "start_money": 80},
         "tuning": {"world_event_every": 0, "max_new_characters": 12},
     },
     {
@@ -92,6 +95,7 @@ SANDBOXES = [
         "relations_overview": "同伴与心动对象都在冒险途中相遇；后宫不是白来的，每一份心动都要你亲手挣。",
         "trope_tags": ["异世界", "转生", "后宫", "轻小说", "沙盒"],
         "phone": {"enabled": True, "device": "传讯水晶"},
+        "sandbox_extra": {"currency": "铜币", "start_money": 50},
         # 后宫向：心动涨幅的衰减放缓一点，其余同款
         "tuning": {"world_event_every": 0, "max_new_characters": 12, "rom_taper_den": 160},
     },
@@ -146,7 +150,7 @@ def main() -> None:
                 acts=ONE_ACT,
                 endings=[],      # a sandbox has no exits
                 locations=[],    # the start place is synthesized; the map grows emergently
-                sandbox={"enabled": True, "real_time": True},
+                sandbox={"enabled": True, "real_time": True, **(sb.get("sandbox_extra") or {})},
                 phone=sb.get("phone"),
                 tuning=sb["tuning"],
                 visibility="public",

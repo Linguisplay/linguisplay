@@ -986,7 +986,8 @@ async function openBag() {
       (s.items||[]).map(i=>`<div class="jfrag">${escapeHtml(i.name||"")}${i.detail?`<span class="jwho"> · ${escapeHtml(i.detail)}</span>`:""}</div>`).join("")
     }</div>`).join("");
   const tip = `<div class="jempty" style="margin-top:10px">收纳：在一个地方说「把××放在这里」；回到那里说「取回××」。</div>`;
-  phoneShell(`<div style="padding:4px 2px">
+  const cash = curMoney != null ? `<div class="jtitle" style="margin:4px 0">💰 现钱 <b>${curMoney}</b>${escapeHtml(curCurrency)}</div>` : "";
+  phoneShell(`<div style="padding:4px 2px">${cash}
     <div class="jtitle" style="margin:4px 0">🎒 随身带着（${(jd.inventory||[]).length}）</div>${inv}
     ${stash ? `<div class="jtitle" style="margin:12px 0 4px">📦 存放的</div>${stash}` : ""}
     ${tip}</div>`, "🎒 背包", "openPhone()");
@@ -1002,7 +1003,10 @@ function openCalendar() {
   const prs = (lastPromises || []).map(p =>
     `<div class="pcalitem">${p.romantic ? "💞" : "🤝"} <b>${escapeHtml(p.when)}</b>${p.place ? " · " + escapeHtml(p.place) : ""} · ${escapeHtml(p.what)}<span class="jwho">（${escapeHtml(p.name)}）</span></div>`
   ).join("") || `<div class="jempty">日历上暂时没有约定。</div>`;
-  phoneShell(`${now}${ddl}<div class="jh">约定</div>${prs}`, "🗓 日历", "openPhone()");
+  const qs = (curQuests || []).filter(q => q.status === "open").map(q =>
+    `<div class="pcalitem">📋 ${escapeHtml(q.title||"")}${q.reward ? `（酬 ${q.reward}${escapeHtml(curCurrency)}）` : ""}${q.deadline_day ? ` · 限第${q.deadline_day}天内` : ""}<span class="jwho">（${escapeHtml(q.giver||"")}）</span></div>`
+  ).join("");
+  phoneShell(`${now}${ddl}<div class="jh">约定</div>${prs}${qs ? `<div class="jh">在办的差事</div>${qs}` : ""}`, "🗓 日历", "openPhone()");
 }
 // 到达即发现: physical truths that unlocked the moment we arrived
 function renderDiscoveries(list) {
@@ -1169,9 +1173,15 @@ function updatePlaceholder() {
 function renderState(st) {
   if (!st) return;
   if (st.player_hp !== undefined) renderPlayerHp(st.player_hp);
+  renderRebirth(!!st.can_reincarnate);
+  if (st.money != null) { curMoney = st.money; curCurrency = st.currency || ""; }
+  if (st.quests !== undefined) curQuests = st.quests || [];
   const hpBit = { hurt: " · 🩹 带伤", dying: " · 🆘 <b style='color:#ff9d9d'>重伤濒死</b>",
                   dead: " · 💀 <b style='color:#ff9d9d'>你已死去</b>" }[st.player_hp] || "";
-  state.innerHTML = `第 <b>${st.act}</b> 幕 · 好感 <b>${st.affinity}</b> · 已解锁碎片 <b>${(st.unlocked_fragment_ids||[]).length}</b>${hpBit}`;
+  const moneyBit = st.money != null ? ` · 💰 <b>${st.money}</b>${escapeHtml(st.currency||"")}` : "";
+  const openQ = (st.quests||[]).filter(q=>q.status==="open").length;
+  const questBit = openQ ? ` · 📋 在办 <b>${openQ}</b>` : "";
+  state.innerHTML = `第 <b>${st.act}</b> 幕 · 好感 <b>${st.affinity}</b> · 已解锁碎片 <b>${(st.unlocked_fragment_ids||[]).length}</b>${moneyBit}${questBit}${hpBit}`;
   if (st.goal !== undefined) renderGoal(st.goal);
   if (st.progress !== undefined) renderProgress(st.progress);
   if (st.location !== undefined) renderPlace(st.location);
@@ -1179,6 +1189,28 @@ function renderState(st) {
   if (st.phone_unread !== undefined) setPhoneBadge(st.phone_unread);
   if (st.verdict !== undefined) renderVerdictBar(st.verdict);
 }
+// 🔄 沙盒转生: the dead may return as a new face in the same world
+let curMoney = null, curCurrency = "", curQuests = [];
+function renderRebirth(on) {
+  let el = document.getElementById("rebirth");
+  if (!on) { if (el) el.remove(); return; }
+  if (el) return;
+  el = document.createElement("div");
+  el.id = "rebirth";
+  el.style.cssText = "margin:4px 8px";
+  el.innerHTML = `<button style="width:100%" onclick="doReincarnate()">🔄 转生：以新的面孔回到这个世界（前尘往事化作传闻）</button>`;
+  const f = document.querySelector("footer");
+  f.parentNode.insertBefore(el, f);
+}
+async function doReincarnate() {
+  if (!confirm("转生后：身体、钱财、关系、身份全部从头来过；这个世界与它记得的一切都会保留。确定？")) return;
+  try {
+    const run = await j(`/runs/${runId}/reincarnate`, { method: "POST" });
+    pushToast("🔄 你转生了。这个世界不认识现在的你", "t-act", 300);
+    await enterRun(run);
+  } catch (e) { pushToast("转生失败：" + e.message, "t-press", 300); }
+}
+
 // 💀 the player's own body (sandbox): dead strips 说/做 — watching (想) remains
 let playerHp = "healthy";
 function renderPlayerHp(hp) {
@@ -1655,6 +1687,14 @@ function showMoments(moments, relDeltas) {
     else if (m.kind === "arrival") pushToast(`👋 新面孔登场：${m.name || ""}`, "t-act", i++ * 650);
     else if (m.kind === "identity") pushToast(`🎖 你的身份变了：${m.text || ""}`, "t-end", i++ * 650);
     else if (m.kind === "world") pushToast(`🌍 世界记住了：${m.text || ""}`, "t-unlock", i++ * 650);
+    else if (m.kind === "money") pushToast(
+      `${m.delta > 0 ? "💰 +" : "💸 "}${m.delta}${m.why ? `（${m.why}）` : ""} · 余 ${m.balance}`,
+      m.delta > 0 ? "t-unlock" : "t-press", i++ * 650);
+    else if (m.kind === "quest") pushToast(
+      m.status === "open" ? `📋 接下差事：${m.title}${m.reward ? `（酬 ${m.reward}）` : ""}${m.days ? ` · 限${m.days}天` : ""}` :
+      m.status === "done" ? `✅ 差事办成：${m.title}${m.reward ? `（+${m.reward}）` : ""}` :
+      `⌛ 差事黄了：${m.title}`,
+      m.status === "failed" ? "t-press" : "t-unlock", i++ * 650);
     else if (m.kind === "player_hp") pushToast(
       m.hp === "dead" ? "💀 你死了。「说」与「做」已被剥夺，你只能旁观" :
       m.hp === "dying" ? "🆘 你重伤濒死" :

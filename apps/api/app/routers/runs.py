@@ -150,6 +150,12 @@ def _to_run(r: RunModel) -> Run:
             player_character_name=(runtime._char_name(r.pinned_content or {}, pcid) if pcid else None),
             pressure=int(st.get("pressure", 0) or 0),
             player_hp=st.get("player_hp", "healthy"),
+            money=st.get("money"),
+            currency=(runtime.currency_of(r.pinned_content or {})
+                      if st.get("money") is not None else None),
+            quests=list(st.get("quests") or []),
+            can_reincarnate=bool(runtime.sandbox_on(r.pinned_content or {})
+                                 and st.get("player_hp") == "dead" and not st.get("ended")),
             identity=st.get("identity"),
             inventory=list(st.get("inventory") or []),
             pressure_name=((runtime.pressure_cfg(r.pinned_content or {}) or {}).get("name")),
@@ -280,6 +286,10 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
     state["goal"] = runtime.current_goal(content, 1)
     if runtime.sandbox_on(content) and (body.worldview or "").strip():
         state["worldview"] = body.worldview.strip()[:2000]
+    # 💰 the sandbox runs a real cash ledger: start with the authored pocket money
+    if runtime.sandbox_on(content):
+        sb_cfg = (content.get("story") or {}).get("sandbox") or {}
+        state["money"] = runtime._to_int(sb_cfg.get("start_money"), 0, 99999) or 100
     # ⏰ 现实同步 runs open at the player's real hour
     if runtime.real_time_on(content):
         runtime.sync_real_clock(content, state)
@@ -369,6 +379,30 @@ def delete_run(run_id: str, user: User = Depends(current_user), db: Session = De
     db.commit()
 
 
+@router.post("/{run_id}/reincarnate", response_model=Run)
+def reincarnate_run(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """🔄 沙盒转生: a dead sandbox player returns as a new face in the same world.
+    The world's ledgers survive; the player's side (body/money/ties/name) restarts,
+    and character memory is cut at this seam — nobody remembers the former life's talks."""
+    r = _own_run(run_id, user, db)
+    st = dict(r.state or {})
+    content = r.pinned_content or {}
+    if not runtime.sandbox_on(content):
+        raise HTTPException(400, "只有无尽沙盒才能转生")
+    if st.get("player_hp") != "dead":
+        raise HTTPException(400, "你还活着")
+    beats = runtime.reincarnate(content, st)
+    seq = (r.beats[-1].seq + 1) if r.beats else 0
+    st["history_cut_seq"] = seq
+    for i, b in enumerate(beats):
+        db.add(BeatModel(run_id=r.id, seq=seq + i, type="description",
+                         text=b.get("text", ""), author="engine"))
+    r.state = st
+    db.commit()
+    db.refresh(r)
+    return _to_run(r)
+
+
 # ── play ──────────────────────────────────────────────────
 @router.get("/{run_id}/play", response_model=list[Beat])
 def replay(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
@@ -408,9 +442,11 @@ def play(
 
     # 0. raw beat log (with each beat's witnesses) — the engine builds a FILTERED history per
     #    responder from this, so info never silently leaks between characters/scenes.
+    #    🔄 after a rebirth, history starts over: nobody remembers talking to the former life.
+    _cut = int(st.get("history_cut_seq") or 0)
     beat_log = [{"author": b.author, "type": b.type, "text": b.text,
                  "speaker_name": b.speaker_name, "present_ids": b.present_ids}
-                for b in r.beats]
+                for b in r.beats if b.seq >= _cut]
 
     # RETURN detection (回归问候): the player has been away long enough that this turn is a
     # comeback → the primary speaker greets them and picks up the last thread. Only counts

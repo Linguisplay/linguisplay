@@ -238,6 +238,17 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append(f"【你新近听来的传闻】{rumor}。若话头合适，用你自己的口吻自然带给对方"
                      "（街坊闲话的讲法，别念播报）；话头不合适就先按下不提。")
 
+    pm = prompt.get("player_money")
+    if pm and not observer and group_mode != "member":
+        lines.append(f"「{player_name}」身上现有 {pm.get('amount', 0)} {pm.get('currency', '')}。"
+                     "这是TA的全部现钱：TA花钱、给钱不可能超过这个数；真金白银的收付要在剧情里落实。")
+    q_lines = [str(x) for x in (prompt.get("player_quests") or []) if str(x).strip()]
+    if q_lines and not observer and group_mode != "member":
+        lines.append("【玩家正在办的差事】" + "；".join(q_lines) + "。差事当面交付办妥时，要认账付酬。")
+    news = (prompt.get("news") or "").strip()
+    if news:
+        lines.append(f"【这两天世界里的事】{news}。可作为你知道的近闻自然聊起；话头不合适就按下。")
+
     cond = prompt.get("condition") or {}
     if cond.get("hp") or cond.get("intent") or cond.get("mood") or cond.get("keepsakes"):
         bits = []
@@ -553,6 +564,19 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                               "注意：存放/收纳/藏起来【不是失去】，那要填 item_stashed；否则空字符串"}
         props["item_stashed"] = {"type": "string", "description":
                                  "若玩家把随身物品存放/收纳/寄存/藏在当前地点，填物品名；否则空字符串"}
+        if prompt.get("player_money"):
+            props["money_delta"] = {"type": "string", "description":
+                                    "若这一轮玩家实际收付了现钱（结工钱/买卖成交/给赏/被讹走），"
+                                    "填「+数额|缘由」或「-数额|缘由」（整数）；口头讲价没成交不算；"
+                                    "没有则空字符串"}
+        if prompt.get("sandbox"):
+            props["quest_accepted"] = {"type": "string", "description":
+                                       "若这一轮有人把一件有报酬的差事托付给玩家、且玩家应下了，填"
+                                       "「一句话差事|报酬数额|限几天」（如 送三坛酒到码头|40|2；"
+                                       "无期限第三段填0）；没有则空字符串"}
+            props["quest_done"] = {"type": "string", "description":
+                                   "若玩家这一轮把先前应下的差事当面办成交付了，填那件差事的原话关键词；"
+                                   "没有则空字符串"}
         props["world_fact"] = {"type": "string", "description":
                                "若这一轮对【当前地点本身】造成了会一直留下的物理改变"
                                "（门被砸开/东西烧毁/墙上留了字/桥断了），用≤30字客观记一笔；"
@@ -1014,6 +1038,12 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
         out["player_harm"] = str(d.get("player_harm") or "").strip()
     if "world_fact" in d:
         out["world_fact"] = str(d.get("world_fact") or "").strip()
+    if "money_delta" in d:
+        out["money_delta"] = str(d.get("money_delta") or "").strip()
+    if "quest_accepted" in d:
+        out["quest_accepted"] = str(d.get("quest_accepted") or "").strip()
+    if "quest_done" in d:
+        out["quest_done"] = str(d.get("quest_done") or "").strip()
     if "npc_moves" in d:
         out["npc_moves"] = [{"who": str(m.get("who") or "").strip(),
                              "to": str(m.get("to") or "").strip()}
@@ -1781,6 +1811,36 @@ class QwenLLM:
         return {"beats": [{"type": "description", "speaker_name": None, "text": txt}],
                 "affinity_delta": 0, "advance_act": False, "ending": None}
 
+    def _world_news(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🌊 one line of the world's OWN news for a day the player missed. Grounded in
+        the worldview / cast / standing facts; degrades to {} (no news that day)."""
+        wv = (prompt.get("worldview") or "").strip()
+        cast = "、".join(prompt.get("cast") or []) or "（尚无具名人物）"
+        facts = "；".join(prompt.get("facts") or []) or "（无）"
+        recent = "；".join(prompt.get("recent") or []) or "（无）"
+        sys = ("你为一个持续运转的沙盒世界生成【昨天发生的一件事】。只输出JSON："
+               '{"text":"≤40字的一件具体的事"}。'
+               "要求：贴世界观、贴在场人物的处境，可以是变故/风波/买卖/传言坐实；"
+               "要具体可谈（谁、哪里、什么事），不要抒情空话；不得与已发生的事实矛盾，也别重复近闻。")
+        u = f"世界观：{wv}\n城中人物：{cast}\n既成事实：{facts}\n近几天已发生：{recent}"
+        try:
+            resp = httpx.post(
+                self._url,
+                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
+                json={"model": self._model,
+                      "messages": [{"role": "system", "content": sys},
+                                   {"role": "user", "content": u}],
+                      "max_tokens": 120, "temperature": 0.95,
+                      "response_format": {"type": "json_object"}},
+                timeout=25,
+            )
+            resp.raise_for_status()
+            import json as _json
+            data = _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
     def _sandbox_cast(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """🏖 conjure the sandbox's opening cast from the player's worldview. Strict
         JSON; degrades to {} (runtime seeds a deterministic stranger instead)."""
@@ -1883,6 +1943,8 @@ class QwenLLM:
             return self._start_place(prompt)
         if prompt.get("sandbox_cast"):
             return self._sandbox_cast(prompt)
+        if prompt.get("world_news"):
+            return self._world_news(prompt)
         if prompt.get("parting"):
             return self._parting(prompt)
         if prompt.get("arrive"):

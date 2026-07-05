@@ -92,6 +92,10 @@ class MockLLM:
         if prompt.get("sandbox_cast"):
             return {}
 
+        # 🌊 world news: mock world stays quiet.
+        if prompt.get("world_news"):
+            return {}
+
         # 🌆 offscreen drama: mock stays quiet — no fabricated rumors in tests.
         if prompt.get("offscreen"):
             return {}
