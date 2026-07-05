@@ -68,7 +68,14 @@ def get(mode_id: str | None) -> dict[str, str]:
     return ARCHETYPES.get(mode_id or DEFAULT_MODE, ARCHETYPES[DEFAULT_MODE])
 
 
-def name_of(mode_id: str | None) -> str:
+_NAME_EN = {"stranger": "Stranger", "peer": "Peer", "friend": "Friend",
+            "flirt": "Something More", "lover": "Lover", "enemy": "Enemy",
+            "elder": "Elder", "junior": "Junior"}
+
+
+def name_of(mode_id: str | None, lang: str = "zh") -> str:
+    if lang == "en":
+        return _NAME_EN.get(mode_id or "", get(mode_id).get("name", ""))
     return get(mode_id).get("name", "")
 
 
@@ -288,11 +295,12 @@ def next_tier(char: dict[str, Any], scores: dict[str, int], tuning: dict | None 
     return {"name": name, "to_next": max(1, int(rem))}
 
 
-def state_for(char: dict[str, Any], scores: dict[str, int], tuning: dict | None = None) -> dict[str, Any]:
+def state_for(char: dict[str, Any], scores: dict[str, int], tuning: dict | None = None,
+              lang: str = "zh") -> dict[str, Any]:
     """A small summary for the UI / API: current mode + its name + the raw scores + the
     nearest reachable upgrade (the daily 'one more step' hook)."""
     mode = derive_mode(char, scores, tuning)
-    return {"mode": mode, "mode_name": name_of(mode),
+    return {"mode": mode, "mode_name": name_of(mode, lang),
             "closeness": int(scores.get("closeness", START_CLOSENESS)),
             "romance": int(scores.get("romance", START_ROMANCE)),
             "next": next_tier(char, scores, tuning)}

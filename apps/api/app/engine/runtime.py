@@ -199,6 +199,7 @@ MAX_OPEN_PROMISES = 3  # 🤝 open appointments a run may hold at once (per char
 # story deadlines (story.clock) hang off this. Story-agnostic — the names are the frame,
 # not any script's content.
 SLOTS = ("晨", "午", "夜")
+_SLOT_EN = {"晨": "Morning", "午": "Noon", "夜": "Night"}  # display names for en stories
 AWAY = "__away__"  # a scheduled character whose no entry covers this hour: off somewhere, unreachable
 
 _SLOT_NARR = {
@@ -380,12 +381,16 @@ def clock_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]
     if slot is None:
         return None
     day = int((state.get("clock") or {}).get("day", 1) or 1)
-    view: dict[str, Any] = {"day": day, "slot": slot, "label": f"第{day}天·{slot}"}
+    en = lang_of(content) == "en"
+    slot_disp = _SLOT_EN.get(slot, slot) if en else slot
+    view: dict[str, Any] = {"day": day, "slot": slot,
+                            "label": f"Day {day} · {slot_disp}" if en else f"第{day}天·{slot}"}
     if real_time_on(content):
         now = _now()
         view["real"] = True
         view["hhmm"] = f"{now.hour:02d}:{now.minute:02d}"
-        view["label"] = f"第{day}天·{slot} {view['hhmm']}"
+        view["label"] = (f"Day {day} · {slot_disp} {view['hhmm']}" if en
+                         else f"第{day}天·{slot} {view['hhmm']}")
     ccfg = clock_cfg(content)
     try:
         dd = int(ccfg.get("deadline_day") or 0)
@@ -1053,12 +1058,15 @@ def set_follow(content: dict[str, Any], state: dict[str, Any],
         if not relationships.can_follow(char, scores, tun):
             state["following"] = following
             mode = relationships.derive_mode(char, scores, tun)
-            reason = (f"{name}对你满是戒备，不会跟你走。" if mode == "enemy"
-                      else f"你和{name}还没熟到那份上。先多聊聊、把关系处近点，TA 才愿意跟你走。")
+            reason = _t(content,
+                        f"{name}对你满是戒备，不会跟你走。" if mode == "enemy"
+                        else f"你和{name}还没熟到那份上。先多聊聊、把关系处近点，TA 才愿意跟你走。",
+                        f"{name} doesn't trust you enough to go anywhere with you." if mode == "enemy"
+                        else f"You and {name} aren't close enough yet. Talk more, get closer, then ask.")
             return {"ok": False, "following": following, "name": name, "reason": reason}
         following.append(char_id)
         rel_log(state, char_id, int(state.get("act", 1) or 1), "follow",
-                f"{name} 答应与你同行。")
+                _t(content, f"{name} 答应与你同行。", f"{name} agreed to come along."))
     state["following"] = following
     return {"ok": True, "following": following, "name": name, "reason": ""}
 
@@ -1258,7 +1266,9 @@ def act_progress(content: dict[str, Any], state: dict[str, Any], act_index: int)
             lid = floc.get(fid)
             loc = _location_by_id(content, lid) if lid else None
             if loc and location_available(content, state, loc):
-                label = f"{label}（去「{loc.get('name','')}」看看）"
+                label = (f"{label} (worth a look: {loc.get('name','')})"
+                         if lang_of(content) == "en"
+                         else f"{label}（去「{loc.get('name','')}」看看）")
         items.append({"label": label, "done": done})
     for eid in adv.get("required_event_ids") or []:
         items.append({"label": elabels.get(eid, "关键进展"), "done": eid in triggered})
@@ -1578,21 +1588,22 @@ def _smart_suggestions(llm, all_beats, player_input, primary, content, state, lo
         return []
 
 
-def build_suggestions(context: dict[str, Any]) -> list[str]:
+def build_suggestions(context: dict[str, Any], content: dict[str, Any] | None = None) -> list[str]:
     """Nudge the player toward what's close to unlocking, without spoiling content.
 
     hint_topics are secrets exactly one condition short — steering the player there
     is a fair gameplay hint (it's the topic label, never the secret body)."""
+    en = content is not None and lang_of(content) == "en"
     s: list[str] = []
     for t in context.get("hint_topics", [])[:2]:
-        s.append(f"再追问「{t}」")
+        s.append(f"Press them about “{t}”" if en else f"再追问「{t}」")
     if context.get("new_reveal"):
-        s.append("顺着他刚说的继续深挖")
+        s.append("Dig into what they just admitted" if en else "顺着他刚说的继续深挖")
     if not s and context.get("has_hidden"):
-        s.append("他像在回避，换个角度问问")
-    s.append("用「做」描述你的一个动作")
+        s.append("They're dodging — come at it sideways" if en else "他像在回避，换个角度问问")
+    s.append("Use “Do” to describe an action" if en else "用「做」描述你的一个动作")
     if len(s) < 3:
-        s.append("跟他多聊聊，拉近距离")
+        s.append("Keep talking, get closer" if en else "跟他多聊聊，拉近距离")
     # de-dup preserving order
     seen, out = set(), []
     for x in s:
@@ -1605,6 +1616,7 @@ def build_suggestions(context: dict[str, Any]) -> list[str]:
 # ── entrances & exits: people never just pop in/out of the cast bar ─────────────
 # Slot flavor prefixes for deterministic entrance lines (keyed by SLOTS names).
 _SLOT_FLAVOR = {"晨": "晨光里", "午": "日头底下", "夜": "夜色里"}
+_SLOT_FLAVOR_EN = {"晨": "In the morning light", "午": "Under the midday sun", "夜": "Out of the dark"}
 
 
 def _first_sentence(s: str, cap: int = 48) -> str:
@@ -1615,9 +1627,15 @@ def entrance_beat(content: dict[str, Any], state: dict[str, Any], c: dict[str, A
     """A CONCRETE arrival line for a character who just walked into the scene (the hour
     rolled / a new act brought them on): looks + role, not a bare name in the cast bar."""
     slot = active_slot(content, state)
-    flavor = _SLOT_FLAVOR.get(slot or "", "")
+    en = lang_of(content) == "en"
+    flavor = (_SLOT_FLAVOR_EN if en else _SLOT_FLAVOR).get(slot or "", "")
     look = _first_sentence(c.get("persona_text") or "")
     role = (c.get("role") or "").strip()
+    if en:
+        bits = "; ".join(b for b in (role, look) if b)
+        lead = f"{flavor}, " if flavor else ""
+        return {"type": "description", "speaker_name": None,
+                "text": f"({lead}{c.get('name')} arrives{(' — ' + bits) if bits else ''}.)"}
     bits = "，".join(b for b in (role, look) if b)
     lead = f"{flavor}，" if flavor else ""
     return {"type": "description", "speaker_name": None,
@@ -1631,12 +1649,16 @@ def _exit_dest(content: dict[str, Any], state: dict[str, Any],
     hinted without spoiling geography; AWAY admits nobody knows."""
     home = char_position(content, state, c)
     loc = _location_by_id(content, home) if (home and home != AWAY) else None
+    en = lang_of(content) == "en"
     if loc and location_available(content, state, loc):
-        return loc.get("name"), f"，往{loc.get('name')}那边去了"
+        return loc.get("name"), (f", heading for {loc.get('name')}" if en
+                                 else f"，往{loc.get('name')}那边去了")
     if loc:
-        return None, "，往你还没去过的地方去了"
+        return None, (", off toward somewhere you haven't been" if en
+                      else "，往你还没去过的地方去了")
     if home == AWAY:
-        return None, "，没人知道TA这个时辰去了哪"
+        return None, (", and nobody knows where they go at this hour" if en
+                      else "，没人知道TA这个时辰去了哪")
     return None, ""
 
 
@@ -1657,11 +1679,14 @@ def farewell_beats(content: dict[str, Any], state: dict[str, Any], c: dict[str, 
     except Exception:
         line = ""
     if not line:
-        line = f"我先走一步，{dest}那边还有事。" if dest else "先这样，我得走了。回头见。"
+        line = _t(content, f"我先走一步，{dest}那边还有事。" if dest else "先这样，我得走了。回头见。",
+                  f"I'd better go. Things to see to at {dest}." if dest
+                  else "That's me. Things to do. See you around.")
     return [
         {"type": "dialogue", "speaker_name": c.get("name"), "text": line},
         {"type": "description", "speaker_name": None,
-         "text": f"（{c.get('name')}说着起身走了{tail}。）"},
+         "text": _t(content, f"（{c.get('name')}说着起身走了{tail}。）",
+                    f"({c.get('name')} says so and heads out{tail}.)")},
     ]
 
 
@@ -1669,7 +1694,8 @@ def exit_beat(content: dict[str, Any], state: dict[str, Any], c: dict[str, Any])
     """The budget-friendly departure (no spoken line): still says where they went."""
     _, tail = _exit_dest(content, state, c)
     return {"type": "description", "speaker_name": None,
-            "text": f"（不知什么时候，{c.get('name')}已经离开了{tail}。）"}
+            "text": _t(content, f"（不知什么时候，{c.get('name')}已经离开了{tail}。）",
+                       f"(At some point, {c.get('name')} slipped away{tail}.)")}
 
 
 def arrival_narration(content: dict[str, Any], state: dict[str, Any], persona: dict[str, Any],
@@ -1952,7 +1978,8 @@ def discover_on_arrival(content: dict[str, Any], state: dict[str, Any]) -> list[
         body = (f.get("content") or "").strip()
         title = (f.get("secret_title") or "").strip()
         out.append({"fragment_id": f.get("id"), "title": title,
-                    "text": f"（到了这里你才看清：{body}）"})
+                    "text": _t(content, f"（到了这里你才看清：{body}）",
+                               f"(Only standing here do you finally see it: {body})")})
     return out
 
 
@@ -2214,8 +2241,14 @@ def _promise_index(pr: dict[str, Any]) -> int:
     return int(pr.get("day", 1) or 1) * len(SLOTS) + si
 
 
-def promise_when_label(pr: dict[str, Any], state: dict[str, Any]) -> str:
+def promise_when_label(content: dict[str, Any], pr: dict[str, Any],
+                       state: dict[str, Any]) -> str:
     diff = int(pr.get("day", 1) or 1) - int((state.get("clock") or {}).get("day", 1) or 1)
+    if lang_of(content) == "en":
+        day = ("today" if diff <= 0 else "tomorrow" if diff == 1
+               else "in two days" if diff == 2 else f"day {pr.get('day')}")
+        slot = _SLOT_EN.get(pr.get("slot", ""), pr.get("slot", "")).lower()
+        return f"{day}{(' ' + slot) if slot else ''}"
     day = "今天" if diff <= 0 else "明天" if diff == 1 else "后天" if diff == 2 else f"第{pr.get('day')}天"
     return f"{day}{pr.get('slot', '')}"
 
@@ -2227,7 +2260,7 @@ def promises_view(content: dict[str, Any], state: dict[str, Any]) -> list[dict[s
                      key=_promise_index):
         loc = _location_by_id(content, pr.get("location_id")) if pr.get("location_id") else None
         out.append({"name": pr.get("char_name") or "", "what": pr.get("what") or "",
-                    "when": promise_when_label(pr, state),
+                    "when": promise_when_label(content, pr, state),
                     "place": (loc or {}).get("name") or "", "romantic": bool(pr.get("romantic"))})
     return out
 
@@ -2391,18 +2424,20 @@ def phone_deliveries(content: dict[str, Any], state: dict[str, Any], here_ids: s
         c = _char_by_id(content, cid)
         if not c or not absent(cid):
             continue
-        when, what = promise_when_label(pr, state), pr.get("what") or ""
+        when, what = promise_when_label(content, pr, state), pr.get("what") or ""
         if pr.get("status") == "open" and _promise_index(pr) == now_idx + 1 and not pr.get("reminded"):
             pr["reminded"] = True
             msgs = compose_message(content, state, c, "reminder",
                                    f"你们约好了{when}（{what}），时辰快到了，你捎话提醒TA，带上你自己的语气",
-                                   f"别忘了{when}，{what}。我等你。", llm)
+                                   _t(content, f"别忘了{when}，{what}。我等你。",
+                                      f"Don't forget: {when}, {what}. I'll be waiting."), llm)
             out.append(phone_push(content, state, c, msgs, now_label))
         elif pr.get("status") in ("missed", "missed_noted") and not pr.get("texted"):
             pr["texted"] = True
             msgs = compose_message(content, state, c, "stood_up",
                                    f"TA爽约了你们约好的（{what}），你心里不好受，忍不住捎话给TA",
-                                   "我等了你很久。你没来。", llm)
+                                   _t(content, "我等了你很久。你没来。",
+                                      "I waited a long time. You never came."), llm)
             out.append(phone_push(content, state, c, msgs, now_label))
     # ③ afterglow: a romance-tier character the player was JUST with, now apart
     seen = (state.get("phone") or {}).get("seen") or {}
@@ -2427,7 +2462,8 @@ def phone_deliveries(content: dict[str, Any], state: dict[str, Any], here_ids: s
                                ("TA刚离开你身边就忍不住拨通了你——写TA接通后开口说的1~2句话，"
                                 "短、软、像TA的性格" if as_call else
                                 "TA刚离开你身边，你心里还想着TA，忍不住捎一句——短、软、像TA的性格"),
-                               "你刚走，我就开始想你了。", llm)
+                               _t(content, "你刚走，我就开始想你了。",
+                                  "You just left and I already miss you."), llm)
         out.append(phone_push(content, state, c, msgs, now_label, call=as_call))
     return out
 
@@ -2676,9 +2712,13 @@ def compose_letter(content: dict[str, Any], state: dict[str, Any], char: dict[st
     subject = (out.get("subject") or "").strip()
     body = (out.get("body") or "").strip()
     if not body:
-        subject = subject or "想对你说的话"
-        body = (f"有些话，当着面说不出口，只好写下来。\n\n这段日子里发生的事，"
-                f"我想了很多。你是其中想得最多的那一个。\n\n—— {char.get('name') or ''}")
+        subject = subject or _t(content, "想对你说的话", "The things I meant to say")
+        body = _t(content,
+                  f"有些话，当着面说不出口，只好写下来。\n\n这段日子里发生的事，"
+                  f"我想了很多。你是其中想得最多的那一个。\n\n—— {char.get('name') or ''}",
+                  "Some things won't come out face to face, so I'm writing them down.\n\n"
+                  "I've been thinking about everything that's happened. "
+                  f"Mostly, I've been thinking about you.\n\n— {char.get('name') or ''}")
     return mail_push(content, state, char, subject, body)
 
 
@@ -2750,7 +2790,8 @@ def offline_pulse(content: dict[str, Any], state: dict[str, Any], here_ids: set,
             continue
         msgs = compose_message(content, state, c, "away_pulse",
                                f"你们有阵子没见了（离开了约{max(1, int(away_hours))}小时）。{hint}。",
-                               "好久没你的消息了。一切都好吗？", llm)
+                               _t(content, "好久没你的消息了。一切都好吗？",
+                                  "Haven't heard from you in a while. Everything okay?"), llm)
         out.append(phone_push(content, state, c, msgs, now_label))
     return out
 
@@ -2896,7 +2937,7 @@ def character_profile(content: dict[str, Any], state: dict[str, Any],
     act = int(state.get("act", 1) or 1)
     tun = tuning_for(content)
     scores = (state.get("rel") or {}).get(char_id) or relationships.new_scores()
-    rel = relationships.state_for(c, scores, tun)
+    rel = relationships.state_for(c, scores, tun, lang=lang_of(content))
     dead = char_id in _dead_ids(state)
     # their secrets: titles appear only after the first layer opened (journal's rule)
     unlocked = set(state.get("unlocked_fragment_ids") or [])
@@ -2916,9 +2957,9 @@ def character_profile(content: dict[str, Any], state: dict[str, Any],
     loc = _location_by_id(content, home) if (home and home != AWAY) else None
     where = (loc.get("name") if (loc and location_available(content, state, loc)) else None)
     if home == AWAY:
-        where = "此刻不知去向"
+        where = _t(content, "此刻不知去向", "whereabouts unknown right now")
     if char_id in set(state.get("following") or []):
-        where = "与你同行"
+        where = _t(content, "与你同行", "traveling with you")
     # 分层小传: closeness unlocks authored layers; the next locked bar is shown as a tease
     closeness = int(scores.get("closeness", 0))
     bio_open, bio_next = [], None
@@ -2988,7 +3029,7 @@ def journal(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
                for e in story.get("endings", []) or []]
     loc_names = {l.get("id"): l.get("name") for l in _locations(content)}
     promises = [{"name": p.get("char_name") or "", "what": p.get("what") or "",
-                 "when": promise_when_label(p, state), "status": p.get("status"),
+                 "when": promise_when_label(content, p, state), "status": p.get("status"),
                  "romantic": bool(p.get("romantic"))}
                 for p in (state.get("promises") or [])]
     return {"secrets": secrets, "secrets_untouched": untouched, "endings": endings,
@@ -3278,7 +3319,9 @@ def _confront_gen(content, state, persona, secret, frag, next_locked, target, ll
     if pcfg and dice["outcome"] == "crit_fail":
         # a blown confrontation makes noise. Capped at 99: only a full turn can blow the lid
         state["pressure"] = min(99, int(state.get("pressure", 0)) + 8)
-        moments.append({"kind": "pressure", "note": "这场对质闹出了动静。",
+        moments.append({"kind": "pressure",
+                        "note": _t(content, "这场对质闹出了动静。",
+                                   "That confrontation made some noise."),
                         "value": state["pressure"]})
     title = (secret.get("title") or "").strip() or "那件事"
     ev = (frag.get("content") or "").strip()
@@ -3290,7 +3333,9 @@ def _confront_gen(content, state, persona, secret, frag, next_locked, target, ll
         return ("beat", b)
 
     yield emit({"type": "description", "speaker_name": None,
-                "text": f"（你直视着{tname}，把你已经知道的事一字一句摆到TA面前：{ev}）"})
+                "text": _t(content, f"（你直视着{tname}，把你已经知道的事一字一句摆到TA面前：{ev}）",
+                           f"(You look {tname} in the eye and lay out, word by word, "
+                           f"what you already know: {ev})")})
     if forced_id:
         for t in _titles_for_fragments(content, [forced_id]):
             moments.append({"kind": "unlock", "title": t})
@@ -3920,22 +3965,22 @@ def run_turn_stream(
             # CELEBRATE a tier-up (陌生→朋友→暧昧→恋人): the "高潮=阈值被跨过" moment, made
             # visible — a strong reward + come-back hook. Only on an UPGRADE, never a downgrade.
             if mode_after != mode_before and _RANK.get(mode_after, 0) > _RANK.get(mode_before, 0):
+                mn = relationships.name_of(mode_after, lang_of(content))
                 moments.append({"kind": "rel_up", "character_id": sp_id, "name": sp_name,
-                                "mode": mode_after,
-                                "mode_name": relationships.name_of(mode_after)})
+                                "mode": mode_after, "mode_name": mn})
                 rel_log(state, sp_id, old_act, "rel_up",
-                        f"你们成了「{relationships.name_of(mode_after)}」。")
+                        _t(content, f"你们成了「{mn}」。", f"You became “{mn}”."))
                 album_add(content, state, "rel_up",
-                          f"成为{relationships.name_of(mode_after)}",
+                          _t(content, f"成为{mn}", f"Becoming {mn}"),
                           _last_line_of(said_this_turn, sp_name)
-                          or f"你和{sp_name}成了「{relationships.name_of(mode_after)}」。", sp)
+                          or _t(content, f"你和{sp_name}成了「{mn}」。",
+                                f"You and {sp_name} became “{mn}”."), sp)
                 yield emit({"type": "description", "speaker_name": None,
                             "text": _t(content,
                                        f"💗（你感觉到，和{sp_name}的关系又近了一层。现在你们是"
-                                       f"「{relationships.name_of(mode_after)}」了。）",
+                                       f"「{mn}」了。）",
                                        f"💗 (You can feel it — something between you and {sp_name} "
-                                       f"has shifted closer. You are now "
-                                       f"“{relationships.name_of(mode_after)}”.)")})
+                                       f"has shifted closer. You are now “{mn}”.)")})
                 # 📮 crossing into 恋人 earns a LETTER: some things TA can only write down
                 if mode_after == "lover" and phone_enabled(content):
                     lm = compose_letter(content, state, sp, "love_letter",
@@ -3968,7 +4013,7 @@ def run_turn_stream(
                 made = make_promise(content, state, sp, pm, tun)
                 if made:
                     loc_nm = (_location_by_id(content, made.get("location_id")) or {}).get("name") or "老地方"
-                    when = promise_when_label(made, state)
+                    when = promise_when_label(content, made, state)
                     moments.append({"kind": "promise", "status": "made",
                                     "name": sp_name, "what": made["what"], "when": when,
                                     "romantic": bool(made.get("romantic"))})
@@ -4799,7 +4844,7 @@ def run_turn_stream(
     if not (fired and fired.get("terminal")):
         suggestions = _smart_suggestions(
             llm, all_beats, player_input, primary, content, state, location, needed_topics, observer
-        ) or build_suggestions(sugg_context)
+        ) or build_suggestions(sugg_context, content)
 
     yield ("final", {
         "state": state,
@@ -4869,7 +4914,8 @@ def relations_summary(content: dict[str, Any], state: dict[str, Any]) -> dict[st
         cid = c.get("id")
         if not cid or cid == pcid:
             continue
-        out[cid] = relationships.state_for(c, rel_all.get(cid) or relationships.new_scores(), tun)
+        out[cid] = relationships.state_for(c, rel_all.get(cid) or relationships.new_scores(),
+                                           tun, lang=lang_of(content))
     return out
 
 

@@ -447,6 +447,7 @@ const EN = {
   "🗺 地图": "🗺 Map", "📔 档案": "📔 Dossier",
 };
 function t(s) { return uiLang === "en" ? (EN[s] || s) : s; }
+const B = (zh, en) => uiLang === "en" ? en : zh;
 // translate a rendered subtree: text nodes + placeholder/title attributes, exact-match
 function translateNode(root) {
   if (uiLang !== "en" || !root) return root;
@@ -779,8 +780,8 @@ function renderCast() {
   // the "所有人" / broadcast pseudo-target
   const all = document.createElement("div");
   all.className = "castitem" + (target === null ? " sel" : "");
-  all.appendChild(avatarEl("所有人"));
-  const as = document.createElement("small"); as.textContent = "所有人"; all.appendChild(as);
+  all.appendChild(avatarEl(B("所有人", "All")));
+  const as = document.createElement("small"); as.textContent = B("所有人", "Everyone"); all.appendChild(as);
   all.onclick = () => { target = null; renderCast(); updatePlaceholder(); };
   el.appendChild(all);
 
@@ -853,7 +854,9 @@ async function moveTo(name) {
   try {
     const run = await j(`/runs/${runId}/move`, { method:"POST", body: JSON.stringify({ location: name }) });
     applyRunUpdate(run);
-    const who = following.length ? `（你带着同行的人来到了 ${name}。）` : `（你来到了 ${name}。）`;
+    const who = following.length
+      ? B(`（你带着同行的人来到了 ${name}。）`, `(You arrive at ${name}, your companions with you.)`)
+      : B(`（你来到了 ${name}。）`, `(You arrive at ${name}.)`);
     renderBeat({ author:"engine", type:"description", text: who });
     renderDiscoveries(run.discoveries);
     if (run.suggestions && run.suggestions.length) renderSuggest(run.suggestions);
@@ -872,12 +875,13 @@ function renderMoveAsk(req) {
   if (!req || ended) { el.classList.add("hidden"); el.innerHTML = ""; return; }
   el.innerHTML = "";
   const t = document.createElement("span");
-  const tail = req.generate ? "（一处新的去处，去了才知道是什么样）" : "";
-  t.innerHTML = `🚪 <b>${escapeHtml(req.by_name||"对方")}</b> 想带你去 <b>${escapeHtml(req.to_name||"")}</b>${tail}`;
-  const go = document.createElement("button"); go.className = "go"; go.textContent = `跟 TA 去`;
+  const tail = req.generate ? B("（一处新的去处，去了才知道是什么样）", " (somewhere new — you won't know until you go)") : "";
+  t.innerHTML = B(`🚪 <b>${escapeHtml(req.by_name||"对方")}</b> 想带你去 <b>${escapeHtml(req.to_name||"")}</b>${tail}`,
+                  `🚪 <b>${escapeHtml(req.by_name||"They")}</b> wants to take you to <b>${escapeHtml(req.to_name||"")}</b>${tail}`);
+  const go = document.createElement("button"); go.className = "go"; go.textContent = B("跟 TA 去", "Go with them");
   go.onclick = () => acceptMove(req);
-  const stay = document.createElement("button"); stay.className = "stay"; stay.textContent = "留下";
-  stay.onclick = () => { renderMoveAsk(null); renderBeat({ author:"engine", type:"description", text:`（你没有动，留在了原地。）` }); };
+  const stay = document.createElement("button"); stay.className = "stay"; stay.textContent = B("留下", "Stay");
+  stay.onclick = () => { renderMoveAsk(null); renderBeat({ author:"engine", type:"description", text: B("（你没有动，留在了原地。）", "(You don't move. You stay where you are.)") }); };
   el.append(t, go, stay); el.classList.remove("hidden");
 }
 async function acceptMove(req) {
@@ -886,7 +890,9 @@ async function acceptMove(req) {
   try {
     const run = await j(`/runs/${runId}/move`, { method:"POST", body: JSON.stringify({ location: req.to || req.to_name, with_character_id: req.by_id, generate: !!req.generate }) });
     applyRunUpdate(run);
-    renderBeat({ author:"engine", type:"description", text:`（你跟着${req.by_name||"对方"}来到了 ${req.to_name}。）` });
+    renderBeat({ author:"engine", type:"description",
+      text: B(`（你跟着${req.by_name||"对方"}来到了 ${req.to_name}。）`,
+              `(You follow ${req.by_name||"them"} to ${req.to_name}.)`) });
     renderDiscoveries(run.discoveries);
     if (run.suggestions && run.suggestions.length) renderSuggest(run.suggestions);
   } catch(e) { renderBeat({ author:"engine", type:"description", text:`（${e.message}）` }); }
@@ -932,35 +938,37 @@ async function openJournal() {
     const frags = sec.frags && sec.frags.length ? sec.frags : (sec.unlocked || []).map(u => ({ id: null, text: u }));
     const layers = frags.map(f => `<div class="jfrag">${escapeHtml(f.text)}${
       (sec.confrontable && f.id)
-        ? ` <a class="jconfront" data-frag="${escapeHtml(f.id)}" data-char="${escapeHtml(sec.character_id || "")}">🃏 当面对质</a>` : ""
+        ? ` <a class="jconfront" data-frag="${escapeHtml(f.id)}" data-char="${escapeHtml(sec.character_id || "")}">${B("🃏 当面对质", "🃏 Confront them")}</a>` : ""
     }</div>`).join("");
     const left = sec.locked_count > 0
-      ? `<div class="jlocked">…还有 ${sec.locked_count} 层没有揭开${sec.confrontable ? `<span class="jwho">（${escapeHtml(sec.character)}就在眼前，可拿已知的证据当面对质）</span>` : ""}</div>` : "";
+      ? `<div class="jlocked">${B(`…还有 ${sec.locked_count} 层没有揭开`, `…${sec.locked_count} layer(s) still hidden`)}${sec.confrontable ? `<span class="jwho">${B(`（${escapeHtml(sec.character)}就在眼前，可拿已知的证据当面对质）`, ` (${escapeHtml(sec.character)} is right here — you can confront them with what you know)`)}</span>` : ""}</div>` : "";
     const who = sec.character ? `<span class="jwho">（${escapeHtml(sec.character)}）</span>` : "";
     return `<div class="jsec"><div class="jtitle">🔓 ${escapeHtml(sec.title)}${who}</div>${layers}${left}</div>`;
-  }).join("") || `<div class="jempty">还没有揭开任何真相。</div>`;
-  const more = jd.secrets_untouched > 0 ? `<div class="jlocked">这故事里还藏着 ${jd.secrets_untouched} 个你尚未触及的秘密…</div>` : "";
-  const KIND = { true: "真结局", normal: "结局", bad: "坏结局", death: "死亡" };
+  }).join("") || `<div class="jempty">${B("还没有揭开任何真相。", "No truths uncovered yet.")}</div>`;
+  const more = jd.secrets_untouched > 0 ? `<div class="jlocked">${B(`这故事里还藏着 ${jd.secrets_untouched} 个你尚未触及的秘密…`, `${jd.secrets_untouched} secret(s) in this story remain untouched…`)}</div>` : "";
+  const KIND = uiLang === "en" ? { true: "True Ending", normal: "Ending", bad: "Bad Ending", death: "Death" }
+                               : { true: "真结局", normal: "结局", bad: "坏结局", death: "死亡" };
   const ends = (jd.endings || []).map(e =>
-    e.achieved ? `<div class="jend got">🏆 ${KIND[e.kind] || "结局"} · ${escapeHtml(e.title || "")}</div>`
-               : `<div class="jend">🔒 ${KIND[e.kind] || "结局"} · ？？？</div>`
-  ).join("") || `<div class="jempty">这个剧本没有作者预设的结局。</div>`;
+    e.achieved ? `<div class="jend got">🏆 ${KIND[e.kind] || KIND.normal} · ${escapeHtml(e.title || "")}</div>`
+               : `<div class="jend">🔒 ${KIND[e.kind] || KIND.normal} · ？？？</div>`
+  ).join("") || `<div class="jempty">${B("这个剧本没有作者预设的结局。", "This story has no authored endings.")}</div>`;
   ov.innerHTML = `<div class="jcard" onclick="event.stopPropagation()">
-    <div class="jbar"><b>📔 档案</b><button class="ghost" onclick="document.getElementById('journal').remove()">关闭</button></div>
-    ${jd.identity ? `<div class="jh">🎖 当前身份</div><div class="jfrag">${escapeHtml(jd.identity)}</div>` : ""}
-    ${(jd.inventory||[]).length ? `<div class="jh">🎒 随身物品</div>` + jd.inventory.map(i=>`<div class="jfrag">${escapeHtml(i.name)}${i.detail?`<span class="jwho"> — ${escapeHtml(i.detail)}</span>`:""}</div>`).join("") : ""}
-    ${(jd.stashes||[]).length ? `<div class="jh">📦 存放在各处</div>` + jd.stashes.map(st=>`<div class="jfrag">${escapeHtml(st.location||"")}：${st.items.map(i=>escapeHtml(i.name)).join("、")}</div>`).join("") : ""}
-    ${(jd.deaths||[]).length ? `<div class="jh">🕯 逝者</div><div class="jfrag">${jd.deaths.map(escapeHtml).join("、")}</div>` : ""}
-    ${(jd.promises||[]).length ? `<div class="jh">🤝 约定</div>` + jd.promises.map(p => {
+    <div class="jbar"><b>${B("📔 档案", "📔 Dossier")}</b><button class="ghost" onclick="document.getElementById('journal').remove()">${B("关闭", "Close")}</button></div>
+    ${jd.identity ? `<div class="jh">${B("🎖 当前身份", "🎖 Current identity")}</div><div class="jfrag">${escapeHtml(jd.identity)}</div>` : ""}
+    ${(jd.inventory||[]).length ? `<div class="jh">${B("🎒 随身物品", "🎒 Carrying")}</div>` + jd.inventory.map(i=>`<div class="jfrag">${escapeHtml(i.name)}${i.detail?`<span class="jwho"> — ${escapeHtml(i.detail)}</span>`:""}</div>`).join("") : ""}
+    ${(jd.stashes||[]).length ? `<div class="jh">${B("📦 存放在各处", "📦 Stashed around")}</div>` + jd.stashes.map(st=>`<div class="jfrag">${escapeHtml(st.location||"")}：${st.items.map(i=>escapeHtml(i.name)).join("、")}</div>`).join("") : ""}
+    ${(jd.deaths||[]).length ? `<div class="jh">${B("🕯 逝者", "🕯 The departed")}</div><div class="jfrag">${jd.deaths.map(escapeHtml).join("、")}</div>` : ""}
+    ${(jd.promises||[]).length ? `<div class="jh">${B("🤝 约定", "🤝 Promises")}</div>` + jd.promises.map(p => {
       const tag = p.status === "open" ? "⏳" : p.status === "kept" ? "✅" : p.status === "void" ? "🕯" : "💔";
       return `<div class="jfrag">${tag} ${escapeHtml(p.when)} · ${escapeHtml(p.what)}<span class="jwho">（${escapeHtml(p.name)}）</span></div>`;
     }).join("") : ""}
-    <div class="jh">已揭开的真相</div>${secs}${more}
-    <div class="jh">结局图鉴</div><div class="jends">${ends}</div>
+    <div class="jh">${B("已揭开的真相", "Truths uncovered")}</div>${secs}${more}
+    <div class="jh">${B("结局图鉴", "Ending gallery")}</div><div class="jends">${ends}</div>
   </div>`;
   ov.querySelectorAll(".jconfront").forEach(el => {
     el.onclick = () => confrontClue(el.dataset.frag, el.dataset.char);
   });
+  translateNode(ov);
 }
 // ── 📱 小手机: messages / calendar / contacts / notes in one shell ──────────────
 let phoneUnread = 0, phoneDevice = "手机";
@@ -1039,7 +1047,7 @@ async function openAlbum() {
   const rows = (jd.album || []).map(a =>
     `<div class="albumcard"><div class="atitle">${icon[a.kind] || "💫"} ${escapeHtml(a.title||"")}${a.name ? `<span class="jwho"> · ${escapeHtml(a.name)}</span>` : ""}</div>
       <div class="atext">${escapeHtml(a.text||"")}</div>
-      <div class="ameta">第${a.act||1}幕${a.at ? " · " + escapeHtml(a.at) : ""}</div></div>`
+      <div class="ameta">${B(`第${a.act||1}幕`, `Act ${a.act||1}`)}${a.at ? " · " + escapeHtml(a.at) : ""}</div></div>`
   ).join("") || `<div class="jempty">还没有值得裱起来的瞬间。<br>它们会在你意想不到的时候降临。</div>`;
   phoneShell(rows, "💞 回忆", "openPhone()");
 }
@@ -1082,7 +1090,7 @@ function renderThread(th) {
   openPhone.lastThread = th.char_id;
 }
 function toastUnlocked(th) {
-  for (const t of (th.unlocked || [])) pushToast(`🔓 TA在${escapeHtml(th.device||"消息")}里松了口：「${escapeHtml(t)}」`, "t-unlock", 500);
+  for (const t of (th.unlocked || [])) pushToast(B(`🔓 TA在${escapeHtml(th.device||"消息")}里松了口：「${escapeHtml(t)}」`, `🔓 They let it slip over the ${escapeHtml(th.device||"phone")}: “${escapeHtml(t)}”`), "t-unlock", 500);
 }
 async function sendPhoneMsg(cid) {
   const inp = document.getElementById("pmsgIn");
@@ -1143,16 +1151,16 @@ async function openBag() {
     `<div class="jsec" style="margin-top:6px"><div class="jtitle">📦 存放在「${escapeHtml(s.location||"")}」</div>${
       (s.items||[]).map(i=>`<div class="jfrag">${escapeHtml(i.name||"")}${i.detail?`<span class="jwho"> · ${escapeHtml(i.detail)}</span>`:""}</div>`).join("")
     }</div>`).join("");
-  const tip = `<div class="jempty" style="margin-top:10px">收纳：在一个地方说「把××放在这里」；回到那里说「取回××」。</div>`;
-  const cash = curMoney != null ? `<div class="jtitle" style="margin:4px 0">💰 现钱 <b>${curMoney}</b>${escapeHtml(curCurrency)}</div>` : "";
+  const tip = `<div class="jempty" style="margin-top:10px">${B("收纳：在一个地方说「把××放在这里」；回到那里说「取回××」。", "Stashing: say “leave the X here” at a place; come back and say “take back the X”.")}</div>`;
+  const cash = curMoney != null ? `<div class="jtitle" style="margin:4px 0">${B("💰 现钱", "💰 Cash")} <b>${curMoney}</b>${escapeHtml(curCurrency)}</div>` : "";
   phoneShell(`<div style="padding:4px 2px">${cash}
-    <div class="jtitle" style="margin:4px 0">🎒 随身带着（${(jd.inventory||[]).length}）</div>${inv}
-    ${stash ? `<div class="jtitle" style="margin:12px 0 4px">📦 存放的</div>${stash}` : ""}
+    <div class="jtitle" style="margin:4px 0">${B("🎒 随身带着", "🎒 Carrying")}（${(jd.inventory||[]).length}）</div>${inv}
+    ${stash ? `<div class="jtitle" style="margin:12px 0 4px">${B("📦 存放的", "📦 Stashed")}</div>${stash}` : ""}
     ${tip}</div>`, "🎒 背包", "openPhone()");
 }
 function openCalendar() {
   const ck = curClock;
-  const now = ck && ck.label ? `<div class="pcalnow">🕐 现在：<b>${escapeHtml(ck.label)}</b></div>` : "";
+  const now = ck && ck.label ? `<div class="pcalnow">${B("🕐 现在：", "🕐 Now: ")}<b>${escapeHtml(ck.label)}</b></div>` : "";
   let ddl = "";
   if (ck && ck.deadline) {
     const d = ck.deadline;
@@ -1164,7 +1172,7 @@ function openCalendar() {
   const qs = (curQuests || []).filter(q => q.status === "open").map(q =>
     `<div class="pcalitem">📋 ${escapeHtml(q.title||"")}${q.reward ? `（酬 ${q.reward}${escapeHtml(curCurrency)}）` : ""}${q.deadline_day ? ` · 限第${q.deadline_day}天内` : ""}<span class="jwho">（${escapeHtml(q.giver||"")}）</span></div>`
   ).join("");
-  phoneShell(`${now}${ddl}<div class="jh">约定</div>${prs}${qs ? `<div class="jh">在办的差事</div>${qs}` : ""}`, "🗓 日历", "openPhone()");
+  phoneShell(`${now}${ddl}<div class="jh">${B("约定", "Promises")}</div>${prs}${qs ? `<div class="jh">${B("在办的差事", "Open jobs")}</div>${qs}` : ""}`, "🗓 日历", "openPhone()");
 }
 // 到达即发现: physical truths that unlocked the moment we arrived
 function renderDiscoveries(list) {
@@ -1193,13 +1201,13 @@ async function openMap() {
     const canGo = !n.here && reachable.has(n.id);
     const cls = "mnode" + (n.here ? " here" : "") + (canGo ? " cango" : "");
     const go = canGo ? `data-go="${escapeHtml(n.name)}"` : "";
-    const tag = n.here ? `<span class="mhere">📍 你在这里</span>` : (canGo ? `<span class="mgo">可前往</span>` : "");
+    const tag = n.here ? `<span class="mhere">${B("📍 你在这里", "📍 You are here")}</span>` : (canGo ? `<span class="mgo">${B("可前往", "Can go")}</span>` : "");
     return `<div class="${cls}" ${go}><div class="mname">${escapeHtml(n.name)} ${tag}</div>${chars}${exits}</div>`;
   }).join("");
-  const hidden = mp.hidden > 0 ? `<div class="mhidden">还有 ${mp.hidden} 处地方，你尚未打听到…</div>` : "";
+  const hidden = mp.hidden > 0 ? `<div class="mhidden">${B(`还有 ${mp.hidden} 处地方，你尚未打听到…`, `${mp.hidden} more place(s) you haven't heard of yet…`)}</div>` : "";
   ov.innerHTML = `<div class="mcard" onclick="event.stopPropagation()">
-    <div class="jbar"><b>🗺 地图</b><button class="ghost" onclick="document.getElementById('mapov').remove()">关闭</button></div>
-    <div class="mgrid">${cards || '<div class="jempty">这个故事没有标注地图。</div>'}</div>${hidden}
+    <div class="jbar"><b>${B("🗺 地图", "🗺 Map")}</b><button class="ghost" onclick="document.getElementById('mapov').remove()">${B("关闭", "Close")}</button></div>
+    <div class="mgrid">${cards || `<div class="jempty">${B("这个故事没有标注地图。", "This story has no map.")}</div>`}</div>${hidden}
   </div>`;
   ov.querySelectorAll("[data-go]").forEach(el => {
     el.onclick = async () => { ov.remove(); await moveTo(el.getAttribute("data-go")); };
@@ -1210,9 +1218,11 @@ function showDice(d) {
   if (!d) return;
   const row = document.createElement("div");
   row.className = "dice";
-  const label = { crit_success: "大成功！", success: "成功", fail: "失败", crit_fail: "大失败！" }[d.outcome] || "";
+  const label = (uiLang === "en"
+    ? { crit_success: "Critical success!", success: "Success", fail: "Fail", crit_fail: "Critical fail!" }
+    : { crit_success: "大成功！", success: "成功", fail: "失败", crit_fail: "大失败！" })[d.outcome] || "";
   const cls = (d.outcome === "success" || d.outcome === "crit_success") ? "win" : "lose";
-  row.innerHTML = `🎲 命运判定 d20 · 需要 ≥${d.dc || "?"} <b class="roll">--</b>`;
+  row.innerHTML = `${B("🎲 命运判定 d20 · 需要", "🎲 Fate check d20 · need")} ≥${d.dc || "?"} <b class="roll">--</b>`;
   chat.appendChild(row); chat.scrollTop = chat.scrollHeight;
   const rollEl = row.querySelector(".roll");
   const t = setInterval(() => { rollEl.textContent = 1 + Math.floor(Math.random() * 20); }, 55);
@@ -1267,39 +1277,39 @@ async function openCharCard(cid) {
   const rel = p.relation || {};
   const KIND_ICON = { meet: "🤝", rel_up: "💗", reveal: "🔓", death: "🕯", follow: "🚶" };
   const logs = (p.log || []).slice(-12).reverse().map(e =>
-    `<div class="clog">${KIND_ICON[e.kind] || "·"} <span class="jwho">第${e.act}幕</span> ${escapeHtml(e.text)}</div>`).join("")
-    || `<div class="jempty">你们的故事才刚开始。</div>`;
+    `<div class="clog">${KIND_ICON[e.kind] || "·"} <span class="jwho">${B(`第${e.act}幕`, `Act ${e.act}`)}</span> ${escapeHtml(e.text)}</div>`).join("")
+    || `<div class="jempty">${B("你们的故事才刚开始。", "Your story is just beginning.")}</div>`;
   const secrets = (p.secrets || []).map(sec =>
-    `<div class="clog">🔓 ${escapeHtml(sec.title)} <span class="jwho">${sec.unlocked}/${sec.total} 层</span></div>`).join("")
-    + (p.secrets_hidden ? `<div class="jlocked">TA身上似乎还藏着 ${p.secrets_hidden} 个你未触及的秘密…</div>` : "");
+    `<div class="clog">🔓 ${escapeHtml(sec.title)} <span class="jwho">${sec.unlocked}/${sec.total}${B(" 层", "")}</span></div>`).join("")
+    + (p.secrets_hidden ? `<div class="jlocked">${B(`TA身上似乎还藏着 ${p.secrets_hidden} 个你未触及的秘密…`, `They seem to be keeping ${p.secrets_hidden} more secret(s) you haven't touched…`)}</div>` : "");
   const bio = (p.bio || []).map(b => `<div class="jfrag">${escapeHtml(b)}</div>`).join("")
-    + (p.bio_next_at != null ? `<div class="jlocked">🔒 关系再近一点（亲近≥${p.bio_next_at}），你会更了解TA…</div>` : "");
-  const nextTxt = rel.next && rel.next.name ? `<span class="jwho">（差${rel.next.to_next}到「${rel.next.name}」）</span>` : "";
+    + (p.bio_next_at != null ? `<div class="jlocked">${B(`🔒 关系再近一点（亲近≥${p.bio_next_at}），你会更了解TA…`, `🔒 Get closer (closeness ≥${p.bio_next_at}) to learn more…`)}</div>` : "");
+  const nextTxt = rel.next && rel.next.name ? `<span class="jwho">${B(`（差${rel.next.to_next}到「${rel.next.name}」）`, ` (${rel.next.to_next} to “${rel.next.name}”)`)}</span>` : "";
   const av = p.avatar_url ? `<img class="cportrait" src="${p.avatar_url}" alt="" onerror="this.style.display=\'none\'">`
                           : `<div class="cportrait cletter" style="background:${avatarColor(p.name)}">${escapeHtml((p.name||"?").slice(0,1))}</div>`;
   const followBtn = (!p.dead && playMode !== "god" && !p.is_lead)
-    ? `<button class="ghost" style="font-size:12px;padding:5px 10px" onclick="toggleFollow('${p.id}', ${!p.following}); document.getElementById('charcard').remove()">${p.following ? "🚶同行中 · 分开走" : (p.can_follow ? "邀TA同行" : "🔒关系不够")}</button>` : "";
+    ? `<button class="ghost" style="font-size:12px;padding:5px 10px" onclick="toggleFollow('${p.id}', ${!p.following}); document.getElementById('charcard').remove()">${p.following ? B("🚶同行中 · 分开走", "🚶Together · part ways") : (p.can_follow ? B("邀TA同行", "Invite along") : B("🔒关系不够", "🔒Not close enough"))}</button>` : "";
   ov.innerHTML = `<div class="jcard" onclick="event.stopPropagation()">
-    <div class="jbar"><b>${p.dead ? "🕯 " : ""}${escapeHtml(p.name)}${p.is_lead ? " · 核心" : ""}</b>
-      <button class="ghost" onclick="document.getElementById('charcard').remove()">关闭</button></div>
+    <div class="jbar"><b>${p.dead ? "🕯 " : ""}${escapeHtml(p.name)}${p.is_lead ? B(" · 核心", " · lead") : ""}</b>
+      <button class="ghost" onclick="document.getElementById('charcard').remove()">${B("关闭", "Close")}</button></div>
     <div class="chead">${av}<div class="cmeta">
       ${p.role ? `<div class="jwho">${escapeHtml(p.role)}</div>` : ""}
       <div class="cdesc">${escapeHtml((p.persona_text || "").slice(0, 90))}${(p.persona_text||"").length>90?"…":""}</div>
       ${p.where ? `<div class="jwho">📍 ${escapeHtml(p.where)}</div>` : ""}
-      ${p.hp === "hurt" ? `<div class="jwho">🩸 带着伤</div>` : p.hp === "dying" ? `<div class="jwho" style="color:#ff7a7a">🩸 重伤濒死，需要救治</div>` : ""}
+      ${p.hp === "hurt" ? `<div class="jwho">${B("🩸 带着伤", "🩸 Wounded")}</div>` : p.hp === "dying" ? `<div class="jwho" style="color:#ff7a7a">${B("🩸 重伤濒死，需要救治", "🩸 Dying — needs help now")}</div>` : ""}
       ${followBtn}
     </div></div>
-    ${p.dead ? `<div class="jlocked">TA 已不在人世。</div>` : `
-    <div class="jh">你们的关系 · ${escapeHtml(rel.mode_name || "")} ${nextTxt}</div>
-    ${barHtml("亲近", p.closeness, -40, 100, "#8fe0a6")}
-    ${barHtml("心动", p.romance, 0, 100, "#ff8fb3")}`}
-    ${bio ? `<div class="jh">你所了解的TA</div>${bio}` : ""}
-    ${(p.carrying||[]).length || (p.keepsakes||[]).length ? `<div class="jh">TA带着的</div><div class="clog">${
-      (p.carrying||[]).map(escapeHtml).join("、")}${(p.keepsakes||[]).length ? `<span class="jwho">　🎁 ${p.keepsakes.map(escapeHtml).join("、")}（你送的）</span>` : ""}</div>` : ""}
-    ${(p.ties||[]).length ? `<div class="jh">TA与其他人</div>` + p.ties.map(t =>
+    ${p.dead ? `<div class="jlocked">${B("TA 已不在人世。", "They are gone.")}</div>` : `
+    <div class="jh">${B("你们的关系", "Your relationship")} · ${escapeHtml(rel.mode_name || "")} ${nextTxt}</div>
+    ${barHtml(B("亲近", "Closeness"), p.closeness, -40, 100, "#8fe0a6")}
+    ${barHtml(B("心动", "Romance"), p.romance, 0, 100, "#ff8fb3")}`}
+    ${bio ? `<div class="jh">${B("你所了解的TA", "What you know of them")}</div>${bio}` : ""}
+    ${(p.carrying||[]).length || (p.keepsakes||[]).length ? `<div class="jh">${B("TA带着的", "What they carry")}</div><div class="clog">${
+      (p.carrying||[]).map(escapeHtml).join("、")}${(p.keepsakes||[]).length ? `<span class="jwho">　🎁 ${p.keepsakes.map(escapeHtml).join("、")}${B("（你送的）", " (your gifts)")}</span>` : ""}</div>` : ""}
+    ${(p.ties||[]).length ? `<div class="jh">${B("TA与其他人", "Them and the others")}</div>` + p.ties.map(t =>
       `<div class="clog">${({"-2":"⚔️","-1":"💢","1":"🤝","2":"🛡️"})[String(t.stance)] || "·"} ${escapeHtml(t.name)} <span class="jwho">${escapeHtml(t.label || "")}</span></div>`).join("") : ""}
-    <div class="jh">TA的秘密</div>${secrets || '<div class="jempty">还一无所知。</div>'}
-    <div class="jh">你们的故事</div>${logs}
+    <div class="jh">${B("TA的秘密", "Their secrets")}</div>${secrets || `<div class="jempty">${B("还一无所知。", "You know nothing yet.")}</div>`}
+    <div class="jh">${B("你们的故事", "Your story together")}</div>${logs}
   </div>`;
 }
 
@@ -1416,7 +1426,7 @@ function renderPlace(loc) {
   const exits = (loc.exits||[]).filter(Boolean);
   el.innerHTML = `${clockChip()}📍 <b>${escapeHtml(loc.name)}</b>`;
   if (exits.length) {
-    const wrap = document.createElement("span"); wrap.className = "exits"; wrap.append("　→ 可去：");
+    const wrap = document.createElement("span"); wrap.className = "exits"; wrap.append(B("　→ 可去：", "　→ Go: "));
     exits.forEach((name, i) => {
       if (i) wrap.append("、");
       const a = document.createElement("span"); a.className = "exit"; a.textContent = name;
@@ -1441,7 +1451,7 @@ function refreshStrip() {
   if (curClock && curClock.label) {
     let t = "🕐" + curClock.label;
     if (curClock.deadline && curClock.deadline.days_left >= 0)
-      t += " ⏳" + (curClock.deadline.days_left === 0 ? "今天" : curClock.deadline.days_left + "天");
+      t += " ⏳" + (curClock.deadline.days_left === 0 ? B("今天", "today") : curClock.deadline.days_left + B("天", "d"));
     bits.push(escapeHtml(t));
   }
   if (curLocData && curLocData.name) bits.push("📍" + escapeHtml(curLocData.name));
@@ -1451,10 +1461,10 @@ function refreshStrip() {
   if (lastPressure && lastPressure.name) bits.push("⚠️" + escapeHtml(String(lastPressure.value || 0)));
   if (!document.getElementById("hintbar").classList.contains("hidden")) bits.push("💡");
   if (curVerdict && !curVerdict.solved && !curVerdict.failed && curVerdict.attempts_left)
-    bits.push('<span class="alert">🔍 可结案</span>');
+    bits.push(`<span class="alert">${B("🔍 可结案", "🔍 Case ready")}</span>`);
   if (!bits.length) { el.classList.add("hidden"); return; }
   el.classList.remove("hidden");
-  el.innerHTML = `<span class="stripbits">${bits.join("　")}</span><span class="chev">${barsOpen ? "▲ 收起" : "▼ 详情"}</span>`;
+  el.innerHTML = `<span class="stripbits">${bits.join("　")}</span><span class="chev">${barsOpen ? B("▲ 收起", "▲ Fold") : B("▼ 详情", "▼ More")}</span>`;
 }
 
 // 🔍 指认结案: the case can be CLOSED — the player commits, with limited attempts
@@ -1464,7 +1474,8 @@ function renderVerdictBar(v) {
   curVerdict = v || null;
   const el = document.getElementById("verdictbar");
   if (!v || v.solved || v.failed || !v.attempts_left) { el.classList.add("hidden"); return; }
-  el.innerHTML = `🔍 <b>可以结案了。</b>把你认定的真相说出来（还有 ${v.attempts_left} 次机会）<button onclick="openVerdict()">正式指认</button>`;
+  el.innerHTML = B(`🔍 <b>可以结案了。</b>把你认定的真相说出来（还有 ${v.attempts_left} 次机会）<button onclick="openVerdict()">正式指认</button>`,
+                   `🔍 <b>The case can be closed.</b> Name the truth as you see it (${v.attempts_left} attempt(s) left) <button onclick="openVerdict()">Make the call</button>`);
   el.classList.remove("hidden");
 }
 function openVerdict() {
@@ -1478,12 +1489,12 @@ function openVerdict() {
   }
   const opts = (v.options || []).map(o => {
     const tried = (v.tried || []).includes(o.id);
-    return `<button class="vopt" data-oid="${escapeHtml(o.id)}" ${tried ? "disabled" : ""}>${escapeHtml(o.label)}${tried ? "（已排除）" : ""}</button>`;
+    return `<button class="vopt" data-oid="${escapeHtml(o.id)}" ${tried ? "disabled" : ""}>${escapeHtml(o.label)}${tried ? B("（已排除）", " (ruled out)") : ""}</button>`;
   }).join("");
   ov.innerHTML = `<div class="jcard" onclick="event.stopPropagation()">
-    <div class="jbar"><b>🔍 结案指认</b><button class="ghost" onclick="document.getElementById('verdictov').remove()">再想想</button></div>
+    <div class="jbar"><b>${B("🔍 结案指认", "🔍 Closing the case")}</b><button class="ghost" onclick="document.getElementById('verdictov').remove()">${B("再想想", "Not yet")}</button></div>
     <p class="vprompt">${escapeHtml(v.prompt)}</p>
-    <p class="jwho">指认是正式的。剩余 ${v.attempts_left} 次机会，说错是有代价的。</p>
+    <p class="jwho">${B(`指认是正式的。剩余 ${v.attempts_left} 次机会，说错是有代价的。`, `This is formal. ${v.attempts_left} attempt(s) left — a wrong call has a price.`)}</p>
     <div class="vopts">${opts}</div></div>`;
   ov.querySelectorAll(".vopt:not([disabled])").forEach(b => {
     b.onclick = () => submitVerdict(b.dataset.oid, b.textContent);
@@ -1493,10 +1504,10 @@ async function submitVerdict(oid, label) {
   const ov = document.getElementById("verdictov"); if (ov) ov.remove();
   try {
     const res = await j(`/runs/${runId}/verdict`, { method:"POST", body: JSON.stringify({ option_id: oid }) });
-    renderBeat({ author:"player", type:"dialogue", text:`（你正式指认：${label}）` });
+    renderBeat({ author:"player", type:"dialogue", text: B(`（你正式指认：${label}）`, `(You make the formal call: ${label})`) });
     renderBeat({ author:"engine", type:"description", text: res.text || "" });
-    if (res.correct) pushToast("🔍 指认成立，真相已然大白", "t-end", 300);
-    else pushToast(`🔍 指认不成立${res.attempts_left > 0 ? `，还剩 ${res.attempts_left} 次机会` : ""}`, "t-press", 300);
+    if (res.correct) pushToast(B("🔍 指认成立，真相已然大白", "🔍 The call stands — the truth is out"), "t-end", 300);
+    else pushToast(B(`🔍 指认不成立${res.attempts_left > 0 ? `，还剩 ${res.attempts_left} 次机会` : ""}`, `🔍 The call doesn't hold${res.attempts_left > 0 ? ` — ${res.attempts_left} attempt(s) left` : ""}`), "t-press", 300);
     if (res.ending) showEnding(res.ending);
     renderVerdictBar(res.verdict);
   } catch (e) { pushToast("⚠️ " + escapeHtml(e.message), "", 3000); }
@@ -1511,7 +1522,7 @@ function renderPromises(list) {
   if (!list || !list.length) { el.classList.add("hidden"); return; }
   const p = list[0];
   const icon = p.romantic ? "💞" : "🤝";
-  let s = `${icon} 约定：<b>${escapeHtml(p.when)}</b>`;
+  let s = `${icon} ${B("约定：", "Promise: ")}<b>${escapeHtml(p.when)}</b>`;
   if (p.place) s += ` · ${escapeHtml(p.place)}`;
   s += ` · ${escapeHtml(p.what)}${p.name ? `（${escapeHtml(p.name)}）` : ""}`;
   if (list.length > 1) s += `<span class="pmore">＋${list.length - 1}</span>`;
@@ -1521,13 +1532,13 @@ function renderPromises(list) {
 function renderGoal(goal) {
   queueMicrotask(refreshStrip);
   const el = document.getElementById("goalbar");
-  if (goal) { el.innerHTML = `🎯 <b>当前目标</b>：${escapeHtml(goal)}`; el.classList.remove("hidden"); }
+  if (goal) { el.innerHTML = `🎯 <b>${B("当前目标", "Current goal")}</b>${B("：", ": ")}${escapeHtml(goal)}`; el.classList.remove("hidden"); }
   else el.classList.add("hidden");
 }
 function renderHint(hint) {
   queueMicrotask(refreshStrip);
   const el = document.getElementById("hintbar");
-  if (hint) { el.innerHTML = `💡 <b>线索</b>：${escapeHtml(hint)}`; el.classList.remove("hidden"); }
+  if (hint) { el.innerHTML = `💡 <b>${B("线索", "Hint")}</b>${B("：", ": ")}${escapeHtml(hint)}`; el.classList.remove("hidden"); }
   else el.classList.add("hidden");
 }
 function renderProgress(prog) {
@@ -1536,20 +1547,21 @@ function renderProgress(prog) {
   const rows = prog.items.map(it =>
     `<span class="it ${it.done?'done':''}">${it.done?'✓':'○'} ${escapeHtml(it.label)}</span>`
   ).join("　");
-  el.innerHTML = `<span class="hd">🔎 线索 ${prog.done}/${prog.total}</span>　${rows}`;
+  el.innerHTML = `<span class="hd">🔎 ${B("线索", "Clues")} ${prog.done}/${prog.total}</span>　${rows}`;
   el.classList.remove("hidden");
 }
 function renderSuggest(items) {
   suggest.innerHTML = "";
   (items||[]).forEach(t => {
     const c = document.createElement("span"); c.className = "chip"; c.textContent = "💡 " + t;
-    c.onclick = () => { const isAct = t.startsWith("用「做」"); msg.value = isAct ? "" : t; if (isAct) channel.value = "do"; msg.focus(); };
+    c.onclick = () => { const isAct = t.startsWith("用「做」") || t.startsWith("Use “Do”"); msg.value = isAct ? "" : t; if (isAct) channel.value = "do"; msg.focus(); };
     suggest.appendChild(c);
   });
 }
 
 // ── ending ────────────────────────────────────────────
-const KIND_LABEL = { true: "真结局", normal: "结局", bad: "坏结局", death: "你死了" };
+const KIND_LABEL_ZH = { true: "真结局", normal: "结局", bad: "坏结局", death: "你死了" };
+const KIND_LABEL_EN = { true: "True Ending", normal: "Ending", bad: "Bad Ending", death: "You Died" };
 let ended = false;
 function showEnding(ending) {
   if (!ending) return;
@@ -1562,7 +1574,8 @@ function showEnding(ending) {
   ended = true;
   const card = document.createElement("div");
   card.className = "ending " + kind;
-  card.innerHTML = `<div class="kind">— ${KIND_LABEL[kind] || "结局"} —</div>`
+  const KIND_LABEL = uiLang === "en" ? KIND_LABEL_EN : KIND_LABEL_ZH;
+  card.innerHTML = `<div class="kind">— ${KIND_LABEL[kind] || KIND_LABEL.normal} —</div>`
     + `<h2>${escapeHtml(ending.title || "")}</h2>`
     + (ending.text ? `<p>${escapeHtml(ending.text)}</p>` : "");
   const btn = document.createElement("button");
@@ -1785,8 +1798,8 @@ async function streamTurn(url, bodyObj) {
         else if (ev.event === "phone") {
           const m = ev.message || {};
           setPhoneBadge(phoneUnread + (m.msgs || []).length);
-          if (m.mail) pushToast(`📮 ${escapeHtml(m.name || "")} 给你写了一封信：「${escapeHtml(((m.msgs || [])[0] || "").slice(0, 20))}」`, "t-rel", 400);
-          else if (m.call) pushToast(`📞 ${escapeHtml(m.name || "")} 来电：「${escapeHtml(((m.msgs || [])[0] || "").slice(0, 24))}…」`, "t-rel", 400);
+          if (m.mail) pushToast(B(`📮 ${escapeHtml(m.name || "")} 给你写了一封信：「${escapeHtml(((m.msgs || [])[0] || "").slice(0, 20))}」`, `📮 ${escapeHtml(m.name || "")} wrote you a letter: “${escapeHtml(((m.msgs || [])[0] || "").slice(0, 20))}”`), "t-rel", 400);
+          else if (m.call) pushToast(B(`📞 ${escapeHtml(m.name || "")} 来电：「${escapeHtml(((m.msgs || [])[0] || "").slice(0, 24))}…」`, `📞 ${escapeHtml(m.name || "")} calling: “${escapeHtml(((m.msgs || [])[0] || "").slice(0, 24))}…”`), "t-rel", 400);
           else pushToast(`📱 ${escapeHtml(m.name || "")}：${escapeHtml(((m.msgs || [])[0] || "").slice(0, 24))}`, "t-rel", 400);
           playSfx && playSfx(m.call ? "ringtone" : "knock");
         }
@@ -1845,51 +1858,73 @@ function pushToast(html, cls, delay) {
 function showMoments(moments, relDeltas) {
   let i = 0;
   for (const m of moments) {
-    if (m.kind === "unlock") pushToast(`🔓 真相拼上一块：「${m.title}」`, "t-unlock", i++ * 650);
-    else if (m.kind === "rel_up") pushToast(`💗 你和 ${m.name} 成了「${m.mode_name}」`, "t-rel", i++ * 650);
-    else if (m.kind === "act") pushToast(`📖 进入第${m.index}幕${m.title ? " · " + m.title : ""}`, "t-act", i++ * 650);
-    else if (m.kind === "ending" && !m.terminal) pushToast(`🏆 达成结局：「${m.title || m.ending_kind}」`, "t-end", i++ * 650);
+    if (m.kind === "unlock") pushToast(B(`🔓 真相拼上一块：「${m.title}」`, `🔓 A piece of the truth clicks in: “${m.title}”`), "t-unlock", i++ * 650);
+    else if (m.kind === "rel_up") pushToast(B(`💗 你和 ${m.name} 成了「${m.mode_name}」`, `💗 You and ${m.name} are now “${m.mode_name}”`), "t-rel", i++ * 650);
+    else if (m.kind === "act") pushToast(B(`📖 进入第${m.index}幕${m.title ? " · " + m.title : ""}`, `📖 Act ${m.index}${m.title ? " · " + m.title : ""}`), "t-act", i++ * 650);
+    else if (m.kind === "ending" && !m.terminal) pushToast(B(`🏆 达成结局：「${m.title || m.ending_kind}」`, `🏆 Ending reached: “${m.title || m.ending_kind}”`), "t-end", i++ * 650);
     else if (m.kind === "pressure") pushToast(`⚠️ ${m.note || ""}`, "t-press", i++ * 650);
-    else if (m.kind === "death") pushToast(`☠️ ${m.name || "有人"} 死了`, "t-press", i++ * 650);
-    else if (m.kind === "arrival") pushToast(`👋 新面孔登场：${m.name || ""}`, "t-act", i++ * 650);
-    else if (m.kind === "identity") pushToast(`🎖 你的身份变了：${m.text || ""}`, "t-end", i++ * 650);
-    else if (m.kind === "world") pushToast(`🌍 世界记住了：${m.text || ""}`, "t-unlock", i++ * 650);
+    else if (m.kind === "death") pushToast(B(`☠️ ${m.name || "有人"} 死了`, `☠️ ${m.name || "Someone"} is dead`), "t-press", i++ * 650);
+    else if (m.kind === "arrival") pushToast(B(`👋 新面孔登场：${m.name || ""}`, `👋 A new face: ${m.name || ""}`), "t-act", i++ * 650);
+    else if (m.kind === "identity") pushToast(B(`🎖 你的身份变了：${m.text || ""}`, `🎖 Your standing changed: ${m.text || ""}`), "t-end", i++ * 650);
+    else if (m.kind === "world") pushToast(B(`🌍 世界记住了：${m.text || ""}`, `🌍 The world remembers: ${m.text || ""}`), "t-unlock", i++ * 650);
     else if (m.kind === "money") pushToast(
-      `${m.delta > 0 ? "💰 +" : "💸 "}${m.delta}${m.why ? `（${m.why}）` : ""} · 余 ${m.balance}`,
+      B(`${m.delta > 0 ? "💰 +" : "💸 "}${m.delta}${m.why ? `（${m.why}）` : ""} · 余 ${m.balance}`,
+        `${m.delta > 0 ? "💰 +" : "💸 "}${m.delta}${m.why ? ` (${m.why})` : ""} · balance ${m.balance}`),
       m.delta > 0 ? "t-unlock" : "t-press", i++ * 650);
     else if (m.kind === "quest") pushToast(
-      m.status === "open" ? `📋 接下差事：${m.title}${m.reward ? `（酬 ${m.reward}）` : ""}${m.days ? ` · 限${m.days}天` : ""}` :
-      m.status === "done" ? `✅ 差事办成：${m.title}${m.reward ? `（+${m.reward}）` : ""}` :
-      `⌛ 差事黄了：${m.title}`,
+      B(m.status === "open" ? `📋 接下差事：${m.title}${m.reward ? `（酬 ${m.reward}）` : ""}${m.days ? ` · 限${m.days}天` : ""}` :
+        m.status === "done" ? `✅ 差事办成：${m.title}${m.reward ? `（+${m.reward}）` : ""}` :
+        `⌛ 差事黄了：${m.title}`,
+        m.status === "open" ? `📋 Job taken: ${m.title}${m.reward ? ` (pay ${m.reward})` : ""}${m.days ? ` · ${m.days} day(s)` : ""}` :
+        m.status === "done" ? `✅ Job done: ${m.title}${m.reward ? ` (+${m.reward})` : ""}` :
+        `⌛ Job expired: ${m.title}`),
       m.status === "failed" ? "t-press" : "t-unlock", i++ * 650);
     else if (m.kind === "player_hp") pushToast(
-      m.hp === "dead" ? "💀 你死了。「说」与「做」已被剥夺，你只能旁观" :
-      m.hp === "dying" ? "🆘 你重伤濒死" :
-      m.hp === "hurt" ? "🩹 你受伤了" : "💚 你缓过来了",
+      B(m.hp === "dead" ? "💀 你死了。「说」与「做」已被剥夺，你只能旁观" :
+        m.hp === "dying" ? "🆘 你重伤濒死" :
+        m.hp === "hurt" ? "🩹 你受伤了" : "💚 你缓过来了",
+        m.hp === "dead" ? "💀 You died. Say and Do are gone — all you can do is watch" :
+        m.hp === "dying" ? "🆘 You are dying" :
+        m.hp === "hurt" ? "🩹 You are hurt" : "💚 You're recovering"),
       m.hp === "healthy" ? "t-unlock" : "t-press", i++ * 650);
     else if (m.kind === "item") pushToast(
-      m.verb === "gained" ? `🎒 获得：${m.name}` :
-      m.verb === "stashed" ? `📦 已存放：${m.name}` :
-      m.verb === "crafted" ? `🛠 做出了：${m.name}` :
-      m.verb === "taken" ? `✊ 抢到手：${m.name}（${m.from || "对方"}记住了）` :
-      m.verb === "traded" ? `🔁 换到了：${m.name}（给出${m.gave || ""}）` :
-      `🎒 失去：${m.name}`, m.verb === "taken" ? "t-press" : "t-unlock", i++ * 650);
-    else if (m.kind === "event") pushToast(`🌊 ${m.label || "起变故了"}`, "t-act", i++ * 650);
-    else if (m.kind === "confront") pushToast({ crit_success: `🃏 一击即中：${m.name}彻底松口了`,
-      success: `🃏 对质奏效：${m.name}松了口`, fail: `🃏 ${m.name}扛住了你的对质`,
-      crit_fail: `🃏 弄巧成拙：${m.name}反将你一军` }[m.outcome] || "🃏 对质", m.outcome === "fail" || m.outcome === "crit_fail" ? "t-press" : "t-unlock", i++ * 650);
-    else if (m.kind === "deadline") pushToast(`⏳ ${m.text || "大限"}：就在今天`, "t-press", i++ * 650);
-    else if (m.kind === "npc_rel") pushToast(m.delta > 0 ? `🤝 ${m.a}和${m.b}走近了` : `⚡ ${m.a}和${m.b}闹僵了`, m.delta > 0 ? "t-rel" : "t-press", i++ * 650);
-    else if (m.kind === "dying") pushToast(`🩸 ${m.name || "有人"} 重伤濒死，还来得及救`, "t-press", i++ * 650);
-    else if (m.kind === "hurt") pushToast(`🩸 ${m.name || "有人"} 受了伤`, "t-press", i++ * 650);
-    else if (m.kind === "recover") pushToast(`💚 ${m.name || "有人"} 的伤势缓过来了`, "t-rel", i++ * 650);
+      B(m.verb === "gained" ? `🎒 获得：${m.name}` :
+        m.verb === "stashed" ? `📦 已存放：${m.name}` :
+        m.verb === "crafted" ? `🛠 做出了：${m.name}` :
+        m.verb === "taken" ? `✊ 抢到手：${m.name}（${m.from || "对方"}记住了）` :
+        m.verb === "traded" ? `🔁 换到了：${m.name}（给出${m.gave || ""}）` :
+        `🎒 失去：${m.name}`,
+        m.verb === "gained" ? `🎒 Got: ${m.name}` :
+        m.verb === "stashed" ? `📦 Stashed: ${m.name}` :
+        m.verb === "crafted" ? `🛠 Crafted: ${m.name}` :
+        m.verb === "taken" ? `✊ Snatched: ${m.name} (${m.from || "they"} will remember)` :
+        m.verb === "traded" ? `🔁 Traded for: ${m.name} (gave ${m.gave || ""})` :
+        `🎒 Lost: ${m.name}`), m.verb === "taken" ? "t-press" : "t-unlock", i++ * 650);
+    else if (m.kind === "event") pushToast(`🌊 ${m.label || B("起变故了", "Something happened")}`, "t-act", i++ * 650);
+    else if (m.kind === "confront") pushToast(B(
+      { crit_success: `🃏 一击即中：${m.name}彻底松口了`,
+        success: `🃏 对质奏效：${m.name}松了口`, fail: `🃏 ${m.name}扛住了你的对质`,
+        crit_fail: `🃏 弄巧成拙：${m.name}反将你一军` }[m.outcome] || "🃏 对质",
+      { crit_success: `🃏 Dead on: ${m.name} gave it all up`,
+        success: `🃏 It landed: ${m.name} cracked`, fail: `🃏 ${m.name} held the line`,
+        crit_fail: `🃏 It backfired: ${m.name} turned it on you` }[m.outcome] || "🃏 Confrontation"),
+      m.outcome === "fail" || m.outcome === "crit_fail" ? "t-press" : "t-unlock", i++ * 650);
+    else if (m.kind === "deadline") pushToast(B(`⏳ ${m.text || "大限"}：就在今天`, `⏳ ${m.text || "The deadline"}: today`), "t-press", i++ * 650);
+    else if (m.kind === "npc_rel") pushToast(B(m.delta > 0 ? `🤝 ${m.a}和${m.b}走近了` : `⚡ ${m.a}和${m.b}闹僵了`,
+      m.delta > 0 ? `🤝 ${m.a} and ${m.b} grew closer` : `⚡ ${m.a} and ${m.b} fell out`), m.delta > 0 ? "t-rel" : "t-press", i++ * 650);
+    else if (m.kind === "dying") pushToast(B(`🩸 ${m.name || "有人"} 重伤濒死，还来得及救`, `🩸 ${m.name || "Someone"} is dying — there's still time`), "t-press", i++ * 650);
+    else if (m.kind === "hurt") pushToast(B(`🩸 ${m.name || "有人"} 受了伤`, `🩸 ${m.name || "Someone"} got hurt`), "t-press", i++ * 650);
+    else if (m.kind === "recover") pushToast(B(`💚 ${m.name || "有人"} 的伤势缓过来了`, `💚 ${m.name || "Someone"} is pulling through`), "t-rel", i++ * 650);
     else if (m.kind === "promise") pushToast(
-      m.status === "made" ? `${m.romantic ? "💞" : "🤝"} ${m.name}和你约好了：${m.when || ""}·${m.what || ""}` :
-      m.status === "kept" ? `${m.romantic ? "💞 心动赴约" : "🤝 如约而至"}：${m.what || ""}` :
-      `💔 你爽约了${m.name ? "：" + m.name : ""}（${m.what || ""}）`,
+      B(m.status === "made" ? `${m.romantic ? "💞" : "🤝"} ${m.name}和你约好了：${m.when || ""}·${m.what || ""}` :
+        m.status === "kept" ? `${m.romantic ? "💞 心动赴约" : "🤝 如约而至"}：${m.what || ""}` :
+        `💔 你爽约了${m.name ? "：" + m.name : ""}（${m.what || ""}）`,
+        m.status === "made" ? `${m.romantic ? "💞" : "🤝"} ${m.name} made a promise with you: ${m.when || ""} · ${m.what || ""}` :
+        m.status === "kept" ? `${m.romantic ? "💞 A date, kept" : "🤝 You showed up"}: ${m.what || ""}` :
+        `💔 You stood ${m.name || "them"} up (${m.what || ""})`),
       m.status === "missed" ? "t-press" : "t-rel", i++ * 650);
-    else if (m.kind === "golden") pushToast(`✨ 金色瞬间：「${m.title || ""}」已存入回忆`, "t-end", i++ * 650);
-    else if (m.kind === "mail") pushToast(`📮 ${m.name || "有人"} 给你写了一封信（去信箱看看）`, "t-rel", i++ * 650);
+    else if (m.kind === "golden") pushToast(B(`✨ 金色瞬间：「${m.title || ""}」已存入回忆`, `✨ A golden moment: “${m.title || ""}” saved to Memories`), "t-end", i++ * 650);
+    else if (m.kind === "mail") pushToast(B(`📮 ${m.name || "有人"} 给你写了一封信（去信箱看看）`, `📮 ${m.name || "Someone"} wrote you a letter (check the mailbox)`), "t-rel", i++ * 650);
   }
   const bits = [];
   for (const cid in relDeltas) {
