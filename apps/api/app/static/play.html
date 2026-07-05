@@ -112,6 +112,15 @@
   .pmsg small { color: #565d72; font-size: 10px; margin-top: 2px; }
   .pmsg.them { align-self: flex-start; } .pmsg.them span { background: #23232f; color: #e2e5ee; border-bottom-left-radius: 5px; }
   .pmsg.me { align-self: flex-end; align-items: flex-end; } .pmsg.me span { background: #2c4a35; color: #dff1e3; border-bottom-right-radius: 5px; }
+  .pmsg.sys { align-self: center; max-width: 92%; } .pmsg.sys span { background: none; color: #7b8296; font-size: 12px; font-style: italic; }
+  .pmsg.call span { border: 1px dashed #4a4a66; }
+  .pletter { background: #191926; border: 1px solid #2a2a3a; border-radius: 12px; padding: 12px 14px; margin: 6px 2px; }
+  .pletter .lsub { font-weight: 700; font-size: 14px; margin-bottom: 6px; }
+  .pletter .lbody { font-size: 13.5px; line-height: 1.8; color: #d5d9e6; white-space: pre-wrap; }
+  .albumcard { background: #191926; border: 1px solid #2a2a3a; border-left: 3px solid #b9975b; border-radius: 10px; padding: 10px 12px; margin: 6px 2px; }
+  .albumcard .atitle { font-weight: 700; font-size: 13.5px; }
+  .albumcard .atext { font-size: 12.5px; color: #b7bdcd; line-height: 1.7; margin-top: 4px; }
+  .albumcard .ameta { font-size: 11px; color: #565d72; margin-top: 5px; }
   .pcompose { display: flex; gap: 8px; padding-top: 10px; }
   .pcompose input { flex: 1; background: #191924; border: 1px solid #2c2c3c; border-radius: 18px; color: #e6e9f2; padding: 9px 14px; font-size: 13.5px; }
   .pcompose button { border-radius: 18px; padding: 0 16px; background: #2c4a35; border: 1px solid #3c6a4a; color: #dff1e3; cursor: pointer; }
@@ -893,18 +902,59 @@ function phoneShell(inner, title, backTo) {
 async function openPhone() {
   if (!runId) return;
   let inbox = { threads: [], unread: 0, device: phoneDevice };
+  let mailbox = { mail: [], unread: 0 };
   try { inbox = await j(`/runs/${runId}/phone`); } catch (e) {}
+  try { mailbox = await j(`/runs/${runId}/mail`); } catch (e) {}
   phoneDevice = inbox.device || "手机";
-  setPhoneBadge(inbox.unread || 0);
+  setPhoneBadge((inbox.unread || 0) + (mailbox.unread || 0));
   const msgBadge = inbox.unread ? `<span class="appdot">${inbox.unread > 9 ? "9+" : inbox.unread}</span>` : "";
+  const mailBadge = mailbox.unread ? `<span class="appdot">${mailbox.unread > 9 ? "9+" : mailbox.unread}</span>` : "";
   const inner = `<div class="papps">
     <div class="papp" onclick="openInbox()">💬${msgBadge}<small>信息</small></div>
+    <div class="papp" onclick="openMailbox()">📮${mailBadge}<small>信箱</small></div>
     <div class="papp" onclick="openContacts()">👥<small>通讯录</small></div>
+    <div class="papp" onclick="openAlbum()">💞<small>回忆</small></div>
     <div class="papp" onclick="openBag()">🎒<small>背包</small></div>
     <div class="papp" onclick="openCalendar()">🗓<small>日历</small></div>
     <div class="papp" onclick="document.getElementById('phoneov').remove(); openJournal()">📔<small>备忘录</small></div>
   </div>`;
   phoneShell(inner, phoneDevice === "手机" ? "📱 小手机" : `📮 ${phoneDevice}`);
+}
+// 📮 信箱: the letters characters have written — a love letter reads different from a text
+async function openMailbox() {
+  let box;
+  try { box = await j(`/runs/${runId}/mail`); } catch (e) { return; }
+  const rows = (box.mail || []).map(m => {
+    const dot = m.read ? "" : `<span class="appdot">新</span>`;
+    const av = m.avatar_url ? `<img class="pav" src="${m.avatar_url}" onerror="this.style.display='none'">`
+                            : `<span class="pav plet" style="background:${avatarColor(m.name)}">${escapeHtml((m.name||"?")[0])}</span>`;
+    return `<div class="pthread" data-mid="${escapeHtml(m.id)}">${av}<div class="pmeta">
+      <div class="pname">${escapeHtml(m.name)}${dot}</div>
+      <div class="plast">✉️ ${escapeHtml(m.subject||"")}</div></div><small class="pat">${escapeHtml(m.at||"")}</small></div>`;
+  }).join("") || `<div class="jempty">信箱里还是空的。<br>有些话，TA们只会写在信里。</div>`;
+  const ov = phoneShell(rows, "📮 信箱", "openPhone()");
+  ov.querySelectorAll(".pthread").forEach(el => { el.onclick = () => openLetter(el.dataset.mid); });
+}
+async function openLetter(mid) {
+  let m;
+  try { m = await j(`/runs/${runId}/mail/${mid}`); } catch (e) { return; }
+  setPhoneBadge(phoneUnread - 1);
+  phoneShell(`<div class="pletter"><div class="lsub">✉️ ${escapeHtml(m.subject||"")}</div>
+    <div class="lbody">${escapeHtml(m.body||"")}</div>
+    <div class="ameta" style="margin-top:8px;color:#565d72;font-size:11px">${escapeHtml(m.name||"")}${m.at ? " · " + escapeHtml(m.at) : ""}</div></div>`,
+    "📮 信箱", "openMailbox()");
+}
+// 💞 回忆: the run's album — golden moments, tier-ups, honored dates, endings
+async function openAlbum() {
+  let jd = null;
+  try { jd = await j(`/runs/${runId}/journal`); } catch (e) { return; }
+  const icon = { golden: "✨", rel_up: "💗", date: "💞", promise: "🤝", ending: "🏁" };
+  const rows = (jd.album || []).map(a =>
+    `<div class="albumcard"><div class="atitle">${icon[a.kind] || "💫"} ${escapeHtml(a.title||"")}${a.name ? `<span class="jwho"> · ${escapeHtml(a.name)}</span>` : ""}</div>
+      <div class="atext">${escapeHtml(a.text||"")}</div>
+      <div class="ameta">第${a.act||1}幕${a.at ? " · " + escapeHtml(a.at) : ""}</div></div>`
+  ).join("") || `<div class="jempty">还没有值得裱起来的瞬间。<br>它们会在你意想不到的时候降临。</div>`;
+  phoneShell(rows, "💞 回忆", "openPhone()");
 }
 async function openInbox() {
   let inbox;
@@ -928,19 +978,24 @@ async function openThread(cid) {
   renderThread(th);
 }
 function renderThread(th) {
-  const bubbles = (th.msgs || []).map(m =>
-    `<div class="pmsg ${m.from === "me" ? "me" : "them"}"><span>${escapeHtml(m.text)}</span><small>${escapeHtml(m.at||"")}</small></div>`
-  ).join("") || `<div class="jempty">还没说过话，发一条试试。</div>`;
+  const bubbles = (th.msgs || []).map(m => {
+    const who = m.from === "me" ? "me" : m.from === "sys" ? "sys" : "them";
+    return `<div class="pmsg ${who}${m.call ? " call" : ""}"><span>${escapeHtml(m.text)}</span><small>${escapeHtml(m.at||"")}</small></div>`;
+  }).join("") || `<div class="jempty">还没说过话，发一条试试。</div>`;
   const dead = th.dead;
   const composer = dead
     ? `<div class="jempty">TA已不在人世，这个对话停在了这里。</div>`
     : `<div class="pcompose"><input id="pmsgIn" placeholder="发条${escapeHtml(th.device||"消息")}…"
          onkeydown="if(event.key==='Enter')sendPhoneMsg('${escapeHtml(th.char_id)}')">
-       <button onclick="sendPhoneMsg('${escapeHtml(th.char_id)}')">发送</button></div>`;
+       <button onclick="sendPhoneMsg('${escapeHtml(th.char_id)}')">发送</button>
+       <button class="ghost" title="拨过去，实时说话" onclick="sendPhoneCall('${escapeHtml(th.char_id)}')">📞</button></div>`;
   const ov = phoneShell(`<div class="pmsgs" id="pmsgs">${bubbles}</div>${composer}`,
                         `${escapeHtml(th.name)}`, "openInbox()");
   const box = ov.querySelector("#pmsgs"); if (box) box.scrollTop = box.scrollHeight;
   openPhone.lastThread = th.char_id;
+}
+function toastUnlocked(th) {
+  for (const t of (th.unlocked || [])) pushToast(`🔓 TA在${escapeHtml(th.device||"消息")}里松了口：「${escapeHtml(t)}」`, "t-unlock", 500);
 }
 async function sendPhoneMsg(cid) {
   const inp = document.getElementById("pmsgIn");
@@ -951,6 +1006,20 @@ async function sendPhoneMsg(cid) {
     const th = await j(`/runs/${runId}/phone/${cid}`, { method:"POST", body: JSON.stringify({ text }) });
     renderThread(th);
     if (!th.replied) pushToast("（对方已读，没有回。）", "", 2400);
+    toastUnlocked(th);
+  } catch (e) { pushToast("⚠️ " + escapeHtml(e.message), "", 3000); if (inp) inp.disabled = false; }
+}
+// 📞 通话: same composer text, but spoken live down the line (作息不在 → 无人接听)
+async function sendPhoneCall(cid) {
+  const inp = document.getElementById("pmsgIn");
+  const text = (inp && inp.value || "").trim();
+  if (!text) { pushToast("先在输入框里写下你开口要说的话，再按 📞", "", 2600); return; }
+  inp.value = ""; inp.disabled = true;
+  try {
+    const th = await j(`/runs/${runId}/phone/${cid}/call`, { method:"POST", body: JSON.stringify({ text }) });
+    renderThread(th);
+    if (!th.replied) pushToast("📞 电话那头没有回应。", "", 2400);
+    toastUnlocked(th);
   } catch (e) { pushToast("⚠️ " + escapeHtml(e.message), "", 3000); if (inp) inp.disabled = false; }
 }
 async function openContacts() {
@@ -1622,8 +1691,10 @@ async function streamTurn(url, bodyObj) {
         else if (ev.event === "phone") {
           const m = ev.message || {};
           setPhoneBadge(phoneUnread + (m.msgs || []).length);
-          pushToast(`📱 ${escapeHtml(m.name || "")}：${escapeHtml(((m.msgs || [])[0] || "").slice(0, 24))}`, "t-rel", 400);
-          playSfx && playSfx("knock");
+          if (m.mail) pushToast(`📮 ${escapeHtml(m.name || "")} 给你写了一封信：「${escapeHtml(((m.msgs || [])[0] || "").slice(0, 20))}」`, "t-rel", 400);
+          else if (m.call) pushToast(`📞 ${escapeHtml(m.name || "")} 来电：「${escapeHtml(((m.msgs || [])[0] || "").slice(0, 24))}…」`, "t-rel", 400);
+          else pushToast(`📱 ${escapeHtml(m.name || "")}：${escapeHtml(((m.msgs || [])[0] || "").slice(0, 24))}`, "t-rel", 400);
+          playSfx && playSfx(m.call ? "ringtone" : "knock");
         }
         else if (ev.event === "pressure") { renderPressure(ev.pressure); }
         else if (ev.event === "move_request") { afterPlay.moveReq = ev.move_request; }
@@ -1723,6 +1794,8 @@ function showMoments(moments, relDeltas) {
       m.status === "kept" ? `${m.romantic ? "💞 心动赴约" : "🤝 如约而至"}：${m.what || ""}` :
       `💔 你爽约了${m.name ? "：" + m.name : ""}（${m.what || ""}）`,
       m.status === "missed" ? "t-press" : "t-rel", i++ * 650);
+    else if (m.kind === "golden") pushToast(`✨ 金色瞬间：「${m.title || ""}」已存入回忆`, "t-end", i++ * 650);
+    else if (m.kind === "mail") pushToast(`📮 ${m.name || "有人"} 给你写了一封信（去信箱看看）`, "t-rel", i++ * 650);
   }
   const bits = [];
   for (const cid in relDeltas) {

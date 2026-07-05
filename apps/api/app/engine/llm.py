@@ -80,6 +80,15 @@ class MockLLM:
         if prompt.get("compose_msg"):
             return {}
 
+        # 📮 letter composer: mock defers to the deterministic fallback letter.
+        if prompt.get("compose_letter"):
+            return {}
+
+        # ✨ golden moment: mock never drops one — random rolls in tests stay beat-free
+        # (a test that wants the drop supplies its own LLM + a pinned _rng).
+        if prompt.get("golden_moment"):
+            return {}
+
         # departing goodbye line: mock defers to the deterministic fallback.
         if prompt.get("farewell"):
             return {}

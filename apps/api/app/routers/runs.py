@@ -162,7 +162,7 @@ def _to_run(r: RunModel) -> Run:
             pressure_name=((runtime.pressure_cfg(r.pinned_content or {}) or {}).get("name")),
             clock=runtime.clock_view(r.pinned_content or {}, st),
             promises=runtime.promises_view(r.pinned_content or {}, st),
-            phone_unread=runtime.phone_threads_view(r.pinned_content or {}, st)["unread"],
+            phone_unread=runtime.phone_total_unread(r.pinned_content or {}, st),
             verdict=runtime.verdict_view(r.pinned_content or {}, st),
         ),
         cast=cast,
@@ -459,6 +459,7 @@ def play(
     # comeback → the primary speaker greets them and picks up the last thread. Only counts
     # once a real conversation exists (some player beat on record).
     returning = False
+    away_hours = 0.0
     if r.beats and any(b.author == "player" for b in r.beats):
         last_at = r.beats[-1].created_at
         if last_at is not None:
@@ -466,7 +467,8 @@ def play(
             if last_at.tzinfo is None:
                 now = now.replace(tzinfo=None)
             gap_h = runtime.tuning_for(content).get("return_gap_hours", 6)
-            returning = (now - last_at).total_seconds() > gap_h * 3600
+            away_hours = (now - last_at).total_seconds() / 3600
+            returning = away_hours > gap_h
 
     # 1. persist the player's own turn. In character mode the player speaks AS the chosen
     #    character; in god mode the input is an unseen director's cue (no speaker).
@@ -508,7 +510,7 @@ def play(
                 content=content, state=state0, persona=persona_dict,
                 player_input=body.input, channel=body.channel,
                 beat_log=beat_log, target_character_id=body.target_character_id,
-                returning=returning,
+                returning=returning, away_hours=away_hours,
             ):
                 if kind == "dice":
                     # the roll streams BEFORE the narration so the UI can animate it
@@ -745,6 +747,50 @@ def send_phone(run_id: str, char_id: str, body: PhoneSendIn,
     flag_modified(r, "state")
     db.commit()
     return view
+
+
+@router.post("/{run_id}/phone/{char_id}/call")
+def call_phone(run_id: str, char_id: str, body: PhoneSendIn,
+               user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """📞 CALL a character who isn't in the scene. Live voice under the same gate:
+    spoken lines + one line of what's audible down the line; probing on a call counts.
+    A character whose 作息 says they're unreachable right now doesn't pick up."""
+    r = _own_run(run_id, user, db)
+    if (r.state or {}).get("ended"):
+        raise HTTPException(409, "这局已经结束了")
+    st = dict(r.state or {})
+    persona = db.get(PersonaModel, r.persona_id)
+    try:
+        view = runtime.phone_call(r.pinned_content or {}, st, _persona_dict(persona) if persona else {},
+                                  char_id, body.text)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    r.state = st
+    flag_modified(r, "state")
+    db.commit()
+    return view
+
+
+@router.get("/{run_id}/mail")
+def get_mail(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """📮 the 信箱: letters characters have written the player (subjects only + unread)."""
+    r = _own_run(run_id, user, db)
+    return runtime.mail_view(r.pinned_content or {}, r.state or {})
+
+
+@router.get("/{run_id}/mail/{mail_id}")
+def read_mail(run_id: str, mail_id: str,
+              user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """One full letter; opening it marks it read."""
+    r = _own_run(run_id, user, db)
+    st = dict(r.state or {})
+    m = runtime.mail_open(st, mail_id)
+    if not m:
+        raise HTTPException(404, "没有这封信")
+    r.state = st
+    flag_modified(r, "state")
+    db.commit()
+    return m
 
 
 @router.get("/{run_id}/journal")

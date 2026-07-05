@@ -24,12 +24,15 @@ STORY = {
 }
 
 
-def test_parting_hook_is_one_spoiler_safe_narration():
+def test_parting_hook_is_spoiler_safe_cliffhanger_plus_teaser():
     st = runtime.default_state()
     beats = runtime.build_parting_hook(STORY, st, {"name": "我"})  # MockLLM path
-    assert len(beats) == 1 and beats[0]["type"] == "description"
+    # one cliffhanger + the 下幕预告 (next act's TITLE only — never its events)
+    assert len(beats) == 2 and all(b["type"] == "description" for b in beats)
     assert "BODY" not in beats[0]["text"]          # label only, never the locked content
     assert "那本账" in beats[0]["text"]             # points at the pending topic
+    assert "下幕预告" in beats[1]["text"] and "b" in beats[1]["text"]
+    assert "BODY" not in beats[1]["text"]
 
 
 def test_returning_flag_reaches_primary_prompt():

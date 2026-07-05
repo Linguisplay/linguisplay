@@ -127,7 +127,9 @@ def default_state() -> dict[str, Any]:
         "clock": {"day": 1, "slot": 0, "turns_in_slot": 0},  # ⏳ diegetic time (slot → SLOTS)
         "npc_rel": {},                  # 🕸 NPC↔NPC stances {"a|b": {stance,-2..2, label?, log:[]}}
         "promises": [],                 # 🤝 约定 [{char_id,char_name,what,day,slot,location_id?,romantic,status}]
-        "phone": {"threads": {}},       # 📱 小手机: {threads: {cid: {msgs:[{from,text,at}], unread}}}
+        "phone": {"threads": {}},       # 📱 小手机: {threads: {cid: {msgs:[{from,text,at}], unread}}, mail: [...]}
+        "album": [],                    # 💞 名场面收藏 [{kind,title,text,char_id,name,at,act}]
+        "golden_cd": 0,                 # ✨ turns until the next 稀有奇遇 may fire (cooldown)
     }
 
 
@@ -186,6 +188,9 @@ DEFAULT_TUNING = {
     "mind_reader": 1,           # 📟 心象仪: characters' true inner state shown on bubbles (0 = off)
     "promise_keep_bonus": 6,    # 🤝 closeness for showing up to a promise (romantic: 心动 too)
     "promise_break_cost": 4,    # 🤝 closeness lost for standing someone up
+    "golden_chance": 4,         # ✨ 稀有奇遇: % chance per eligible turn (0 = off)
+    "golden_cooldown": 10,      # ✨ turns between two golden moments, minimum
+    "letter_away_hours": 48,    # 📮 away at least this long → the warmest heart writes a LETTER
 }
 
 MAX_OPEN_PROMISES = 3  # 🤝 open appointments a run may hold at once (per char: one)
@@ -2279,15 +2284,19 @@ def sms_tail_line(state: dict[str, Any], cid: str) -> str:
 
 
 def phone_push(content: dict[str, Any], state: dict[str, Any], char: dict[str, Any],
-               msgs: list[str], now_label: str) -> dict[str, Any]:
-    """Deliver incoming message bubbles from a character. Returns the UI event payload."""
+               msgs: list[str], now_label: str, call: bool = False) -> dict[str, Any]:
+    """Deliver incoming message bubbles from a character. Returns the UI event payload.
+    call=True marks the lines as spoken down the line (📞 来电) — the UI rings."""
     th = _thread(state, char.get("id"))
     for m in msgs:
-        th["msgs"].append({"from": "them", "text": m[:120], "at": now_label})
+        rec = {"from": "them", "text": m[:120], "at": now_label}
+        if call:
+            rec["call"] = True
+        th["msgs"].append(rec)
     th["msgs"] = th["msgs"][-60:]
     th["unread"] = int(th.get("unread", 0)) + len(msgs)
     return {"char_id": char.get("id"), "name": char.get("name") or "",
-            "avatar_url": char.get("avatar_url"), "msgs": msgs,
+            "avatar_url": char.get("avatar_url"), "msgs": msgs, "call": bool(call),
             "device": phone_device(content)}
 
 
@@ -2366,10 +2375,15 @@ def phone_deliveries(content: dict[str, Any], state: dict[str, Any], here_ids: s
         if int(th.get("auto_idx", -1)) >= int(seen.get(cid, -99)):
             continue  # this parting already got its note
         th["auto_idx"] = int(seen.get(cid, -99))
+        # 恋人 doesn't settle for a text — TA 直接拨过来 (恋与深空-style incoming call)
+        as_call = relationships.derive_mode(
+            c, rels.get(cid) or relationships.new_scores(), tun) == "lover"
         msgs = compose_message(content, state, c, "missing_you",
-                               "TA刚离开你身边，你心里还想着TA，忍不住捎一句——短、软、像TA的性格",
+                               ("TA刚离开你身边就忍不住拨通了你——写TA接通后开口说的1~2句话，"
+                                "短、软、像TA的性格" if as_call else
+                                "TA刚离开你身边，你心里还想着TA，忍不住捎一句——短、软、像TA的性格"),
                                "你刚走，我就开始想你了。", llm)
-        out.append(phone_push(content, state, c, msgs, now_label))
+        out.append(phone_push(content, state, c, msgs, now_label, call=as_call))
     return out
 
 
@@ -2404,12 +2418,9 @@ def phone_thread(content: dict[str, Any], state: dict[str, Any], char_id: str,
             "msgs": list(th.get("msgs") or [])}
 
 
-def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str, Any],
-               char_id: str, text: str, llm: LLM | None = None) -> dict[str, Any]:
-    """The player texts a character from anywhere. The character answers IN VOICE with
-    their gated context (locked truths can't leak over text either) — or reads and says
-    nothing (已读不回 is a statement too). Small relationship movement applies."""
-    llm = llm or get_llm()
+def _phone_target(content: dict[str, Any], state: dict[str, Any], char_id: str,
+                  text: str) -> dict[str, Any]:
+    """Shared reachability checks for texting/calling someone. Raises player-readable."""
     if not phone_enabled(content):
         raise ValueError("这个故事里没有这种联系方式")
     c = _char_by_id(content, char_id)
@@ -2421,22 +2432,62 @@ def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str
         raise ValueError("不能发给你自己")
     if char_id not in set(state.get("met_ids") or []):
         raise ValueError("你还不认识TA，没有TA的联系方式")
-    text = (text or "").strip()
-    if not text:
+    if not (text or "").strip():
         raise ValueError("说点什么吧")
     if state.get("player_hp") == "dead":
         raise ValueError("你已经死了，发不出任何消息")
+    return c
+
+
+def _phone_probe(content: dict[str, Any], state: dict[str, Any], char_id: str,
+                 text: str) -> tuple[list[str], list[str]]:
+    """套话挖秘密: probing over text/call counts for real. The player's words register
+    as asks (same keyword detection as a scene turn), the gate re-evaluates, and any
+    layer that cracks open NOW is returned so the character can voice it in their reply.
+    known_by still holds — only truths THIS character carries surface here; unlocks are
+    global and sticky, exactly like in-scene ones. Returns (newly_ids, unlocked_titles
+    limited to what this speaker may voice)."""
+    asks = dict(state.get("asks") or {})
+    for sid in _detect_asks(content, text):
+        asks[sid] = asks.get(sid, 0) + 1
+    state["asks"] = asks
+    frags = gating.iter_fragments(content)
+    already = set(state.get("unlocked_fragment_ids") or [])
+    newly = gating.evaluate_unlocks(state, frags)
+    if not newly:
+        return [], []
+    state["unlocked_fragment_ids"] = sorted(already | set(newly))
+    act = int(state.get("act", 1) or 1)
+    titles: list[str] = []
+    newset = set(newly)
+    for sec in content.get("secrets", []) or []:
+        hit = [f for f in sec.get("fragments", []) or [] if f.get("id") in newset]
+        if not hit:
+            continue
+        title = (sec.get("title") or "").strip()
+        rel_log(state, sec.get("character_id"), act, "reveal",
+                f"关于「{title}」的真相，在{phone_device(content)}里揭开了一层。")
+        # only truths this speaker is allowed to voice count as "撬开了TA的嘴"
+        if any(not f.get("known_by_character_ids")
+               or char_id in (f.get("known_by_character_ids") or []) for f in hit):
+            titles.append(title)
+    return newly, titles
+
+
+def _phone_exchange(content: dict[str, Any], state: dict[str, Any], persona: dict[str, Any],
+                    c: dict[str, Any], text: str, llm: LLM, newly: list[str],
+                    call: bool = False) -> dict[str, Any]:
+    """One gated text/call exchange with a character: build their view, ask the model,
+    apply relationship movement. Returns the raw LLM output dict."""
+    char_id = c.get("id")
     tun = tuning_for(content)
-    now_label = (clock_view(content, state) or {}).get("label", "")
-    th = _thread(state, char_id)
-    th["msgs"].append({"from": "me", "text": text[:200], "at": now_label})
-    th["msgs"] = th["msgs"][-60:]
     scores = (state.get("rel") or {}).get(char_id) or relationships.new_scores()
     mode = relationships.derive_mode(c, scores, tun)
-    ctx = gating.build_context(char_id, gating.iter_fragments(content), state, newly_ids=[])
+    ctx = gating.build_context(char_id, gating.iter_fragments(content), state, newly_ids=newly)
     pcid = state.get("player_character_id")
     pc = _char_by_id(content, pcid) if pcid else None
-    out = llm.generate({"phone_reply": True, "device": phone_device(content),
+    out = llm.generate({"phone_reply": True, "call": bool(call),
+                        "device": phone_device(content),
                         "char": {"name": c.get("name"), "role": c.get("role") or "",
                                  "persona_text": (c.get("persona_text") or "")[:200],
                                  "eq_style": (c.get("eq_style") or "")[:150],
@@ -2450,11 +2501,30 @@ def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str
                         or state.get("memory", ""),
                         "thread_tail": _thread_tail(state, char_id, 8),
                         "text": text}) or {}
-    msgs = [dedash(str(m).strip()[:120]) for m in (out.get("msgs") or []) if str(m).strip()][:3]
     dc = int(out.get("closeness", 0) or 0)
     dr = int(out.get("romance", 0) or 0)
     if dc or dr:
         state.setdefault("rel", {})[char_id] = relationships.apply_deltas(scores, dc, dr, tun)
+    return out
+
+
+def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str, Any],
+               char_id: str, text: str, llm: LLM | None = None) -> dict[str, Any]:
+    """The player texts a character from anywhere. The character answers IN VOICE with
+    their gated context (locked truths can't leak over text either) — or reads and says
+    nothing (已读不回 is a statement too). Small relationship movement applies. Probing
+    over text COUNTS: keep asking the right question and TA may crack right here in the
+    thread (the unlock is global and sticky, same as in-scene)."""
+    llm = llm or get_llm()
+    text = (text or "").strip()
+    c = _phone_target(content, state, char_id, text)
+    now_label = (clock_view(content, state) or {}).get("label", "")
+    th = _thread(state, char_id)
+    th["msgs"].append({"from": "me", "text": text[:200], "at": now_label})
+    th["msgs"] = th["msgs"][-60:]
+    newly, cracked = _phone_probe(content, state, char_id, text)
+    out = _phone_exchange(content, state, persona, c, text, llm, newly)
+    msgs = [dedash(str(m).strip()[:120]) for m in (out.get("msgs") or []) if str(m).strip()][:3]
     if msgs:
         for m in msgs:
             th["msgs"].append({"from": "them", "text": m, "at": now_label})
@@ -2462,7 +2532,179 @@ def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str
     th["unread"] = 0  # the player is looking at this thread right now
     view = phone_thread(content, state, char_id)
     view["replied"] = bool(msgs)
+    view["unlocked"] = cracked  # 🔓 titles pried open by THIS text (UI toast)
     return view
+
+
+def phone_call(content: dict[str, Any], state: dict[str, Any], persona: dict[str, Any],
+               char_id: str, text: str, llm: LLM | None = None) -> dict[str, Any]:
+    """📞 the player CALLS a character. Live voice: the reply comes back as spoken lines
+    plus one line of what the player HEARS down the line (背景音 — a truth of its own).
+    Same gate as everything else; probing on a call counts too. A character whose 作息
+    says they're unreachable right now simply doesn't pick up."""
+    llm = llm or get_llm()
+    text = (text or "").strip()
+    c = _phone_target(content, state, char_id, text)
+    if any(ch.get("id") == char_id for ch in scene_characters(content, state)):
+        raise ValueError("TA就在你身边，当面说吧")
+    now_label = (clock_view(content, state) or {}).get("label", "")
+    th = _thread(state, char_id)
+    # 作息说 TA 此刻不知去向 → 无人接听 (the world doesn't bend for the dial tone)
+    slot_now = active_slot(content, state)
+    if char_home(c, int(state.get("act", 1) or 1), slot_now) == AWAY:
+        th["msgs"].append({"from": "me", "text": f"📞 {text[:120]}", "at": now_label, "call": True})
+        th["msgs"].append({"from": "sys", "text": "（无人接听。TA此刻不知在何处。）",
+                           "at": now_label, "call": True})
+        th["msgs"] = th["msgs"][-60:]
+        th["unread"] = 0
+        view = phone_thread(content, state, char_id)
+        view["replied"] = False
+        view["unlocked"] = []
+        return view
+    th["msgs"].append({"from": "me", "text": f"📞 {text[:200]}", "at": now_label, "call": True})
+    th["msgs"] = th["msgs"][-60:]
+    newly, cracked = _phone_probe(content, state, char_id, text)
+    out = _phone_exchange(content, state, persona, c, text, llm, newly, call=True)
+    msgs = [dedash(str(m).strip()[:120]) for m in (out.get("msgs") or []) if str(m).strip()][:3]
+    ambient = dedash((out.get("ambient") or "").strip())[:60]
+    if ambient:
+        th["msgs"].append({"from": "sys", "text": f"（{ambient}）", "at": now_label, "call": True})
+    if msgs:
+        for m in msgs:
+            th["msgs"].append({"from": "them", "text": m, "at": now_label, "call": True})
+    else:
+        th["msgs"].append({"from": "sys", "text": "（电话那头沉默了几秒，挂断了。）",
+                           "at": now_label, "call": True})
+    th["msgs"] = th["msgs"][-60:]
+    th["unread"] = 0
+    view = phone_thread(content, state, char_id)
+    view["replied"] = bool(msgs)
+    view["unlocked"] = cracked
+    return view
+
+
+# ── 📮 信箱 (mail) ───────────────────────────────────────────────────────────────
+# Long-form letters, the slow warm counterpart to texts: a lover writes when the
+# relationship crosses into 恋人, and a long absence earns a letter from whoever
+# missed the player most. Engine-triggered; the model only writes the words.
+MAIL_CAP = 20
+
+
+def _mailbox(state: dict[str, Any]) -> list[dict[str, Any]]:
+    return state.setdefault("phone", {}).setdefault("mail", [])
+
+
+def mail_push(content: dict[str, Any], state: dict[str, Any], char: dict[str, Any],
+              subject: str, body: str) -> dict[str, Any]:
+    import uuid as _uuid
+    box = _mailbox(state)
+    m = {"id": f"mail_{_uuid.uuid4().hex[:8]}", "char_id": char.get("id"),
+         "name": char.get("name") or "", "avatar_url": char.get("avatar_url"),
+         "subject": dedash((subject or "").strip())[:24] or "一封信",
+         "body": dedash((body or "").strip())[:800],
+         "at": (clock_view(content, state) or {}).get("label", ""), "read": False}
+    box.append(m)
+    del box[:-MAIL_CAP]
+    return m
+
+
+def compose_letter(content: dict[str, Any], state: dict[str, Any], char: dict[str, Any],
+                   reason: str, hint: str, llm: LLM) -> dict[str, Any]:
+    """One letter in this character's hand. LLM-written; deterministic fallback."""
+    tun = tuning_for(content)
+    scores = (state.get("rel") or {}).get(char.get("id")) or relationships.new_scores()
+    try:
+        out = llm.generate({"compose_letter": True, "device": phone_device(content),
+                            "char": {"name": char.get("name"), "role": char.get("role") or "",
+                                     "persona_text": (char.get("persona_text") or "")[:200],
+                                     "eq_style": (char.get("eq_style") or "")[:120]},
+                            "relation": relationships.name_of(
+                                relationships.derive_mode(char, scores, tun)),
+                            "reason": reason, "hint": hint,
+                            "memory": (state.get("memory_by_char", {}) or {}).get(char.get("id"))
+                            or state.get("memory", "")}) or {}
+    except Exception:
+        out = {}
+    subject = (out.get("subject") or "").strip()
+    body = (out.get("body") or "").strip()
+    if not body:
+        subject = subject or "想对你说的话"
+        body = (f"有些话，当着面说不出口，只好写下来。\n\n这段日子里发生的事，"
+                f"我想了很多。你是其中想得最多的那一个。\n\n—— {char.get('name') or ''}")
+    return mail_push(content, state, char, subject, body)
+
+
+def mail_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+    box = _mailbox(state)
+    return {"device": phone_device(content),
+            "mail": [{k: v for k, v in m.items() if k != "body"} for m in reversed(box)],
+            "unread": sum(1 for m in box if not m.get("read"))}
+
+
+def mail_open(state: dict[str, Any], mail_id: str) -> dict[str, Any] | None:
+    for m in _mailbox(state):
+        if m.get("id") == mail_id:
+            m["read"] = True
+            return dict(m)
+    return None
+
+
+def phone_total_unread(content: dict[str, Any], state: dict[str, Any]) -> int:
+    """Everything blinking on the 小手机: unread texts + unread letters."""
+    return (phone_threads_view(content, state)["unread"]
+            + sum(1 for m in (state.get("phone") or {}).get("mail") or [] if not m.get("read")))
+
+
+# ── 💌 你不在的时候 (offline pulse) ───────────────────────────────────────────────
+def offline_pulse(content: dict[str, Any], state: dict[str, Any], here_ids: set,
+                  away_hours: float, llm: LLM) -> list[dict[str, Any]]:
+    """The world missed the player while they were gone. On a comeback turn, the
+    absent characters who'd genuinely reach out do: the warmest hearts first (lover >
+    flirt > an open promise > friend), each with ONE in-voice message about the time
+    apart. A LONG absence (≥ letter_away_hours) upgrades the warmest one to a real
+    LETTER in the 信箱. Deterministic triggers; the model only writes the words.
+    Returns UI event payloads ({...,"mail": True} for the letter)."""
+    if not phone_enabled(content):
+        return []
+    tun = tuning_for(content)
+    dead = _dead_ids(state)
+    met = set(state.get("met_ids") or [])
+    rels = state.get("rel") or {}
+    open_pr = {p.get("char_id") for p in state.get("promises") or [] if p.get("status") == "open"}
+    ranked: list[tuple[int, dict[str, Any], str]] = []
+    for c in _characters(content):
+        cid = c.get("id")
+        if not cid or cid not in met or cid in dead or cid in here_ids \
+                or cid == state.get("player_character_id"):
+            continue
+        mode = relationships.derive_mode(c, rels.get(cid) or relationships.new_scores(), tun)
+        if mode == "lover":
+            ranked.append((0, c, "你们是恋人，TA数着日子想你，捎来的话要软、要往心里去"))
+        elif mode == "flirt":
+            ranked.append((1, c, "你们正暧昧着，TA嘴上不肯认，字里行间都是惦记"))
+        elif cid in open_pr:
+            ranked.append((2, c, "你们还有个约定没赴，TA提一句，看你还记不记得"))
+        elif mode == "friend":
+            ranked.append((3, c, "TA这些天遇到点事，想找你说说，顺口问你去哪了"))
+    ranked.sort(key=lambda t: t[0])
+    now_label = (clock_view(content, state) or {}).get("label", "")
+    out: list[dict[str, Any]] = []
+    for rank, c, hint in ranked[:PHONE_MAX_PER_TURN]:
+        # a LONG absence: the warmest one writes a letter instead of a text
+        if not out and away_hours >= tun["letter_away_hours"] and rank <= 1:
+            m = compose_letter(content, state, c,
+                               "away_letter",
+                               f"你有{int(away_hours // 24)}天没见到TA了，把这些天攒下的话写成一封信",
+                               llm)
+            out.append({"char_id": c.get("id"), "name": c.get("name") or "",
+                        "avatar_url": c.get("avatar_url"), "mail": True,
+                        "msgs": [m["subject"]], "device": phone_device(content)})
+            continue
+        msgs = compose_message(content, state, c, "away_pulse",
+                               f"你们有阵子没见了（离开了约{max(1, int(away_hours))}小时）。{hint}。",
+                               "好久没你的消息了。一切都好吗？", llm)
+        out.append(phone_push(content, state, c, msgs, now_label))
+    return out
 
 
 def rel_log(state: dict[str, Any], char_id: str | None, act: int, kind: str, text: str) -> None:
@@ -2474,6 +2716,30 @@ def rel_log(state: dict[str, Any], char_id: str | None, act: int, kind: str, tex
     entries.append({"act": int(act), "kind": kind, "text": text.strip()})
     log[char_id] = entries[-30:]
     state["rel_log"] = log
+
+
+# ── 💞 名场面收藏 (the album) ─────────────────────────────────────────────────────
+# The run's keepsake gallery: golden moments, tier-ups, honored dates, endings — the
+# scenes worth reliving, collected as they happen and browsable from the 小手机.
+def album_add(content: dict[str, Any], state: dict[str, Any], kind: str, title: str,
+              text: str, char: dict[str, Any] | None = None) -> dict[str, Any]:
+    entry = {"kind": kind, "title": (title or "").strip()[:24],
+             "text": dedash((text or "").strip())[:200],
+             "char_id": (char or {}).get("id"), "name": (char or {}).get("name") or "",
+             "at": (clock_view(content, state) or {}).get("label", ""),
+             "act": int(state.get("act", 1) or 1)}
+    album = list(state.get("album") or [])
+    album.append(entry)
+    state["album"] = album[-40:]
+    return entry
+
+
+def _last_line_of(said: list[dict[str, str]], name: str) -> str:
+    """The most recent thing this character said this turn (album snippet material)."""
+    for s in reversed(said or []):
+        if s.get("speaker") == name and (s.get("text") or "").strip():
+            return s["text"].strip()
+    return ""
 
 
 def _re_split_mats(s: str) -> list[str]:
@@ -2679,6 +2945,7 @@ def journal(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
                 for p in (state.get("promises") or [])]
     return {"secrets": secrets, "secrets_untouched": untouched, "endings": endings,
             "promises": promises,  # 🤝 约定史: open + kept + missed
+            "album": list(reversed(state.get("album") or [])),  # 💞 名场面, newest first
             "choices": dict(state.get("choices") or {}),
             "identity": state.get("identity"),
             "identity_log": list(state.get("identity_log") or []),
@@ -2868,7 +3135,15 @@ def build_parting_hook(content: dict[str, Any], state: dict[str, Any],
         hint = f"关于「{topics[0]}」的话" if topics else "有句话"
         beats = [{"type": "description", "speaker_name": None,
                   "text": f"（你起身离开。身后有人欲言又止，{hint}似乎还没说完。）"}]
-    return [dedash_beat(b) for b in beats[:1]]
+    beats = beats[:1]
+    # 📺 下幕预告: leaving mid-story gets a next-episode tease — the NEXT act's authored
+    # title only (never its events), like the preview after the credits. Retention hook.
+    nxt = current_act(content, act + 1)
+    if nxt and (nxt.get("title") or "").strip() and not state.get("ended"):
+        beats.append({"type": "description", "speaker_name": None,
+                      "text": f"〔下幕预告〕第{act + 1}幕《{nxt['title'].strip()}》。"
+                              "这个故事，会在你回来的地方等你。"})
+    return [dedash_beat(b) for b in beats]
 
 
 def confront_stream(content: dict[str, Any], state: dict[str, Any], persona: dict[str, Any],
@@ -3058,6 +3333,8 @@ def run_turn(
     llm: LLM | None = None,
     history: list[dict[str, str]] | None = None,
     target_character_id: str | None = None,
+    returning: bool = False,
+    away_hours: float = 0.0,
 ) -> dict[str, Any]:
     """Advance one turn, returning the whole result at once (beats + state + extras).
 
@@ -3067,7 +3344,8 @@ def run_turn(
     beats: list[dict[str, Any]] = []
     final: dict[str, Any] = {}
     for kind, payload in run_turn_stream(
-        content, state, persona, player_input, channel, llm, history, target_character_id
+        content, state, persona, player_input, channel, llm, history, target_character_id,
+        returning=returning, away_hours=away_hours,
     ):
         if kind == "beat":
             beats.append(payload)
@@ -3088,6 +3366,7 @@ def run_turn_stream(
     target_character_id: str | None = None,
     beat_log: list[dict[str, Any]] | None = None,
     returning: bool = False,
+    away_hours: float = 0.0,
 ):
     """Advance one turn as a GENERATOR. Yields ('beat', beat) for each beat the moment
     it's computed (so responders stream out one by one), then a final ('final', result)
@@ -3208,6 +3487,16 @@ def run_turn_stream(
             if scid and title and sec.get("id") not in logged                     and any(f.get("id") in newset for f in sec.get("fragments", []) or []):
                 logged.add(sec.get("id"))
                 rel_log(state, scid, old_act, "reveal", f"关于「{title}」的真相，揭开了一层。")
+
+    # 💌 你不在的时候: this turn is a COMEBACK → the absent hearts that missed the
+    # player reach out first thing (texts; a long absence earns a letter). The present
+    # primary's greeting rides on the `returning` prompt flag as before.
+    if returning and (state.get("mode") or "character") != "god" and channel != "think":
+        for ev in offline_pulse(content, state, here_before, away_hours, llm):
+            yield ("phone", ev)
+            moments.append({"kind": "mail" if ev.get("mail") else "phone",
+                            "name": ev["name"], "device": ev["device"],
+                            "call": bool(ev.get("call"))})
 
     # responder selection. With an explicit @target → just that character. With NO target
     # (and not an inner thought) the player is addressing the WHOLE room — every present
@@ -3575,9 +3864,23 @@ def run_turn_stream(
                                 "mode_name": relationships.name_of(mode_after)})
                 rel_log(state, sp_id, old_act, "rel_up",
                         f"你们成了「{relationships.name_of(mode_after)}」。")
+                album_add(content, state, "rel_up",
+                          f"成为{relationships.name_of(mode_after)}",
+                          _last_line_of(said_this_turn, sp_name)
+                          or f"你和{sp_name}成了「{relationships.name_of(mode_after)}」。", sp)
                 yield emit({"type": "description", "speaker_name": None,
                             "text": f"💗（你感觉到，和{sp_name}的关系又近了一层。现在你们是"
                                     f"「{relationships.name_of(mode_after)}」了。）"})
+                # 📮 crossing into 恋人 earns a LETTER: some things TA can only write down
+                if mode_after == "lover" and phone_enabled(content):
+                    lm = compose_letter(content, state, sp, "love_letter",
+                                        "你们刚刚捅破了那层窗户纸，成了恋人。把当面说不出口的"
+                                        "那些话，写成一封信给TA", llm)
+                    yield ("phone", {"char_id": sp_id, "name": sp_name,
+                                     "avatar_url": sp.get("avatar_url"), "mail": True,
+                                     "msgs": [lm["subject"]], "device": phone_device(content)})
+                    moments.append({"kind": "mail", "name": sp_name,
+                                    "device": phone_device(content)})
         if directed.get("advance_act"):
             advance = True
         if is_primary:
@@ -3972,6 +4275,59 @@ def run_turn_stream(
                     chosen = chosen[:3]
                 responders.extend(chosen)
 
+    # 🤝 a kept promise is a scene worth keeping: the date goes into the album with the
+    # character's own best line from it as the caption.
+    if promise_kept:
+        kc_char = _char_by_id(content, promise_kept.get("char_id"))
+        album_add(content, state, "date" if promise_kept.get("romantic") else "promise",
+                  promise_kept.get("what") or "如约而至",
+                  _last_line_of(said_this_turn, (kc_char or {}).get("name") or "")
+                  or f"你如约而至：{promise_kept.get('what', '')}。", kc_char)
+
+    # ✨ 稀有奇遇 (golden moment): a rare, unprompted flash the story didn't owe you —
+    # program-rolled (tuning.golden_chance% per eligible turn, cooldown-gated),
+    # model-written for whoever in the scene is closest to the player, celebrated,
+    # and collected into the album. The 恋与深空 "金色瞬间" as a drop, not a schedule.
+    state["golden_cd"] = max(0, int(state.get("golden_cd", 0) or 0) - 1)
+    if (responders and not observer and not is_think and tun["golden_chance"] > 0
+            and state["golden_cd"] <= 0 and not state.get("ended")
+            and _rng.randint(1, 100) <= tun["golden_chance"]):
+        star = max(responders, key=lambda c: (
+            int((rel_all.get(c.get("id")) or {}).get("romance", 0)) * 2
+            + int((rel_all.get(c.get("id")) or {}).get("closeness", 0))))
+        g_scores = rel_all.get(star.get("id")) or relationships.new_scores()
+        g_mode = relationships.derive_mode(star, g_scores, tun)
+        g = llm.generate({"golden_moment": True,
+                          "char": {"name": star.get("name"), "role": star.get("role") or "",
+                                   "persona_text": (star.get("persona_text") or "")[:200],
+                                   "eq_style": (star.get("eq_style") or "")[:120]},
+                          "relation": relationships.name_of(g_mode),
+                          "place": (current_location(content, state) or {}).get("name") or "",
+                          "clock": clock_line,
+                          "said_this_turn": list(said_this_turn)[-4:],
+                          "mature": bool(state.get("mature"))}) or {}
+        g_text = dedash((g.get("text") or "").strip())
+        if g_text:
+            g_title = (g.get("title") or "").strip()[:16] or "金色瞬间"
+            state["golden_cd"] = tun["golden_cooldown"]
+            sid_g = star.get("id")
+            yield emit({"type": "description", "speaker_name": None,
+                        "text": f"✨「{g_title}」 {g_text}"})
+            old_g = rel_all.get(sid_g) or relationships.new_scores()
+            rel_all[sid_g] = relationships.apply_deltas(
+                old_g, 2, 2 if g_mode in ("flirt", "lover") else 1, tun)
+            dc_g = int(rel_all[sid_g].get("closeness", 0)) - int(old_g.get("closeness", 0))
+            dr_g = int(rel_all[sid_g].get("romance", 0)) - int(old_g.get("romance", 0))
+            if dc_g or dr_g:
+                prev = rel_deltas.get(sid_g) or {"name": star.get("name"),
+                                                 "closeness": 0, "romance": 0}
+                rel_deltas[sid_g] = {"name": star.get("name"),
+                                     "closeness": int(prev.get("closeness", 0)) + dc_g,
+                                     "romance": int(prev.get("romance", 0)) + dr_g}
+            album_add(content, state, "golden", g_title, g_text, star)
+            moments.append({"kind": "golden", "title": g_title, "name": star.get("name")})
+            rel_log(state, sid_g, old_act, "golden", f"「{g_title}」：{g_text[:40]}")
+
     # think = OBSERVE/EXAMINE. No target → look at the surroundings (where am I, what's
     # going on). With a target → examine that person: a brief intro + their CURRENT state
     # (expression / posture / appearance / mood). Narration only; no dialogue, no affinity;
@@ -4294,6 +4650,8 @@ def run_turn_stream(
             title = candidate.get("title") or ""
             moments.append({"kind": "ending", "ending_kind": kind, "title": title,
                             "terminal": terminal})
+            album_add(content, state, "ending", title or head,
+                      (candidate.get("text") or "").strip() or f"{head} {title}".strip())
             yield emit({"type": "description", "speaker_name": None,
                         "text": f"{head}  {title}".strip()})
             if candidate.get("text"):
@@ -4374,7 +4732,7 @@ def run_turn_stream(
                           if pcfg else None),
         "clock_view": clock_view(content, state),  # ⏳ {day,slot,label,deadline?} or None
         "promises": promises_view(content, state),  # 🤝 open appointments, soonest first
-        "phone_unread": phone_threads_view(content, state)["unread"],  # 📱 badge count
+        "phone_unread": phone_total_unread(content, state),  # 📱 badge (texts + letters)
         "verdict": verdict_view(content, state),  # 🔍 case-closing panel (None until unlocked)
 
         "pending_choice": state.get("pending_choice"),  # unanswered key-moment decision

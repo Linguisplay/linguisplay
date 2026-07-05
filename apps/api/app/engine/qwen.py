@@ -1714,12 +1714,16 @@ class QwenLLM:
         return {"msgs": msgs} if msgs else {}
 
     def _phone_reply(self, prompt: dict[str, Any]) -> dict[str, Any]:
-        """📱 the player texted this character. Answer in voice under the SAME gate as a
-        scene turn (locked truths can't leak over text) — or leave them on read (msgs=[])."""
+        """📱 the player texted (or 📞 CALLED) this character. Answer in voice under the
+        SAME gate as a scene turn (locked truths can't leak over the line either) — or
+        leave them on read (msgs=[]). A probe that just cracked a layer (new_reveal)
+        must be voiced. Calls add one line of what's audible down the line (ambient)."""
         ch = prompt.get("char") or {}
         device = prompt.get("device") or "手机"
+        call = bool(prompt.get("call"))
         ctx = prompt.get("context") or {}
         reveal = ctx.get("reveal") or []
+        new_reveal = ctx.get("new_reveal") or []
         has_hidden = bool(ctx.get("has_hidden"))
         pl = prompt.get("player_name") or "对方"
         tail = "\n".join(f"{pl if m.get('from') == 'me' else ch.get('name','')}：{m.get('text','')}"
@@ -1730,26 +1734,40 @@ class QwenLLM:
             f"你自己的盘算：{ch.get('agenda','')}" if ch.get("agenda") else "",
             f"你与{pl}的关系：{prompt.get('relation','')}。{prompt.get('relationship_playbook','')}",
             f"你们此前的经历（你的记忆）：{(prompt.get('memory') or '')[:400]}" if prompt.get("memory") else "",
-            f"TA不在你身边，是通过{device}给你捎话。你在忙你自己的事，回不回、回多少、什么语气，全凭你此刻的心情和你们的关系。",
+            (f"TA不在你身边，此刻正通过{device}和你【实时通话】。你听得到TA的呼吸和背景音，"
+             "TA也听得到你的。你说出来的是口语，一句一句，可以停顿、可以叹气、可以突然沉默。"
+             if call else
+             f"TA不在你身边，是通过{device}给你捎话。你在忙你自己的事，回不回、回多少、什么语气，"
+             "全凭你此刻的心情和你们的关系。"),
             "【铁律】你只能基于下面列出的「可透露信息」谈及内情；此外的任何秘密你都不知道，绝不能写出来——"
-            "被追问就回避、岔开，或干脆不回。" if (reveal or has_hidden) else "",
+            "被追问就回避、岔开，或干脆不回。" if (reveal or new_reveal or has_hidden) else "",
+            ("【TA这句话问到了要害，你守不住了——把下面这个实情，用你自己的话、你此刻的情绪说出来"
+             "（这是你第一次对TA松口）】" + "；".join((r.get("content") or "")[:80]
+                                                    for r in new_reveal[:2])) if new_reveal else "",
             ("【你对外的统一口径（假话，别偏离）】" + "；".join(
                 f"关于「{c.get('secret_title','')}」：{c.get('content','')}"
-                for c in (ctx.get("covers") or [])[:3])) if ctx.get("covers") else "",
+                for c in (ctx.get("covers") or [])[:3]))
+            if (ctx.get("covers") and not new_reveal) else "",
             ("【你已经告诉过TA的】" + "；".join((r.get("content") or "")[:60] for r in reveal[:4])) if reveal else "",
-            "输出格式：写0~3条短消息，每条一行（口语，短，像真的在发消息；可以只回一个字，也可以连发两三条）。"
-            "如果你此刻不想回（心情/性格/在气头上），就只输出：【已读】",
+            ("输出格式：写1~3行你说出口的话（口语，短句）。另起一行写：背景：你那头此刻传过去的"
+             "声响或动静，10~20字（环境音、你的动作声，不含你的台词）。如果你不想接这个话，"
+             "可以只说一两个字，或输出【沉默】表示你握着听筒没出声。"
+             if call else
+             "输出格式：写0~3条短消息，每条一行（口语，短，像真的在发消息；可以只回一个字，也可以连发两三条）。"
+             "如果你此刻不想回（心情/性格/在气头上），就只输出：【已读】"),
         ]
         sys = "\n".join(l for l in sys_lines if l)
-        u = (f"你们的消息记录：\n{tail}\n\n（TA刚发来最后那条。）你现在回什么？\n"
-             "最后另起一行，写：好感：一个整数-2~2（这几条消息让你对TA更近还是更远）；"
+        u = ((f"你们此前的往来：\n{tail}\n\n（电话接通了，TA刚说了最后那句。）你开口说什么？\n"
+              if call else
+              f"你们的消息记录：\n{tail}\n\n（TA刚发来最后那条。）你现在回什么？\n")
+             + "最后另起一行，写：好感：一个整数-2~2（这几句话让你对TA更近还是更远）；"
              "心动：一个整数-1~2（仅当TA的话让你心里一动）。")
         try:
             resp = httpx.post(
                 self._url,
                 headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
                 json={"model": self._model, "messages": [{"role": "system", "content": sys},
-                      {"role": "user", "content": u}], "max_tokens": 180, "temperature": 0.9},
+                      {"role": "user", "content": u}], "max_tokens": 240, "temperature": 0.9},
                 timeout=25,
             )
             resp.raise_for_status()
@@ -1759,6 +1777,7 @@ class QwenLLM:
         import re as _re
         dc = dr = 0
         msgs: list[str] = []
+        ambient = ""
         for ln in txt.splitlines():
             s = ln.strip()
             if not s:
@@ -1769,12 +1788,87 @@ class QwenLLM:
             elif s.startswith("心动"):
                 m = _re.search(r"-?\d+", s)
                 dr = max(-1, min(2, int(m.group()))) if m else 0
-            elif "已读" in s and len(s) <= 6:
+            elif s.startswith("背景"):
+                ambient = s.split("：", 1)[-1].split(":", 1)[-1].strip().strip("（）()")[:60]
+            elif ("已读" in s or "沉默" in s) and len(s) <= 6:
                 msgs = []
                 break
             else:
                 msgs.append(s.strip("「」\"'")[:120])
-        return {"msgs": msgs[:3], "closeness": dc, "romance": dr}
+        out: dict[str, Any] = {"msgs": msgs[:3], "closeness": dc, "romance": dr}
+        if call:
+            out["ambient"] = ambient
+        return out
+
+    def _compose_letter(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """📮 a real LETTER in this character's hand (love letter / long-absence letter).
+        Longer than a text, unmistakably them. Degrades to {} → deterministic fallback."""
+        ch = prompt.get("char") or {}
+        sys = (f"你是「{ch.get('name','')}」（{ch.get('role','')}）。人设：{ch.get('persona_text','')}\n"
+               f"表达方式：{ch.get('eq_style','')}\n"
+               f"你与收信人的关系：{prompt.get('relation','')}。\n"
+               f"你们此前的经历（你的记忆）：{(prompt.get('memory') or '')[:400]}\n"
+               f"情境：{prompt.get('hint','')}\n"
+               "写一封【信】：第一行是信的标题（≤12字，像你会写的，不要「无题」）；"
+               "空一行后是正文，120~250字，第二人称写给TA。要具体，写到你们之间真实发生过的事、"
+               "你当时没说出口的心思；落款是你的名字。忌空泛抒情、忌套话。不用破折号。")
+        try:
+            resp = httpx.post(
+                self._url,
+                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
+                json={"model": self._model, "messages": [{"role": "system", "content": sys},
+                      {"role": "user", "content": "写这封信（第一行标题，空行，正文）："}],
+                      "max_tokens": 420, "temperature": 0.9},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+        except Exception:
+            return {}
+        lines = txt.splitlines()
+        head = next((l.strip().strip("《》「」#* ") for l in lines if l.strip()), "")
+        first_i = next((i for i, l in enumerate(lines) if l.strip()), 0)
+        body = "\n".join(lines[first_i + 1:]).strip()
+        return {"subject": head[:24], "body": body[:800]} if body else {}
+
+    def _golden(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """✨ 稀有奇遇: a rare golden moment with the closest character — one cinematic
+        flash the scene didn't owe the player. Degrades to {} (the drop simply doesn't
+        fire this turn; the engine keeps the roll for another day)."""
+        ch = prompt.get("char") or {}
+        said = "\n".join(f"{s.get('speaker','')}：{s.get('text','')}"
+                         for s in (prompt.get("said_this_turn") or [])) or "（刚才没有对话）"
+        sys = ("你在为互动剧情游戏写一段【金色瞬间】，罕见的、玩家没有预期的一小段奇遇演出，"
+               f"主角是「{ch.get('name','')}」（{ch.get('role','')}；人设：{ch.get('persona_text','')}）"
+               f"与玩家。你们的关系：{prompt.get('relation','')}。\n"
+               "写两行：第一行是这个瞬间的名字（4~10字，像回忆相册里的标题）；"
+               "第二行是这个瞬间本身，60~120字：一个突然到来的、值得记一辈子的小片段，"
+               "可以是TA罕见的失态或温柔、一次心照不宣的对视、一件只给你看的东西、一句压了很久的话。"
+               "必须扣住此时此地与TA的性格，具体可感，不许出现任何秘密或未揭露的剧情。不用破折号。"
+               + ("（本局为成人向，允许更亲密的肢体细节，但这一段以心动为主。）"
+                  if prompt.get("mature") else ""))
+        u = (f"地点：{prompt.get('place','') or '（未知）'}；时间：{prompt.get('clock','') or '不明'}\n"
+             f"刚才的对话：\n{said}\n\n写这个金色瞬间（两行）：")
+        try:
+            resp = httpx.post(
+                self._url,
+                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
+                json={"model": self._model, "messages": [{"role": "system", "content": sys},
+                      {"role": "user", "content": u}], "max_tokens": 220, "temperature": 0.95},
+                timeout=25,
+            )
+            resp.raise_for_status()
+            txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+        except Exception:
+            return {}
+        lines = [l.strip().strip("《》「」#* ") for l in txt.splitlines() if l.strip()]
+        if not lines:
+            return {}
+        title = lines[0][:16]
+        text = " ".join(lines[1:]).strip()
+        if not text:  # single-line output → treat it all as the moment itself
+            title, text = "", lines[0]
+        return {"title": title, "text": text[:200]}
 
     def _arrive(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """到达旁白: the player just walked into a place. One vivid pan (2~4 sentences):
@@ -1961,8 +2055,12 @@ class QwenLLM:
             return self._arrive(prompt)
         if prompt.get("compose_msg"):
             return self._compose_msg(prompt)
+        if prompt.get("compose_letter"):
+            return self._compose_letter(prompt)
         if prompt.get("phone_reply"):
             return self._phone_reply(prompt)
+        if prompt.get("golden_moment"):
+            return self._golden(prompt)
         if prompt.get("farewell"):
             return self._farewell(prompt)
         if prompt.get("opening_hook"):
