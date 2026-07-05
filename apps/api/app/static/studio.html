@@ -40,6 +40,16 @@
   .issue.warn { background: #262112; border: 1px solid #55491f; color: #e8cf7a; }
   .issue.ok { background: #14231a; border: 1px solid #275737; color: #9de8b3; }
   code.id { font-size: 11px; color: #6d7590; background: #101017; padding: 1px 5px; border-radius: 5px; }
+  /* 📚 角色卡库 overlay */
+  #cardlib { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.6); display: grid; place-items: center; }
+  #cardlib .libcard { width: min(680px, 94vw); max-height: 88vh; overflow-y: auto; background: #101018;
+                      border: 1px solid #34344a; border-radius: 16px; padding: 16px 18px; }
+  .cardrow { display: flex; align-items: center; gap: 10px; padding: 8px 6px; border-bottom: 1px solid #1c1c26; }
+  .cardrow .cav { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; background: #23232f;
+                  display: grid; place-items: center; font-weight: 700; flex: none; }
+  .cardrow .cmeta { flex: 1; min-width: 0; }
+  .cardrow .cname { font-weight: 600; font-size: 13.5px; }
+  .cardrow .crole { color: #888; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 </style>
 </head>
 <body>
@@ -62,7 +72,10 @@
   <div id="list" class="hidden">
     <div class="bar" style="justify-content:space-between; margin-top:14px">
       <h2 style="border:0; margin:0">我的剧本</h2>
-      <button onclick="newStory()">+ 新建剧本</button>
+      <span class="bar">
+        <button class="ghost" onclick="openCardLib(false)">📚 角色卡库</button>
+        <button onclick="newStory()">+ 新建剧本</button>
+      </span>
     </div>
     <div id="stories"></div>
   </div>
@@ -107,8 +120,9 @@
     <div class="muted">世界的物理地图。角色按作息待在地点里，玩家走过去才遇得到；地点上可以放「可搜查物证」。不配地图 = 所有角色随时在场（旧行为）。</div>
     <div id="locs"></div>
 
-    <h2>角色 <button class="sm" onclick="addChar()">+ 加角色</button></h2>
-    <div class="muted">主角（is_lead）是默认开口的人。每个角色可挂秘密、作息表、随身物品、与他人的旧关系。</div>
+    <h2>角色 <button class="sm" onclick="addChar()">+ 加角色</button>
+      <button class="sm ghost" onclick="openCardLib(true)">📚 从角色卡库导入</button></h2>
+    <div class="muted">主角（is_lead）是默认开口的人。每个角色可挂秘密、作息表、随身物品、与他人的旧关系。卡库里的角色跨剧本复用（导入=复制，之后改卡不影响已导入的剧本）。</div>
     <div id="chars"></div>
 
     <h2>幕 / 剧情事件 <button class="sm" onclick="addAct()">+ 加一幕</button></h2>
@@ -349,6 +363,7 @@ function renderChars(){
         <h3 style="margin:0">👤 ${esc(c.name||"未命名")} <code class="id">${esc(c.id)}</code></h3>
         <span class="bar">
           <label style="margin:0"><input type="radio" name="lead" ${c.is_lead?"checked":""} onclick="setLead(${i})" style="width:auto"> 主角</label>
+          <button class="sm ghost" onclick="saveCharAsCard(${i})">📚 存入卡库</button>
           <button class="sm del" onclick="delChar(${i})">删除</button>
         </span>
       </div>
@@ -740,6 +755,125 @@ async function save(publish){
     else saveMsg.textContent="已保存草稿 ✓";
     renderMedia();
   }catch(e){ saveMsg.textContent="出错: "+e.message; }
+}
+
+// ── 📚 角色卡库：跨剧本的角色（Character.AI 式）。导入 = 复制进当前剧本 ──
+let libCards = [];
+function closeCardLib(){ const o=document.getElementById("cardlib"); if(o) o.remove(); }
+async function openCardLib(importMode){
+  closeCardLib();
+  const o=document.createElement("div"); o.id="cardlib";
+  o.onclick=e=>{ if(e.target===o) o.remove(); };
+  document.body.appendChild(o);
+  try{ libCards = await j("/cards"); }catch(e){ libCards=[]; }
+  renderCardLib(!!importMode);
+}
+function renderCardLib(importMode){
+  const o=document.getElementById("cardlib"); if(!o) return;
+  const rows = libCards.map(c=>{
+    const av = c.avatar_url ? `<img class="cav" src="${esc(c.avatar_url)}">`
+                            : `<span class="cav">${esc((c.name||"?")[0])}</span>`;
+    return `<div class="cardrow">${av}<div class="cmeta">
+        <div class="cname">${esc(c.name)}</div><div class="crole">${esc(c.role||c.persona_text||"")}</div></div>
+      ${importMode?`<button class="sm" onclick="importCard('${c.id}')">导入到剧本</button>`:""}
+      <button class="sm ghost" onclick="editCardForm('${c.id}')">编辑</button>
+      <button class="sm del" onclick="delCard('${c.id}')">删</button></div>`;
+  }).join("") || `<p class="muted">卡库还是空的。建一张卡，或在剧本角色上点「📚 存入卡库」。</p>`;
+  o.innerHTML = `<div class="libcard" onclick="event.stopPropagation()">
+    <div class="bar" style="justify-content:space-between">
+      <h3 style="margin:0">📚 角色卡库${importMode?"（点「导入」加进当前剧本）":""}</h3>
+      <span class="bar"><button class="sm" onclick="editCardForm(null)">＋ 新建角色卡</button>
+      <button class="sm ghost" onclick="closeCardLib()">关闭</button></span></div>
+    <div id="librows">${rows}</div></div>`;
+  o.dataset.importMode = importMode ? "1" : "";
+}
+function editCardForm(id){
+  const o=document.getElementById("cardlib"); if(!o) return;
+  const c = libCards.find(x=>x.id===id) || {name:"",role:"",persona_text:"",background:"",
+    eq_style:"",agenda:"",knowledge:"",examples:[],items:[],bio_layers:[],visibility:"private"};
+  o.querySelector(".libcard").innerHTML = `
+    <div class="bar" style="justify-content:space-between">
+      <h3 style="margin:0">${id?"编辑角色卡":"新建角色卡"}</h3>
+      <button class="sm ghost" onclick="renderCardLib(document.getElementById('cardlib').dataset.importMode==='1')">‹ 返回卡库</button></div>
+    <div class="row2">
+      <div><label>名字</label><input id="cc_name" value="${esc(c.name)}"></div>
+      <div><label>身份（一句话）</label><input id="cc_role" value="${esc(c.role||"")}"></div>
+    </div>
+    <label>人设（外貌、性格、说话方式）</label><textarea id="cc_persona">${esc(c.persona_text||"")}</textarea>
+    <label>背景（可选）</label><textarea id="cc_bg">${esc(c.background||"")}</textarea>
+    <div class="row2">
+      <div><label>情绪表达方式（eq_style）</label><input id="cc_eq" value="${esc(c.eq_style||"")}"></div>
+      <div><label>TA 自己的目的（agenda）</label><input id="cc_agenda" value="${esc(c.agenda||"")}"></div>
+    </div>
+    <label>台词范例（一行一句，最能代表 TA 声音的原话）</label>
+    <textarea id="cc_examples">${esc((c.examples||[]).join("\n"))}</textarea>
+    <label>知识库（可选，或用下面的智能增强自动生成）</label><textarea id="cc_kn">${esc(c.knowledge||"")}</textarea>
+    <div class="bar" style="margin-top:10px">
+      <button onclick="saveCardForm('${id||""}')">保存</button>
+      ${id?`<button class="ghost sm" onclick="enrichCardBtn('${id}')">🔍 智能增强</button>
+      <label class="ghost sm" style="margin:0;padding:4px 9px;background:#23232c;border-radius:7px;cursor:pointer;color:#bbb;font-size:12px">
+        🖼 上传头像<input type="file" accept="image/*" style="display:none" onchange="uploadCardAvatar('${id}',this)"></label>`:""}
+      <span id="cc_msg" class="muted"></span></div>`;
+}
+function _ccPayload(){
+  return { name:cc_name.value.trim(), role:cc_role.value.trim(), persona_text:cc_persona.value,
+    background:cc_bg.value, eq_style:cc_eq.value.trim(), agenda:cc_agenda.value.trim(),
+    knowledge:cc_kn.value, examples:cc_examples.value.split("\n").map(s=>s.trim()).filter(Boolean),
+    items:[], bio_layers:[], visibility:"private" };
+}
+async function saveCardForm(id){
+  try{
+    const body=_ccPayload();
+    const keep = libCards.find(x=>x.id===id);
+    if(keep){ body.items=keep.items||[]; body.bio_layers=keep.bio_layers||[]; body.visibility=keep.visibility||"private"; }
+    if(id) await j(`/cards/${id}`,{method:"PATCH",body:JSON.stringify(body)});
+    else await j("/cards",{method:"POST",body:JSON.stringify(body)});
+    libCards = await j("/cards");
+    renderCardLib(document.getElementById("cardlib").dataset.importMode==="1");
+  }catch(e){ const m=document.getElementById("cc_msg"); if(m) m.textContent="出错: "+e.message; }
+}
+async function delCard(id){
+  if(!confirm("删除这张角色卡？（已导入各剧本的副本不受影响）")) return;
+  try{ await j(`/cards/${id}`,{method:"DELETE"}); libCards=libCards.filter(c=>c.id!==id);
+    renderCardLib(document.getElementById("cardlib").dataset.importMode==="1"); }catch(e){ alert(e.message); }
+}
+async function enrichCardBtn(id){
+  const m=document.getElementById("cc_msg"); if(m) m.textContent="🔍 生成中（十几秒）…";
+  try{ const c=await j(`/cards/${id}/enrich`,{method:"POST"});
+    libCards=libCards.map(x=>x.id===id?c:x); cc_kn.value=c.knowledge||"";
+    if(m) m.textContent=c.knowledge?"✓ 已生成":"（未配置模型 key，跳过）";
+  }catch(e){ if(m) m.textContent="出错: "+e.message; }
+}
+async function uploadCardAvatar(id, input){
+  const f=input.files && input.files[0]; if(!f) return;
+  const m=document.getElementById("cc_msg"); if(m) m.textContent="上传中…";
+  const fd=new FormData(); fd.append("file", f);
+  const r=await fetch(`${API}/cards/${id}/avatar`,{method:"POST",credentials:"include",body:fd});
+  if(m) m.textContent = r.ok ? "✓ 头像已更新" : "上传失败";
+  if(r.ok){ const b=await r.json(); libCards=libCards.map(x=>x.id===id?{...x,avatar_url:b.avatar_url}:x); }
+}
+// 导入 = 复制进当前剧本（记 source_card_id 溯源；剧本绑定字段留给作者在剧本里配）
+function importCard(id){
+  const c = libCards.find(x=>x.id===id); if(!c) return;
+  story.characters.push({ id:gid("c_"), name:c.name, role:c.role||"",
+    is_lead:story.characters.length===0, persona_text:c.persona_text||"", background:c.background||"",
+    avatar_url:c.avatar_url||"", eq_style:c.eq_style||"", agenda:c.agenda||"", knowledge:c.knowledge||"",
+    examples:c.examples||[], items:c.items||[], bio_layers:c.bio_layers||[], source_card_id:c.id,
+    presence:"present", appears_from_act:0, playable:false, relation_default:"",
+    home_location_id:null, schedule:[], ties:[] });
+  closeCardLib(); renderAll();
+  saveMsg.textContent=`已导入「${c.name}」（复制），记得保存 ✓`;
+}
+// 反向：把剧本里写好的角色收进卡库，别的剧本也能用
+async function saveCharAsCard(i){
+  const c=story.characters[i]; if(!c || !(c.name||"").trim()){ alert("角色得先有名字"); return; }
+  try{
+    await j("/cards",{method:"POST",body:JSON.stringify({ name:c.name, role:c.role||"",
+      persona_text:c.persona_text||"", background:c.background||"", eq_style:c.eq_style||"",
+      agenda:c.agenda||"", knowledge:c.knowledge||"", examples:c.examples||[],
+      items:c.items||[], bio_layers:c.bio_layers||[], visibility:"private" })});
+    saveMsg.textContent=`「${c.name}」已存入角色卡库 ✓`;
+  }catch(e){ alert("存入失败: "+e.message); }
 }
 </script>
 </body>

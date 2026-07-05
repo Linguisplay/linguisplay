@@ -71,6 +71,28 @@ class Persona(Base):
     owner: Mapped[User] = relationship(back_populates="personas")
 
 
+class CharacterCard(Base):
+    """📚 角色卡库: a character that lives OUTSIDE any story (Character.AI-style).
+    Authored once — persona, voice, example lines — then imported into any 剧本 as a
+    COPY (the story character records source_card_id for provenance; later edits to
+    the card never mutate stories that already imported it)."""
+
+    __tablename__ = "character_cards"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+
+    name: Mapped[str] = mapped_column(String(120))
+    visibility: Mapped[str] = mapped_column(String(16), default="private")
+    avatar_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # the portable persona payload (role/persona_text/eq_style/agenda/knowledge/
+    # bio_layers/items/examples) — one JSON blob, same philosophy as Story's columns
+    content: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+
+
 class Story(Base):
     __tablename__ = "stories"
 

@@ -117,6 +117,36 @@ class Character(BaseModel):
     presence: Literal["present", "offstage"] = "present"
     # if >0, this character only becomes present from that act onward (a later entrance).
     appears_from_act: int = 0
+    # 📚 provenance: imported from this library card (COPY semantics — editing the card
+    # later never mutates this story). None = authored directly in the story.
+    source_card_id: Optional[str] = None
+    # 台词范例 carried from the card: lines that ARE this voice (future mes_example hook;
+    # kept in the schema so publish doesn't silently drop them)
+    examples: list[str] = []
+
+
+class CharacterCardInput(BaseModel):
+    """📚 角色卡库 payload: the PORTABLE persona subset of Character — everything about
+    who they are, nothing about where they stand in a particular story (no schedule/
+    ties/home_location/presence: those are authored after import, per story)."""
+    name: str = ""
+    role: Optional[str] = None
+    persona_text: Optional[str] = None
+    background: Optional[str] = None
+    eq_style: Optional[str] = None
+    agenda: Optional[str] = None
+    knowledge: Optional[str] = None
+    bio_layers: list[dict[str, Any]] = []
+    items: list[dict[str, Any]] = []
+    # 台词范例 (mes_example-style few-shot): lines that ARE this character's voice
+    examples: list[str] = []
+    visibility: Literal["private", "public"] = "private"
+
+
+class CharacterCard(CharacterCardInput):
+    id: str
+    avatar_url: Optional[str] = None
+    updated_at: Optional[datetime] = None
 
 
 class StoryEvent(BaseModel):

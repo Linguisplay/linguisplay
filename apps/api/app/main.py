@@ -13,7 +13,7 @@ for _sub in ("bg", "bgm", "sfx"):
 
 from .config import get_settings
 from .db import init_db
-from .routers import auth, me, personas, phone_mock, runs, stories
+from .routers import auth, cards, me, personas, phone_mock, runs, stories
 
 settings = get_settings()
 
@@ -43,6 +43,7 @@ API = "/api/v1"
 app.include_router(auth.router, prefix=API)
 app.include_router(me.router, prefix=API)
 app.include_router(personas.router, prefix=API)
+app.include_router(cards.router, prefix=API)  # 📚 角色卡库 (cross-story characters)
 app.include_router(stories.router, prefix=API)
 app.include_router(runs.router, prefix=API)
 app.include_router(phone_mock.router, prefix=API)  # MOCK: phone domain skeleton
