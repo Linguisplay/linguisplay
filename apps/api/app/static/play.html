@@ -1654,6 +1654,7 @@ function showMoments(moments, relDeltas) {
     else if (m.kind === "death") pushToast(`☠️ ${m.name || "有人"} 死了`, "t-press", i++ * 650);
     else if (m.kind === "arrival") pushToast(`👋 新面孔登场：${m.name || ""}`, "t-act", i++ * 650);
     else if (m.kind === "identity") pushToast(`🎖 你的身份变了：${m.text || ""}`, "t-end", i++ * 650);
+    else if (m.kind === "world") pushToast(`🌍 世界记住了：${m.text || ""}`, "t-unlock", i++ * 650);
     else if (m.kind === "player_hp") pushToast(
       m.hp === "dead" ? "💀 你死了。「说」与「做」已被剥夺，你只能旁观" :
       m.hp === "dying" ? "🆘 你重伤濒死" :

@@ -551,6 +551,10 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                               "注意：存放/收纳/藏起来【不是失去】，那要填 item_stashed；否则空字符串"}
         props["item_stashed"] = {"type": "string", "description":
                                  "若玩家把随身物品存放/收纳/寄存/藏在当前地点，填物品名；否则空字符串"}
+        props["world_fact"] = {"type": "string", "description":
+                               "若这一轮对【当前地点本身】造成了会一直留下的物理改变"
+                               "（门被砸开/东西烧毁/墙上留了字/桥断了），用≤30字客观记一笔；"
+                               "人的情绪、对话、临时动作不算；没有则空字符串"}
         if prompt.get("player_items"):
             props["gift_received"] = {"type": "string", "description":
                                       "若玩家这一轮把TA的随身物品【送给你】（递给你/塞给你/请你收下），"
@@ -1006,6 +1010,8 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
         out["trade"] = str(d.get("item_traded") or "").strip()
     if "player_harm" in d:
         out["player_harm"] = str(d.get("player_harm") or "").strip()
+    if "world_fact" in d:
+        out["world_fact"] = str(d.get("world_fact") or "").strip()
     if "npc_moves" in d:
         out["npc_moves"] = [{"who": str(m.get("who") or "").strip(),
                              "to": str(m.get("to") or "").strip()}

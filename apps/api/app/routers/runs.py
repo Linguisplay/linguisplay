@@ -292,6 +292,10 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
     # starting place synthesized from their opening setting.
     start_loc = runtime.ensure_start_location(content, state)
     _spawn_location_bg(content, start_loc)
+    # 🏖 sandbox spatial rigor: the conjured cast LIVES at the start place (not
+    # everywhere); the map decides who you can meet, movement means something
+    if runtime.sandbox_on(content) and start_loc and start_loc.get("id"):
+        runtime.anchor_homeless_cast(content, start_loc["id"])
     # an authored key-moment decision on act 1 greets the player at the door
     state["pending_choice"] = runtime.choice_for_act(content, state, 1)
     # 🎒 the embodied character's authored pocket items start the run with the player

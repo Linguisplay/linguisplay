@@ -126,6 +126,34 @@ def test_stash_is_deterministic_and_retrieve_hears_speech():
     assert not out3["state"].get("stashes")
 
 
+def test_world_facts_persist_dedupe_and_ground_the_place():
+    # a judged lasting change is booked to THIS place and served back to every scene
+    out = runtime.run_turn(STORY, _st(), {"name": "我"}, "一脚踹向大门", channel="say",
+                           llm=ActLLM(world_fact="正门被撞开了一道缝", next_speakers=[]))
+    st = out["state"]
+    assert st["place_facts"]["hall"][0]["text"] == "正门被撞开了一道缝"
+    assert any(m["kind"] == "world" for m in out["moments"])
+    assert "正门被撞开了一道缝" in runtime._physical_place(STORY, st)
+    # the same fact never books twice
+    st = runtime.run_turn(STORY, st, {"name": "我"}, "再看看门", channel="say",
+                          llm=ActLLM(world_fact="正门被撞开了一道缝。", next_speakers=[]))["state"]
+    assert len(st["place_facts"]["hall"]) == 1
+
+
+def test_homeless_conjured_cast_gets_anchored():
+    content = {"story": {"id": "s", "characters": [
+        {"id": "g1", "name": "甲", "generated": True},
+        {"id": "g2", "name": "乙", "generated": True, "home_location_id": "elsewhere"},
+        {"id": "a1", "name": "丙"},                       # authored ubiquitous stays so
+    ], "locations": [{"id": "L", "name": "码头", "detail": "x", "exits": []}]},
+        "secrets": []}
+    runtime.anchor_homeless_cast(content, "L")
+    chars = {c["id"]: c for c in content["story"]["characters"]}
+    assert chars["g1"]["home_location_id"] == "L"
+    assert chars["g2"]["home_location_id"] == "elsewhere"   # an existing home is kept
+    assert "home_location_id" not in chars["a1"]            # authored chars untouched
+
+
 def test_possessions_visible_on_the_dossier():
     st = _st()
     prof = runtime.character_profile(STORY, st, "a")

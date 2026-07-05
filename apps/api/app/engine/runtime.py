@@ -101,6 +101,7 @@ def default_state() -> dict[str, Any]:
         "identity_log": [],             # [{act, text}] — how the identity evolved
         "inventory": [],                # 🎒 pocket: [{name, detail?}] carried items
         "stashes": {},                  # {location_id: [{name,...}]} items left somewhere
+        "place_facts": {},              # 🌍 {location_id: [{text,label}]} lasting physical changes
         "met_ids": [],                  # characters the player has already met (首次见面 log)
         "rel_log": {},                  # 关系大事记: {char_id: [{act, kind, text}]}
         "pending_choice": None,         # an authored decision awaiting the player's pick
@@ -422,6 +423,16 @@ def seed_sandbox_cast(content: dict[str, Any], llm: LLM | None = None,
                   "persona_text": "对生面孔有超出寻常的兴趣，话不多，但每一句都像已经认识你很久。",
                   "relation_default": "stranger", "generated": True, "is_lead": True}]
     story.setdefault("characters", []).extend(chars)
+
+
+def anchor_homeless_cast(content: dict[str, Any], location_id: str) -> None:
+    """🏖 sandbox spatial rigor: conjured characters live SOMEWHERE. Anyone generated
+    without a home is anchored to the given place (the start location), so presence
+    obeys the map instead of everyone being everywhere. Later arrivals get their home
+    where they were born (see the new_character block); npc_moves relocate for real."""
+    for c in (content.get("story") or {}).get("characters") or []:
+        if c.get("generated") and not c.get("home_location_id"):
+            c["home_location_id"] = location_id
 
 
 def align_clock_to_act(content: dict[str, Any], state: dict[str, Any],
@@ -902,8 +913,15 @@ def _physical_place(content: dict[str, Any], state: dict[str, Any]) -> str:
     stash = [(i.get("name") or "") for i in (state.get("stashes") or {}).get(loc.get("id"), []) if i.get("name")]
     if stash:
         concrete += f"　玩家之前存放在这里的东西：{'、'.join(stash)}。"
+    # 🌍 场面事实账本: the world REMEMBERS physical changes booked here (smashed doors
+    # stay smashed) — served back so prose can never quietly reset the place
+    facts = [(f.get("text") or "")
+             for f in (state.get("place_facts") or {}).get(loc.get("id"), []) if f.get("text")]
+    if facts:
+        concrete += f"　这里已经发生过、至今仍然作数的改变：{'；'.join(facts)}。"
     instruction = (
         "旁白只能描写这个地点里实际存在的东西，不要凭空添置别处的陈设；"
+        "已经发生过的改变是既成事实，绝不能写回原样（砸开的门不会自己完好如初）；"
         "玩家要移动到别处，必须经由上面列出的通路，且要把移动过程写出来，不能瞬移。"
     )
     return concrete + "\n" + instruction
@@ -3698,6 +3716,19 @@ def run_turn_stream(
                     else:
                         rel_log(state, sp_id, old_act, "gift",
                                 f"你想把{g_item.strip()}送给TA，被TA推回来了。")
+            # 🌍 场面事实账本: a judged PERSISTENT physical change to this place gets
+            # booked and served back forever (the smashed door stays smashed) — the
+            # world's memory is engine-owned, not vibes
+            wf = (directed.get("world_fact") or "").strip()[:60]
+            if wf and not observer and state.get("location_id"):
+                pf = dict(state.get("place_facts") or {})
+                lst = list(pf.get(state["location_id"]) or [])
+                if all(logic._norm(x.get("text", "")) != logic._norm(wf) for x in lst):
+                    lst.append({"text": wf,
+                                "label": (clock_view(content, state) or {}).get("label", "")})
+                    pf[state["location_id"]] = lst[-6:]
+                    state["place_facts"] = pf
+                    moments.append({"kind": "world", "text": wf})
             # 🎒 ITEMS: gained / lost / stashed at the current place
             if not observer:
                 g = (directed.get("gained") or "").strip()
