@@ -50,6 +50,25 @@ def list_cards(user: User = Depends(current_user), db: Session = Depends(get_db)
     return [_to_schema(c) for c in rows]
 
 
+@router.get("/square", response_model=list[CharacterCard])
+def card_square(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """🌐 角色卡广场: everyone's PUBLIC cards, newest first. Import/clone is a copy —
+    the square never hands out edit rights, and later edits by the author don't
+    reach anyone who already took the card."""
+    rows = (db.query(CardModel).filter(CardModel.visibility == "public")
+            .order_by(CardModel.updated_at.desc()).limit(60).all())
+    authors = {u.id: (u.display_name or "匿名作者")
+               for u in db.query(User).filter(
+                   User.id.in_({c.owner_id for c in rows})).all()} if rows else {}
+    out = []
+    for c in rows:
+        card = _to_schema(c)
+        card.author = authors.get(c.owner_id, "匿名作者")
+        card.mine = c.owner_id == user.id
+        out.append(card)
+    return out
+
+
 @router.post("", status_code=201, response_model=CharacterCard)
 def create_card(body: CharacterCardInput,
                 user: User = Depends(current_user), db: Session = Depends(get_db)):
@@ -65,7 +84,13 @@ def create_card(body: CharacterCardInput,
 
 @router.get("/{card_id}", response_model=CharacterCard)
 def get_card(card_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    return _to_schema(_own(card_id, user, db))
+    """Own cards always; anyone's card when it's shared to the 广场 (read-only copy source)."""
+    c = db.get(CardModel, card_id)
+    if not c or (c.owner_id != user.id and c.visibility != "public"):
+        raise HTTPException(404, "没有这张角色卡")
+    card = _to_schema(c)
+    card.mine = c.owner_id == user.id
+    return card
 
 
 @router.patch("/{card_id}", response_model=CharacterCard)

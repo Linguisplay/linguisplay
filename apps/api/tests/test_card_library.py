@@ -84,6 +84,26 @@ def test_imported_character_survives_save_and_publish():
         assert still["persona_text"] == "话少，记性好得吓人"
 
 
+def test_square_lists_public_only_and_strangers_can_read_them():
+    with _fresh_client() as c:
+        _signup(c, "a@x.com")
+        pub = c.post("/api/v1/cards", json={**CARD, "visibility": "public"}).json()
+        priv = c.post("/api/v1/cards", json={**CARD, "name": "私藏", }).json()
+        with TestClient(app) as other:
+            _signup(other, "b@x.com")
+            sq = other.get("/api/v1/cards/square").json()
+            assert [x["id"] for x in sq] == [pub["id"]]          # private stays home
+            assert sq[0]["author"] and sq[0]["mine"] is False
+            # a public card is readable (copy source), a private one is not
+            assert other.get(f"/api/v1/cards/{pub['id']}").status_code == 200
+            assert other.get(f"/api/v1/cards/{priv['id']}").status_code == 404
+            # …but never editable by a stranger
+            assert other.patch(f"/api/v1/cards/{pub['id']}", json=CARD).status_code == 404
+            assert other.delete(f"/api/v1/cards/{pub['id']}").status_code == 404
+        # the owner sees mine=True on their own square entry
+        assert c.get("/api/v1/cards/square").json()[0]["mine"] is True
+
+
 def test_avatar_upload_validates_and_enrich_is_stubbed(monkeypatch):
     with _fresh_client() as c:
         _signup(c, "a@x.com")

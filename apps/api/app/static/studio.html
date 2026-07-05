@@ -771,29 +771,67 @@ async function openCardLib(importMode){
   try{ libCards = await j("/cards"); }catch(e){ libCards=[]; }
   renderCardLib(!!importMode);
 }
+function _libShell(importMode, tab, inner, actions){
+  const o=document.getElementById("cardlib"); if(!o) return null;
+  o.dataset.importMode = importMode ? "1" : "";
+  o.innerHTML = `<div class="libcard" onclick="event.stopPropagation()">
+    <div class="bar" style="justify-content:space-between">
+      <span class="bar">
+        <button class="sm ${tab==="mine"?"":"ghost"}" onclick="renderCardLib(document.getElementById('cardlib').dataset.importMode==='1')">📚 我的卡库</button>
+        <button class="sm ${tab==="square"?"":"ghost"}" onclick="openCardSquare()">🌐 广场</button>
+      </span>
+      <span class="bar">${actions||""}<button class="sm ghost" onclick="closeCardLib()">关闭</button></span></div>
+    ${importMode?`<div class="muted" style="margin:6px 0 0">导入 = 复制进当前剧本，之后互不影响。</div>`:""}
+    <div id="librows">${inner}</div></div>`;
+  return o;
+}
 function renderCardLib(importMode){
-  const o=document.getElementById("cardlib"); if(!o) return;
   const rows = libCards.map(c=>{
     const av = c.avatar_url ? `<img class="cav" src="${esc(c.avatar_url)}">`
                             : `<span class="cav">${esc((c.name||"?")[0])}</span>`;
     return `<div class="cardrow">${av}<div class="cmeta">
-        <div class="cname">${esc(c.name)}</div><div class="crole">${esc(c.role||c.persona_text||"")}</div></div>
+        <div class="cname">${esc(c.name)}${c.visibility==="public"?' <span class="tag">🌐 已公开</span>':""}</div>
+        <div class="crole">${esc(c.role||c.persona_text||"")}</div></div>
       ${importMode?`<button class="sm" onclick="importCard('${c.id}')">导入到剧本</button>`:""}
       <button class="sm ghost" onclick="editCardForm('${c.id}')">编辑</button>
       <button class="sm del" onclick="delCard('${c.id}')">删</button></div>`;
-  }).join("") || `<p class="muted">卡库还是空的。建一张卡，或在剧本角色上点「📚 存入卡库」。</p>`;
-  o.innerHTML = `<div class="libcard" onclick="event.stopPropagation()">
-    <div class="bar" style="justify-content:space-between">
-      <h3 style="margin:0">📚 角色卡库${importMode?"（点「导入」加进当前剧本）":""}</h3>
-      <span class="bar"><button class="sm" onclick="editCardForm(null)">＋ 新建角色卡</button>
-      <button class="sm ghost" onclick="closeCardLib()">关闭</button></span></div>
-    <div id="librows">${rows}</div></div>`;
-  o.dataset.importMode = importMode ? "1" : "";
+  }).join("") || `<p class="muted">卡库还是空的。建一张卡，或在剧本角色上点「📚 存入卡库」，也可以去🌐广场收别人的。</p>`;
+  _libShell(importMode, "mine", rows,
+            `<button class="sm" onclick="editCardForm(null)">＋ 新建角色卡</button>`);
+}
+// 🌐 角色卡广场: everyone's public cards — import to the story, or clone into my library
+let sqCards = [];
+async function openCardSquare(){
+  const importMode = document.getElementById("cardlib").dataset.importMode==="1";
+  try{ sqCards = await j("/cards/square"); }catch(e){ sqCards=[]; }
+  const rows = sqCards.map(c=>{
+    const av = c.avatar_url ? `<img class="cav" src="${esc(c.avatar_url)}">`
+                            : `<span class="cav">${esc((c.name||"?")[0])}</span>`;
+    return `<div class="cardrow">${av}<div class="cmeta">
+        <div class="cname">${esc(c.name)} <span class="tag">by ${esc(c.author||"匿名作者")}</span></div>
+        <div class="crole">${esc(c.role||c.persona_text||"")}</div></div>
+      ${importMode?`<button class="sm" onclick="importCard('${c.id}')">导入到剧本</button>`:""}
+      ${c.mine?`<button class="sm ghost" onclick="editCardForm('${c.id}')">编辑</button>`
+              :`<button class="sm ghost" onclick="cloneCard('${c.id}')">收进我的卡库</button>`}</div>`;
+  }).join("") || `<p class="muted">广场还空着。把你的角色卡设为「公开」，就会出现在这里。</p>`;
+  _libShell(importMode, "square", rows);
+}
+async function cloneCard(id){
+  const c = sqCards.find(x=>x.id===id); if(!c) return;
+  try{
+    await j("/cards",{method:"POST",body:JSON.stringify({ name:c.name, role:c.role||"",
+      persona_text:c.persona_text||"", background:c.background||"", eq_style:c.eq_style||"",
+      agenda:c.agenda||"", knowledge:c.knowledge||"", examples:c.examples||[],
+      items:c.items||[], bio_layers:c.bio_layers||[], visibility:"private" })});
+    libCards = await j("/cards");
+    alert(`「${c.name}」已收进你的卡库`);
+  }catch(e){ alert("收藏失败: "+e.message); }
 }
 function editCardForm(id){
   const o=document.getElementById("cardlib"); if(!o) return;
-  const c = libCards.find(x=>x.id===id) || {name:"",role:"",persona_text:"",background:"",
-    eq_style:"",agenda:"",knowledge:"",examples:[],items:[],bio_layers:[],visibility:"private"};
+  const c = libCards.find(x=>x.id===id) || sqCards.find(x=>x.id===id && x.mine)
+    || {name:"",role:"",persona_text:"",background:"",
+        eq_style:"",agenda:"",knowledge:"",examples:[],items:[],bio_layers:[],visibility:"private"};
   o.querySelector(".libcard").innerHTML = `
     <div class="bar" style="justify-content:space-between">
       <h3 style="margin:0">${id?"编辑角色卡":"新建角色卡"}</h3>
@@ -811,6 +849,10 @@ function editCardForm(id){
     <label>台词范例（一行一句，最能代表 TA 声音的原话）</label>
     <textarea id="cc_examples">${esc((c.examples||[]).join("\n"))}</textarea>
     <label>知识库（可选，或用下面的智能增强自动生成）</label><textarea id="cc_kn">${esc(c.knowledge||"")}</textarea>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:8px;cursor:pointer">
+      <input type="checkbox" id="cc_pub" ${c.visibility==="public"?"checked":""} style="width:auto" />
+      🌐 公开到广场（其他作者可以导入或收藏这张卡的副本）
+    </label>
     <div class="bar" style="margin-top:10px">
       <button onclick="saveCardForm('${id||""}')">保存</button>
       ${id?`<button class="ghost sm" onclick="enrichCardBtn('${id}')">🔍 智能增强</button>
@@ -819,16 +861,17 @@ function editCardForm(id){
       <span id="cc_msg" class="muted"></span></div>`;
 }
 function _ccPayload(){
+  const pub = document.getElementById("cc_pub");
   return { name:cc_name.value.trim(), role:cc_role.value.trim(), persona_text:cc_persona.value,
     background:cc_bg.value, eq_style:cc_eq.value.trim(), agenda:cc_agenda.value.trim(),
     knowledge:cc_kn.value, examples:cc_examples.value.split("\n").map(s=>s.trim()).filter(Boolean),
-    items:[], bio_layers:[], visibility:"private" };
+    items:[], bio_layers:[], visibility:(pub && pub.checked)?"public":"private" };
 }
 async function saveCardForm(id){
   try{
     const body=_ccPayload();
     const keep = libCards.find(x=>x.id===id);
-    if(keep){ body.items=keep.items||[]; body.bio_layers=keep.bio_layers||[]; body.visibility=keep.visibility||"private"; }
+    if(keep){ body.items=keep.items||[]; body.bio_layers=keep.bio_layers||[]; }
     if(id) await j(`/cards/${id}`,{method:"PATCH",body:JSON.stringify(body)});
     else await j("/cards",{method:"POST",body:JSON.stringify(body)});
     libCards = await j("/cards");
@@ -857,7 +900,7 @@ async function uploadCardAvatar(id, input){
 }
 // 导入 = 复制进当前剧本（记 source_card_id 溯源；剧本绑定字段留给作者在剧本里配）
 function importCard(id){
-  const c = libCards.find(x=>x.id===id); if(!c) return;
+  const c = libCards.find(x=>x.id===id) || sqCards.find(x=>x.id===id); if(!c) return;
   story.characters.push({ id:gid("c_"), name:c.name, role:c.role||"",
     is_lead:story.characters.length===0, persona_text:c.persona_text||"", background:c.background||"",
     avatar_url:c.avatar_url||"", eq_style:c.eq_style||"", agenda:c.agenda||"", knowledge:c.knowledge||"",

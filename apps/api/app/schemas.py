@@ -147,6 +147,8 @@ class CharacterCard(CharacterCardInput):
     id: str
     avatar_url: Optional[str] = None
     updated_at: Optional[datetime] = None
+    author: Optional[str] = None   # 🌐 广场: who shared this card (display name)
+    mine: bool = True              # whether the requesting user owns it
 
 
 class StoryEvent(BaseModel):
