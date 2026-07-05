@@ -102,9 +102,10 @@
       <label>世界硬事实（world_facts：空间结构、关键物件、不可违背的设定；每回合都喂给 AI，防跑偏）</label>
       <textarea id="f_facts" oninput="story.world_facts=this.value"></textarea>
       <label>人物关系总览（relations_overview，可选）</label><textarea id="f_rel" oninput="story.relations_overview=this.value"></textarea>
-      <div class="row2">
+      <div class="row3">
         <div><label>题材标签（逗号分隔）</label><input id="f_tropes" oninput="story.trope_tags=this.value.split(/[,，]/).map(s=>s.trim()).filter(Boolean)" /></div>
         <div><label>可见性</label><select id="f_vis" onchange="story.visibility=this.value"><option value="private">私密</option><option value="public">公开</option></select></div>
+        <div><label>演出语言（AI 输出与旁白）</label><select id="f_lang" onchange="story.language=this.value"><option value="zh">中文</option><option value="en">English</option></select></div>
       </div>
       <label style="display:flex;align-items:center;gap:8px;margin-top:8px;cursor:pointer">
         <input type="checkbox" id="f_mature" onchange="story.mature=this.checked" style="width:auto" />
@@ -194,7 +195,7 @@ const TUNING_KNOBS = [
   ["rom_taper_den", 110, "心动增益衰减分母（越大越易动心）"],
   ["act_backstop_div", 12, "好感兜底推幕除数"],
 ];
-function blankStory(){ return { id:null, title:"", one_liner:"", synopsis:"", world_long:"", world_facts:"", relations_overview:"",
+function blankStory(){ return { id:null, title:"", language:"zh", one_liner:"", synopsis:"", world_long:"", world_facts:"", relations_overview:"",
   trope_tags:[], visibility:"private", mature:false, characters:[], acts:[], endings:[], locations:[],
   tuning:{}, pressure:null, clock:null, phone:null, verdict:null, sandbox:null }; }
 function gid(p){ return p + Math.random().toString(36).slice(2,8); }
@@ -255,6 +256,7 @@ function openEditor(){
   f_title.value=story.title||""; f_oneliner.value=story.one_liner||""; f_synopsis.value=story.synopsis||"";
   f_world.value=story.world_long||""; f_facts.value=story.world_facts||""; f_rel.value=story.relations_overview||"";
   f_tropes.value=(story.trope_tags||[]).join(", "); f_vis.value=story.visibility||"private";
+  f_lang.value=story.language||"zh";
   f_mature.checked=!!story.mature;
   renderAll();
 }
@@ -739,7 +741,8 @@ async function save(publish){
   try{
     saveMsg.textContent="保存中…";
     const sys=_cleanup();
-    const payload = { title:story.title, one_liner:story.one_liner, synopsis:story.synopsis, world_long:story.world_long,
+    const payload = { title:story.title, language:story.language||"zh",
+      one_liner:story.one_liner, synopsis:story.synopsis, world_long:story.world_long,
       world_facts:story.world_facts, relations_overview:story.relations_overview,
       trope_tags:story.trope_tags, visibility:story.visibility, mature:!!story.mature,
       characters:story.characters, acts:story.acts, endings:story.endings, locations:story.locations,

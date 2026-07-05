@@ -38,6 +38,7 @@ def _to_story(s: StoryModel) -> Story:
     return Story(
         id=s.id,
         title=s.title,
+        language=s.language or "zh",
         cover_url=s.cover_url,
         one_liner=s.one_liner,
         synopsis=s.synopsis,

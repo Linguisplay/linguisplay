@@ -100,6 +100,9 @@ class Story(Base):
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
 
     title: Mapped[str] = mapped_column(String(255), default="Untitled")
+    # story language: "zh" | "en" — drives the engine's OUTPUT language (prompt directive
+    # + localized deterministic narration). NA-market stories author with "en".
+    language: Mapped[str] = mapped_column(String(8), default="zh")
     cover_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     one_liner: Mapped[str | None] = mapped_column(String(500), nullable=True)
     synopsis: Mapped[str | None] = mapped_column(Text, nullable=True)

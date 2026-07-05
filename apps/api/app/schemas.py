@@ -262,6 +262,9 @@ class Ending(BaseModel):
 
 class StoryInput(BaseModel):
     title: Optional[str] = None
+    # "zh" | "en" — the language the engine performs this story in (output directive +
+    # localized deterministic narration). Default zh keeps every existing story unchanged.
+    language: Optional[str] = None
     cover_url: Optional[str] = None
     one_liner: Optional[str] = None
     synopsis: Optional[str] = None
@@ -286,6 +289,7 @@ class StoryInput(BaseModel):
 class Story(BaseModel):
     id: str
     title: str
+    language: str = "zh"
     cover_url: Optional[str] = None
     one_liner: Optional[str] = None
     synopsis: Optional[str] = None

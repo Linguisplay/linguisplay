@@ -25,6 +25,20 @@ _ANTI_ASSISTANT = (
 # breathes with 句号/逗号 instead. Appended to every player-visible prose generator.
 _STYLE_PUNCT = "【禁用破折号】行文一律不用「——」，改用句号、逗号或冒号断句（唯一例外：话被打断时可用在句尾）。"
 
+
+def _lang_rule(prompt: dict[str, Any]) -> str:
+    """🌐 story-language directive (stamped onto prompts by runtime.lang_llm). Empty for
+    zh so existing stories stay byte-identical. For "en": everything the player READS is
+    native English, but marker lines the parser matches by Chinese prefix keep the prefix."""
+    if (prompt.get("language") or "zh") != "en":
+        return ""
+    return ("\n【Output language: ENGLISH】Everything the player reads must be written in "
+            "natural, fluent English: narration, dialogue, messages, letters, titles, "
+            "suggestions. Keep authored proper nouns as written. IMPORTANT: any metadata "
+            "or marker line with a Chinese prefix (e.g. 好感：/心动：/背景：/回应：/【已读】/"
+            "【沉默】) must KEEP that exact Chinese prefix — only the free text after it "
+            "is English.")
+
 # 18+ permission block, appended only when the run is mature (story flagged 18+ and the
 # player is age-gated 18+ at signup). Mirrors the old persona R18 feature.
 _R18_BLOCK = (
@@ -1498,7 +1512,7 @@ class QwenLLM:
             "具体可操作、贴合这个角色的性格与说话方式、尽量精炼（十来个字最好，最多一句话说完）。"
             "★建议只能落在【当前地点、此刻在场的人、可去的地方】上——绝不要提任何不在场的人、"
             "不在眼前的东西。不要剧透隐藏真相，只点方向。"
-        )
+        ) + _lang_rule(prompt)
         u = (
             f"你（{pc or '主角'}）此刻在：{ctx.get('place') or '（未知地点）'}\n"
             f"你刚才对{ctx.get('speaker','对方')}说：{ctx.get('player_input','')}\n"
@@ -1696,7 +1710,8 @@ class QwenLLM:
                f"你与对方的关系：{prompt.get('relation','')}。\n"
                f"你此刻不在对方身边，要通过{device}给TA捎话。情境：{prompt.get('hint','')}\n"
                "写1~2条【短消息】：每条一行、口语、短（20字内最好），必须一眼就是你的声音——"
-               "你的口头禅、你的脾气、你的分寸。不要旁白、不要引号、不要署名，只输出消息本身。不用破折号。")
+               "你的口头禅、你的脾气、你的分寸。不要旁白、不要引号、不要署名，只输出消息本身。不用破折号。"
+               + _lang_rule(prompt))
         u = f"你们之前捎过的话：\n{tail}\n\n现在写你要发的消息（1~2行）："
         try:
             resp = httpx.post(
@@ -1756,7 +1771,7 @@ class QwenLLM:
              "输出格式：写0~3条短消息，每条一行（口语，短，像真的在发消息；可以只回一个字，也可以连发两三条）。"
              "如果你此刻不想回（心情/性格/在气头上），就只输出：【已读】"),
         ]
-        sys = "\n".join(l for l in sys_lines if l)
+        sys = "\n".join(l for l in sys_lines if l) + _lang_rule(prompt)
         u = ((f"你们此前的往来：\n{tail}\n\n（电话接通了，TA刚说了最后那句。）你开口说什么？\n"
               if call else
               f"你们的消息记录：\n{tail}\n\n（TA刚发来最后那条。）你现在回什么？\n")
@@ -1811,7 +1826,8 @@ class QwenLLM:
                f"情境：{prompt.get('hint','')}\n"
                "写一封【信】：第一行是信的标题（≤12字，像你会写的，不要「无题」）；"
                "空一行后是正文，120~250字，第二人称写给TA。要具体，写到你们之间真实发生过的事、"
-               "你当时没说出口的心思；落款是你的名字。忌空泛抒情、忌套话。不用破折号。")
+               "你当时没说出口的心思；落款是你的名字。忌空泛抒情、忌套话。不用破折号。"
+               + _lang_rule(prompt))
         try:
             resp = httpx.post(
                 self._url,
@@ -1846,7 +1862,7 @@ class QwenLLM:
                "可以是TA罕见的失态或温柔、一次心照不宣的对视、一件只给你看的东西、一句压了很久的话。"
                "必须扣住此时此地与TA的性格，具体可感，不许出现任何秘密或未揭露的剧情。不用破折号。"
                + ("（本局为成人向，允许更亲密的肢体细节，但这一段以心动为主。）"
-                  if prompt.get("mature") else ""))
+                  if prompt.get("mature") else "") + _lang_rule(prompt))
         u = (f"地点：{prompt.get('place','') or '（未知）'}；时间：{prompt.get('clock','') or '不明'}\n"
              f"刚才的对话：\n{said}\n\n写这个金色瞬间（两行）：")
         try:
@@ -1883,7 +1899,8 @@ class QwenLLM:
                    "① 先写一眼看到的空间——光线、声响、气味，必须扣住给出的地点细节，不要泛泛；\n"
                    "② 再写此刻在场的每个人【正在做什么】——具体的动作、姿态、注意力所在，一人一笔。\n"
                    "这是一位看不见的观众在换机位：场景里【没有任何人到来】，绝不能有人抬头、察觉、"
-                   "感到被注视或对空气说话。不要剧透，不要总结抒情。只输出旁白本身。" + _STYLE_PUNCT)
+                   "感到被注视或对空气说话。不要剧透，不要总结抒情。只输出旁白本身。"
+                   + _STYLE_PUNCT + _lang_rule(prompt))
             u = (f"地点：{prompt.get('place','')}（{prompt.get('detail','')}）\n"
                  f"时间：{prompt.get('slot','') or '不明'}\n"
                  f"此刻在场：\n{plist}")
@@ -1893,7 +1910,8 @@ class QwenLLM:
                    "② 再写此刻在场的每个人【正在做什么】——具体的动作、姿态、注意力所在，贴合各自的身份和长相，"
                    "一人一笔，谁都不能只是'站在那里'；\n"
                    "③ 最后写谁最先注意到玩家进来、那一瞬的反应（一个眼神/动作即可，不写对话）。\n"
-                   "不要替玩家做动作或说话，不要剧透，不要总结抒情。只输出旁白本身。" + _STYLE_PUNCT)
+                   "不要替玩家做动作或说话，不要剧透，不要总结抒情。只输出旁白本身。"
+                   + _STYLE_PUNCT + _lang_rule(prompt))
             u = (f"地点：{prompt.get('place','')}（{prompt.get('detail','')}）\n"
                  f"时间：{prompt.get('slot','') or '不明'}\n"
                  f"走进来的人：{prompt.get('player_name') or '玩家'}\n"
@@ -1987,7 +2005,7 @@ class QwenLLM:
         sys = ("你在为一个互动剧情游戏写【玩家暂时离开】时的收尾旁白。写1~2句第三人称旁白，"
                "留一个让人惦记的钩子：在场的某人欲言又止、一个反常的细节此刻才被注意到、"
                f"或一句没说完的话。{tline}要具体可感，不要总结、不要抒情空话、不要预告。"
-               "只输出旁白本身。" + _STYLE_PUNCT)
+               "只输出旁白本身。" + _STYLE_PUNCT + _lang_rule(prompt))
         u = f"地点：{place or '（未知）'}\n在场的人：{cast}\n玩家此刻起身离开。写那1~2句收尾旁白。"
         try:
             resp = httpx.post(
@@ -2078,6 +2096,7 @@ class QwenLLM:
         system = (_build_intro_system(prompt) if intro else
                   _build_transition_system(prompt) if transition else
                   _build_observe_system(prompt) if observe else _build_system(prompt))
+        system += _lang_rule(prompt)  # 🌐 en story → perform in English
         player_input = prompt.get("player_input", "")
         history = prompt.get("history") or []
 
