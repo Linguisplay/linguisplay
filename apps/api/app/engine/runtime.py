@@ -19,6 +19,7 @@ from typing import Any
 from ..config import get_settings
 from . import actions as actions_mod
 from . import gating
+from . import heat as heat_mod
 from . import intent as intent_mod
 from . import logic
 from . import relationships
@@ -1731,7 +1732,12 @@ def _logic_guard(llm, prompt: dict[str, Any], directed: dict[str, Any], content:
     verdict = _check(directed)
     lang_broke = _lang_break(prompt, directed, content)
     power_broke = _power_break(prompt, directed, state)
-    if not verdict["hard"] and not lang_broke and not power_broke:
+    # 🔥 fourth check: at 交合+ the player named the act plainly but the reply dodged
+    # (euphemism / camera fled to the scenery / narrator became 「我」) → rewrite once
+    heat_broke = (bool(state.get("mature"))
+                  and heat_mod.broke(state, prompt.get("player_input") or "",
+                                     directed.get("beats", [])))
+    if not verdict["hard"] and not lang_broke and not power_broke and not heat_broke:
         return directed
     # regenerate once, telling the model exactly what broke (labels only — never the secret body)
     corr_parts: list[str] = []
@@ -1746,6 +1752,10 @@ def _logic_guard(llm, prompt: dict[str, Any], directed: dict[str, Any], content:
         corr_parts.append(_POWER_CORRECTION)
         _audit(state, "power.enforced", True, _power_named(state, prompt.get("player_input") or ""),
                "上一版试图压制金手指，已强制重写")
+    if heat_broke:
+        corr_parts.append(heat_mod.correction(lang_of(content)))
+        _audit(state, "heat.enforced", True, prompt.get("speaker_name") or "",
+               "上一版回避了正面描写，已强制重写")
     retry = llm.generate({**prompt, "logic_correction": "\n".join(corr_parts)})
     if not _check(retry)["hard"]:
         return retry  # a lingering language slip is tolerable; a logic break is not
@@ -4788,6 +4798,15 @@ def run_turn_stream(
     intent_digest = intent_mod.digest(
         intent_mod.analyze(content, state, player_input, channel), lang_of(content)) \
         if (player_input or "").strip() and not observer else ""
+    # 🔥 床戏进度: engine-owned intimate ladder (mature runs only) — climbs from the
+    # player's line, never slides back, resets when the scene moves. Rides depth-0 so
+    # the model can't re-undress her or reset the room (both observed in prod).
+    heat_anchor = ""
+    if state.get("mature") and not observer:
+        _h_old, _h_new = heat_mod.advance(state, player_input or "", state.get("location_id"))
+        if _h_new != _h_old:
+            _audit(state, "heat.stage", True, f"{_h_old}→{_h_new}")
+        heat_anchor = heat_mod.anchor(state, lang_of(content))
     affinity_delta = 0
     advance = False
     model_ending = None
@@ -4886,6 +4905,7 @@ def run_turn_stream(
             "player_emotion": state.get("player_emotion", ""),  # prior emotional read (continuity)
             "knowledge": sp.get("knowledge", ""),  # 智能增强: this character's background lore
             "mature": bool(state.get("mature")),   # 18+ run → adult content permitted
+            "heat_anchor": heat_anchor,            # 🔥 床戏阶段表 (depth-0, replaces the generic line)
             "scene": current_act(content, old_act),
             "next_act_title": (next_act or {}).get("title", "") if next_act else "",
             "clock": clock_line,                  # ⏳ 第几天·什么时段 (+ deadline countdown)
@@ -4974,6 +4994,14 @@ def run_turn_stream(
         elif not is_primary:
             # members skip the full logic guard, but an EN story still can't leak Chinese
             directed = _lang_guard(llm, prompt, directed, content)
+        if is_primary and state.get("mature"):
+            # 🔥 the model may lead the scene forward on its own — the ladder follows the
+            # prose too (strict pattern set), so next turn's anchor states the truth
+            _h_old, _h_new = heat_mod.advance(
+                state, " ".join(b.get("text", "") for b in directed.get("beats", [])),
+                state.get("location_id"), from_model=True)
+            if _h_new != _h_old:
+                _audit(state, "heat.stage", True, f"{_h_old}→{_h_new}")
         d_beats = directed.get("beats", [])
         if not is_primary:
             # members contribute dialogue only (one shared narration from the primary)

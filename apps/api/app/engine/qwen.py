@@ -124,13 +124,19 @@ def _depth_anchor(prompt: dict[str, Any]) -> str:
                     if en else
                     f"现在的时间是【{ck}】——谁开口提到早上/下午/晚上，都必须与它一致，绝不能说错时辰。")
     if prompt.get("mature"):
-        # long intimate scenes drift back to tame defaults — restate the permission here
-        bits.append("Mature mode is ON: intimate moments are written plainly and "
-                    "explicitly, no fading out, no euphemism — one step per turn, "
-                    "written fully."
-                    if en else
-                    "成人模式已开启：亲密处正面、直白、具体地写，不淡化、不跳切、不打哑谜；"
-                    "一轮写透当下这一步。")
+        # long intimate scenes drift back to tame defaults — restate the permission here.
+        # An ACTIVE scene carries the engine's heat sheet instead (stage ladder, clothing
+        # state, vocabulary clearance): the sharper anchor replaces the generic one.
+        ha = (prompt.get("heat_anchor") or "").strip()
+        if ha:
+            bits.append(ha)
+        else:
+            bits.append("Mature mode is ON: intimate moments are written plainly and "
+                        "explicitly, no fading out, no euphemism — one step per turn, "
+                        "written fully."
+                        if en else
+                        "成人模式已开启：亲密处正面、直白、具体地写，不淡化、不跳切、不打哑谜；"
+                        "一轮写透当下这一步。")
     place = (prompt.get("place") or "").strip()
     if place:
         # keep only the concrete locator sentence (first line), drop the long instructions
