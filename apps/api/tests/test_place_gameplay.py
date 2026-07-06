@@ -100,3 +100,47 @@ def test_map_view_hides_locked_places_and_marks_position():
     st["unlocked_fragment_ids"] = ["f_loc"]
     mv2 = runtime.map_view(MAP, st)
     assert "阁楼" in [n["name"] for n in mv2["nodes"]] and mv2["hidden"] == 0
+
+
+# ── 🤲 受赠确定性化: accepting an offered thing books it, no judgment field needed ──
+
+def _accept_state():
+    st = runtime.default_state()
+    st["location_id"] = "hall"
+    return st
+
+_OFFER_HIST = [{"role": "assistant", "content": "老格伦：拿着，这把短刃跟了我三年，钢火没得挑。"}]
+
+
+def test_accept_books_an_item_spoken_of_in_conversation():
+    st = _accept_state()
+    got = runtime.accept_item(MAP, st, "把短刃收入背包", "say", _OFFER_HIST)
+    assert [i["name"] for i in got] == ["短刃"]
+    assert runtime._inv_find(st["inventory"], "短刃") >= 0
+    # accepting again is a no-op (already carried)
+    assert runtime.accept_item(MAP, st, "收下短刃", "say", _OFFER_HIST) == []
+
+
+def test_accept_refuses_items_never_seen_in_the_world():
+    st = _accept_state()
+    assert runtime.accept_item(MAP, st, "收下光之神剑", "say", _OFFER_HIST) == []
+    assert not st.get("inventory")
+
+
+def test_accept_takes_the_real_object_off_a_present_character():
+    st = _accept_state()
+    runtime.char_items(MAP, st, "c1").append({"name": "铜钥匙", "detail": "旧的"})
+    got = runtime.accept_item(MAP, st, "接过铜钥匙", "say", [])
+    assert [i["name"] for i in got] == ["铜钥匙"]
+    assert runtime._inv_find(runtime.char_items(MAP, st, "c1"), "铜钥匙") < 0
+    assert st["inventory"][0].get("detail") == "旧的"
+
+
+def test_accept_never_fires_on_giving_away_or_english_smalltalk():
+    st = _accept_state()
+    st["inventory"] = [{"name": "短刃"}]
+    assert runtime.accept_item(MAP, st, "把短刃递给他，让他收好", "say", _OFFER_HIST) == []
+    hist_en = [{"role": "assistant", "content": "Glen: Take the dagger, it's yours."}]
+    got = runtime.accept_item(MAP, {**_accept_state()}, "I accept the dagger.", "say", hist_en)
+    assert [i["name"] for i in got] == ["dagger"]
+    assert runtime.accept_item(MAP, _accept_state(), "let me take a look around", "say", hist_en) == []

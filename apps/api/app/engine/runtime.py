@@ -3020,6 +3020,65 @@ def retrieve_stash(content: dict[str, Any], state: dict[str, Any],
     return got
 
 
+# 🤲 受赠: the player says they take/accept a named thing. Zh + a conservative en set.
+_ACCEPT_RE_ZH = re.compile(
+    r"(?:收下|接过|接下|收好|揣上|揣好)(?:这把|那把|这个|那个|这枚|那枚|这块|那块|这)?"
+    r"([^，。！？!?,.、\s]{1,12})")
+_ACCEPT_BA_RE_ZH = re.compile(
+    r"把(?:这把|那把|这个|那个)?([^，。！？!?,.、\s]{1,12}?)"
+    r"(?:收进|收入|放进|装进|收好|揣进|揣好|收起来)")
+_ACCEPT_RE_EN = re.compile(
+    r"(?:\baccept the\b|\bpocket the\b|\btuck the\b|\bput the\b)\s+([a-zA-Z' -]{2,30}?)"
+    r"(?:\s+(?:in|into|away)\b|[,.!?]|$)", re.IGNORECASE)
+
+
+def accept_item(content: dict[str, Any], state: dict[str, Any], player_input: str,
+                channel: str = "say", history: list[dict[str, str]] | None = None
+                ) -> list[dict[str, Any]]:
+    """🤲 受赠确定性化: 「收下短刃」「把短刃收入背包」 books the thing into the pocket —
+    DETERMINISTIC third twin of stash/retrieve. The model's item_gained judgment misses
+    real handovers often enough (格伦 said 拿着, twice, and nothing landed) that the
+    engine keeps this ledger itself. Guard against minting arbitrary loot: the named
+    thing must exist in the world — carried by someone present, or spoken of in the
+    recent conversation."""
+    if channel not in ("do", "say"):
+        return []
+    text = (player_input or "").strip()
+    if not text:
+        return []
+    # handing something AWAY is the opposite move — that stays with gift/trade judgment
+    if any(w in text for w in ("送", "给你", "给他", "给她", "递给", "交给", "还给")):
+        return []
+    names: list[str] = []
+    for rx in (_ACCEPT_BA_RE_ZH, _ACCEPT_RE_ZH, _ACCEPT_RE_EN):
+        names += [m.strip(" 的了吧。，、") for m in rx.findall(text)]
+    names = [n for n in names if n and n not in ("背包", "东西", "它", "他", "她", "it", "them")]
+    if not names:
+        return []
+    recent = " ".join(str(m.get("content", "")) for m in (history or [])[-12:])
+    got: list[dict[str, Any]] = []
+    pcid = state.get("player_character_id")
+    for n in names:
+        if _inv_find(state.get("inventory") or [], n) >= 0:
+            continue  # already carrying it
+        item = None
+        # someone present is carrying it → a consensual handover moves the real object
+        for c in scene_characters(content, state):
+            if c.get("id") == pcid:
+                continue
+            their = char_items(content, state, c.get("id"))
+            ti = _inv_find(their, n)
+            if ti >= 0:
+                item = their.pop(ti)
+                break
+        # otherwise it must at least have come up in the recent conversation
+        if item is None and n in recent:
+            item = {"name": n}
+        if item is not None and _inv_add(state, item.get("name", n), item.get("detail", "")):
+            got.append(item)
+    return got
+
+
 def character_profile(content: dict[str, Any], state: dict[str, Any],
                       char_id: str) -> dict[str, Any] | None:
     """Everything the player may KNOW about one character, gathered for the 档案卡:
@@ -3627,6 +3686,7 @@ def run_turn_stream(
     prop_frag_ids = [pf["fragment_id"] for pf in found_props if pf.get("fragment_id")]
     retrieved = retrieve_stash(content, state, player_input, channel)
     stashed_now = stash_items(content, state, player_input, channel)  # 📦 deterministic 收纳
+    accepted = accept_item(content, state, player_input, channel, history)  # 🤲 受赠确定性化
     for pf in found_props:   # 🎒 a takeable prop goes straight into the pocket
         if pf.get("take"):
             _inv_add(state, pf.get("name", ""), pf.get("detail", ""))
@@ -3880,6 +3940,11 @@ def run_turn_stream(
                                f"（你把{it.get('name','')}收放在了这里。想用时回到这里说一声取回。）",
                                f"(You stash the {it.get('name','')} here. Come back and ask "
                                "for it when you need it.)")})
+    for it in accepted:
+        moments.append({"kind": "item", "verb": "gained", "name": it.get("name")})
+        yield emit({"type": "description", "speaker_name": None,
+                    "text": _t(content, f"（{it.get('name','')}到手了，已收进背包。）",
+                               f"(The {it.get('name','')} is yours — tucked into your bag.)")})
 
     # searching paid off → narrate the physical evidence BEFORE anyone reacts to it
     for pf in found_props:
