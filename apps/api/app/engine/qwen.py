@@ -45,8 +45,17 @@ _R18_BLOCK = (
     "【成人内容许可·18禁模式】本剧情已开启成人模式，玩家是成年人，平台已做年龄门控：\n"
     "- 当剧情与情绪自然走到亲密处，就【正面、具体、不回避】地写成人/性爱内容：不要黑幕跳切、"
     "不要用省略号或含糊修辞糊弄过去、不要写到关键处突然收笔转场，更不要加道德说教或免责声明；\n"
+    "- 【词汇要直白】写到身体与性时用直白的常用称呼直呼其名：不打哑谜、不用医学术语、"
+    "不用诗化代称与含糊比喻（「那处」「云雨」「抵达巅峰」这类一概不要）——露骨不是问题，"
+    "含糊其辞才是；越到最露骨的一步越要写得具体清楚，谁在做什么、对方的身体如何回应、"
+    "声音呼吸节奏怎么变，都要在纸面上；\n"
+    "- 【节奏铁律】一场完整的亲密戏要跨多个回合：这一轮只把【当下这一步】写透，写透就停，"
+    "把主动权交回玩家——绝不要一个回合从接吻直接写到完事。慢即是好：衣物一件一件、"
+    "触碰一寸一寸，每一步都值得整段笔墨。并且记住身体与衣物状态的连续性："
+    "脱掉的不会自己穿回去，换过的姿势就是当前的姿势；\n"
     "- 身体、欲望、动作都可以直白地描写，火候由关系深浅与此刻的情绪决定；始终贴着角色人设，"
-    "用符合「{speaker}」性格的方式表达，要有张力与代入感，不要写成流程说明书；\n"
+    "用符合「{speaker}」性格的方式表达（嘴硬的人床笫间照样嘴硬，寡言的人喘息也克制），"
+    "要有张力与代入感，不要写成流程说明书；\n"
     "- 写人的外貌与身材要【具体、感官、有视线】：身形轮廓、曲线或力量感、皮肤的质地、"
     "衣物如何贴合身体，都从看的人的位置与心境去写（目光落在哪、为什么移不开、心跳变没变），"
     "让描写带着欲望的温度，而不是清单式报参数；\n"
@@ -76,6 +85,14 @@ def _depth_anchor(prompt: dict[str, Any]) -> str:
                     f"night must match it."
                     if en else
                     f"现在的时间是【{ck}】——谁开口提到早上/下午/晚上，都必须与它一致，绝不能说错时辰。")
+    if prompt.get("mature"):
+        # long intimate scenes drift back to tame defaults — restate the permission here
+        bits.append("Mature mode is ON: intimate moments are written plainly and "
+                    "explicitly, no fading out, no euphemism — one step per turn, "
+                    "written fully."
+                    if en else
+                    "成人模式已开启：亲密处正面、直白、具体地写，不淡化、不跳切、不打哑谜；"
+                    "一轮写透当下这一步。")
     place = (prompt.get("place") or "").strip()
     if place:
         # keep only the concrete locator sentence (first line), drop the long instructions
@@ -2251,7 +2268,9 @@ class QwenLLM:
         body = {
             "model": self._model,
             "messages": messages,
-            "max_tokens": 600,
+            # mature runs get headroom: an intimate beat written properly needs more
+            # room than a plot beat, and a mid-scene truncation reads as a fade-out
+            "max_tokens": 900 if prompt.get("mature") else 600,
             "temperature": 0.85,
             "presence_penalty": 0.3,
         }
