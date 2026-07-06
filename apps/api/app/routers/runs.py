@@ -270,9 +270,10 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
     # locations), and we must never mutate the shared published snapshot.
     content = copy.deepcopy(content)
 
-    # 🔞 decided up front so the conjured cast can carry the tone from birth
-    mature_run = bool((content.get("story") or {}).get("mature")) \
-        or (runtime.sandbox_on(content) and body.mature)
+    # 🔞 decided up front so the conjured cast can carry the tone from birth. The player's
+    # run-start toggle works on EVERY story (the platform age-gates at signup); a
+    # story-level mature flag is simply always-on regardless of the toggle.
+    mature_run = bool((content.get("story") or {}).get("mature")) or bool(body.mature)
 
     # 🏖 sandbox: the player DEFINES the world at run start — their private copy runs on
     # that worldview, and opens with a small cast conjured from it (grows forever in play)
