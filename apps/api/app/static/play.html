@@ -896,9 +896,14 @@ function renderMoveAsk(req) {
   el.innerHTML = "";
   const t = document.createElement("span");
   const tail = req.generate ? B("（一处新的去处，去了才知道是什么样）", " (somewhere new — you won't know until you go)") : "";
-  t.innerHTML = B(`🚪 <b>${escapeHtml(req.by_name||"对方")}</b> 想带你去 <b>${escapeHtml(req.to_name||"")}</b>${tail}`,
-                  `🚪 <b>${escapeHtml(req.by_name||"They")}</b> wants to take you to <b>${escapeHtml(req.to_name||"")}</b>${tail}`);
-  const go = document.createElement("button"); go.className = "go"; go.textContent = B("跟 TA 去", "Go with them");
+  if (req.seek) {
+    t.innerHTML = B(`📍 <b>${escapeHtml(req.by_name||"")}</b> 此刻在 <b>${escapeHtml(req.to_name||"")}</b>，要去找 TA 吗？`,
+                    `📍 <b>${escapeHtml(req.by_name||"")}</b> is at <b>${escapeHtml(req.to_name||"")}</b> right now — go find them?`);
+  } else {
+    t.innerHTML = B(`🚪 <b>${escapeHtml(req.by_name||"对方")}</b> 想带你去 <b>${escapeHtml(req.to_name||"")}</b>${tail}`,
+                    `🚪 <b>${escapeHtml(req.by_name||"They")}</b> wants to take you to <b>${escapeHtml(req.to_name||"")}</b>${tail}`);
+  }
+  const go = document.createElement("button"); go.className = "go"; go.textContent = req.seek ? B("去找 TA", "Go find them") : B("跟 TA 去", "Go with them");
   go.onclick = () => acceptMove(req);
   const stay = document.createElement("button"); stay.className = "stay"; stay.textContent = B("留下", "Stay");
   stay.onclick = () => { renderMoveAsk(null); renderBeat({ author:"engine", type:"description", text: B("（你没有动，留在了原地。）", "(You don't move. You stay where you are.)") }); };
@@ -908,11 +913,14 @@ async function acceptMove(req) {
   renderMoveAsk(null);
   if (!runId || ended) return;
   try {
-    const run = await j(`/runs/${runId}/move`, { method:"POST", body: JSON.stringify({ location: req.to || req.to_name, with_character_id: req.by_id, generate: !!req.generate }) });
+    const run = await j(`/runs/${runId}/move`, { method:"POST", body: JSON.stringify({ location: req.to || req.to_name, with_character_id: req.seek ? null : req.by_id, generate: !!req.generate }) });
     applyRunUpdate(run);
     renderBeat({ author:"engine", type:"description",
-      text: B(`（你跟着${req.by_name||"对方"}来到了 ${req.to_name}。）`,
-              `(You follow ${req.by_name||"them"} to ${req.to_name}.)`) });
+      text: req.seek
+        ? B(`（你来到 ${req.to_name}，找${req.by_name||"TA"}。）`,
+            `(You head to ${req.to_name} to find ${req.by_name||"them"}.)`)
+        : B(`（你跟着${req.by_name||"对方"}来到了 ${req.to_name}。）`,
+            `(You follow ${req.by_name||"them"} to ${req.to_name}.)`) });
     renderDiscoveries(run.discoveries);
     if (run.suggestions && run.suggestions.length) renderSuggest(run.suggestions);
   } catch(e) { renderBeat({ author:"engine", type:"description", text:`（${e.message}）` }); }

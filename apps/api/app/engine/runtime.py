@@ -716,6 +716,9 @@ def char_position(content: dict[str, Any], state: dict[str, Any],
     sim0 = (state.get("char_sim") or {}).get(cid) or {}
     if sim0.get("hp") == "dying" and sim0.get("pos"):
         return sim0["pos"]  # the dying don't keep their appointments — they lie where they fell
+    pin = (state.get("char_pins") or {}).get(cid)
+    if pin:
+        return pin  # 🔎 the engine told the player "TA在那儿" — so they ARE there, waiting
     sched = char_home(c, int(state.get("act", 1) or 1), active_slot(content, state))
     if sched:
         return sched  # includes AWAY
@@ -974,8 +977,19 @@ def location_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, A
     return {**loc, "exits": avail}
 
 
+def _drop_pins_on_leave(state: dict[str, Any], old_lid: str | None) -> None:
+    """🔎 a pinned meeting is honored until the player LEAVES that place — walking away
+    releases the character back to their own schedule."""
+    pins = state.get("char_pins") or {}
+    if old_lid and pins:
+        kept = {k: v for k, v in pins.items() if v != old_lid}
+        if len(kept) != len(pins):
+            state["char_pins"] = kept
+
+
 def apply_move(content: dict[str, Any], state: dict[str, Any], dest_ref: str) -> dict[str, Any]:
-    """Move the player to an authored location reachable from where they are. Characters
+    """Move the player to an authored location reachable from where they are — directly
+    connected, or a few hops away through unlocked exits (the walk is implied). Characters
     currently following the player come along automatically (they stay in `following`, so
     they're still 'here' at the new place). Returns the new location dict.
     Raises ValueError if the destination is unknown or not connected to the current place."""
@@ -986,10 +1000,13 @@ def apply_move(content: dict[str, Any], state: dict[str, Any], dest_ref: str) ->
         raise ValueError("not yet available")  # place not discovered/unlocked yet
     cur = current_location(content, state)
     exits = (cur or {}).get("exits") or []
-    # if exits are authored, enforce them; an isolated/exitless map allows free travel
+    # if exits are authored, enforce connectivity (multi-hop through unlocked exits is
+    # fine); an isolated/exitless map allows free travel
     if exits and dest.get("name") not in exits and dest.get("id") not in exits \
-            and dest.get("id") != (cur or {}).get("id"):
+            and dest.get("id") != (cur or {}).get("id") \
+            and not _route_exists(content, state, (cur or {}).get("id"), dest["id"]):
         raise ValueError("not reachable from here")
+    _drop_pins_on_leave(state, (cur or {}).get("id"))
     state["location_id"] = dest["id"]
     return dest
 
@@ -3162,8 +3179,57 @@ def player_move(content: dict[str, Any], state: dict[str, Any], player_input: st
             continue
         if not _route_exists(content, state, (cur or {}).get("id"), dest["id"]):
             continue
+        _drop_pins_on_leave(state, (cur or {}).get("id"))
         state["location_id"] = dest["id"]
         return dest
+    return None
+
+
+# 🔎 找人: 「去找X」 pops a confirmable "TA此刻在Y" prompt — and X WILL be there.
+_SEEK_RE_ZH = re.compile(r"(?:去找|去见|找|见)\s*([^，。！？!?,.、\s]{1,12})")
+_SEEK_RE_EN = re.compile(r"\b(?:find|look for|go see|visit)\s+([A-Za-z' ]{2,30})", re.IGNORECASE)
+
+
+def player_seek(content: dict[str, Any], state: dict[str, Any], player_input: str,
+                channel: str = "say") -> dict[str, Any] | None:
+    """When the player wants to FIND a known character who isn't in this scene, locate
+    them. Returns {"char": c, "loc": loc} when they're somewhere reachable (loc is the
+    location dict), {"char": c, "loc": None} when they're AWAY/unreachable this hour,
+    None when the input isn't a seek (or the person is already right here)."""
+    if channel not in ("do", "say"):
+        return None
+    text = (player_input or "").strip()
+    if not text or len(text) > 60:
+        return None
+    if any(n in text for n in ("别去", "不去", "不想", "别找", "不找")):
+        return None
+    toks = [m.strip() for m in _SEEK_RE_ZH.findall(text)]
+    toks += [m.strip() for m in _SEEK_RE_EN.findall(text)]
+    toks = [t for t in toks if len(t) >= 2]
+    if not toks:
+        return None
+    act = int(state.get("act", 1) or 1)
+    pcid = state.get("player_character_id")
+    here_ids = {c.get("id") for c in scene_characters(content, state)}
+    cur = current_location(content, state)
+    for tok in toks:
+        for c in present_characters(content, act, _dead_ids(state)):
+            nm = (c.get("name") or "").strip()
+            if not nm or c.get("id") == pcid or c.get("id") in here_ids:
+                continue
+            if not (nm == tok or nm in tok or tok in nm):
+                continue
+            pos = char_position(content, state, c)
+            if pos is None:
+                return None          # mapless story — everyone is 'here' already
+            if pos == AWAY:
+                return {"char": c, "loc": None}
+            loc = _location_by_id(content, pos)
+            if not loc or not location_available(content, state, loc) \
+                    or loc.get("id") == (cur or {}).get("id") \
+                    or not _route_exists(content, state, (cur or {}).get("id"), loc["id"]):
+                return {"char": c, "loc": None}
+            return {"char": c, "loc": loc}
     return None
 
 
@@ -3773,6 +3839,51 @@ def run_turn_stream(
     moved = None if (state.get("mode") or "character") == "god" else \
         player_move(content, state, player_input, channel)
     arrival_discoveries = discover_on_arrival(content, state) if moved else []
+
+    # 1b². 🔎 找人: 「去找X」→ pop a confirmable "TA此刻在Y，去吗？" and STOP the turn there.
+    #      The pin guarantees X is still at Y when the player arrives (作息让位于约见).
+    seek = None if (moved or (state.get("mode") or "character") == "god") else \
+        player_seek(content, state, player_input, channel)
+    if seek and seek.get("loc"):
+        c_s, l_s = seek["char"], seek["loc"]
+        pins = dict(state.get("char_pins") or {})
+        pins[c_s["id"]] = l_s["id"]
+        state["char_pins"] = pins
+        pcid_s = state.get("player_character_id")
+        mode_s = state.get("mode") or "character"
+        state["goal"] = current_goal(content, old_act)
+        yield ("beat", dedash_beat({
+            "type": "description", "speaker_name": None,
+            "text": _t(content, f"（你打听了一圈：{c_s.get('name')}这会儿就在{l_s.get('name')}。）",
+                       f"(You ask around: {c_s.get('name')} is at {l_s.get('name')} right now.)")}))
+        yield ("final", {
+            "state": state, "newly_unlocked": [], "suggestions": [], "scene": None,
+            "cast": cast_for(content, old_act, exclude_id=pcid_s if mode_s == "character" else None,
+                             state=state),
+            "here": scene_cast(content, state, exclude_id=pcid_s if mode_s == "character" else None),
+            "following": list(state.get("following") or []),
+            "goal": state["goal"], "progress": act_progress(content, state, old_act),
+            "hint": "", "moments": [], "dice": None, "content_mutated": False,
+            "pressure_view": None, "clock_view": clock_view(content, state),
+            "promises": promises_view(content, state),
+            "phone_unread": phone_total_unread(content, state),
+            "verdict": verdict_view(content, state),
+            "pending_choice": state.get("pending_choice"), "rel_deltas": {},
+            "location": location_view(content, state),
+            "move_request": {"seek": True, "to": l_s["id"], "to_name": l_s.get("name"),
+                             "by_id": c_s.get("id"), "by_name": c_s.get("name")},
+            "relations": relations_summary(content, state),
+        })
+        return
+    if seek and not seek.get("loc"):
+        # the person exists but can't be reached this hour — say so, then play the scene on
+        yield ("beat", dedash_beat({
+            "type": "description", "speaker_name": None,
+            "text": _t(content,
+                       f"（你打听了一圈，这个时辰没人说得清{seek['char'].get('name')}在哪，"
+                       "恐怕得等TA自己露面。）",
+                       f"(You ask around, but no one can say where {seek['char'].get('name')} "
+                       "is at this hour.)")}))
 
     #     现场搜查: naming a searchable prop at THIS place (做/看 channel) turns it over —
     #     physical evidence unlocks directly, its story event fires. Deterministic.

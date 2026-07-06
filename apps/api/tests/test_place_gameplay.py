@@ -190,3 +190,47 @@ def test_player_move_speaks_english_too():
     st = {**runtime.default_state(), "location_id": "x"}
     dest = runtime.player_move(m, st, "I head back to the Old Lighthouse", "do")
     assert dest and dest["id"] == "y" and st["location_id"] == "y"
+
+
+# ── 🔎 找人: "go find X" pops a confirm, and X is GUARANTEED to be there ──
+
+def test_char_pin_overrides_schedule_until_you_leave():
+    st = {**runtime.default_state(), "location_id": "hall", "act": 2}
+    c = MAP["story"]["characters"][0]
+    assert runtime.char_position(MAP, st, c) == "study"   # act-2 作息 says study
+    st["char_pins"] = {"c1": "hall"}
+    assert runtime.char_position(MAP, st, c) == "hall"    # …but the promised meeting wins
+    assert any(x["id"] == "c1" for x in runtime.scene_characters(MAP, st))
+    runtime.apply_move(MAP, st, "书房")                    # leaving the meeting place
+    assert not st.get("char_pins")
+    assert runtime.char_position(MAP, st, c) == "study"   # released back to her schedule
+
+
+def test_seek_pops_a_confirm_and_pins_the_target():
+    st = {**runtime.default_state(), "location_id": "study", "act": 1}
+    out = runtime.run_turn(MAP, st, {"name": "我"}, "去找Mara", channel="say")
+    mr = out.get("move_request")
+    assert mr and mr.get("seek") and mr["to"] == "hall" and mr["by_name"] == "Mara"
+    assert out["state"]["location_id"] == "study"          # not moved yet — awaiting confirm
+    assert out["state"]["char_pins"] == {"c1": "hall"}     # she WILL be there
+    assert any("Mara" in (b.get("text") or "") for b in out["beats"])
+
+
+def test_seek_ignores_people_already_here_and_non_people():
+    st = {**runtime.default_state(), "location_id": "hall", "act": 1}
+    assert runtime.player_seek(MAP, st, "去找Mara", "say") is None     # she's right here
+    st2 = {**runtime.default_state(), "location_id": "study", "act": 1}
+    assert runtime.player_seek(MAP, st2, "找找有没有线索", "say") is None
+    assert runtime.player_seek(MAP, st2, "别找Mara了", "say") is None
+
+
+def test_apply_move_walks_multi_hop_now():
+    m = {"story": {"id": "m5", "characters": [], "acts": [{"index": 1, "title": "一"}],
+                   "locations": [
+                       {"id": "a", "name": "码头", "exits": ["集市"]},
+                       {"id": "b", "name": "集市", "exits": ["码头", "钟楼"]},
+                       {"id": "t", "name": "钟楼", "exits": ["集市"]}]},
+         "secrets": []}
+    st = {**runtime.default_state(), "location_id": "a"}
+    dest = runtime.apply_move(m, st, "钟楼")               # two hops → the walk is implied
+    assert dest["id"] == "t" and st["location_id"] == "t"
