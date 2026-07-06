@@ -49,9 +49,12 @@ def test_resolve_location_matches_name_or_id_else_none():
 
 
 def test_director_move_is_a_confirmable_request_not_a_teleport():
-    """The model can only PROPOSE a move (move_invite) — the player stays put until they
+    """The MODEL can only PROPOSE a move (move_invite) — the player stays put until they
     confirm (apply_move, the /move endpoint). An off-map destination becomes an emergent
-    generate-on-accept offer, never a silent teleport."""
+    generate-on-accept offer, never a silent teleport. (The player's OWN first-person
+    「去X」 now walks immediately via player_move — that path is covered in
+    test_place_gameplay; here the input asks the CHARACTER to lead, so it stays a
+    confirmable invite.)"""
     class MoverLLM:
         def __init__(self, dest):
             self.dest = dest
@@ -65,7 +68,7 @@ def test_director_move_is_a_confirmable_request_not_a_teleport():
 
     # a known, connected destination → a confirm request; NOT moved yet
     st = runtime.default_state()
-    out = runtime.run_turn(MAP, st, {"name": "我"}, "去书房", channel="do", llm=MoverLLM("书房"))
+    out = runtime.run_turn(MAP, st, {"name": "我"}, "带我去书房吧", channel="do", llm=MoverLLM("书房"))
     assert out["state"]["location_id"] in (None, "hall")   # unmoved until the player confirms
     assert out["move_request"] and out["move_request"]["to"] == "study"
     # confirming actually moves

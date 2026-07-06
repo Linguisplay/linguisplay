@@ -3090,6 +3090,83 @@ def accept_item(content: dict[str, Any], state: dict[str, Any], player_input: st
     return got
 
 
+# 🚶 说走就走: the player's own clear "go there" EXECUTES, deterministically — the fourth
+# twin (props/stash/accept/move). Waiting for the model to honor a 地点 marker left players
+# saying 「去工会」 three times and standing still.
+_MOVE_NEG = ("别去", "不去", "不要去", "先不去", "不想去", "别回", "怎么去", "如何去", "怎么走")
+_MOVE_OTHER_RE = re.compile(
+    r"(?:你|您|你们|他|她|它|TA|他们|她们)\s*(?:先|自己)?\s*(?:去|回|前往)"
+    r"|(?:让|叫|派|请|带|催|送)\s*\S{1,6}?(?:去|回|前往)")
+_MOVE_DEST_ZH = re.compile(
+    r"(?:前往|走到|走去|走回|赶到|赶去|赶回|动身去|出发去|去|回到|回)"
+    r"([^，。！？!?,.;；、\s]{1,20})")
+_MOVE_DEST_EN = re.compile(
+    r"\b(?:go|head|walk|move|travel|run|get|come)\s+(?:straight\s+)?(?:back\s+)?to\s+(?:the\s+)?"
+    r"([^,.!?;]{2,40})", re.IGNORECASE)
+
+
+def _route_exists(content: dict[str, Any], state: dict[str, Any],
+                  from_id: str | None, to_id: str) -> bool:
+    """Is `to_id` reachable from `from_id` through currently-available exits (BFS)?
+    Mirrors apply_move's leniency: a current place with NO authored exits = free travel."""
+    if not from_id or from_id == to_id:
+        return True
+    locs = {l.get("id"): l for l in _locations(content) if l.get("id")}
+    cur = locs.get(from_id)
+    if cur is not None and not (cur.get("exits") or []):
+        return True
+    seen, frontier = {from_id}, [from_id]
+    while frontier:
+        nxt: list[str] = []
+        for lid in frontier:
+            for ref in (locs.get(lid) or {}).get("exits") or []:
+                d = resolve_location(content, ref)
+                did = (d or {}).get("id")
+                if not did or did in seen or not location_available(content, state, d):
+                    continue
+                if did == to_id:
+                    return True
+                seen.add(did)
+                nxt.append(did)
+        frontier = nxt
+    return False
+
+
+def player_move(content: dict[str, Any], state: dict[str, Any], player_input: str,
+                channel: str = "do") -> dict[str, Any] | None:
+    """When the player's own words are a clear first-person move to a KNOWN, available
+    place (「去工会」「我们回客栈」"head to the guild"), execute it: walks multi-hop through
+    unlocked exits, so 想去哪就去哪 — while locked places stay locked. None = not a move
+    (questions, orders aimed at others, negations, unknown names) → the director handles it."""
+    if channel not in ("do", "say"):
+        return None
+    text = (player_input or "").strip()
+    if not text or len(text) > 80:   # long prose is a scene, not a travel order
+        return None
+    if any(q in text for q in ("吗", "要不要", "敢不敢", "好不好", "？", "?")):
+        return None                   # questions/invitations are for the cast to answer
+    if any(n in text for n in _MOVE_NEG):
+        return None
+    if _MOVE_OTHER_RE.search(text):
+        return None                   # sending someone ELSE somewhere
+    cands = [m.strip(" 的了吧啊呀去看一趟") for m in _MOVE_DEST_ZH.findall(text)]
+    cands += [m.strip() for m in _MOVE_DEST_EN.findall(text)]
+    cur = current_location(content, state)
+    for ref in cands:
+        if not ref:
+            continue
+        dest = resolve_location(content, ref)
+        if not dest or not dest.get("id") or dest.get("id") == (cur or {}).get("id"):
+            continue
+        if not location_available(content, state, dest):
+            continue
+        if not _route_exists(content, state, (cur or {}).get("id"), dest["id"]):
+            continue
+        state["location_id"] = dest["id"]
+        return dest
+    return None
+
+
 def character_profile(content: dict[str, Any], state: dict[str, Any],
                       char_id: str) -> dict[str, Any] | None:
     """Everything the player may KNOW about one character, gathered for the 档案卡:
@@ -3691,7 +3768,13 @@ def run_turn_stream(
     _apply_event_triggers(content, state, player_input)
     provisional_events = set(state.get("triggered_event_ids") or []) - _ev_before
 
-    # 1b. 现场搜查: naming a searchable prop at THIS place (做/看 channel) turns it over —
+    # 1b. 🚶 说走就走 FIRST: a clear "I go to X" moves the player NOW, so every twin below
+    #     and the whole prompt (place anchor, roster, responders) already lives at X.
+    moved = None if (state.get("mode") or "character") == "god" else \
+        player_move(content, state, player_input, channel)
+    arrival_discoveries = discover_on_arrival(content, state) if moved else []
+
+    #     现场搜查: naming a searchable prop at THIS place (做/看 channel) turns it over —
     #     physical evidence unlocks directly, its story event fires. Deterministic.
     found_props = search_props(content, state, player_input, channel)
     prop_frag_ids = [pf["fragment_id"] for pf in found_props if pf.get("fragment_id")]
@@ -3705,8 +3788,10 @@ def run_turn_stream(
 
     # 1c. 🎲 fate check: a risky 做-action gets judged (tiny call) and ROLLED for real.
     #     The result is handed to the director, who must narrate accordingly — no fiat.
+    #     A deterministic move is just walking — never a gamble, no roll.
     dice = None
-    if channel == "do" and tun["dice"] and (state.get("mode") or "character") != "god":
+    if channel == "do" and tun["dice"] and not moved \
+            and (state.get("mode") or "character") != "god":
         rj = llm.generate({"risk_judge": True, "action": player_input,
                            "place": (current_location(content, state) or {}).get("name") or "",
                            # ✨ declared powers count as real capability when judging odds
@@ -3940,6 +4025,13 @@ def run_turn_stream(
     # player's own embodied character)
     rel_active = (not observer)
 
+    if moved:
+        yield emit({"type": "description", "speaker_name": None,
+                    "text": _t(content, f"（你动身去了{moved.get('name','')}。）",
+                               f"(You make your way to {moved.get('name','')}.)")})
+        for d in arrival_discoveries:
+            if d.get("text"):
+                yield emit({"type": "description", "speaker_name": None, "text": d["text"]})
     for it in retrieved:
         yield emit({"type": "description", "speaker_name": None,
                     "text": _t(content, f"（你取回了之前放在这里的{it.get('name','')}。）",

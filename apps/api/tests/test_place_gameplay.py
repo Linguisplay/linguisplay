@@ -144,3 +144,49 @@ def test_accept_never_fires_on_giving_away_or_english_smalltalk():
     got = runtime.accept_item(MAP, {**_accept_state()}, "I accept the dagger.", "say", hist_en)
     assert [i["name"] for i in got] == ["dagger"]
     assert runtime.accept_item(MAP, _accept_state(), "let me take a look around", "say", hist_en) == []
+
+
+# ── 🚶 说走就走: a first-person "go to X" executes deterministically ──
+
+def test_player_move_walks_to_a_named_exit():
+    st = {**runtime.default_state(), "location_id": "hall"}
+    dest = runtime.player_move(MAP, st, "我们去书房看看", "say")
+    assert dest and dest["id"] == "study" and st["location_id"] == "study"
+    # partial name resolves too (「回门厅」 vs authored 门厅)
+    dest = runtime.player_move(MAP, st, "回门厅", "do")
+    assert dest and dest["id"] == "hall"
+
+
+def test_player_move_multi_hop_routes_through_unlocked_exits():
+    m = {"story": {"id": "m3", "characters": [{"id": "c9", "name": "Nia"}],
+                   "acts": [{"index": 1, "title": "一"}],
+                   "locations": [
+                       {"id": "a", "name": "码头", "exits": ["集市"]},
+                       {"id": "b", "name": "集市", "exits": ["码头", "钟楼"]},
+                       {"id": "t", "name": "钟楼", "exits": ["集市"]}]},
+         "secrets": []}
+    st = {**runtime.default_state(), "location_id": "a"}
+    dest = runtime.player_move(m, st, "去钟楼", "do")   # two hops away → still walks
+    assert dest and dest["id"] == "t" and st["location_id"] == "t"
+
+
+def test_player_move_never_fires_on_questions_orders_negations_or_locked():
+    st = {**runtime.default_state(), "location_id": "hall"}
+    assert runtime.player_move(MAP, st, "要不要一起去书房？", "say") is None
+    assert runtime.player_move(MAP, st, "你去书房等我", "say") is None
+    assert runtime.player_move(MAP, st, "让他去书房拿书", "say") is None
+    assert runtime.player_move(MAP, st, "别去书房", "say") is None
+    assert runtime.player_move(MAP, st, "去阁楼", "do") is None      # locked (needs f_loc)
+    st["unlocked_fragment_ids"] = ["f_loc"]
+    assert runtime.player_move(MAP, st, "去阁楼", "do") is None      # unlocked but no path in
+    assert st["location_id"] == "hall"
+
+
+def test_player_move_speaks_english_too():
+    m = {"story": {"id": "m4", "characters": [], "acts": [{"index": 1, "title": "1"}],
+                   "locations": [{"id": "x", "name": "Harbor", "exits": ["Old Lighthouse"]},
+                                 {"id": "y", "name": "Old Lighthouse", "exits": ["Harbor"]}]},
+         "secrets": []}
+    st = {**runtime.default_state(), "location_id": "x"}
+    dest = runtime.player_move(m, st, "I head back to the Old Lighthouse", "do")
+    assert dest and dest["id"] == "y" and st["location_id"] == "y"
