@@ -18,6 +18,7 @@ from typing import Any
 
 from ..config import get_settings
 from . import gating
+from . import intent as intent_mod
 from . import logic
 from . import relationships
 from . import scene as scene_mod
@@ -4169,6 +4170,12 @@ def run_turn_stream(
     #    responder's beats are YIELDED the moment they're computed → they stream out.
     next_act = current_act(content, old_act + 1)
     place = _physical_place(content, state)   # concrete "you are here" anchor (empty if none)
+    # 🧩 input analysis: the player's line decomposed into ENGINE-VERIFIED referents
+    # (who/where/what it names + live status) — computed once AFTER the twins so it
+    # reflects the post-move truth, then rides every responder prompt at depth-0
+    intent_digest = intent_mod.digest(
+        intent_mod.analyze(content, state, player_input, channel), lang_of(content)) \
+        if (player_input or "").strip() and not observer else ""
     affinity_delta = 0
     advance = False
     model_ending = None
@@ -4286,6 +4293,7 @@ def run_turn_stream(
             "world_facts": (content.get("story") or {}).get("world_facts") or "",
             "roster": _physical_roster(content, state, persona),  # deterministic headcount
             "place": place,                       # concrete current-location anchor (if authored)
+            "intent_digest": intent_digest,       # 🧩 engine-verified referents of the line
             "eq_style": sp.get("eq_style", ""),   # how THIS character reads/expresses emotion
             # 台词范例 (mes_example): lines that ARE this voice — the most durable 去AI味 lever
             "examples": [str(x) for x in (sp.get("examples") or [])][:5],

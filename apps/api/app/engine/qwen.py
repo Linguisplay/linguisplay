@@ -100,6 +100,9 @@ def _depth_anchor(prompt: dict[str, Any]) -> str:
     roster = (prompt.get("roster") or "").strip()
     if roster:
         bits.append(roster.split("\n", 1)[0].strip())  # the "此刻在场…共N人" headcount sentence
+    digest = (prompt.get("intent_digest") or "").strip()
+    if digest:
+        bits.append(digest)  # 🧩 what the player's line actually names, engine-verified
     if not bits:
         return ""
     label = ("[Scene facts — stay consistent with these:] "
