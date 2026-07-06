@@ -566,10 +566,12 @@ def play(
                 except Exception:
                     pass
                 if final.get("content_mutated") or av_changed:
-                    # the run grew an emergent character (or gained avatar urls) —
-                    # persist its private story copy
+                    # the run grew an emergent character or location (or gained avatar
+                    # urls) — persist its private story copy
                     run.pinned_content = content
                     flag_modified(run, "pinned_content")
+                    # 🧭 a moved_to may have generated the place mid-turn: queue its bg
+                    _spawn_location_bg(content, runtime.current_location(content, final["state"]))
                 db2.commit()
                 yield _event({"event": "state", "state": _to_run(run).state.model_dump()})
                 yield _event({"event": "scene", "scene": final.get("scene")})

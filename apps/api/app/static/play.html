@@ -900,11 +900,14 @@ function renderMoveAsk(req) {
   if (req.seek) {
     t.innerHTML = B(`📍 <b>${escapeHtml(req.by_name||"")}</b> 此刻在 <b>${escapeHtml(req.to_name||"")}</b>，要去找 TA 吗？`,
                     `📍 <b>${escapeHtml(req.by_name||"")}</b> is at <b>${escapeHtml(req.to_name||"")}</b> right now — go find them?`);
+  } else if (req.self_go) {
+    t.innerHTML = B(`🧭 <b>${escapeHtml(req.to_name||"")}</b> 还不在你已知的地图上${tail}，动身去吗？`,
+                    `🧭 <b>${escapeHtml(req.to_name||"")}</b> isn't on your map yet${tail} — set out?`);
   } else {
     t.innerHTML = B(`🚪 <b>${escapeHtml(req.by_name||"对方")}</b> 想带你去 <b>${escapeHtml(req.to_name||"")}</b>${tail}`,
                     `🚪 <b>${escapeHtml(req.by_name||"They")}</b> wants to take you to <b>${escapeHtml(req.to_name||"")}</b>${tail}`);
   }
-  const go = document.createElement("button"); go.className = "go"; go.textContent = req.seek ? B("去找 TA", "Go find them") : B("跟 TA 去", "Go with them");
+  const go = document.createElement("button"); go.className = "go"; go.textContent = req.seek ? B("去找 TA", "Go find them") : (req.self_go ? B("出发", "Set out") : B("跟 TA 去", "Go with them"));
   go.onclick = () => acceptMove(req);
   const stay = document.createElement("button"); stay.className = "stay"; stay.textContent = B("留下", "Stay");
   stay.onclick = () => { renderMoveAsk(null); renderBeat({ author:"engine", type:"description", text: B("（你没有动，留在了原地。）", "(You don't move. You stay where you are.)") }); };

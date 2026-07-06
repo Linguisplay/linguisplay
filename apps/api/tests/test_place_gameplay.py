@@ -234,3 +234,52 @@ def test_apply_move_walks_multi_hop_now():
     st = {**runtime.default_state(), "location_id": "a"}
     dest = runtime.apply_move(m, st, "钟楼")               # two hops → the walk is implied
     assert dest["id"] == "t" and st["location_id"] == "t"
+
+
+# ── 场景不切换 fixes: new move verbs, single-exit leave, player-named emergent dest ──
+
+SANDBOX_MAP = {
+    "story": {
+        "id": "sb", "sandbox": {"enabled": True},
+        "characters": [{"id": "c1", "name": "Mara", "is_lead": True,
+                        "home_location_id": "hall"}],
+        "acts": [{"index": 1, "title": "一"}],
+        "locations": [
+            {"id": "hall", "name": "门厅", "detail": "一盏吊灯", "exits": ["书房"]},
+            {"id": "study", "name": "书房", "detail": "书架", "exits": ["门厅"]},
+        ],
+    },
+    "secrets": [],
+}
+
+
+def test_walk_into_verb_moves():
+    st = {**runtime.default_state(), "location_id": "hall"}
+    dest = runtime.player_move(MAP, st, "走进书房", channel="do")
+    assert dest and dest["id"] == "study" and st["location_id"] == "study"
+
+
+def test_directionless_leave_single_exit():
+    # hall has exactly one exit (书房) → 「离开」 is unambiguous
+    st = {**runtime.default_state(), "location_id": "hall"}
+    dest = runtime.player_move(MAP, st, "离开", channel="do")
+    assert dest and dest["id"] == "study"
+    # 书房 also has one exit → straight back
+    dest = runtime.player_move(MAP, st, "出去吧", channel="do")
+    assert dest and dest["id"] == "hall"
+
+
+def test_emergent_destination_offer_sandbox_only():
+    st = {**runtime.default_state(), "location_id": "hall"}
+    # sandbox + off-map name → offer it
+    assert runtime.player_move_emergent(SANDBOX_MAP, st, "去后台", channel="do") == "后台"
+    # known place → not emergent (player_move's business)
+    assert runtime.player_move_emergent(SANDBOX_MAP, st, "去书房", channel="do") is None
+    # deictics/questions/others-orders never generate a place
+    assert runtime.player_move_emergent(SANDBOX_MAP, st, "去外面", channel="do") is None
+    assert runtime.player_move_emergent(SANDBOX_MAP, st, "要不要去后台？", channel="do") is None
+    assert runtime.player_move_emergent(SANDBOX_MAP, st, "你去后台", channel="do") is None
+    # authored story → closed map, no generation
+    assert runtime.player_move_emergent(MAP, st, "去后台", channel="do") is None
+    # a character name is a seek, not a place
+    assert runtime.player_move_emergent(SANDBOX_MAP, st, "去找Mara", channel="do") is None

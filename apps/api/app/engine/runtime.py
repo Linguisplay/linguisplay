@@ -3238,8 +3238,13 @@ _MOVE_OTHER_RE = re.compile(
     r"(?:你|您|你们|他|她|它|TA|他们|她们)\s*(?:先|自己)?\s*(?:去|回|前往)"
     r"|(?:让|叫|派|请|带|催|送)\s*\S{1,6}?(?:去|回|前往)")
 _MOVE_DEST_ZH = re.compile(
-    r"(?:前往|走到|走去|走回|赶到|赶去|赶回|动身去|出发去|去|回到|回)"
+    r"(?:前往|走到|走去|走回|赶到|赶去|赶回|动身去|出发去|走进|进入|踏入|穿过|去|回到|回)"
     r"([^，。！？!?,.;；、\s]{1,20})")
+# directionless leave (「离开」「出去」): only unambiguous with exactly ONE way out
+_LEAVE_RE = re.compile(r"^(?:我)?(?:先)?(?:离开|出去|出门)(?:这里|这儿|吧|了)?$")
+# deictics that name a direction, not a place — never a generatable destination
+_DEICTIC = ("哪里", "哪儿", "那里", "这里", "那边", "这边", "前面", "后面",
+            "里面", "外面", "附近", "别处", "远处")
 _MOVE_DEST_EN = re.compile(
     r"\b(?:go|head|walk|move|travel|run|get|come)\s+(?:straight\s+)?(?:back\s+)?to\s+(?:the\s+)?"
     r"([^,.!?;]{2,40})", re.IGNORECASE)
@@ -3305,6 +3310,48 @@ def player_move(content: dict[str, Any], state: dict[str, Any], player_input: st
         _drop_pins_on_leave(state, (cur or {}).get("id"))
         state["location_id"] = dest["id"]
         return dest
+    # 🚪 「离开/出去」names no place — unambiguous only when there is exactly ONE way out
+    if _LEAVE_RE.match(text):
+        outs = []
+        for ref in (cur or {}).get("exits") or []:
+            d = resolve_location(content, ref)
+            if d and d.get("id") and d["id"] != (cur or {}).get("id") \
+                    and location_available(content, state, d):
+                outs.append(d)
+        if len(outs) == 1:
+            _drop_pins_on_leave(state, (cur or {}).get("id"))
+            state["location_id"] = outs[0]["id"]
+            return outs[0]
+    return None
+
+
+def player_move_emergent(content: dict[str, Any], state: dict[str, Any], player_input: str,
+                         channel: str = "do") -> str | None:
+    """SANDBOX: the player names a destination that is NOT on the map (「去后台」 with no
+    后台 anywhere). Returns that name so the turn can surface a generate-and-go confirm
+    chip — the same gated door the cast's invitations use. None everywhere else."""
+    if not sandbox_on(content) or channel not in ("do", "say"):
+        return None
+    text = (player_input or "").strip()
+    if not text or len(text) > 80:
+        return None
+    if any(q in text for q in ("吗", "要不要", "敢不敢", "好不好", "？", "?")):
+        return None
+    if any(n in text for n in _MOVE_NEG) or _MOVE_OTHER_RE.search(text):
+        return None
+    cands = [m.strip(" 的了吧啊呀去看一趟") for m in _MOVE_DEST_ZH.findall(text)]
+    cands += [m.strip() for m in _MOVE_DEST_EN.findall(text)]
+    names = [c.get("name") for c in _characters(content) if c.get("name")]
+    for ref in cands:
+        if not ref or len(ref) < 2 or len(ref) > 12 or ref in _DEICTIC:
+            continue
+        if ref[0] in "找见寻接等约":
+            continue                      # 「去找X」「去见X」 are seeks, not places
+        if resolve_location(content, ref):
+            continue                      # known place → player_move's business, not ours
+        if any(n == ref or n in ref for n in names):
+            continue                      # names a person, not a place
+        return ref
     return None
 
 
@@ -3962,6 +4009,31 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
         flags["primary_invite"] = directed.get("move_invite")
         flags["primary_name_for_invite"] = sp_name
         flags["time_skip"] = (directed.get("time_skip") or "").strip()
+        # 🧭 声明式移动: the narration itself already WALKED the player somewhere this
+        # turn (穿过窄门/出了大门). The engine makes it true so prose and state can never
+        # drift apart: known & reachable → move; sandbox & off-map → the place gets
+        # generated for real (the prose has committed); otherwise rejected on the audit.
+        mv_to = (directed.get("moved_to") or "").strip() if not observer else ""
+        if mv_to:
+            cur_l = current_location(content, state)
+            dest_l = resolve_location(content, mv_to)
+            if dest_l and dest_l.get("id") == (cur_l or {}).get("id"):
+                pass                                   # narrated arriving where we already are
+            elif dest_l and dest_l.get("id") \
+                    and location_available(content, state, dest_l) \
+                    and _route_exists(content, state, (cur_l or {}).get("id"), dest_l["id"]):
+                _drop_pins_on_leave(state, (cur_l or {}).get("id"))
+                state["location_id"] = dest_l["id"]
+                _audit(state, "move.narrated", True, mv_to)
+            elif not dest_l and sandbox_on(content):
+                try:
+                    generate_and_move(content, state, mv_to, llm=llm)
+                    flags["content_mutated"] = True    # run grew a location → persist content
+                    _audit(state, "move.narrated", True, f"{mv_to}（新生成）")
+                except Exception:
+                    _audit(state, "move.narrated", False, mv_to, "生成失败")
+            else:
+                _audit(state, "move.narrated", False, mv_to, "不可达或未解锁")
         # 🤝 the speaker set a future appointment with the player (恋与深空-style
         # proactive 邀约 at romance tiers) — record it, announce it, hang it in the bar
         pm = directed.get("promise")
@@ -4505,6 +4577,10 @@ def run_turn_stream(
     if moved:
         _audit(state, "move", True, moved.get("name", ""))
     arrival_discoveries = discover_on_arrival(content, state) if moved else []
+    # 🏖 the player named an OFF-MAP destination in a sandbox (「去后台」, no 后台 yet):
+    # surface a generate-and-go confirm chip at final — 想去哪就去哪, even somewhere new
+    emergent_dest = None if moved else \
+        player_move_emergent(content, state, player_input, channel)
 
     # 1b². 🔎 找人: 「去找X」→ pop a confirmable "TA此刻在Y，去吗？" and STOP the turn there.
     #      The pin guarantees X is still at Y when the player arrives (作息让位于约见).
@@ -5533,6 +5609,12 @@ def run_turn_stream(
             # GENERATE it on accept (still gated behind the player's confirmation).
             move_request = {"to": None, "to_name": primary_invite.strip(), "generate": True,
                             "by_id": primary_id, "by_name": primary_name_for_invite}
+    if move_request is None and emergent_dest and not observer \
+            and not resolve_location(content, emergent_dest):
+        # the PLAYER named the off-map place themselves — same chip, no inviter.
+        # (If the director's moved_to already generated it this turn, we're there; skip.)
+        move_request = {"to": None, "to_name": emergent_dest, "generate": True,
+                        "by_id": None, "by_name": None, "self_go": True}
 
     # suggestions steer toward what's close to unlocking for the primary speaker
     sugg_context = gating.build_context(primary_id, frags, state, newly_ids=newly) if primary else {}

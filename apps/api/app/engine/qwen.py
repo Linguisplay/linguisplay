@@ -644,6 +644,10 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                                 "没有新打算就填空字符串"}
     if has_map and not is_member and not is_think:
         props["move_invite"] = {"type": "string", "description": "若你这轮提出或答应带玩家去某处，填那个地点名（可以是【可去通路】里的，也可以是对话里自然浮现的新地点；旁白只写到起身相邀为止）；否则填空字符串"}
+        props["moved_to"] = {"type": "string", "description":
+                             "默认空字符串。仅当这一轮旁白已经把【玩家本人】实际带到了另一个地方"
+                             "（走进后台、出了大门、上了楼、进了里屋）才填到达的地点名；"
+                             "只是起身、提议、指路、还没走到，都不填。"}
     if not observer and not is_member and not is_think and not prompt.get("sandbox"):
         props["ending"] = {"type": "string", "description": "默认空字符串；只有玩家本人此刻被你弄死填 death，走到不可挽回的坏结局填 bad"}
     # DYNAMIC WORLD judgments (all optional; empty string = nothing happened):
@@ -1143,6 +1147,8 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
         out["next_speakers"] = [str(x).strip() for x in (d.get("next_speakers") or []) if str(x).strip()]
     if "time_skip" in d:
         out["time_skip"] = str(d.get("time_skip") or "").strip()
+    if "moved_to" in d:
+        out["moved_to"] = str(d.get("moved_to") or "").strip()
     if "self_state" in d:
         out["self_state"] = str(d.get("self_state") or "").strip()
     if "self_intent" in d:
