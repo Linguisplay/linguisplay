@@ -26,25 +26,28 @@ from typing import Any
 # beats read strictly (prose mentions like 舔了舔嘴唇 must not climb the ladder).
 # Keywords ≥2 chars or bound to an object, per the actions.py lesson (撬棍 ≠ 撬锁).
 _PLAYER_RES: list[tuple[int, re.Pattern]] = [
-    (5, re.compile(r"高潮|绝顶|射了|射精|射进|射在|\b(climax|orgasm|cum|came|finish inside)\b", re.I)),
-    (4, re.compile(r"插进|插入|插到|猛插|深插|抽插|抽送|做爱|交合|骑乘|骑上|进入.{0,4}(身体|体内|里面)"
+    (5, re.compile(r"高潮|绝顶|射了|射精|射进|射在|内射|中出|\b(climax|orgasm|cum|came|finish inside)\b", re.I)),
+    (4, re.compile(r"插进|插入|插到|猛插|深插|再插|抽插|抽送|做爱|交合|骑乘|骑上|捅进"
+                   r"|进入.{0,4}(身体|体内|里面)|狠狠(顶|撞|操|干|插)|操逼|干死"
                    r"|(干|操|上)(她|他|我|你)|操死|鸡巴|肉棒|阳具|阴茎.{0,6}(插|进|埋)"
                    r"|\b(fuck|thrust|penetrate|put it in|inside (her|him|me|you))\b", re.I)),
-    (3, re.compile(r"口交|舔(她|他|我|你|下面|阴|穴|乳)|吸吮|吮吸|含住|指交|前戏|手指.{0,4}(探|滑|伸)进"
+    (3, re.compile(r"口交|口活|(给|帮)(我|他|她|你)口|先口|口一下|深喉|吹箫"
+                   r"|舔(她|他|我|你|下面|阴|穴|乳)|吸吮|吮吸|含住|指交|前戏|手指.{0,4}(探|滑|伸)进"
                    r"|揉(胸|乳|臀)|摸(下面|私处|胸|乳|大腿根)"
-                   r"|\b(foreplay|lick|suck|finger her|finger me|eat (her|me) out|go down on)\b", re.I)),
+                   r"|\b(foreplay|lick|suck|blowjob|finger her|finger me|eat (her|me) out|go down on)\b", re.I)),
     (2, re.compile(r"脱(衣|光|掉|下|了)|解(开)?(衣|扣|裙|裤|胸衣|内衣)|宽衣|扒(光|掉|下)|快脱"
                    r"|\b(undress|strip|take off (your|her|his|my|the) \w+)\b", re.I)),
     (1, re.compile(r"接吻|亲吻|亲(她|他|我|你|上|嘴)|吻(她|他|我|你|上)|舌吻|拥吻|调情|挑逗|推倒"
                    r"|搂进怀|抱(上|到)床|\b(kiss|make out|flirt with|push .{0,12} onto the bed)\b", re.I)),
 ]
 _MODEL_RES: list[tuple[int, re.Pattern]] = [
-    (5, re.compile(r"高潮|绝顶|痉挛着到达|释放在|射精|\b(climax|orgasm|came|comes undone)\b", re.I)),
-    (4, re.compile(r"插入|抽插|挺进|顶入|沉腰.{0,8}(坐|吞|纳)|进入.{0,4}(身体|体内|里面)|结合处"
+    (5, re.compile(r"高潮|绝顶|痉挛着到达|释放在|射精|泄了出来|\b(climax|orgasm|came|comes undone)\b", re.I)),
+    (4, re.compile(r"插入|抽插|挺进|顶入|顶弄|贯穿|沉腰.{0,8}(坐|吞|纳)|进入.{0,4}(身体|体内|里面)"
+                   r"|结合处|硬挺(抵|顶|进|撞|入)|抵进来|撞进|一下一下(顶|撞|捣)|顶得.{0,8}(撞|晃|颤|抖)"
                    r"|\b(thrusts?|sinks? (down )?onto|slides? into|buried inside)\b", re.I)),
-    (3, re.compile(r"口交|吸吮|指尖.{0,4}(探|滑|伸)入|舔弄|含住.{0,4}(乳|性|顶端)"
+    (3, re.compile(r"口交|吸吮|指尖.{0,4}(探|滑|伸)入|舔弄|舔舐|吞吐|深喉|含住"
                    r"|\b(licks?|sucks?|fingers? (her|him))\b", re.I)),
-    (2, re.compile(r"(脱|褪|扒)(下|去|掉).{0,8}(衣|衫|裙|裤|胸衣|内衣)|赤裸|一丝不挂"
+    (2, re.compile(r"(脱|褪|扒)(下|去|掉).{0,8}(衣|衫|裙|裤|胸衣|内衣)|褪到(膝|脚|腿)|赤裸|一丝不挂"
                    r"|\b(undresses|strips|slips? off (her|his) \w+|naked)\b", re.I)),
     (1, re.compile(r"吻住|吻上|深吻|舌尖.{0,4}(纠缠|交缠)|\b(kisses|deep kiss)\b", re.I)),
 ]
@@ -59,10 +62,14 @@ _STAGE_EN = {1: "flirting, heating up", 2: "undressing", 3: "foreplay",
 # ── the anti-euphemism check (fourth check in the logic guard) ────────────────
 # the player named the act plainly this turn…
 _EXPLICIT_ASK = re.compile(r"插|抽送|做爱|交合|(干|操)(她|他|我|你)|鸡巴|肉棒|阳具|阴茎|小穴|阴道"
-                           r"|逼里|高潮|射精|口交|\b(fuck|cock|pussy|thrust|cum)\b", re.I)
+                           r"|逼里|高潮|射精|口交|口活|(给|帮)(我|他|她|你)口|深喉"
+                           r"|\b(fuck|cock|pussy|thrust|cum|blowjob)\b", re.I)
+# …or, mid-coitus, just urged it on — at 交合+ ANY spur deserves the act, not scenery
+_URGE = re.compile(r"继续|快点|快些|用力|使劲|别停|再来|再快|加把劲|\b(keep going|harder|faster|don't stop|more)\b", re.I)
 # …then the reply must touch the body by name; a dodge has none of these
 _EXPLICIT_OUT = re.compile(r"阴茎|性器|龟头|肉棒|鸡巴|小穴|阴唇|阴蒂|阴道|乳头|乳尖|抽插|顶弄|挺进"
-                           r"|插入|顶入|结合处|体内|深处|\b(cock|pussy|clit|nipple|thrust|inside her|inside him)\b", re.I)
+                           r"|插入|顶入|结合处|体内|深处|含住|吞吐|舔弄|舌尖|唇舌|贯穿|硬挺"
+                           r"|\b(cock|pussy|clit|nipple|thrust|inside her|inside him)\b", re.I)
 
 
 def advance(state: dict[str, Any], text: str, location_id: Any,
@@ -75,14 +82,14 @@ def advance(state: dict[str, Any], text: str, location_id: Any,
         state["heat"] = h
     old = int(h.get("stage") or 0)
     if old and h.get("at") != location_id:
-        h["stage"], h["at"] = 0, location_id      # new place, new scene
+        h["stage"], h["cooled"] = 0, True         # new place, new scene
         old = 0
     h["at"] = location_id
     t = (text or "").strip()
     if not t:
         return old, old
     if old and _END_RE.search(t):
-        h["stage"] = 0
+        h["stage"], h["cooled"] = 0, True         # visibly over: stay cold until re-lit
         return old, 0
     detected = 0
     for stage, rx in (_MODEL_RES if from_model else _PLAYER_RES):
@@ -91,6 +98,32 @@ def advance(state: dict[str, Any], text: str, location_id: Any,
             break                                  # lists are ordered high→low
     if detected > old:
         h["stage"] = detected
+        h["cooled"] = False                        # a fresh climb re-arms catchup
+    return old, h["stage"]
+
+
+def catchup(state: dict[str, Any], recent_texts: list[str], location_id: Any) -> tuple[int, int]:
+    """Self-healing ignition: when the ladder reads colder than the recent transcript
+    (deploy landed mid-scene, or a climb slipped past the patterns), rescan the last
+    few beats with BOTH pattern sets and jump straight to the hottest rung found.
+    Without this, one missed climb strands the ladder at 0 while the scene rages on —
+    the player types 继续/快点 forever and nothing ever ignites."""
+    h = state.get("heat")
+    if not isinstance(h, dict):
+        h = {"stage": 0, "at": location_id}
+        state["heat"] = h
+    old = int(h.get("stage") or 0)
+    if h.get("cooled"):
+        return old, old   # the scene was deliberately closed; history stays history
+    blob = " ".join(t for t in recent_texts if t)
+    if not blob:
+        return old, old
+    detected = 0
+    for stage_n, rx in _PLAYER_RES + _MODEL_RES:
+        if stage_n > detected and rx.search(blob):
+            detected = stage_n
+    if detected > old:
+        h["stage"], h["at"] = detected, location_id
     return old, h["stage"]
 
 
@@ -151,7 +184,9 @@ def broke(state: dict[str, Any], player_input: str, beats: list[dict[str, Any]])
             return True
     if s < 4:
         return False
-    if not _EXPLICIT_ASK.search(player_input or ""):
+    pi = player_input or ""
+    # a plain naming OR a mid-coitus spur (继续/快点/用力): both demand the act on the page
+    if not _EXPLICIT_ASK.search(pi) and not _URGE.search(pi):
         return False
     txt = " ".join(b.get("text", "") for b in beats)
     return not _EXPLICIT_OUT.search(txt)

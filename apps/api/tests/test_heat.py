@@ -105,9 +105,59 @@ def test_pov_hijack_is_a_break():
 
 def test_player_interiority_is_not_pov_break():
     s = _st(4)
+    # non-urge input: this asserts the POV heuristic alone (你-anchored interiority is fine)
     ok = _beats("你心里翻来覆去只有一个念头：我不能输，我不能先服软，我偏不。")
-    assert heat.broke(s, "继续", ok) is False
+    assert heat.broke(s, "看着她", ok) is False
 
 
 def test_cold_scene_never_breaks():
     assert heat.broke(_st(0), "插进去", _beats("我我我")) is False
+
+
+# ── prod regression: the exact texts that stranded the ladder at 0 ───────────
+
+def test_oral_asks_climb():
+    s = {}
+    assert heat.advance(s, "给我口", "L1")[1] == 3
+    s2 = {}
+    assert heat.advance(s2, "深喉", "L1")[1] == 3
+
+
+def test_model_prose_from_prod_climbs():
+    # beat 187: 「硬挺抵进来的时候…身体被一下一下顶得往木箱上撞」
+    s = {}
+    heat.advance(s, "硬挺抵进来的时候，她咬住了下唇。身体被一下一下顶得往木箱上撞。",
+                 "L1", from_model=True)
+    assert heat.stage(s) == 4
+    # beat 198: 「嘴唇抿成一条线，然后张开，含住。」
+    s2 = {}
+    heat.advance(s2, "她嘴唇抿成一条线，然后张开，含住。", "L1", from_model=True)
+    assert heat.stage(s2) == 3
+
+
+def test_catchup_ignites_mid_scene():
+    # deploy landed mid-scene: state cold, transcript hot → jump to truth
+    s = {}
+    old, new = heat.catchup(s, ["快脱", "她解开外套", "把我的鸡巴插到她的逼里",
+                                "硬挺抵进来的时候她咬住下唇"], "L1")
+    assert (old, new) == (0, 4)
+
+
+def test_catchup_respects_deliberate_cooldown():
+    s = _st(4)
+    heat.advance(s, "穿好衣服，我们走", "L1")          # scene visibly over
+    old, new = heat.catchup(s, ["把我的鸡巴插到她的逼里"], "L1")
+    assert (old, new) == (0, 0)                        # history stays history
+    # …until the player re-lights it with a real move
+    assert heat.advance(s, "吻她", "L1")[1] == 1
+    assert heat.catchup(s, ["插进去"], "L1")[1] == 4    # re-armed
+
+
+def test_urge_mid_coitus_demands_the_act():
+    s = _st(4)
+    # beat 190: 给我继续 → dust, rusty can, trembling jaw — zero body, that's a dodge
+    tame = _beats("灰尘在光柱里缓缓沉降，她把脸转向阴影那一侧，只留给你一截绷紧的下颌线。")
+    assert heat.broke(s, "给我继续", tame) is True
+    # oral delivery with 含住 counts as on-the-page, not a dodge
+    oral = _beats("她俯下身，含住，动作生涩，齿缘时不时擦过。")
+    assert heat.broke(s, "给我口", oral) is False

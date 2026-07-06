@@ -4803,6 +4803,13 @@ def run_turn_stream(
     # the model can't re-undress her or reset the room (both observed in prod).
     heat_anchor = ""
     if state.get("mature") and not observer:
+        # self-healing ignition first: if the ladder reads colder than the recent
+        # transcript (deploy mid-scene / a climb the patterns missed), jump to truth
+        _recent = ([b.get("text") or "" for b in (beat_log or [])[-12:]]
+                   or [h.get("content") or "" for h in (history or [])[-12:]])
+        _h_old, _h_new = heat_mod.catchup(state, _recent, state.get("location_id"))
+        if _h_new != _h_old:
+            _audit(state, "heat.stage", True, f"{_h_old}→{_h_new}（回填）")
         _h_old, _h_new = heat_mod.advance(state, player_input or "", state.get("location_id"))
         if _h_new != _h_old:
             _audit(state, "heat.stage", True, f"{_h_old}→{_h_new}")
