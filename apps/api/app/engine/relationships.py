@@ -267,7 +267,8 @@ def can_follow(char: dict[str, Any], scores: dict[str, int], tuning: dict | None
     return int(scores.get("closeness", START_CLOSENESS)) >= _tv(tuning, "follow_min_closeness", FOLLOW_MIN_CLOSENESS)
 
 
-def next_tier(char: dict[str, Any], scores: dict[str, int], tuning: dict | None = None) -> dict[str, Any] | None:
+def next_tier(char: dict[str, Any], scores: dict[str, int], tuning: dict | None = None,
+              lang: str = "zh") -> dict[str, Any] | None:
     """The nearest DESIRABLE relationship upgrade this character can still reach, and how
     far off it is — drives the "差一点就到暧昧了" daily-return pull. None if already at the
     top of what's allowed (or only a downgrade like enemy is near)."""
@@ -281,18 +282,18 @@ def next_tier(char: dict[str, Any], scores: dict[str, int], tuning: dict | None 
     # become FRIENDS first (the natural, non-presumptuous first step) before surfacing a
     # romance step — unless romance is already climbing on its own.
     if "friend" in allowed and mode in ("stranger", "peer") and c < friend_t and r < flirt_t:
-        return {"name": "朋友", "to_next": max(1, friend_t - c)}
+        return {"name": name_of("friend", lang), "to_next": max(1, friend_t - c)}
     cands: list[tuple[int, str]] = []
     if "flirt" in allowed and mode in ("stranger", "peer", "friend") and r < flirt_t:
-        cands.append((flirt_t - r, "暧昧对象"))
+        cands.append((flirt_t - r, "flirt"))
     if "lover" in allowed and mode == "flirt" and r < lover_t:
-        cands.append((lover_t - r, "恋人"))
+        cands.append((lover_t - r, "lover"))
     if "friend" in allowed and mode in ("stranger", "peer") and c < friend_t:
-        cands.append((friend_t - c, "朋友"))
+        cands.append((friend_t - c, "friend"))
     if not cands:
         return None
-    rem, name = min(cands)
-    return {"name": name, "to_next": max(1, int(rem))}
+    rem, mid = min(cands)
+    return {"name": name_of(mid, lang), "to_next": max(1, int(rem))}
 
 
 def state_for(char: dict[str, Any], scores: dict[str, int], tuning: dict | None = None,
@@ -303,4 +304,4 @@ def state_for(char: dict[str, Any], scores: dict[str, int], tuning: dict | None 
     return {"mode": mode, "mode_name": name_of(mode, lang),
             "closeness": int(scores.get("closeness", START_CLOSENESS)),
             "romance": int(scores.get("romance", START_ROMANCE)),
-            "next": next_tier(char, scores, tuning)}
+            "next": next_tier(char, scores, tuning, lang)}
