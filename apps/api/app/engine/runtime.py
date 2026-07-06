@@ -17,6 +17,7 @@ import re
 from typing import Any
 
 from ..config import get_settings
+from . import actions as actions_mod
 from . import gating
 from . import intent as intent_mod
 from . import logic
@@ -2247,6 +2248,22 @@ def _roll_check(risk: int) -> dict[str, Any]:
     return {"risk": int(risk), "roll": roll, "dc": dc, "die": 20, "outcome": outcome}
 
 
+def _roll_dc(dc: int) -> dict[str, Any]:
+    """🎲 d20 against an ENGINE-SET DC (the action-resolution path). Same shape and
+    crit rules as _roll_check; `risk` reported as the implied success chance."""
+    dc = max(2, min(19, int(dc)))
+    roll = _rng.randint(1, 20)
+    if roll == 20:
+        outcome = "crit_success"
+    elif roll == 1:
+        outcome = "crit_fail"
+    elif roll >= dc:
+        outcome = "success"
+    else:
+        outcome = "fail"
+    return {"risk": (21 - dc) * 5, "roll": roll, "dc": dc, "die": 20, "outcome": outcome}
+
+
 def pressure_cfg(content: dict[str, Any]) -> dict[str, Any] | None:
     """The story's authored pressure meter (卧底暴露值/灵异逼近…), or None when the story
     doesn't run one. Shape: {name, hint, ending_id, levels: [{at, note}]}"""
@@ -4009,6 +4026,10 @@ def run_turn_stream(
         _audit(state, "power", True, _pw, "金手指动作不掷骰，必然生效")
     if channel == "do" and tun["dice"] and not moved and not _pw \
             and (state.get("mode") or "character") != "god":
+        # 五层筛 [1]+[3]: the ENGINE classifies the attempt first (verb class → base
+        # tier + wound/equipment modifiers). A classified action ALWAYS rolls — the
+        # model no longer holds a no-roll veto over stunts.
+        base = actions_mod.classify(content, state, player_input)
         rj = llm.generate({"risk_judge": True, "action": player_input,
                            "place": (current_location(content, state) or {}).get("name") or "",
                            # ✨ declared powers count as real capability when judging odds
@@ -4018,7 +4039,18 @@ def run_turn_stream(
             risk = max(0, min(100, int(rj.get("risk", 100))))
         except (TypeError, ValueError):
             risk = 100
-        if risk < 100:
+        if base:
+            # the model's opinion adjusts the engine's tier by AT MOST one step
+            final = actions_mod.resolve_dc(base, risk)
+            dc = final["dc"]
+            if state.get("perk") == "instinct":   # 🌱 NG+ 直觉: fate runs warmer
+                dc = max(2, dc - max(1, INSTINCT_BONUS // 5))
+            dice = _roll_dc(dc)
+            _audit(state, "check", True,
+                   f"{base['cls']}·{final['tier']}(DC{dc})",
+                   "；".join(base["mods"] + (["模型调档"] if final["adjusted"] else [])))
+            yield ("dice", dice)
+        elif risk < 100:
             if state.get("perk") == "instinct":  # 🌱 NG+ 直觉: fate runs warmer
                 risk = min(95, risk + INSTINCT_BONUS)
             dice = _roll_check(risk)
