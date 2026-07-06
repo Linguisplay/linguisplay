@@ -242,6 +242,11 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append("【无尽沙盒】这个世界没有终点：绝不要写大结局、不要收束剧情、不要替故事画句号。"
                      "以【世界观/场景设定】为唯一事实基础，顺着玩家的言行让世界自然长出新的人物、"
                      "新的地方、新的事端；世界不迁就玩家，该有的后果就让它发生。")
+        lines.append("【角色要主动】这里的人有自己的欲望、麻烦和日程，不是等玩家发问的问答机。"
+                     "每一轮都要把戏往前推：主动抛出具体的钩子——提议（带TA去个地方/给TA一桩活/求TA帮个忙）、"
+                     "追问、警告、透露一句风声，或者干脆自己动手做自己的事让玩家撞见。"
+                     "玩家的输入越短、越被动（嗯/哦/随便看看），你越要主动给出一个TA能立刻抓住的具体选择，"
+                     "而不是原地寒暄等TA想词。")
     powers = [str(p) for p in (prompt.get("player_powers") or []) if str(p).strip()]
     if powers:
         lines.append("【玩家的金手指·这个世界承认的真实能力】" + "；".join(powers) + "。"
@@ -2185,6 +2190,19 @@ class QwenLLM:
         user_content = player_input or cue
         if is_observer and player_input:
             user_content = offstage.format(player_input)
+        elif player_input and not intro and not transition:
+            # 🎬 depth-0 channel marker: the raw text of a 做/想 turn reads exactly like a
+            # spoken line, so mark WHAT it is right where generation happens — the system
+            # prompt's channel rules alone don't survive a long history.
+            pl = (prompt.get("persona") or {}).get("name") or ("the player" if en else "玩家")
+            if channel == "do":
+                user_content = (f"(ACTION — {pl} physically does this, without saying it: "
+                                f"{player_input})" if en else
+                                f"（{pl}【做出动作】，并没有开口说话：{player_input}）")
+            elif channel == "think":
+                user_content = (f"({pl} thinks this to themselves — unspoken, inaudible: "
+                                f"{player_input})" if en else
+                                f"（{pl}只在心里想，没有说出口，谁也听不见：{player_input}）")
         # DEPTH INJECTION (SillyTavern @Depth trick): besides the full world_facts/place in
         # the system prompt (which history pushes far from the generation point), restate a
         # SHORT physical anchor right next to the user's turn. Adjacency makes the model
