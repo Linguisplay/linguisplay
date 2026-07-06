@@ -1653,6 +1653,35 @@ _LANG_CORRECTION = (
     "turn natively in English.")
 
 
+# ✨ 金手指 enforcement: the world may react, never nullify
+_POWER_BREAK_RE = re.compile(
+    r"失灵|无效|不起作用|被压制|压制住|免疫|减半|削弱了|封印了|抵消|毫无效果"
+    r"|fizzle|no effect|nullif|suppress|immune to|resisted the")
+_POWER_CORRECTION = (
+    "上一版违反了金手指规则：玩家声明的能力是这个世界的更高法则，绝不允许失灵、被压制、"
+    "被免疫或效果打折。重写这一轮：让能力【无条件完整生效】，写得痛快、有画面；"
+    "世界的回应只能是震惊、忌惮、觊觎或后续麻烦，不能是抵消。")
+
+
+def _power_named(state: dict[str, Any], text: str) -> str:
+    """The first declared 金手指 whose NAME the player's line mentions, else ""."""
+    for p in state.get("powers") or []:
+        nm = str(p).split("：", 1)[0].split(":", 1)[0].strip()
+        if nm and nm in (text or ""):
+            return nm
+    return ""
+
+
+def _power_break(prompt: dict[str, Any], directed: dict[str, Any],
+                 state: dict[str, Any]) -> bool:
+    """True when the player invoked a declared power this turn and the beats tried to
+    suppress/nullify it — the 全员爆衣 failure mode, now a regeneratable violation."""
+    if not _power_named(state, prompt.get("player_input") or ""):
+        return False
+    txt = " ".join(b.get("text", "") for b in directed.get("beats", []))
+    return bool(_POWER_BREAK_RE.search(txt))
+
+
 def _lang_break(prompt: dict[str, Any], directed: dict[str, Any],
                 content: dict[str, Any]) -> bool:
     """True when an EN story's beats came back in Chinese. If the PLAYER wrote Chinese this
@@ -1700,7 +1729,8 @@ def _logic_guard(llm, prompt: dict[str, Any], directed: dict[str, Any], content:
 
     verdict = _check(directed)
     lang_broke = _lang_break(prompt, directed, content)
-    if not verdict["hard"] and not lang_broke:
+    power_broke = _power_break(prompt, directed, state)
+    if not verdict["hard"] and not lang_broke and not power_broke:
         return directed
     # regenerate once, telling the model exactly what broke (labels only — never the secret body)
     corr_parts: list[str] = []
@@ -1711,6 +1741,10 @@ def _logic_guard(llm, prompt: dict[str, Any], directed: dict[str, Any], content:
             "），绝不要让任何不在场的人出场、开口或走进来；也绝不要说出你此刻并不知道、尚未挑明的内情。")
     if lang_broke:
         corr_parts.append(_LANG_CORRECTION)
+    if power_broke:
+        corr_parts.append(_POWER_CORRECTION)
+        _audit(state, "power.enforced", True, _power_named(state, prompt.get("player_input") or ""),
+               "上一版试图压制金手指，已强制重写")
     retry = llm.generate({**prompt, "logic_correction": "\n".join(corr_parts)})
     if not _check(retry)["hard"]:
         return retry  # a lingering language slip is tolerable; a logic break is not
@@ -3967,9 +4001,13 @@ def run_turn_stream(
 
     # 1c. 🎲 fate check: a risky 做-action gets judged (tiny call) and ROLLED for real.
     #     The result is handed to the director, who must narrate accordingly — no fiat.
-    #     A deterministic move is just walking — never a gamble, no roll.
+    #     A deterministic move is just walking — never a gamble; and invoking a declared
+    #     金手指 by name NEVER rolls — the cheat power is a higher law, it just works.
     dice = None
-    if channel == "do" and tun["dice"] and not moved \
+    _pw = _power_named(state, player_input) if channel == "do" else ""
+    if _pw:
+        _audit(state, "power", True, _pw, "金手指动作不掷骰，必然生效")
+    if channel == "do" and tun["dice"] and not moved and not _pw \
             and (state.get("mode") or "character") != "god":
         rj = llm.generate({"risk_judge": True, "action": player_input,
                            "place": (current_location(content, state) or {}).get("name") or "",

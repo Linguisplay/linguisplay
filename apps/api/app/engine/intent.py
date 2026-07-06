@@ -56,9 +56,15 @@ def analyze(content: dict[str, Any], state: dict[str, Any], player_input: str,
 
     text = (player_input or "").strip()
     out: dict[str, Any] = {"chars": [], "locations": [], "items": [],
-                           "props": [], "verbs": [], "channel": channel}
+                           "props": [], "verbs": [], "powers": [], "channel": channel}
     if not text:
         return out
+
+    # ✨ 金手指 invocation: the declared power's NAME (the part before ：) shows up
+    for p in state.get("powers") or []:
+        nm = str(p).split("：", 1)[0].split(":", 1)[0].strip()
+        if nm and nm in text:
+            out["powers"].append({"name": nm})
 
     scene_ids = {c.get("id") for c in rt.scene_characters(content, state)}
     pcid = state.get("player_character_id")
@@ -122,6 +128,10 @@ def digest(analysis: dict[str, Any], lang: str = "zh") -> str:
     if a.get("props"):
         prs = "、".join(p["name"] for p in a["props"][:2])
         bits.append(f"fixtures here: {prs}" if en else f"提到的现场物件：{prs}")
+    if a.get("powers"):
+        pw = "、".join(p["name"] for p in a["powers"][:2])
+        bits.append(f"INVOKES cheat power: {pw} — it MUST take full effect"
+                    if en else f"动用金手指：{pw}——必须无条件完整生效")
     if a.get("verbs"):
         bits.append(("action type: " if en else "动作类别：") + "/".join(a["verbs"][:4]))
     if not bits:
