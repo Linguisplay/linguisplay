@@ -10,8 +10,11 @@ from __future__ import annotations
 
 from typing import Any
 
+import time as _time
+
 import httpx
 
+from .. import metrics
 from ..config import get_settings
 
 DASHSCOPE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
@@ -38,6 +41,33 @@ def _lang_rule(prompt: dict[str, Any]) -> str:
             "or marker line with a Chinese prefix (e.g. 好感：/心动：/背景：/回应：/【已读】/"
             "【沉默】) must KEEP that exact Chinese prefix — only the free text after it "
             "is English.")
+
+def _post_chat(url: str, key: str, body: dict, timeout: int = 25,
+               kind: str = "aux") -> httpx.Response:
+    """Single transport chokepoint for EVERY chat call: one POST, one measured retry on
+    transient failure, one metrics line per call. Raises on final failure — call sites
+    keep their own degrade-to-default except blocks, so fallback semantics are untouched."""
+    t0 = _time.perf_counter()
+    last: Exception | None = None
+    for attempt in (0, 1):
+        try:
+            resp = httpx.post(url, headers={"Authorization": f"Bearer {key}",
+                                            "Content-Type": "application/json"},
+                              json=body, timeout=timeout)
+            resp.raise_for_status()
+            metrics.log("llm", kind=kind, ok=True,
+                        ms=int((_time.perf_counter() - t0) * 1000),
+                        model=str(body.get("model") or ""), retry=attempt)
+            return resp
+        except Exception as e:
+            last = e
+            if attempt == 0:
+                _time.sleep(1.2)
+    metrics.log("llm", kind=kind, ok=False,
+                ms=int((_time.perf_counter() - t0) * 1000),
+                model=str(body.get("model") or ""))
+    raise last  # type: ignore[misc]
+
 
 # 18+ permission block, appended only when the run is mature (story flagged 18+ and the
 # player is age-gated 18+ at signup). Mirrors the old persona R18 feature.
@@ -1357,15 +1387,12 @@ def _qwen_chat(system: str, user: str, max_tokens: int = 700, temperature: float
     if not s.dashscope_api_key:
         return ""
     try:
-        resp = httpx.post(
-            DASHSCOPE_URL,
-            headers={"Authorization": f"Bearer {s.dashscope_api_key}", "Content-Type": "application/json"},
-            json={"model": s.llm_model,
-                  "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-                  "max_tokens": max_tokens, "temperature": temperature},
-            timeout=40,
-        )
-        resp.raise_for_status()
+        resp = _post_chat(DASHSCOPE_URL, s.dashscope_api_key,
+                          {"model": s.llm_model,
+                           "messages": [{"role": "system", "content": system},
+                                        {"role": "user", "content": user}],
+                           "max_tokens": max_tokens, "temperature": temperature},
+                          timeout=40, kind="enrich")
         return resp.json()["choices"][0]["message"]["content"].strip()
     except Exception:
         return ""
@@ -1535,19 +1562,15 @@ class QwenLLM:
         )
         user = f"== 已有备忘录 ==\n{prior or '（空，尚未建立）'}\n\n== 最近新发生的对话 ==\n{convo}"
         try:
-            resp = httpx.post(
-                self._url,
-                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
-                json={
+            resp = _post_chat(self._url, self._key,
+                              {
                     "model": self._summary_model,  # cheap model — background compression
                     "messages": [{"role": "system", "content": _build_summary_system()},
                                  {"role": "user", "content": user}],
                     "max_tokens": 600,
                     "temperature": 0.3,
                 },
-                timeout=30,
-            )
-            resp.raise_for_status()
+                              timeout=30)
             return {"memory": resp.json()["choices"][0]["message"]["content"].strip() or prior}
         except Exception:
             return {"memory": prior}
@@ -1612,14 +1635,10 @@ class QwenLLM:
                 f"你和{ctx.get('speaker','对方')}此刻的关系：{ctx.get('relation','普通')}"
             )
         try:
-            resp = httpx.post(
-                self._url,
-                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
-                json={"model": self._model, "messages": [{"role": "system", "content": sys},
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model, "messages": [{"role": "system", "content": sys},
                       {"role": "user", "content": u}], "max_tokens": 160, "temperature": 0.8},
-                timeout=20,
-            )
-            resp.raise_for_status()
+                              timeout=20)
             txt = resp.json()["choices"][0]["message"]["content"].strip()
         except Exception:
             return {"suggestions": []}
@@ -1648,14 +1667,10 @@ class QwenLLM:
                "画面里不要出现任何人物，不要台词，不要解释或标题。" + _lang_rule(prompt))
         u = f"世界观：{world or '（未知）'}\n新地点名称：{name}\n玩家刚从「{frm or '别处'}」走过来。\n只输出这段环境描写。"
         try:
-            resp = httpx.post(
-                self._url,
-                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
-                json={"model": self._model, "messages": [{"role": "system", "content": sys},
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model, "messages": [{"role": "system", "content": sys},
                       {"role": "user", "content": u}], "max_tokens": 200, "temperature": 0.85},
-                timeout=25,
-            )
-            resp.raise_for_status()
+                              timeout=25)
             return {"detail": (resp.json()["choices"][0]["message"]["content"] or "").strip()}
         except Exception:
             return {"detail": ""}
@@ -1674,14 +1689,10 @@ class QwenLLM:
                   "（范围内=大概率成，范围外才按常人算）。" if powers else ""))
         u = f"情境：{place}。{world}\n玩家动作：{action}\n成功概率（0~100）："
         try:
-            resp = httpx.post(
-                self._url,
-                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
-                json={"model": self._model, "messages": [{"role": "system", "content": sys},
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model, "messages": [{"role": "system", "content": sys},
                       {"role": "user", "content": u}], "max_tokens": 8, "temperature": 0.0},
-                timeout=15,
-            )
-            resp.raise_for_status()
+                              timeout=15)
             import re
             m = re.search(r"\d+", resp.json()["choices"][0]["message"]["content"] or "")
             return {"risk": max(0, min(100, int(m.group()))) if m else 100}
@@ -1707,15 +1718,11 @@ class QwenLLM:
                "让TA感觉被点名、被看见，而不是被客套地接待）。两行都不要用破折号。"
                + _lang_rule(prompt))
         try:
-            resp = httpx.post(
-                self._url,
-                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
-                json={"model": self._model, "messages": [{"role": "system", "content": sys},
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model, "messages": [{"role": "system", "content": sys},
                       {"role": "user", "content": "输出那两行："}], "max_tokens": 140,
                       "temperature": 0.9},
-                timeout=20,
-            )
-            resp.raise_for_status()
+                              timeout=20)
             txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
         except Exception:
             return {}
@@ -1748,15 +1755,11 @@ class QwenLLM:
                "传闻：一句话（30字内，像闲话——谁听见谁看见了什么，具体、有画面，不用破折号）"
                + _lang_rule(prompt))
         try:
-            resp = httpx.post(
-                self._url,
-                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
-                json={"model": self._model, "messages": [{"role": "system", "content": sys},
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model, "messages": [{"role": "system", "content": sys},
                       {"role": "user", "content": "输出那两行："}], "max_tokens": 80,
                       "temperature": 0.95},
-                timeout=20,
-            )
-            resp.raise_for_status()
+                              timeout=20)
             txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
         except Exception:
             return {}
@@ -1782,14 +1785,10 @@ class QwenLLM:
                "可以交代去处、可以留个钩子（回头见/有事来找我）、也可以只一声招呼。"
                "只输出这句话本身，不要引号、不要旁白。" + _lang_rule(prompt))
         try:
-            resp = httpx.post(
-                self._url,
-                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
-                json={"model": self._model, "messages": [{"role": "system", "content": sys},
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model, "messages": [{"role": "system", "content": sys},
                       {"role": "user", "content": "你的告辞："}], "max_tokens": 40, "temperature": 0.9},
-                timeout=15,
-            )
-            resp.raise_for_status()
+                              timeout=15)
             line = (resp.json()["choices"][0]["message"]["content"] or "").strip()
         except Exception:
             return {}
@@ -1813,14 +1812,10 @@ class QwenLLM:
                + _lang_rule(prompt))
         u = f"你们之前捎过的话：\n{tail}\n\n现在写你要发的消息（1~2行）："
         try:
-            resp = httpx.post(
-                self._url,
-                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
-                json={"model": self._model, "messages": [{"role": "system", "content": sys},
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model, "messages": [{"role": "system", "content": sys},
                       {"role": "user", "content": u}], "max_tokens": 90, "temperature": 0.9},
-                timeout=20,
-            )
-            resp.raise_for_status()
+                              timeout=20)
             txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
         except Exception:
             return {}
@@ -1879,14 +1874,10 @@ class QwenLLM:
              + "最后另起一行，写：好感：一个整数-2~2（这几句话让你对TA更近还是更远）；"
              "心动：一个整数-1~2（仅当TA的话让你心里一动）。")
         try:
-            resp = httpx.post(
-                self._url,
-                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
-                json={"model": self._model, "messages": [{"role": "system", "content": sys},
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model, "messages": [{"role": "system", "content": sys},
                       {"role": "user", "content": u}], "max_tokens": 240, "temperature": 0.9},
-                timeout=25,
-            )
-            resp.raise_for_status()
+                              timeout=25)
             txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
         except Exception:
             return {"msgs": [], "closeness": 0, "romance": 0}
@@ -1932,15 +1923,11 @@ class QwenLLM:
                "你当时没说出口的心思；落款是你的名字。忌空泛抒情、忌套话。不用破折号。"
                + _lang_rule(prompt))
         try:
-            resp = httpx.post(
-                self._url,
-                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
-                json={"model": self._model, "messages": [{"role": "system", "content": sys},
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model, "messages": [{"role": "system", "content": sys},
                       {"role": "user", "content": "写这封信（第一行标题，空行，正文）："}],
                       "max_tokens": 420, "temperature": 0.9},
-                timeout=30,
-            )
-            resp.raise_for_status()
+                              timeout=30)
             txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
         except Exception:
             return {}
@@ -1969,14 +1956,10 @@ class QwenLLM:
         u = (f"地点：{prompt.get('place','') or '（未知）'}；时间：{prompt.get('clock','') or '不明'}\n"
              f"刚才的对话：\n{said}\n\n写这个金色瞬间（两行）：")
         try:
-            resp = httpx.post(
-                self._url,
-                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
-                json={"model": self._model, "messages": [{"role": "system", "content": sys},
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model, "messages": [{"role": "system", "content": sys},
                       {"role": "user", "content": u}], "max_tokens": 220, "temperature": 0.95},
-                timeout=25,
-            )
-            resp.raise_for_status()
+                              timeout=25)
             txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
         except Exception:
             return {}
@@ -2020,14 +2003,10 @@ class QwenLLM:
                  f"走进来的人：{prompt.get('player_name') or '玩家'}\n"
                  f"此刻在场：\n{plist}")
         try:
-            resp = httpx.post(
-                self._url,
-                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
-                json={"model": self._model, "messages": [{"role": "system", "content": sys},
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model, "messages": [{"role": "system", "content": sys},
                       {"role": "user", "content": u}], "max_tokens": 260, "temperature": 0.9},
-                timeout=25,
-            )
-            resp.raise_for_status()
+                              timeout=25)
             txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
         except Exception:
             txt = ""
@@ -2049,17 +2028,13 @@ class QwenLLM:
                "要具体可谈（谁、哪里、什么事），不要抒情空话；不得与已发生的事实矛盾，也别重复近闻。")
         u = f"世界观：{wv}\n城中人物：{cast}\n既成事实：{facts}\n近几天已发生：{recent}"
         try:
-            resp = httpx.post(
-                self._url,
-                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
-                json={"model": self._model,
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model,
                       "messages": [{"role": "system", "content": sys},
                                    {"role": "user", "content": u}],
                       "max_tokens": 120, "temperature": 0.95,
                       "response_format": {"type": "json_object"}},
-                timeout=25,
-            )
-            resp.raise_for_status()
+                              timeout=25)
             import json as _json
             data = _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
             return data if isinstance(data, dict) else {}
@@ -2081,17 +2056,13 @@ class QwenLLM:
                   if prompt.get("mature") else "")
                + "不要旁白，不要解释。")
         try:
-            resp = httpx.post(
-                self._url,
-                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
-                json={"model": self._model,
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model,
                       "messages": [{"role": "system", "content": sys},
                                    {"role": "user", "content": f"世界观：{wv}"}],
                       "max_tokens": 420, "temperature": 0.9,
                       "response_format": {"type": "json_object"}},
-                timeout=30,
-            )
-            resp.raise_for_status()
+                              timeout=30)
             import json as _json
             data = _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
             return data if isinstance(data, dict) else {}
@@ -2111,14 +2082,10 @@ class QwenLLM:
                "只输出旁白本身。" + _STYLE_PUNCT + _lang_rule(prompt))
         u = f"地点：{place or '（未知）'}\n在场的人：{cast}\n玩家此刻起身离开。写那1~2句收尾旁白。"
         try:
-            resp = httpx.post(
-                self._url,
-                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
-                json={"model": self._model, "messages": [{"role": "system", "content": sys},
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model, "messages": [{"role": "system", "content": sys},
                       {"role": "user", "content": u}], "max_tokens": 160, "temperature": 0.9},
-                timeout=25,
-            )
-            resp.raise_for_status()
+                              timeout=25)
             txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
         except Exception:
             txt = ""
@@ -2139,14 +2106,10 @@ class QwenLLM:
                "不要解释、不要编号、不要多余的行。" + _lang_rule(prompt))
         u = f"世界观：{world or '（未知）'}\n开场情节：{setting or '（未知）'}\n输出开场地点（两行）。"
         try:
-            resp = httpx.post(
-                self._url,
-                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
-                json={"model": self._model, "messages": [{"role": "system", "content": sys},
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model, "messages": [{"role": "system", "content": sys},
                       {"role": "user", "content": u}], "max_tokens": 160, "temperature": 0.8},
-                timeout=25,
-            )
-            resp.raise_for_status()
+                              timeout=25)
             txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
         except Exception:
             return {"name": "", "detail": ""}
@@ -2313,13 +2276,7 @@ class QwenLLM:
             body["tools"] = [_render_tool(prompt, speaker, observe, group_mode, channel, advance_hint)]
             body["tool_choice"] = {"type": "function", "function": {"name": "render_turn"}}
         try:
-            resp = httpx.post(
-                self._url,
-                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
-                json=body,
-                timeout=40,
-            )
-            resp.raise_for_status()
+            resp = _post_chat(self._url, self._key, body, timeout=40, kind="director")
             msg = resp.json()["choices"][0]["message"]
             text = (msg.get("content") or "").strip()
             tool_calls = msg.get("tool_calls") or []

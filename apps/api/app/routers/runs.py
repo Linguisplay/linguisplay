@@ -1,5 +1,6 @@
 import copy
 import json
+import time as _time_mod
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
+from .. import metrics
 from ..db import SessionLocal, get_db
 from ..deps import current_user
 from ..engine import runtime
@@ -36,6 +38,11 @@ _IMG_Q: "_imgqueue.Queue" = _imgqueue.Queue()
 _IMG_PENDING: set = set()
 _IMG_LOCK = _imgthreading.Lock()
 _IMG_WORKER: list = []
+
+# 🔒 runs with a turn currently streaming — a second /play or /confront on the same
+# run is refused (409) instead of racing the first stream's state write.
+_TURN_ACTIVE: set = set()
+_TURN_GUARD = _imgthreading.Lock()
 
 
 def _img_worker():
@@ -502,6 +509,15 @@ def play(
     persona_dict = _persona_dict(persona) if persona else {}
     start_seq = next_seq
 
+    # 🔒 one turn at a time per run: a double-submit (double click / two tabs) would race
+    # two streams over the same state and silently clobber it — refuse the second.
+    # Acquired here (nothing below raises before the stream starts); released in sse().
+    with _TURN_GUARD:
+        if run_id in _TURN_ACTIVE:
+            raise HTTPException(409, "上一回合还在进行中，等它说完")
+        _TURN_ACTIVE.add(run_id)
+    _turn_t0 = _time_mod.perf_counter()
+
     # 2. stream the engine turn on a FRESH session, persisting + flushing per beat
     def sse():
         db2 = SessionLocal()
@@ -589,12 +605,21 @@ def play(
                             yield _event({"event": "achievements", "achievements": new_ach})
                     except Exception:
                         pass
+                # 📈 one line per turn: duration, beats, dice, what the audit decided
+                metrics.log("turn", run=run_id[:8],
+                            ms=int((_time_mod.perf_counter() - _turn_t0) * 1000),
+                            beats=seq - start_seq,
+                            dice=((final.get("dice") or {}).get("outcome") or ""),
+                            audit=",".join(sorted({(e.get("e") or "") + ("" if e.get("ok") else "!")
+                                                   for e in (final.get("audit") or [])})))
             yield _event({"event": "done"})
         except Exception as e:  # never leave the client hanging
             yield _event({"event": "beat", "beat": {"id": "", "type": "description",
                           "speaker_name": None, "text": f"[出错] {type(e).__name__}", "author": "engine"}})
             yield _event({"event": "done"})
         finally:
+            with _TURN_GUARD:
+                _TURN_ACTIVE.discard(run_id)
             db2.close()
 
     return StreamingResponse(sse(), media_type="text/event-stream")
@@ -864,6 +889,11 @@ def confront(run_id: str, body: ConfrontIn, user: User = Depends(current_user),
     except ValueError as e:
         raise HTTPException(400, str(e))
     start_seq = (r.beats[-1].seq + 1) if r.beats else 0
+    # 🔒 a confrontation is a turn too — same one-at-a-time rule as /play
+    with _TURN_GUARD:
+        if run_id in _TURN_ACTIVE:
+            raise HTTPException(409, "上一回合还在进行中，等它说完")
+        _TURN_ACTIVE.add(run_id)
 
     def sse():
         db2 = SessionLocal()
@@ -906,6 +936,8 @@ def confront(run_id: str, body: ConfrontIn, user: User = Depends(current_user),
                           "speaker_name": None, "text": f"[出错] {type(e).__name__}", "author": "engine"}})
             yield _event({"event": "done"})
         finally:
+            with _TURN_GUARD:
+                _TURN_ACTIVE.discard(run_id)
             db2.close()
 
     return StreamingResponse(sse(), media_type="text/event-stream")
