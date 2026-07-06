@@ -215,6 +215,16 @@ def _build_system(prompt: dict[str, Any]) -> str:
         if facts:
             block += "\n" + facts
         lines.append(block)
+    if roster:
+        lines.append("")
+        lines.append("【龙套与路人】让场面活起来：这个地点按常理该有的无名之辈——店里的伙计、"
+                     "堂中的服务员、门口的卫兵、街上的小贩行人、营地里的杂兵——是存在的，该出现就出现。"
+                     "可以在 narration 里给他们动作和一两句台词（用身份称呼：那个伙计、为首的卫兵），"
+                     "让他们上菜、吆喝、拦路、围观、窃窃私语。但他们是布景不是角色：不占在场人数、"
+                     "不起名字、不知道任何剧情内幕、不替主线做决定，事了就退回背景。"
+                     + ("玩家若对某个路人较上真、聊了不止一两句，就用 new_character 字段"
+                        "给TA名字与身份，把TA转正成真正的角色。"
+                        if prompt.get("can_new_char") else ""))
 
     place = (prompt.get("place") or "").strip()
     if place:
@@ -607,8 +617,9 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
             props["new_character"] = {"type": "string", "description":
                                       "若剧情此刻确实需要一个此前不存在的新人物登场（推门进来/被引见/"
                                       "下属报到/线人现身），填「名字｜身份与外貌各一句话」，并且 narration "
-                                      "里必须把TA的登场写实：进场的动作、外貌神态、第一眼给人的感觉；"
-                                      "不需要则空字符串"}
+                                      "里必须把TA的登场写实：进场的动作、外貌神态、第一眼给人的感觉。"
+                                      "无名路人（伙计/卫兵/杂兵）被玩家搭上话、聊了不止一两句时，"
+                                      "也填这里给TA名字身份、把TA转正成真正的角色；不需要则空字符串"}
     if not observer and not is_member and not is_think:
         props["identity_change"] = {"type": "string", "description":
                                     "若这一轮玩家的身份/职务发生了实质改变（升职、任命、被揭穿、获得头衔），"
@@ -816,6 +827,10 @@ def _build_observe_system(prompt: dict[str, Any]) -> str:
         if facts:
             block += "\n" + facts
         lines.append(block)
+    if roster:
+        lines.append("【龙套与路人】这个地点按常理该有的无名之辈（伙计/服务员/卫兵/行人/杂兵）"
+                     "可以作为布景出现：在旁白里给他们动作和一两句台词，用身份称呼、不起名字、"
+                     "不占在场人数、不知道内幕，事了退回背景。")
     place = (prompt.get("place") or "").strip()
     if place:
         lines.append("【当前所在·空间锚点】（描述四周时必须扣住这个具体地点的真实陈设，写得具体可感）：\n" + place)

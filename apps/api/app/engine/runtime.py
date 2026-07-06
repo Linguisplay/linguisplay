@@ -885,6 +885,17 @@ def _physical_roster(content: dict[str, Any], state: dict[str, Any], persona: di
             f"以下并不是在场的活人，只会出现在镜中、暗处或传闻里——永远不要把 TA 算进在场人数，"
             f"也不要让 TA 像普通人一样正常参与对话：{'、'.join(offstage)}。"
         )
+    if names:
+        # 🎭 the headcount pins NAMED cast only — it must not sterilize the scene of the
+        # nameless extras a real place would have (waiters, guards, passers-by)
+        lines.append(
+            "That headcount covers NAMED characters only. The nameless extras this place "
+            "would naturally have (a waiter, guards, passers-by) do exist as scenery and "
+            "may act in narration."
+            if en else
+            "上面的人数只统计有名有姓的角色。这个地方按常理该有的无名之辈"
+            "（伙计、卫兵、路人、杂兵）是存在的，可以作为布景在旁白里活动。"
+        )
     return "\n".join(lines)
 
 
