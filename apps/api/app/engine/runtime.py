@@ -4250,6 +4250,23 @@ def run_turn_stream(
         rel_scores = rel_all.get(sp_id) or relationships.new_scores()
         rel_playbook = relationships.playbook_block(
             relationships.derive_mode(sp, rel_scores, tun), mature=bool(state.get("mature"))) if rel_active else ""
+        # 💘 防御风格: the style's voice always rides along; after a warm spike (rel-up /
+        # golden moment) the ENGINE schedules ONE pullback at the next meeting — the
+        # "昨天那么好，今天怎么冷了" hook is a rule, not model whim.
+        style_id = relationships.love_style_of(sp) if rel_active else None
+        if style_id:
+            retreat_now = False
+            wp = _sim(state, sp_id).get("warm_peak")
+            if isinstance(wp, dict) and not wp.get("served"):
+                dt = _time_index(state) - int(wp.get("t") or 0)
+                if 0 < dt <= 6:          # the next meeting within ~two days
+                    retreat_now, wp["served"] = True, True
+                    _audit(state, "style.retreat", True, sp_name)
+                elif dt > 6:
+                    wp["served"] = True  # too long ago — the moment cooled on its own
+            sb = relationships.style_block(style_id, retreat=retreat_now)
+            if sb:
+                rel_playbook = (rel_playbook + "\n" + sb) if rel_playbook else sb
         others = [c.get("name") for c in all_chars if c.get("id") != sp_id and c.get("name")]
         is_primary = idx == 0
         # each character only recalls what THEY witnessed + their OWN private digest — no
@@ -4417,6 +4434,9 @@ def run_turn_stream(
                 mn = relationships.name_of(mode_after, lang_of(content))
                 moments.append({"kind": "rel_up", "character_id": sp_id, "name": sp_name,
                                 "mode": mode_after, "mode_name": mn})
+                # 💘 a tier-up is a warm spike — a styled character will pull back next time
+                if relationships.love_style_of(sp):
+                    _sim(state, sp_id)["warm_peak"] = {"t": _time_index(state), "served": False}
                 rel_log(state, sp_id, old_act, "rel_up",
                         _t(content, f"你们成了「{mn}」。", f"You became “{mn}”."))
                 album_add(content, state, "rel_up",
@@ -4931,6 +4951,9 @@ def run_turn_stream(
             album_add(content, state, "golden", g_title, g_text, star)
             moments.append({"kind": "golden", "title": g_title, "name": star.get("name")})
             rel_log(state, sid_g, old_act, "golden", f"「{g_title}」：{g_text[:40]}")
+            # 💘 a golden moment is a warm spike — a styled character will pull back next time
+            if relationships.love_style_of(star):
+                _sim(state, sid_g)["warm_peak"] = {"t": _time_index(state), "served": False}
 
     # think = OBSERVE/EXAMINE. No target → look at the surroundings (where am I, what's
     # going on). With a target → examine that person: a brief intro + their CURRENT state

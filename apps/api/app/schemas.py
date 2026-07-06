@@ -85,6 +85,10 @@ class Character(BaseModel):
     # offscreen tick advances it between scenes and dialogue remembers the latest step.
     # `agenda` above is the legacy static alias; `wants` wins when both are set.
     wants: Optional[str] = None
+    # 💘 防御风格 (courtship-resistance style): 傲娇/冷感慢热/回避型/占有欲/直球 (id or
+    # 中文名; see engine/relationships.LOVE_STYLES). Engine schedules the push-pull:
+    # after a warm spike the character pulls back at the NEXT meeting. Optional.
+    love_style: Optional[str] = None
     # 分层小传: [{closeness_min, text}] — closeness unlocks the character's backstory
     # layer by layer (getting to KNOW someone is itself the collection loop)
     bio_layers: list[dict[str, Any]] = []

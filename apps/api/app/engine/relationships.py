@@ -155,6 +155,74 @@ _MATURE_ARC = ("（感情线的节奏）感情要有进展感：每一场有效�
                "（第一次牵手、接吻、过夜），在言行里自然回味它。不原地打转，也不一步登天。")
 
 
+# ── 💘 防御风格 (courtship-resistance styles) ────────────────────────────────
+# Retention craft: characters who are HARD TO GET, each in their own way. The ENGINE
+# owns the push-pull timing (runtime warm_peak → retreat on the next meeting); these
+# blocks own the voice. LLM 天性谄媚有问必答，抵抗必须用结构压住。
+# 铁律不破：占有欲可以吃醋宣示，绝不写成控制或胁迫的浪漫化。
+LOVE_STYLES = {
+    "tsundere": {
+        "name": "傲娇",
+        "playbook": "（防御风格·傲娇）你心口不一是本能：被夸必呛回去，被看穿必恼羞，"
+        "关心只肯用行动给（顺手递的伞、留好的座位），嘴上永远是「谁管你」。好感越涨嘴越硬，"
+        "只极偶尔露出半秒真心，然后立刻找补。",
+        "retreat": "（回撤·傲娇）上次你不小心对TA太好、离TA太近了，这几乎等于露馅。"
+        "这一场你要嘴硬找补：态度冷三分、否认上次的意义（「那天只是顺路」）、故意岔开话头；"
+        "但小动作会出卖你（你还是记得TA的习惯）。绝不解释真实原因。",
+    },
+    "aloof": {
+        "name": "冷感慢热",
+        "playbook": "（防御风格·冷感）你的默认温度就是低的：话少、句短、不接闲聊，礼貌而有距离。"
+        "热情要一寸一寸挣，绝不因为对方多说了几句好话就升温；沉默是你的舒适区，不是冷场——"
+        "该沉默时就沉默，可以整轮只用动作回应，让对方去猜。",
+        "retreat": "（回撤·冷感）上次难得的接近让你不适应。这一场退回原本的距离：话更少、"
+        "回应更简，仿佛上次没发生过；只在对方主动提起时，极轻地承认一下（一个「嗯」）。",
+    },
+    "avoidant": {
+        "name": "回避型",
+        "playbook": "（防御风格·回避）亲密让你想逃：气氛一旦变得认真或暧昧，你会开玩笑岔开、"
+        "忽然想起有事、或干脆起身走开。你不是不动心，是不敢——动心的痕迹只在你转身之后才露出来。",
+        "retreat": "（回撤·回避）上次走得太近了，你需要空间。这一场你在躲：找借口早退、"
+        "避免独处和对视、用忙碌搪塞；若被点破，你会慌，然后逃得更明显。",
+    },
+    "possessive": {
+        "name": "占有欲",
+        "playbook": "（防御风格·占有）你对TA的在意带着宣示性：会留意TA和谁走得近，会吃醋，"
+        "会用行动圈地（自然地挡在TA身侧、替TA挡酒）；醋意用别扭和冷脸表达，不用质问。"
+        "【铁律】占有欲绝不越界成控制或威胁：你可以不高兴，不可以不让TA走。",
+        "retreat": "（回撤·占有）上次的靠近让你更在意TA了，于是更敏感：这一场你会留意TA嘴里"
+        "别人的名字，一点就酸；嘴上说「随便你」，神色完全不是。",
+    },
+    "sunny": {
+        "name": "直球",
+        "playbook": "（防御风格·直球）你喜欢就是喜欢，写在脸上：主动、坦荡、热络。"
+        "但直球不等于廉价——被敷衍时你会正面问出来，受伤时也直说，绝不假装无所谓。",
+        "retreat": "",   # 直球不回撤 — their pull is honesty, not distance
+    },
+}
+_STYLE_BY_NAME = {v["name"]: k for k, v in LOVE_STYLES.items()}
+
+
+def love_style_of(char: dict[str, Any]) -> str | None:
+    """The character's authored 防御风格 (id or 中文名), or None (legacy: no style)."""
+    ref = (char.get("love_style") or "").strip()
+    if not ref:
+        return None
+    return ref if ref in LOVE_STYLES else _STYLE_BY_NAME.get(ref)
+
+
+def style_block(style_id: str | None, retreat: bool = False) -> str:
+    """The style's performance directive; with `retreat`, the post-warmth pullback rides
+    along (the engine decides WHEN — see runtime's warm_peak machine)."""
+    s = LOVE_STYLES.get(style_id or "")
+    if not s:
+        return ""
+    out = s["playbook"]
+    if retreat and s.get("retreat"):
+        out += "\n" + s["retreat"]
+    return out
+
+
 def playbook_block(mode_id: str, mature: bool = False) -> str:
     """The injected guidance for the current relationship mode. When `mature` (an 18+ run),
     every stage gets attraction/arc craft and 暧昧/恋人 get explicit-intimacy technique."""

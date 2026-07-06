@@ -37,6 +37,7 @@ ONE_ACT = [
 CHARACTERS = [
     {
         "id": "qz_mofan", "name": "莫凡", "is_lead": True,
+        "love_style": "tsundere",
         "wants": "攒够一笔钱寄回家，同时别让任何人发现自己第二系的秘密",
         "role": "插班生 · 雷系（登记在册的那一系）",
         "persona_text": "吊儿郎当的插班生，校服永远只穿一半，上课睡觉、悬赏榜前醒得比谁都快。"
@@ -55,6 +56,7 @@ CHARACTERS = [
     },
     {
         "id": "qz_ningxue", "name": "穆宁雪",
+        "love_style": "aloof",
         "wants": "接下并完成一单三星悬赏，向家族证明自己不需要联姻筹码的身份",
         "role": "驻滨海历练的年轻猎者 · 冰系",
         "persona_text": "名门穆家的女儿，冰系天赋高得让教官闭嘴。不住学院，在猎者工会挂牌历练，"
@@ -69,6 +71,7 @@ CHARACTERS = [
     },
     {
         "id": "qz_nuojiao", "name": "穆诺娇",
+        "love_style": "avoidant",
         "wants": "在月末的学院实战演武上拿到属于自己的名次，而不是「穆家小姐」的名次",
         "role": "本级第一的学霸 · 植物系",
         "persona_text": "名门出身的大小姐，成绩榜和风纪榜的双料第一，温声细语，礼数周全，"
@@ -84,6 +87,7 @@ CHARACTERS = [
     },
     {
         "id": "qz_shaoxu", "name": "蒋少絮",
+        "love_style": "sunny",
         "wants": "查清最近学院里流传的「夜里有人梦游上天台」传闻背后是什么",
         "role": "看热闹不嫌事大的同级生 · 精神系",
         "persona_text": "精神系的天赋小恶魔，最爱在人心事最重的时候凑过来眨眼睛。读得出情绪的"
@@ -99,6 +103,7 @@ CHARACTERS = [
     },
     {
         "id": "qz_manyan", "name": "赵满延",
+        "love_style": "sunny",
         "wants": "说服家里别再逼他接手生意，为此得先在一次真正的猎杀里立个功",
         "role": "家里有矿的护盾流 · 光系",
         "persona_text": "赵家的少爷，零花钱按卡刷不完，护身魔具比课本多。嘴上全是段子，"
