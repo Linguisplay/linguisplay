@@ -46,17 +46,25 @@ def _contains_any(haystack: str, needles) -> bool:
 
 # ── punctuation guard (user rule: 破折号能不用就不用，提示词管不住就硬管) ─────────────
 _CLOSE_QUOTES = "」”』\"'"
-_PUNCT_AFTER = "，。！？；：、）」”…"
-_PUNCT_BEFORE = "，。！？；：、（「“…"
+_PUNCT_AFTER = "，。！？；：、）」”…,.!?;:)"
+_PUNCT_BEFORE = "，。！？；：、（「“…,.!?;:("
+_CJK_RE = re.compile(r"[一-鿿㐀-䶿]")
+
+
+def has_cjk(text: str) -> bool:
+    return bool(_CJK_RE.search(text or ""))
 
 
 def dedash(text: str) -> str:
     """Deterministically rewrite em-dash runs in GENERATED text: a run that ends the
     line or sits right before a closing quote is a dramatic interruption and survives;
     every other one becomes a comma (or vanishes when it would double punctuation).
-    Models ignore the style instruction often enough that this is enforced in code."""
+    Models ignore the style instruction often enough that this is enforced in code.
+    Punctuation follows the text itself: Latin-only text gets ", " and a single "—",
+    CJK text keeps 全角 "，" and "——"."""
     if not text or "—" not in text:
         return text
+    latin = not has_cjk(text)
     out: list[str] = []
     i, n = 0, len(text)
     while i < n:
@@ -69,11 +77,16 @@ def dedash(text: str) -> str:
         while j < n and text[j] == "—":
             j += 1
         nxt = text[j] if j < n else ""
+        if latin:
+            while out and out[-1] == " ":
+                out.pop()
         prev = out[-1] if out else ""
         if j >= n or nxt in _CLOSE_QUOTES:
-            out.append("——")                    # cut-off mid-sentence: keep the drama
+            out.append("—" if latin else "——")  # cut-off mid-sentence: keep the drama
         elif prev in _PUNCT_BEFORE or nxt in _PUNCT_AFTER or not prev:
             pass                                 # glued to punctuation / leading: drop
+        elif latin:
+            out.append("," if nxt == " " else ", ")
         else:
             out.append("，")
         i = j
@@ -833,31 +846,42 @@ def _physical_roster(content: dict[str, Any], state: dict[str, Any], persona: di
     separately as NOT counted among the living."""
     act = int(state.get("act", 1))
     mode = state.get("mode") or "character"
+    en = lang_of(content) == "en"
     pcid = state.get("player_character_id")
     present = scene_characters(content, state)  # only who is in THIS scene right now
+    hp_label = ({"hurt": "wounded", "dying": "gravely wounded"} if en else _HP_LABEL)
     living = []
     for c in present:
         if not c.get("name") or c.get("id") == pcid:
             continue
-        tag = _HP_LABEL.get(char_hp(state, c.get("id")))
-        living.append(c["name"] + (f"（{tag}）" if tag else ""))
+        tag = hp_label.get(char_hp(state, c.get("id")))
+        living.append(c["name"] + ((f" ({tag})" if en else f"（{tag}）") if tag else ""))
     # the player is a body in the scene (except in god/observer mode)
     if mode == "god":
         player_label = None
     else:
         pc = _char_by_id(content, pcid) if pcid else None
-        player_label = (pc.get("name") if pc else (persona or {}).get("name")) or "你"
-    names = ([f"{player_label}（你）"] if player_label else []) + living
+        player_label = (pc.get("name") if pc else (persona or {}).get("name")) or ("you" if en else "你")
+    names = (([f"{player_label} (you)"] if en else [f"{player_label}（你）"]) if player_label else []) + living
     offstage = [c.get("name") for c in _characters(content)
                 if (c.get("presence") or "present") == "offstage" and c.get("name")]
     lines: list[str] = []
+    sep = ", " if en else "、"
     if names:
         lines.append(
+            f"Physically present in this scene right now: {sep.join(names)}. That's "
+            f"{len(names)} in total. This number is exact: never miscount, never recount, "
+            "and never write the player out of the scene."
+            if en else
             f"此刻这个场景里实际在场的人：{'、'.join(names)}——共 {len(names)} 人。"
             "这个数字是确定的：不要数错、不要重算，也绝不要把“你”（玩家）自己漏掉或排除在外。"
         )
     if offstage:
         lines.append(
+            f"The following are NOT living people in the scene. They appear only in mirrors, "
+            f"shadows, or rumor. Never count them among those present, and never let them "
+            f"join a conversation like a normal person: {sep.join(offstage)}."
+            if en else
             f"以下并不是在场的活人，只会出现在镜中、暗处或传闻里——永远不要把 TA 算进在场人数，"
             f"也不要让 TA 像普通人一样正常参与对话：{'、'.join(offstage)}。"
         )
@@ -1077,32 +1101,53 @@ def _physical_place(content: dict[str, Any], state: dict[str, Any]) -> str:
     loc = current_location(content, state)
     if not loc:
         return ""
-    name = loc.get("name") or "此处"
-    # line 1 = the concrete locator (place + fixtures + exits) — this is what the depth
-    # anchor reuses, so keep it self-contained and grounded. line 2 = the meta-instruction.
-    concrete = f"此刻玩家所在的地点是【{name}】。"
-    if loc.get("detail"):
-        concrete += f"这里有：{loc['detail']}"
+    en = lang_of(content) == "en"
+    name = loc.get("name") or ("here" if en else "此处")
     exits = [e for e in (loc.get("exits") or []) if e]
-    if exits:
-        concrete += f"　从这里可以去：{'、'.join(exits)}。"
     props = [p.get("name") for p in (loc.get("props") or []) if p.get("name")]
-    if props:
-        concrete += f"　这里可以翻查：{'、'.join(props)}。"
     stash = [(i.get("name") or "") for i in (state.get("stashes") or {}).get(loc.get("id"), []) if i.get("name")]
-    if stash:
-        concrete += f"　玩家之前存放在这里的东西：{'、'.join(stash)}。"
     # 🌍 场面事实账本: the world REMEMBERS physical changes booked here (smashed doors
     # stay smashed) — served back so prose can never quietly reset the place
     facts = [(f.get("text") or "")
              for f in (state.get("place_facts") or {}).get(loc.get("id"), []) if f.get("text")]
-    if facts:
-        concrete += f"　这里已经发生过、至今仍然作数的改变：{'；'.join(facts)}。"
-    instruction = (
-        "旁白只能描写这个地点里实际存在的东西，不要凭空添置别处的陈设；"
-        "已经发生过的改变是既成事实，绝不能写回原样（砸开的门不会自己完好如初）；"
-        "玩家要移动到别处，必须经由上面列出的通路，且要把移动过程写出来，不能瞬移。"
-    )
+    # line 1 = the concrete locator (place + fixtures + exits) — this is what the depth
+    # anchor reuses, so keep it self-contained and grounded. line 2 = the meta-instruction.
+    if en:
+        concrete = f"The player is currently at [{name}]."
+        if loc.get("detail"):
+            concrete += f" Here: {loc['detail']}"
+        if exits:
+            concrete += f" From here you can go to: {', '.join(exits)}."
+        if props:
+            concrete += f" Searchable here: {', '.join(props)}."
+        if stash:
+            concrete += f" Items the player left here earlier: {', '.join(stash)}."
+        if facts:
+            concrete += f" Changes that already happened here and still hold: {'; '.join(facts)}."
+        instruction = (
+            "Narrate only what actually exists in this place; never invent fixtures from "
+            "elsewhere. Changes that already happened are permanent facts and can never be "
+            "written back to how they were (a smashed door does not mend itself). To move "
+            "elsewhere the player must use the listed exits, and the movement itself must "
+            "be narrated — no teleporting."
+        )
+    else:
+        concrete = f"此刻玩家所在的地点是【{name}】。"
+        if loc.get("detail"):
+            concrete += f"这里有：{loc['detail']}"
+        if exits:
+            concrete += f"　从这里可以去：{'、'.join(exits)}。"
+        if props:
+            concrete += f"　这里可以翻查：{'、'.join(props)}。"
+        if stash:
+            concrete += f"　玩家之前存放在这里的东西：{'、'.join(stash)}。"
+        if facts:
+            concrete += f"　这里已经发生过、至今仍然作数的改变：{'；'.join(facts)}。"
+        instruction = (
+            "旁白只能描写这个地点里实际存在的东西，不要凭空添置别处的陈设；"
+            "已经发生过的改变是既成事实，绝不能写回原样（砸开的门不会自己完好如初）；"
+            "玩家要移动到别处，必须经由上面列出的通路，且要把移动过程写出来，不能瞬移。"
+        )
     return concrete + "\n" + instruction
 
 
@@ -1298,7 +1343,7 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
         state["location_id"] = start["id"]
     # ⏳ the story opens at ITS hour, not at a default 晨 (夜戏 opens at night)
     align_clock_to_act(content, state, 1)
-    directed = llm.generate({
+    prompt = {
         "intro": True,
         "clock": (clock_view(content, state) or {}).get("label", ""),
         "mode": mode,
@@ -1309,7 +1354,8 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
         "cast": present,
         "place": _physical_place(content, state),
         "mature": bool(state.get("mature")),
-    })
+    }
+    directed = _lang_guard(llm, prompt, llm.generate(prompt), content)
     beats = [b for b in directed.get("beats", []) if b.get("type") == "description"]
     beats = beats or [{"type": "description", "speaker_name": None, "text": opening_narration(content)}]
     # ✨ 首局魔法时刻: within the first screen, someone SEES the player — one concrete
@@ -1378,7 +1424,7 @@ def build_act_transition(content: dict[str, Any], state: dict[str, Any], old_act
     present = [c.get("name") for c in scene_characters(content, state)
                if c.get("name") and c.get("id") != pcid]
     prev = current_act(content, old_act) or {}
-    directed = llm.generate({
+    prompt = {
         "transition": True,
         "clock": (clock_view(content, state) or {}).get("label", ""),
         "mode": mode,
@@ -1391,7 +1437,8 @@ def build_act_transition(content: dict[str, Any], state: dict[str, Any], old_act
         "place": _physical_place(content, state),
         "memory": state.get("memory", ""),
         "mature": bool(state.get("mature")),
-    })
+    }
+    directed = _lang_guard(llm, prompt, llm.generate(prompt), content)
     beats = [b for b in directed.get("beats", []) if b.get("type") == "description"]
     # fallback: at least state the new act's events so the transition still carries info
     if not beats:
@@ -1517,6 +1564,35 @@ def _too_similar(text: str, said: list[dict[str, str]]) -> bool:
     return False
 
 
+_LANG_CORRECTION = (
+    "CRITICAL: your previous version slipped into Chinese. This story is played in ENGLISH. "
+    "Rewrite the ENTIRE turn in natural, fluent English — every line of narration and "
+    "dialogue. Keep proper nouns as authored. Do not translate word-for-word; perform the "
+    "turn natively in English.")
+
+
+def _lang_break(prompt: dict[str, Any], directed: dict[str, Any],
+                content: dict[str, Any]) -> bool:
+    """True when an EN story's beats came back in Chinese. If the PLAYER wrote Chinese this
+    turn, mixing is their choice — never flag it."""
+    if lang_of(content) != "en":
+        return False
+    if has_cjk(prompt.get("player_input") or ""):
+        return False
+    txt = " ".join(b.get("text", "") for b in directed.get("beats", []))
+    return len(_CJK_RE.findall(txt)) >= 2
+
+
+def _lang_guard(llm, prompt: dict[str, Any], directed: dict[str, Any],
+                content: dict[str, Any]) -> dict[str, Any]:
+    """Language-only backstop for turns that skip the full logic guard (group members).
+    One retry with a hard English directive; best effort — never scrubs."""
+    if not _lang_break(prompt, directed, content):
+        return directed
+    retry = llm.generate({**prompt, "logic_correction": _LANG_CORRECTION})
+    return retry if retry.get("beats") else directed
+
+
 def _logic_guard(llm, prompt: dict[str, Any], directed: dict[str, Any], content: dict[str, Any],
                  state: dict[str, Any], frags: list[dict[str, Any]]) -> dict[str, Any]:
     """Post-generation logic backstop for the addressed (primary) character. Deterministically
@@ -1541,15 +1617,21 @@ def _logic_guard(llm, prompt: dict[str, Any], directed: dict[str, Any], content:
                                  locked_fragment_texts=locked_texts, present_names=present_names)
 
     verdict = _check(directed)
-    if not verdict["hard"]:
+    lang_broke = _lang_break(prompt, directed, content)
+    if not verdict["hard"] and not lang_broke:
         return directed
     # regenerate once, telling the model exactly what broke (labels only — never the secret body)
-    corr = ("上一版出现了逻辑错误：" + "；".join(verdict["hard"]) +
+    corr_parts: list[str] = []
+    if verdict["hard"]:
+        corr_parts.append(
+            "上一版出现了逻辑错误：" + "；".join(verdict["hard"]) +
             "。请重写这一轮：严格只写此刻在场的人（" + ("、".join(present_names) or "只有你和玩家") +
             "），绝不要让任何不在场的人出场、开口或走进来；也绝不要说出你此刻并不知道、尚未挑明的内情。")
-    retry = llm.generate({**prompt, "logic_correction": corr})
+    if lang_broke:
+        corr_parts.append(_LANG_CORRECTION)
+    retry = llm.generate({**prompt, "logic_correction": "\n".join(corr_parts)})
     if not _check(retry)["hard"]:
-        return retry
+        return retry  # a lingering language slip is tolerable; a logic break is not
     # still broken → deterministically neutralize the intrusion so it never reaches the player
     retry["beats"] = logic.scrub_beats(retry.get("beats", []), absent_names)
     return retry
@@ -1587,7 +1669,7 @@ def _smart_suggestions(llm, all_beats, player_input, primary, content, state, lo
         # en story hard backstop: a chip that came back in Chinese never reaches the UI
         # (drop it — the deterministic English fallback covers the gap)
         if lang_of(content) == "en":
-            outs = [s for s in outs if not re.search(r"[一-鿿]", s)]
+            outs = [s for s in outs if not has_cjk(s)]
         return outs
     except Exception:
         return []
@@ -3235,8 +3317,12 @@ def build_parting_hook(content: dict[str, Any], state: dict[str, Any],
              if b.get("type") == "description" and (b.get("text") or "").strip()]
     if not beats:
         hint = f"关于「{topics[0]}」的话" if topics else "有句话"
+        hint_en = f"something about “{topics[0]}”" if topics else "something"
         beats = [{"type": "description", "speaker_name": None,
-                  "text": f"（你起身离开。身后有人欲言又止，{hint}似乎还没说完。）"}]
+                  "text": _t(content,
+                             f"（你起身离开。身后有人欲言又止，{hint}似乎还没说完。）",
+                             f"(You rise to leave. Behind you, someone hesitates, "
+                             f"{hint_en} left unsaid.)")}]
     beats = beats[:1]
     # 📺 下幕预告: leaving mid-story gets a next-episode tease — the NEXT act's authored
     # title only (never its events), like the preview after the credits. Retention hook.
@@ -3930,6 +4016,9 @@ def run_turn_stream(
         # scene before streaming it — no absent character walks in, no locked secret leaks.
         if is_primary and not observer and get_settings().logic_guard:
             directed = _logic_guard(llm, prompt, directed, content, state, frags)
+        elif not is_primary:
+            # members skip the full logic guard, but an EN story still can't leak Chinese
+            directed = _lang_guard(llm, prompt, directed, content)
         d_beats = directed.get("beats", [])
         if not is_primary:
             # members contribute dialogue only (one shared narration from the primary)

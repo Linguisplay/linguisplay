@@ -78,7 +78,10 @@ def _depth_anchor(prompt: dict[str, Any]) -> str:
         bits.append(roster.split("\n", 1)[0].strip())  # the "此刻在场…共N人" headcount sentence
     if not bits:
         return ""
-    return "［现场速记·务必扣住，别写得与之矛盾］" + " ".join(bits)
+    label = ("[Scene facts — stay consistent with these:] "
+             if (prompt.get("language") or "zh") == "en"
+             else "［现场速记·务必扣住，别写得与之矛盾］")
+    return label + " ".join(bits)
 
 
 def _build_system(prompt: dict[str, Any]) -> str:
@@ -2139,27 +2142,40 @@ class QwenLLM:
                   _build_transition_system(prompt) if transition else
                   _build_observe_system(prompt) if observe else _build_system(prompt))
         system += _lang_rule(prompt)  # 🌐 en story → perform in English
+        en = (prompt.get("language") or "zh") == "en"
         player_input = prompt.get("player_input", "")
         history = prompt.get("history") or []
 
         is_observer = bool(prompt.get("observer"))
+        # 🌐 the cues that sit RIGHT AT the generation point pull the output language far
+        # harder than anything buried in the system prompt — for en stories they must be
+        # English, or the model keeps drifting back into Chinese.
+        offstage = ("(Off-stage direction, no one in the scene hears this: {})" if en
+                    else "（画外引导，场景里无人听见：{}）")
         messages = [{"role": "system", "content": system}]
         if not intro and not transition:
             hist = history[-14:]  # recent turns for continuity (matches MEMORY_WINDOW)
             if is_observer:
                 # 👁 god mode: the viewer's lines are STAGE DIRECTIONS, never audible —
                 # mark every one (current AND past) so no character ever "hears" them
-                hist = [dict(m, content=f"（画外引导，场景里无人听见：{m.get('content', '')}）")
+                hist = [dict(m, content=offstage.format(m.get("content", "")))
                         if m.get("role") == "user" and m.get("content")
-                        and not str(m.get("content", "")).startswith("（画外引导")
+                        and not str(m.get("content", "")).startswith(("（画外引导",
+                                                                      "(Off-stage direction"))
                         else m for m in hist]
             messages += hist
         # observe/intro/transition is a one-off narration; nudge with a neutral cue
-        cue = ("（开场）" if intro else "（进入新的一幕）" if transition else
-               "（观察四周）" if not prompt.get("observe_target") else "（打量这个人）")
+        if en:
+            cue = ("(The story opens.)" if intro else
+                   "(A new act begins.)" if transition else
+                   "(You look around.)" if not prompt.get("observe_target")
+                   else "(You study them closely.)")
+        else:
+            cue = ("（开场）" if intro else "（进入新的一幕）" if transition else
+                   "（观察四周）" if not prompt.get("observe_target") else "（打量这个人）")
         user_content = player_input or cue
         if is_observer and player_input:
-            user_content = f"（画外引导，场景里无人听见：{player_input}）"
+            user_content = offstage.format(player_input)
         # DEPTH INJECTION (SillyTavern @Depth trick): besides the full world_facts/place in
         # the system prompt (which history pushes far from the generation point), restate a
         # SHORT physical anchor right next to the user's turn. Adjacency makes the model
@@ -2168,6 +2184,9 @@ class QwenLLM:
             anchor = _depth_anchor(prompt)
             if anchor:
                 user_content = f"{user_content}\n\n{anchor}"
+        if en:
+            # recency nudge: the LAST thing before generation states the output language
+            user_content = f"{user_content}\n\n(Reply entirely in English.)"
         messages.append({"role": "user", "content": user_content})
         # GROUP TURNS: put what others ALREADY said THIS turn into the message stream as
         # assistant turns (not just the system prompt) so this speaker CONTINUES the
@@ -2176,8 +2195,9 @@ class QwenLLM:
         said_appended = False
         for s in (prompt.get("said_this_turn") or []):
             if s.get("text"):
-                sp = s.get("speaker") or "旁白"
-                messages.append({"role": "assistant", "content": f"{sp}：{s['text']}"})
+                sp = s.get("speaker") or ("Narrator" if en else "旁白")
+                sep = ": " if en else "："
+                messages.append({"role": "assistant", "content": f"{sp}{sep}{s['text']}"})
                 said_appended = True
         if said_appended:
             # RE-ANCHOR whose turn it is. Without this, generation continues the assistant
@@ -2185,10 +2205,17 @@ class QwenLLM:
             # the "natural next line" is the player's ANSWER, and a member speaks it as if
             # it were their own (the 十二少-answers-for-the-player bug). A closing user-role
             # cue breaks that continuation: the model now responds to the cue AS ITSELF.
-            pl = (prompt.get("persona") or {}).get("name") or "对方"
-            messages.append({"role": "user", "content":
-                             f"（该你了：只以「{speaker}」自己的身份接话。上面若有人向{pl}发问，"
-                             f"要由{pl}自己来答——你绝不能替{pl}作答。不想搭话就保持沉默。）"})
+            pl = (prompt.get("persona") or {}).get("name") or ("them" if en else "对方")
+            if en:
+                messages.append({"role": "user", "content":
+                                 f"(Your turn: speak only as {speaker}, in English. If anyone "
+                                 f"above asked {pl} a question, {pl} answers it themselves. "
+                                 f"Never answer for {pl}. Stay silent if you have nothing "
+                                 f"to add.)"})
+            else:
+                messages.append({"role": "user", "content":
+                                 f"（该你了：只以「{speaker}」自己的身份接话。上面若有人向{pl}发问，"
+                                 f"要由{pl}自己来答——你绝不能替{pl}作答。不想搭话就保持沉默。）"})
         # a logic-guard regeneration passes a targeted correction (what broke last attempt)
         corr = prompt.get("logic_correction")
         if corr:

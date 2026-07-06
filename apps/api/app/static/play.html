@@ -547,9 +547,10 @@ async function afterAuth() {
   who.textContent = me.email;
   hide("auth"); show("logoutBtn");
   let masks = await j("/personas");
-  if (!masks.length) masks = [await j("/personas", { method:"POST", body: JSON.stringify({ name:"我", pronouns:"they" }) })];
+  if (!masks.length) masks = [await j("/personas", { method:"POST", body: JSON.stringify({ name: B("我", "Me"), pronouns:"they" }) })];
   const mask = masks.find(m=>m.is_default) || masks[0];
   personaId = mask.id; myName = mask.name || "我";
+  if (uiLang === "en" && myName === "我") myName = "Me";
   const page = await j("/stories");
   stories.innerHTML = "";
   // 继续你的故事: existing runs come FIRST — the relationships you built are the game
@@ -696,7 +697,7 @@ async function enterRun(run) {
   avatarMap = {};
   try { mergeAvatars((await j(`/stories/${run.story_id}`)).characters); } catch (e) {}
   playMode = (run.state && run.state.mode) || "character";
-  myName = (playMode === "character" && run.state && run.state.player_character_name) || "我";
+  myName = (playMode === "character" && run.state && run.state.player_character_name) || B("我", "Me");
   runId = run.id;
   hide("role");
   hide("pick"); show("play"); show("backBtn"); show("soundBtn"); show("journalBtn"); show("mapBtn"); show("phoneBtn");
@@ -960,7 +961,7 @@ async function openJournal() {
     }</div>`).join("");
     const left = sec.locked_count > 0
       ? `<div class="jlocked">${B(`…还有 ${sec.locked_count} 层没有揭开`, `…${sec.locked_count} layer(s) still hidden`)}${sec.confrontable ? `<span class="jwho">${B(`（${escapeHtml(sec.character)}就在眼前，可拿已知的证据当面对质）`, ` (${escapeHtml(sec.character)} is right here — you can confront them with what you know)`)}</span>` : ""}</div>` : "";
-    const who = sec.character ? `<span class="jwho">（${escapeHtml(sec.character)}）</span>` : "";
+    const who = sec.character ? `<span class="jwho">${B(`（${escapeHtml(sec.character)}）`, ` (${escapeHtml(sec.character)})`)}</span>` : "";
     return `<div class="jsec"><div class="jtitle">🔓 ${escapeHtml(sec.title)}${who}</div>${layers}${left}</div>`;
   }).join("") || `<div class="jempty">${B("还没有揭开任何真相。", "No truths uncovered yet.")}</div>`;
   const more = jd.secrets_untouched > 0 ? `<div class="jlocked">${B(`这故事里还藏着 ${jd.secrets_untouched} 个你尚未触及的秘密…`, `${jd.secrets_untouched} secret(s) in this story remain untouched…`)}</div>` : "";

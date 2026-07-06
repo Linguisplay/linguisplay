@@ -80,3 +80,47 @@ def test_parting_teaser_localized():
     beats = runtime.build_parting_hook(STORY_EN, st, {"name": "me"},
                                        llm=SpyLLM())
     assert any("[Next act] Act 2" in b["text"] for b in beats)
+
+
+# ── 🌐 language backstops (this batch) ───────────────────────────────────────
+
+def test_dedash_follows_the_text_language():
+    # Latin text → half-width ", " and a single kept dash before a cut-off
+    assert runtime.dedash("He pours the tea—the cup steams.") == \
+        "He pours the tea, the cup steams."
+    assert runtime.dedash("He pours — the cup steams.") == "He pours, the cup steams."
+    assert runtime.dedash("Wei Ying—") == "Wei Ying—"
+    # CJK text keeps the 全角 behavior byte-identical
+    assert runtime.dedash("他抬眼—茶凉了。") == "他抬眼，茶凉了。"
+    assert runtime.dedash("蓝湛——") == "蓝湛——"
+
+
+def test_lang_break_detects_chinese_beats_in_en_story():
+    zh_beats = {"beats": [{"type": "dialogue", "text": "茶凉了。别看了。"}]}
+    en_beats = {"beats": [{"type": "dialogue", "text": "The tea has gone cold."}]}
+    assert runtime._lang_break({}, zh_beats, STORY_EN) is True
+    assert runtime._lang_break({}, en_beats, STORY_EN) is False
+    # the player themselves wrote Chinese → mixing is their choice, never flagged
+    assert runtime._lang_break({"player_input": "你好"}, zh_beats, STORY_EN) is False
+    # zh story → guard never fires
+    zh_story = {"story": {**STORY_EN["story"], "language": "zh"}, "secrets": []}
+    assert runtime._lang_break({}, zh_beats, zh_story) is False
+
+
+def test_lang_guard_regenerates_a_chinese_turn_once():
+    class Flaky:
+        def __init__(self):
+            self.calls = 0
+        def generate(self, prompt):
+            self.calls += 1
+            if prompt.get("logic_correction"):
+                return {"beats": [{"type": "dialogue", "text": "Mn. Take it."}]}
+            return {"beats": [{"type": "dialogue", "text": "嗯。拿着。"}]}
+    llm = Flaky()
+    bad = llm.generate({})
+    out = runtime._lang_guard(llm, {}, bad, STORY_EN)
+    assert out["beats"][0]["text"] == "Mn. Take it."
+    assert llm.calls == 2
+    # clean turn → zero extra calls
+    out2 = runtime._lang_guard(llm, {}, out, STORY_EN)
+    assert out2 is out and llm.calls == 2
