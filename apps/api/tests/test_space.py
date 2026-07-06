@@ -95,3 +95,13 @@ def test_depth_anchor_is_short_and_grounded():
     assert "\n" not in anchor         # it's a short one-liner, not the whole block
     # nothing physical → no anchor
     assert qwen._depth_anchor({}) == ""
+
+
+def test_depth_anchor_pins_the_clock():
+    from app.engine import qwen
+    # ⏰ the current time rides at the generation point — characters must not call
+    # a morning "下午" (real-time sandbox bug)
+    a = qwen._depth_anchor({"clock": "第3天·晨 09:24"})
+    assert "第3天·晨 09:24" in a and "不能说错时辰" in a
+    b = qwen._depth_anchor({"clock": "Day 3 · Morning 09:24", "language": "en"})
+    assert "Day 3 · Morning 09:24" in b and "must match" in b

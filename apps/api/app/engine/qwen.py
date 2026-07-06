@@ -65,10 +65,17 @@ def _knowledge_block(prompt: dict[str, Any]) -> str:
 
 def _depth_anchor(prompt: dict[str, Any]) -> str:
     """A SHORT physical anchor restated right next to the user's turn (depth-0 injection).
-    Pulls the current-place line + the deterministic headcount line — the two facts the
-    model most often drifts on — so they sit adjacent to generation, not buried up in the
-    system prompt. Returns "" when there's nothing physical to anchor."""
+    Pulls the current time + current-place line + the deterministic headcount line — the
+    facts the model most often drifts on — so they sit adjacent to generation, not buried
+    up in the system prompt. Returns "" when there's nothing physical to anchor."""
+    en = (prompt.get("language") or "zh") == "en"
     bits: list[str] = []
+    ck = (prompt.get("clock") or "").strip()
+    if ck:
+        bits.append(f"The time right now is [{ck}] — any mention of morning/afternoon/"
+                    f"night must match it."
+                    if en else
+                    f"现在的时间是【{ck}】——谁开口提到早上/下午/晚上，都必须与它一致，绝不能说错时辰。")
     place = (prompt.get("place") or "").strip()
     if place:
         # keep only the concrete locator sentence (first line), drop the long instructions
