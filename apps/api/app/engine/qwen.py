@@ -1577,11 +1577,11 @@ class QwenLLM:
             ln = re.sub(r"^\s*[-*\d.、。)）]+\s*", "", ln).strip().strip("「」\"'")
             if not ln:
                 continue
-            # keep chips short, but NEVER chop mid-word: trim at the last sentence punctuation
-            # within range, and only hard-cut (with …) as a last resort.
-            if len(ln) > 24:
-                cut = max((ln.rfind(p, 8, 24) for p in "？！。?!…，,"), default=-1)
-                ln = ln[:cut + 1] if cut >= 8 else ln[:24] + "…"
+            # the FULL sentence survives — the UI truncates display only, and clicking a
+            # chip pastes the whole line. Safety cap only for runaway generations.
+            if len(ln) > 120:
+                cut = max((ln.rfind(p, 40, 120) for p in "？！。?!…，,"), default=-1)
+                ln = ln[:cut + 1] if cut >= 40 else ln[:120] + "…"
             out.append(ln)
         return {"suggestions": out[:3]}
 

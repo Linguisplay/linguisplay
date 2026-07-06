@@ -167,7 +167,8 @@
   #clues .hd { color: #9fb0ff; font-weight: 600; }
   #clues .it { color: #c9c9d4; } #clues .it.done { color: #6fe0a6; }
   #suggest { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 4px; }
-  .chip { font-size: 12px; padding: 5px 10px; border-radius: 14px; background: #1c2030cc; border: 1px solid #2a3350; color: #9fb0ff; cursor: pointer; }
+  .chip { font-size: 12px; padding: 5px 10px; border-radius: 14px; background: #1c2030cc; border: 1px solid #2a3350; color: #9fb0ff; cursor: pointer;
+          max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; }
   .chip:hover { background: #243056; }
   #state { flex: 0 0 auto; font-size: 12px; color: #b6b6c2; padding: 6px 16px; border-top: 1px dashed #23232c66; background: rgba(13,13,18,.4); }
   #state b { color: #8ea2ff; }
@@ -248,7 +249,7 @@
   footer { padding: 8px 9px; gap: 6px; }
   footer select { padding: 8px 5px; }
   #suggest { padding: 0 9px 3px; gap: 5px; }
-  .chip { font-size: 11.5px; padding: 4px 9px; }
+  .chip { font-size: 11.5px; padding: 4px 9px; max-width: 74vw; }
   #state { padding: 4px 10px; font-size: 11px; }
   .toast { font-size: 13px; padding: 8px 14px; }
   .dice { font-size: 12.5px; }
@@ -1578,6 +1579,7 @@ function renderSuggest(items) {
   suggest.innerHTML = "";
   (items||[]).forEach(t => {
     const c = document.createElement("span"); c.className = "chip"; c.textContent = "💡 " + t;
+    c.title = t;  // display may ellipsize; hover shows — and clicking pastes — the full line
     c.onclick = () => { const isAct = t.startsWith("用「做」") || t.startsWith("Use “Do”"); msg.value = isAct ? "" : t; if (isAct) channel.value = "do"; msg.focus(); };
     suggest.appendChild(c);
   });
