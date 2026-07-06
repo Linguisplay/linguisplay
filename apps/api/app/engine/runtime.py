@@ -792,6 +792,31 @@ def set_char_hp(state: dict[str, Any], cid: str, hp: str | None) -> None:
         sim.pop("hp", None)
 
 
+def char_agenda(content: dict[str, Any], state: dict[str, Any],
+                c: dict[str, Any]) -> dict[str, Any]:
+    """🎯 the character's ENGINE-OWNED agenda: what they're trying to get done (`goal`,
+    seeded from the authored wants/agenda field) and what they're doing about it right
+    now (`step`, advanced by the offscreen tick). The world runs on rules, not vibes:
+    an NPC's behavior between scenes is this record, not a fresh dice roll."""
+    sim = _sim(state, c.get("id"))
+    ag = sim.get("agenda")
+    if not isinstance(ag, dict):
+        ag = {"goal": (c.get("wants") or c.get("agenda") or "").strip(), "step": ""}
+        sim["agenda"] = ag
+    return ag
+
+
+def _agenda_prompt(content: dict[str, Any], state: dict[str, Any], c: dict[str, Any]) -> str:
+    """The agenda as one prompt line: authored goal + the engine-tracked latest step."""
+    ag = char_agenda(content, state, c)
+    bits = []
+    if ag.get("goal"):
+        bits.append(ag["goal"])
+    if ag.get("step"):
+        bits.append(f"最近的动静：{ag['step']}")
+    return "；".join(bits)
+
+
 def _is_here(c: dict[str, Any], state: dict[str, Any], cur_loc_id: str | None,
              content: dict[str, Any] | None = None) -> bool:
     """Is this character in the player's CURRENT scene? Their tracked position must BE
@@ -975,6 +1000,34 @@ def location_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, A
         if dest and location_available(content, state, dest):
             avail.append(name)
     return {**loc, "exits": avail}
+
+
+def _finish_audit(state: dict[str, Any], moments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Close the turn's audit sheet: accepted events are derived from `moments` (they are
+    the accept-log already), appended after the inline rejections. Returns the full sheet."""
+    log = list(state.get("last_audit") or [])
+    seen = {(e.get("e"), e.get("data")) for e in log}
+    for m in moments or []:
+        kind = m.get("kind", "")
+        data = str(m.get("name") or m.get("text") or m.get("title") or m.get("what") or "")[:60]
+        if m.get("verb"):
+            kind = f"{kind}.{m['verb']}"
+        if (kind, data) not in seen:
+            log.append({"e": kind, "ok": True, **({"data": data} if data else {})})
+    state["last_audit"] = log[-40:]
+    return state["last_audit"]
+
+
+def _audit(state: dict[str, Any], kind: str, ok: bool, data: str = "", why: str = "") -> None:
+    """📋 per-turn event audit: every model-reported or engine-detected event lands here as
+    accepted or REJECTED (with the reason). Accepted entries are also derived from `moments`
+    at turn end; this call is mainly for rejections — the silent drops playtesters used to
+    puzzle over ("我明明收下了短刃"). Kept small: last 40 entries of the current turn."""
+    log = state.setdefault("last_audit", [])
+    log.append({"e": kind, "ok": bool(ok),
+                **({"data": str(data)[:60]} if data else {}),
+                **({"why": str(why)[:60]} if why else {})})
+    del log[:-40]
 
 
 def _drop_pins_on_leave(state: dict[str, Any], old_lid: str | None) -> None:
@@ -2293,15 +2346,23 @@ def offscreen_drama(content: dict[str, Any], state: dict[str, Any],
         out = llm.generate({"offscreen": True,
                             "place": (_location_by_id(content, lid) or {}).get("name") or "",
                             "a": {"name": a.get("name"), "role": a.get("role") or "",
-                                  "persona": (a.get("persona_text") or "")[:80]},
+                                  "persona": (a.get("persona_text") or "")[:80],
+                                  # 🎯 what happens offscreen ADVANCES their agenda, not dice
+                                  "goal": char_agenda(content, state, a).get("goal", "")},
                             "b": {"name": b.get("name"), "role": b.get("role") or "",
-                                  "persona": (b.get("persona_text") or "")[:80]},
+                                  "persona": (b.get("persona_text") or "")[:80],
+                                  "goal": char_agenda(content, state, b).get("goal", "")},
                             "stance": stance.get("label") or "没什么交情"}) or {}
     except Exception:
         out = {}
     rumor = (out.get("rumor") or "").strip()[:80]
     if not rumor:
         return None
+    # 🎯 book the moment as both characters' latest step — the next scene REMEMBERS it
+    ti = _time_index(state)
+    for who in (a, b):
+        ag = char_agenda(content, state, who)
+        ag["step"], ag["at"] = rumor[:60], ti
     delta = 1 if int(out.get("delta") or 0) > 0 else -1 if int(out.get("delta") or 0) < 0 else 0
     if delta:
         web = dict(state.get("npc_rel") or {})
@@ -3834,10 +3895,14 @@ def run_turn_stream(
     _apply_event_triggers(content, state, player_input)
     provisional_events = set(state.get("triggered_event_ids") or []) - _ev_before
 
+    state["last_audit"] = []   # 📋 fresh audit sheet each turn
+
     # 1b. 🚶 说走就走 FIRST: a clear "I go to X" moves the player NOW, so every twin below
     #     and the whole prompt (place anchor, roster, responders) already lives at X.
     moved = None if (state.get("mode") or "character") == "god" else \
         player_move(content, state, player_input, channel)
+    if moved:
+        _audit(state, "move", True, moved.get("name", ""))
     arrival_discoveries = discover_on_arrival(content, state) if moved else []
 
     # 1b². 🔎 找人: 「去找X」→ pop a confirmable "TA此刻在Y，去吗？" and STOP the turn there.
@@ -3849,6 +3914,7 @@ def run_turn_stream(
         pins = dict(state.get("char_pins") or {})
         pins[c_s["id"]] = l_s["id"]
         state["char_pins"] = pins
+        _audit(state, "seek", True, f"{c_s.get('name')}@{l_s.get('name')}")
         pcid_s = state.get("player_character_id")
         mode_s = state.get("mode") or "character"
         state["goal"] = current_goal(content, old_act)
@@ -3876,6 +3942,7 @@ def run_turn_stream(
         })
         return
     if seek and not seek.get("loc"):
+        _audit(state, "seek", False, seek["char"].get("name", ""), "AWAY/此时不可达")
         # the person exists but can't be reached this hour — say so, then play the scene on
         yield ("beat", dedash_beat({
             "type": "description", "speaker_name": None,
@@ -4205,7 +4272,8 @@ def run_turn_stream(
             "eq_style": sp.get("eq_style", ""),   # how THIS character reads/expresses emotion
             # 台词范例 (mes_example): lines that ARE this voice — the most durable 去AI味 lever
             "examples": [str(x) for x in (sp.get("examples") or [])][:5],
-            "agenda": sp.get("agenda", ""),       # this character's OWN goal/will (autonomy)
+            # 🎯 this character's OWN goal/will: authored wants + the engine-tracked step
+            "agenda": _agenda_prompt(content, state, sp),
             "relationship_playbook": rel_playbook,  # current relationship mode toward player
             "player_emotion": state.get("player_emotion", ""),  # prior emotional read (continuity)
             "knowledge": sp.get("knowledge", ""),  # 智能增强: this character's background lore
@@ -4479,6 +4547,8 @@ def run_turn_stream(
                 hvictim = next((c for c in scene_characters(content, state)
                                 if c.get("id") != pcid and (c.get("name") or "")
                                 and (c["name"] in hname or hname.strip() in c["name"])), None)
+                if not hvictim:
+                    _audit(state, "harm", False, hname.strip(), "伤的人不在这个场景里")
                 if hvictim and hvictim.get("id") not in _dead_ids(state):
                     hid, cur_hp = hvictim["id"], char_hp(state, hvictim.get("id"))
                     hl = hlevel.strip()
@@ -4506,7 +4576,11 @@ def run_turn_stream(
                                if c.get("id") != pcid and (c.get("name") or "")
                                and ((c["name"] == died_ref) or (c["name"] in died_ref)
                                     or (died_ref in c["name"]))), None)
+                if not victim:
+                    _audit(state, "death", False, died_ref, "死的人不在场，改判无效")
                 if victim and char_hp(state, victim.get("id")) != "dying":
+                    _audit(state, "death", False, victim.get("name", ""),
+                           "两段式规则：健康之身先判濒死，给施救留窗口")
                     set_char_hp(state, victim["id"], "dying")
                     if state.get("location_id"):
                         _sim(state, victim["id"])["pos"] = state["location_id"]
@@ -4534,9 +4608,17 @@ def run_turn_stream(
             # BOOK it (the turn-end roster diff narrates the departure + destination)
             for mv in (directed.get("npc_moves") or [])[:2]:
                 if isinstance(mv, dict):
-                    apply_char_move(content, state, mv.get("who", ""), mv.get("to", ""))
+                    booked = apply_char_move(content, state, mv.get("who", ""), mv.get("to", ""))
+                    if booked:
+                        _audit(state, "npc_move", True, f"{booked.get('name')}→{booked.get('to_name')}")
+                    else:
+                        _audit(state, "npc_move", False,
+                               f"{mv.get('who', '')}→{mv.get('to', '')}",
+                               "不在场/被作息钉住/目的地不存在")
             # 👋 EMERGENT CHARACTER: the story brought in a brand-new face — make them real
             nc_raw = (directed.get("new_char") or "").strip()
+            if nc_raw and gen_count >= tun["max_new_characters"]:
+                _audit(state, "new_char", False, nc_raw[:20], "本局涌现人数已到上限")
             if nc_raw and gen_count < tun["max_new_characters"]:
                 import re as _re
                 import uuid as _uuid
@@ -4544,6 +4626,8 @@ def run_turn_stream(
                 nc_name = parts[0].strip().strip("「」\"'")[:12]
                 nc_desc = (parts[1].strip() if len(parts) > 1 else "")[:120]
                 exists = any((c.get("name") or "") == nc_name for c in _characters(content))
+                if nc_name and exists:
+                    _audit(state, "new_char", False, nc_name, "已有同名角色，不重复登场")
                 if nc_name and not exists:
                     nc_id = f"gen_{_uuid.uuid4().hex[:8]}"
                     emergent_ids.add(nc_id)
@@ -4577,6 +4661,8 @@ def run_turn_stream(
             # 🛠 CRAFT: the player made something with their own materials — every
             # material must be in the pocket; a failed fate roll voids the attempt
             cr = (directed.get("crafted") or "").strip()
+            if cr and dice and dice.get("outcome") in ("fail", "crit_fail"):
+                _audit(state, "item.crafted", False, cr.partition("|")[0], "命运判定失败，制作作废")
             if cr and not observer \
                     and not (dice and dice.get("outcome") in ("fail", "crit_fail")):
                 cr_name, _, cr_mats = cr.partition("|")
@@ -4586,19 +4672,29 @@ def run_turn_stream(
                     used = [(_inv_remove(state, m) or {}).get("name") for m in mats]
                     _inv_add(state, cr_name.strip(), "用" + "、".join(u for u in used if u) + "做的")
                     moments.append({"kind": "item", "verb": "crafted", "name": cr_name.strip()})
+                else:
+                    _audit(state, "item.crafted", False, cr_name.strip(),
+                           "材料不在身上（或未报材料），引擎不凭空造物")
             # ✊ SNATCH: the player took something off a character BY FORCE — only a
             # successful fate roll (or an unresisted grab) makes it stick; the victim
             # remembers, the relationship pays, the story's pressure feels the noise
             tk = (directed.get("taken") or "").strip()
+            if tk and dice and dice.get("outcome") in ("fail", "crit_fail"):
+                _audit(state, "item.taken", False, tk.partition("|")[0], "命运判定失败，没抢到")
             if tk and not observer \
                     and not (dice and dice.get("outcome") in ("fail", "crit_fail")):
                 tk_item, _, tk_who = tk.partition("|")
                 victim_t = next((c for c in scene_characters(content, state)
                                  if c.get("id") != pcid and c.get("name")
                                  and (c["name"] in tk_who or tk_who.strip() in c["name"])), None)
+                if not victim_t:
+                    _audit(state, "item.taken", False, tk_item.strip(), "被抢的人不在场")
                 if victim_t:
                     their = char_items(content, state, victim_t["id"])
                     ti = _inv_find(their, tk_item.strip())
+                    if ti < 0:
+                        _audit(state, "item.taken", False, tk_item.strip(),
+                               f"{victim_t.get('name')}身上没有这件东西")
                     if ti >= 0:
                         it = their.pop(ti)
                         _inv_add(state, it.get("name", ""), it.get("detail", ""))
@@ -4620,6 +4716,9 @@ def run_turn_stream(
                     their = char_items(content, state, sp_id)
                     gi = _inv_find(state.get("inventory") or [], give_n)
                     ti = _inv_find(their, get_n)
+                    if gi < 0 or ti < 0:
+                        _audit(state, "item.traded", False, f"{give_n}↔{get_n}",
+                               "你没有这件筹码" if gi < 0 else "对方拿不出那件东西")
                     if gi >= 0 and ti >= 0:
                         mine = _inv_remove(state, give_n)
                         theirs = their.pop(ti)
@@ -4639,6 +4738,8 @@ def run_turn_stream(
                 g_item, _, g_rest = g_raw.partition("|")
                 g_taken = "拒" not in g_rest
                 g_liked = "喜" in g_rest
+                if _inv_find(state.get("inventory") or [], g_item.strip()) < 0:
+                    _audit(state, "gift", False, g_item.strip(), "你身上没有这件东西，送不出去")
                 if _inv_find(state.get("inventory") or [], g_item.strip()) >= 0:
                     if g_taken:
                         it = _inv_remove(state, g_item.strip())
@@ -4663,6 +4764,8 @@ def run_turn_stream(
             if md and not observer and economy_on(state):
                 amt_s, _, m_why = md.partition("|")
                 applied = book_money(content, state, _to_int(amt_s, -9999, 9999), m_why)
+                if not applied:
+                    _audit(state, "money", False, md, "没有入账（余额不足或金额无效）")
                 if applied:
                     moments.append({"kind": "money", "delta": applied,
                                     "why": (m_why or "").strip()[:30],
@@ -4729,16 +4832,23 @@ def run_turn_stream(
             # 🎒 ITEMS: gained / lost / stashed at the current place
             if not observer:
                 g = (directed.get("gained") or "").strip()
-                if g and _inv_add(state, g):
-                    moments.append({"kind": "item", "verb": "gained", "name": g})
+                if g:
+                    if _inv_add(state, g):
+                        moments.append({"kind": "item", "verb": "gained", "name": g})
+                    else:
+                        _audit(state, "item.gained", False, g, "已在身上，不重复入包")
                 l = (directed.get("lost") or "").strip()
                 if l:
                     it = _inv_remove(state, l)
                     if it:
                         moments.append({"kind": "item", "verb": "lost", "name": it.get("name")})
+                    else:
+                        _audit(state, "item.lost", False, l, "身上没有这件东西，不能凭空失去")
                 st_ref = (directed.get("stashed") or "").strip()
                 if st_ref and state.get("location_id"):   # never remove without a shelf
                     it = _inv_remove(state, st_ref)
+                    if not it:
+                        _audit(state, "item.stashed", False, st_ref, "身上没有这件东西")
                     if it:
                         stashes = dict(state.get("stashes") or {})
                         stashes.setdefault(state["location_id"], []).append(it)
@@ -5258,6 +5368,9 @@ def run_turn_stream(
         "location": location,  # {id,name,detail,exits} the player's current place (or None)
         "move_request": move_request,  # {to,to_name,by_id,by_name} a char wants to lead you there (confirm)
         "relations": relations_summary(content, state),  # {cid:{mode,mode_name,...}} toward player
+        # 📋 the turn's event audit: rejections logged where they happened + accepts derived
+        # from moments — the debuggable "what the engine decided and why" sheet
+        "audit": _finish_audit(state, moments),
     })
 
 

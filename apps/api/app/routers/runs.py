@@ -575,6 +575,10 @@ def play(
                     yield _event({"event": "choice", "choice": final["pending_choice"]})
                 if final.get("move_request"):
                     yield _event({"event": "move_request", "move_request": final["move_request"]})
+                if final.get("audit"):
+                    # 📋 the turn's event audit (accepts + rejections with reasons) — the
+                    # playtest debugging sheet; the client logs it to the console
+                    yield _event({"event": "audit", "audit": final["audit"]})
                 yield _event({"event": "suggest", "suggestions": final.get("suggestions", [])})
                 if final.get("ending"):
                     yield _event({"event": "ending", "ending": final["ending"]})

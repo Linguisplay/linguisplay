@@ -81,6 +81,10 @@ class Character(BaseModel):
     # this character's OWN goal/agenda/stance in the story — what THEY are after,
     # independent of the player. Drives autonomous, self-interested behavior. Optional.
     agenda: Optional[str] = None
+    # 🎯 想办成的事: seeds the ENGINE-OWNED live agenda (char_sim.agenda.goal). The
+    # offscreen tick advances it between scenes and dialogue remembers the latest step.
+    # `agenda` above is the legacy static alias; `wants` wins when both are set.
+    wants: Optional[str] = None
     # 分层小传: [{closeness_min, text}] — closeness unlocks the character's backstory
     # layer by layer (getting to KNOW someone is itself the collection loop)
     bio_layers: list[dict[str, Any]] = []

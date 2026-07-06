@@ -1727,12 +1727,18 @@ class QwenLLM:
         """🌆 幕后戏: two NPCs had a moment while the player was elsewhere. Output = a
         stance direction + ONE line of neighborhood-gossip rumor. Degrades to {}."""
         a, b = prompt.get("a") or {}, prompt.get("b") or {}
+        ga = (a.get("goal") or "").strip()
+        gb = (b.get("goal") or "").strip()
         sys = ("你在为互动剧情游戏生成一段【玩家不在场时】两个角色之间发生的小事，"
                "并把它压成一句会在街坊嘴里流传的传闻。\n"
-               f"甲：{a.get('name','')}（{a.get('role','')}）{a.get('persona','')}\n"
-               f"乙：{b.get('name','')}（{b.get('role','')}）{b.get('persona','')}\n"
+               f"甲：{a.get('name','')}（{a.get('role','')}）{a.get('persona','')}"
+               + (f"　TA正想办成的事：{ga}" if ga else "") + "\n"
+               f"乙：{b.get('name','')}（{b.get('role','')}）{b.get('persona','')}"
+               + (f"　TA正想办成的事：{gb}" if gb else "") + "\n"
                f"两人的交情：{prompt.get('stance','')}；事发地：{prompt.get('place','')}\n"
-               "只输出两行：\n变化：近 或 僵 或 无（这件事让两人关系更近/闹僵/没变化）\n"
+               + ("这件小事要顺着某一方正想办成的事往前推半步（办成一点、受个挫、或牵出新麻烦），"
+                  "不要凭空编无关的闲事。\n" if (ga or gb) else "")
+               + "只输出两行：\n变化：近 或 僵 或 无（这件事让两人关系更近/闹僵/没变化）\n"
                "传闻：一句话（30字内，像闲话——谁听见谁看见了什么，具体、有画面，不用破折号）"
                + _lang_rule(prompt))
         try:

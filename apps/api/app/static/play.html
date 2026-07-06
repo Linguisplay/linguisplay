@@ -1853,6 +1853,12 @@ async function streamTurn(url, bodyObj) {
         }
         else if (ev.event === "pressure") { renderPressure(ev.pressure); }
         else if (ev.event === "move_request") { afterPlay.moveReq = ev.move_request; }
+        else if (ev.event === "audit") {
+          // 📋 engine event audit — open devtools to see what the engine accepted/rejected
+          try { console.groupCollapsed("📋 engine audit"); (ev.audit||[]).forEach(a =>
+            console.debug(`${a.ok ? "✓" : "✗"} ${a.e}${a.data ? " · " + a.data : ""}${a.why ? " — " + a.why : ""}`));
+            console.groupEnd(); } catch (e) {}
+        }
         else if (ev.event === "suggest") { afterPlay.suggest = ev.suggestions; }
         else if (ev.event === "ending") { afterPlay.ending = ev.ending; }
         else if (ev.event === "achievements") { (ev.achievements||[]).forEach((a,k) => pushToast(B(`🏅 成就达成：「${a.name}」— ${a.desc||""}`, `🏅 Achievement: “${a.name}” — ${a.desc||""}`), "t-end", 900 + k*700)); }
