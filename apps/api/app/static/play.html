@@ -1222,7 +1222,8 @@ async function openMap() {
     const cls = "mnode" + (n.here ? " here" : "") + (canGo ? " cango" : "");
     const go = canGo ? `data-go="${escapeHtml(n.name)}"` : "";
     const tag = n.here ? `<span class="mhere">${B("📍 你在这里", "📍 You are here")}</span>` : (canGo ? `<span class="mgo">${B("可前往", "Can go")}</span>` : "");
-    return `<div class="${cls}" ${go}><div class="mname">${escapeHtml(n.name)} ${tag}</div>${chars}${exits}</div>`;
+    const regen = n.here ? `<button class="ghost" data-regen="1" style="margin-top:6px; font-size:12px; padding:3px 8px">🖼 ${B("重画这里的背景", "Redraw this background")}</button>` : "";
+    return `<div class="${cls}" ${go}><div class="mname">${escapeHtml(n.name)} ${tag}</div>${chars}${exits}${regen}</div>`;
   }).join("");
   const hidden = mp.hidden > 0 ? `<div class="mhidden">${B(`还有 ${mp.hidden} 处地方，你尚未打听到…`, `${mp.hidden} more place(s) you haven't heard of yet…`)}</div>` : "";
   ov.innerHTML = `<div class="mcard" onclick="event.stopPropagation()">
@@ -1232,6 +1233,17 @@ async function openMap() {
   ov.querySelectorAll("[data-go]").forEach(el => {
     el.onclick = async () => { ov.remove(); await moveTo(el.getAttribute("data-go")); };
   });
+  const rb = ov.querySelector("[data-regen]");
+  if (rb) rb.onclick = async (e) => {
+    e.stopPropagation();
+    try {
+      const res = await j(`/runs/${runId}/bg/regen`, { method: "POST" });
+      bgVer[res.location_id] = Date.now(); bgRetry[res.location_id] = 0;
+      pushToast(B("🖼 已排队重画，新背景稍后自动换上", "🖼 Redraw queued — the new background will appear shortly"));
+      ov.remove();
+      paintBackground();
+    } catch (err) { pushToast((err && err.message) || B("重画失败", "Redraw failed")); }
+  };
 }
 // 🎲 fate roll: a rolling number that settles into the real result
 function showDice(d) {
@@ -1727,14 +1739,15 @@ function paintBackground() {
   bg.style.backgroundPosition = "center";
   bg.style.backgroundRepeat = "no-repeat";
   if (curLocId) {
-    const locUrl = `/scene/bg/${curLocId}.jpg`;
+    // a redraw bumps bgVer so the browser can't serve the stale cached image
+    const locUrl = `/scene/bg/${curLocId}.jpg` + (bgVer[curLocId] ? `?v=${bgVer[curLocId]}` : "");
     const im = new Image();
     im.onload = () => { bg.style.backgroundImage = `url(${locUrl})`; };
     im.onerror = () => {
       paintKeywordBg(scene);  // no AI image for this place (yet) → fall back
-      // an emergent place renders its background server-side (~10-30s) — check back
+      // an emergent place (or a just-requested redraw) renders server-side — check back
       const lid = curLocId;
-      if (/^loc_(gen|start)_/.test(lid) && (bgRetry[lid] || 0) < 8) {
+      if ((/^loc_(gen|start)_/.test(lid) || bgVer[lid]) && (bgRetry[lid] || 0) < 8) {
         bgRetry[lid] = (bgRetry[lid] || 0) + 1;
         setTimeout(() => { if (curLocId === lid) paintBackground(); }, 22000);
       }
@@ -1745,6 +1758,7 @@ function paintBackground() {
   }
 }
 let bgRetry = {};   // locId → poll attempts while its AI background is still rendering
+let bgVer = {};     // locId → cache-buster stamped when the player requests a redraw
 function paintKeywordBg(scene) {
   if (!scene || !scene.bg) return;  // gradient stays
   const stem = scene.night ? scene.bg + "_night" : scene.bg;

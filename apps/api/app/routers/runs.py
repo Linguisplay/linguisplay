@@ -72,19 +72,22 @@ def _enqueue_image(prompt: str, path, size: str) -> None:
     _IMG_Q.put((prompt, path, size))
 
 
+def _bg_prompt(content: dict, loc: dict) -> str:
+    story = content.get("story") or {}
+    era = ((story.get("world_long") or story.get("world_facts") or "")
+           .strip().replace("\n", " "))[:140]
+    return (f"{era} 场景：{loc.get('name', '')}。{(loc.get('detail') or '')[:200]} "
+            "电影感写实场景概念图，强烈氛围与光影，景深，电影级调色，横构图宽幅；"
+            "空镜，画面里没有任何人物，没有文字、字幕或水印。")
+
+
 def _spawn_location_bg(content: dict, loc: dict | None) -> None:
     if not loc or not loc.get("id") or not loc.get("generated"):
         return
     path = _BG_DIR / f"{loc['id']}.jpg"
     if path.exists():
         return
-    story = content.get("story") or {}
-    era = ((story.get("world_long") or story.get("world_facts") or "")
-           .strip().replace("\n", " "))[:140]
-    prompt = (f"{era} 场景：{loc.get('name', '')}。{(loc.get('detail') or '')[:200]} "
-              "电影感写实场景概念图，强烈氛围与光影，景深，电影级调色，横构图宽幅；"
-              "空镜，画面里没有任何人物，没有文字、字幕或水印。")
-    _enqueue_image(prompt, path, "1280*720")
+    _enqueue_image(_bg_prompt(content, loc), path, "1280*720")
 
 
 def _ensure_char_avatars(content: dict) -> bool:
@@ -692,6 +695,39 @@ def get_map(run_id: str, user: User = Depends(current_user), db: Session = Depen
     Locked places appear only as an unnamed count."""
     r = _own_run(run_id, user, db)
     return runtime.map_view(r.pinned_content or {}, r.state or {})
+
+
+@router.post("/{run_id}/bg/regen")
+def regen_bg(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """🖼 玩家对当前地点的背景不满意 → 删掉旧图、重新排队生成一张。
+    Run-private places (sandbox start/emergent) are the player's own art — free to redo.
+    Authored places share their art with every run of the story, so only the story's
+    author may redraw those. One request per run per minute keeps the queue sane."""
+    r = _own_run(run_id, user, db)
+    st = dict(r.state or {})
+    content = r.pinned_content or {}
+    loc = runtime.current_location(content, st)
+    if not loc or not loc.get("id"):
+        raise HTTPException(404, "此刻不在任何有背景的地点")
+    lid = loc["id"]
+    story_row = db.get(StoryModel, r.story_id)
+    authored = {l.get("id") for l in ((story_row.locations if story_row else None) or [])}
+    if lid in authored and (not story_row or story_row.owner_id != user.id):
+        raise HTTPException(403, "这个地点的背景是剧本作者的美术，只有作者能重画")
+    import time as _time
+    now = _time.time()
+    if now - float(st.get("last_bg_regen") or 0) < 60:
+        raise HTTPException(429, "刚提交过重画，稍等一分钟再试")
+    st["last_bg_regen"] = now
+    r.state = st
+    db.commit()
+    path = _BG_DIR / f"{lid}.jpg"
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+    _enqueue_image(_bg_prompt(content, loc), path, "1280*720")
+    return {"queued": True, "location_id": lid, "url": f"/scene/bg/{lid}.jpg"}
 
 
 @router.get("/{run_id}/character/{char_id}")
