@@ -3877,6 +3877,528 @@ def run_turn(
     return final
 
 
+def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, directed,
+                     observer, pcid, old_act, dice, pcfg, newly, asks,
+                     provisional_asks, provisional_events, probe_cands, event_cands,
+                     moments, rel_deltas, rel_all, rel_active, said_this_turn,
+                     dead_names, emergent_ids, emit, llm, flags):
+    """管线 P7b · 逐人落账: everything this speaker's directed output REPORTS gets
+    validated and booked — relationship flow & tier-ups, promises, probe/event
+    reconciliation, pressure, wounds & two-stage deaths, NPC moves, emergent
+    characters, identity, craft/take/trade/gift, money, quests, world facts, items.
+    Scalar outcomes ride `flags`; every rejection lands on the audit sheet.
+    Extracted verbatim from run_turn_stream (管线刀1)."""
+    this_delta = int(directed.get("affinity_delta", 0) or 0)
+    flags["affinity_delta"] += this_delta
+    # per-character relationship FLOW: apply this speaker's own closeness (=好感) and
+    # 心动 deltas to their relationship-toward-player scores; the derived mode shifts
+    # gradually (clamped) so next turn this character treats the player accordingly.
+    if rel_active and sp_id and sp_id != pcid:
+        old_scores = rel_all.get(sp_id) or relationships.new_scores()
+        mode_before = relationships.derive_mode(sp, old_scores, tun)
+        rel_all[sp_id] = relationships.apply_deltas(
+            old_scores, this_delta, int(directed.get("romance_delta", 0) or 0), tun,
+        )
+        mode_after = relationships.derive_mode(sp, rel_all[sp_id], tun)
+        dc = int(rel_all[sp_id].get("closeness", 0)) - int(old_scores.get("closeness", 0))
+        dr = int(rel_all[sp_id].get("romance", 0)) - int(old_scores.get("romance", 0))
+        if dc or dr:
+            rel_deltas[sp_id] = {"name": sp_name, "closeness": dc, "romance": dr}
+        # CELEBRATE a tier-up (陌生→朋友→暧昧→恋人): the "高潮=阈值被跨过" moment, made
+        # visible — a strong reward + come-back hook. Only on an UPGRADE, never a downgrade.
+        if mode_after != mode_before and _RANK.get(mode_after, 0) > _RANK.get(mode_before, 0):
+            mn = relationships.name_of(mode_after, lang_of(content))
+            moments.append({"kind": "rel_up", "character_id": sp_id, "name": sp_name,
+                            "mode": mode_after, "mode_name": mn})
+            # 💘 a tier-up is a warm spike — a styled character will pull back next time
+            if relationships.love_style_of(sp):
+                _sim(state, sp_id)["warm_peak"] = {"t": _time_index(state), "served": False}
+            rel_log(state, sp_id, old_act, "rel_up",
+                    _t(content, f"你们成了「{mn}」。", f"You became “{mn}”."))
+            album_add(content, state, "rel_up",
+                      _t(content, f"成为{mn}", f"Becoming {mn}"),
+                      _last_line_of(said_this_turn, sp_name)
+                      or _t(content, f"你和{sp_name}成了「{mn}」。",
+                            f"You and {sp_name} became “{mn}”."), sp)
+            yield emit({"type": "description", "speaker_name": None,
+                        "text": _t(content,
+                                   f"💗（你感觉到，和{sp_name}的关系又近了一层。现在你们是"
+                                   f"「{mn}」了。）",
+                                   f"💗 (You can feel it — something between you and {sp_name} "
+                                   f"has shifted closer. You are now “{mn}”.)")})
+            # 📮 crossing into 恋人 earns a LETTER: some things TA can only write down
+            if mode_after == "lover" and phone_enabled(content):
+                lm = compose_letter(content, state, sp, "love_letter",
+                                    "你们刚刚捅破了那层窗户纸，成了恋人。把当面说不出口的"
+                                    "那些话，写成一封信给TA", llm)
+                yield ("phone", {"char_id": sp_id, "name": sp_name,
+                                 "avatar_url": sp.get("avatar_url"), "mail": True,
+                                 "msgs": [lm["subject"]], "device": phone_device(content)})
+                moments.append({"kind": "mail", "name": sp_name,
+                                "device": phone_device(content)})
+    if directed.get("advance_act"):
+        flags["advance"] = True
+    if is_primary:
+        model_ending = directed.get("ending")  # only the addressed scene can end the run
+        if sandbox_on(content):
+            mk = (model_ending or {}).get("kind") if isinstance(model_ending, dict) \
+                else (model_ending or "")
+            if "death" in str(mk) and not (directed.get("player_harm") or "").strip():
+                directed["player_harm"] = "重伤"
+            model_ending = None  # 🏖 the sandbox has no exits
+        flags["model_ending"] = model_ending
+        # a character may ASK to lead the player elsewhere — captured here, surfaced as a
+        # confirm prompt (never auto-applied; the player relocates via /move on a yes).
+        flags["primary_invite"] = directed.get("move_invite")
+        flags["primary_name_for_invite"] = sp_name
+        flags["time_skip"] = (directed.get("time_skip") or "").strip()
+        # 🤝 the speaker set a future appointment with the player (恋与深空-style
+        # proactive 邀约 at romance tiers) — record it, announce it, hang it in the bar
+        pm = directed.get("promise")
+        if pm and not observer:
+            made = make_promise(content, state, sp, pm, tun)
+            if made:
+                loc_nm = (_location_by_id(content, made.get("location_id")) or {}).get("name") or "老地方"
+                when = promise_when_label(content, made, state)
+                moments.append({"kind": "promise", "status": "made",
+                                "name": sp_name, "what": made["what"], "when": when,
+                                "romantic": bool(made.get("romantic"))})
+                yield emit({"type": "description", "speaker_name": None,
+                            "text": _t(content,
+                                       f"（约定立下了：{when}，{loc_nm}见，{made['what']}。）",
+                                       f"(It's a promise: {when}, at {loc_nm} — "
+                                       f"{made['what']}.)")})
+        emo = (directed.get("player_emotion") or "").strip()
+        if emo:
+            state["player_emotion"] = emo       # carry the emotional read into next turn
+        # RECONCILE ask/event judgment (root fix for keyword-stuffing). When the model
+        # supplies a judgment it becomes the truth: a provisional keyword ask it rejects
+        # is rolled back (unless it already unlocked something — unlocks stay sticky),
+        # and a genuine probe the keywords missed is counted (its reveal lands next
+        # turn, same one-turn lag as affinity reveals). No judgment (mock/prose
+        # fallback) → the keyword result stands, so tests stay deterministic.
+        judged = directed.get("probed")
+        if judged is not None:
+            judged_ids = _match_candidates(probe_cands, judged, "title")
+            for sid in provisional_asks:
+                if sid not in judged_ids and asks.get(sid, 0) > 0 \
+                        and not _secret_has_newly(content, sid, newly):
+                    asks[sid] -= 1
+            for sid in judged_ids:
+                if sid not in provisional_asks:
+                    asks[sid] = asks.get(sid, 0) + 1
+            state["asks"] = asks
+        occurred = directed.get("occurred")
+        if occurred is not None:
+            ev_ids = _match_candidates(event_cands, occurred, "label")
+            trig = set(state.get("triggered_event_ids") or [])
+            trig -= (provisional_events - ev_ids)  # roll back denied keyword guesses
+            trig |= ev_ids
+            state["triggered_event_ids"] = sorted(trig)
+        # ⚠️ pressure: apply the judged delta, announce level crossings, remember a blowout
+        if pcfg and directed.get("pressure_delta") is not None:
+            p_old = int(state.get("pressure", 0))
+            p_new = max(0, min(100, p_old + int(directed.get("pressure_delta") or 0)))
+            state["pressure"] = p_new
+            for lv in sorted(pcfg.get("levels") or [], key=lambda x: int(x.get("at", 0))):
+                at = int(lv.get("at", 0))
+                if p_old < at <= p_new and (lv.get("note") or "").strip():
+                    yield emit({"type": "description", "speaker_name": None,
+                                "text": f"（{lv['note']}）"})
+                    moments.append({"kind": "pressure", "note": lv["note"], "value": p_new})
+            if p_new >= 100:
+                flags["pressure_blown"] = True
+        # 💀 THE PLAYER'S OWN BODY (sandbox): judged wounds on the same two-stage
+        # ladder as everyone else — a killing blow on the healthy leaves them 濒死,
+        # never instantly dead. Death is not an ending here: the world keeps
+        # running; the dead lose 说 and 做, and can only watch.
+        ph_ref = (directed.get("player_harm") or "").strip()
+        if ph_ref and sandbox_on(content) and not observer \
+                and (state.get("player_hp") or "healthy") != "dead":
+            cur_php = state.get("player_hp") or "healthy"
+            if any(w in ph_ref for w in ("好转", "救", "包扎", "缓")):
+                nxt_php = {"dying": "hurt", "hurt": "healthy"}.get(cur_php)
+                if nxt_php:
+                    state["player_hp"] = nxt_php
+                    moments.append({"kind": "player_hp", "hp": nxt_php})
+                    yield emit({"type": "description", "speaker_name": None,
+                                "text": "（你缓过来一些了。还疼，但死神松了手。）"
+                                        if nxt_php == "hurt"
+                                        else "（伤势稳住了。你重新站稳了脚。）"})
+            else:
+                heavy = any(w in ph_ref for w in ("重", "濒", "毙", "致命", "死"))
+                nxt_php = ("dead" if cur_php == "dying" and heavy else
+                           "dying" if (cur_php in ("hurt", "dying") or heavy) else "hurt")
+                if nxt_php != cur_php:
+                    state["player_hp"] = nxt_php
+                    moments.append({"kind": "player_hp", "hp": nxt_php})
+                    yield emit({"type": "description", "speaker_name": None, "text": {
+                        "hurt": "（你挂了彩。不致命，但每动一下，伤口都在提醒你。）",
+                        "dying": "（你眼前发黑，力气一丝丝往外漏。再没有人管你，你就交代在这了。）",
+                        "dead": "（世界没有停下来。只是你再也发不出声音，再也碰不到任何东西。"
+                                "从这一刻起，你成了看客。）"}[nxt_php]})
+        # 🩸 HARM: judged wounds move ONE step on the graded ladder (轻伤/重伤/好转)
+        harm_ref = (directed.get("harmed") or "").strip()
+        if harm_ref:
+            hname, _, hlevel = harm_ref.partition("|")
+            hvictim = next((c for c in scene_characters(content, state)
+                            if c.get("id") != pcid and (c.get("name") or "")
+                            and (c["name"] in hname or hname.strip() in c["name"])), None)
+            if not hvictim:
+                _audit(state, "harm", False, hname.strip(), "伤的人不在这个场景里")
+            if hvictim and hvictim.get("id") not in _dead_ids(state):
+                hid, cur_hp = hvictim["id"], char_hp(state, hvictim.get("id"))
+                hl = hlevel.strip()
+                if "好转" in hl or "包扎" in hl or "救" in hl:
+                    nxt = {"dying": "hurt", "hurt": None}.get(cur_hp, None)
+                    if cur_hp in ("dying", "hurt"):
+                        set_char_hp(state, hid, nxt)
+                        moments.append({"kind": "recover", "name": hvictim.get("name")})
+                        rel_log(state, hid, old_act, "hurt",
+                                f"{hvictim.get('name')} 的伤势缓过来了。")
+                else:
+                    nxt = "dying" if ("重" in hl or "濒" in hl or cur_hp == "hurt") else "hurt"
+                    if nxt != cur_hp:
+                        set_char_hp(state, hid, nxt)
+                        if nxt == "dying" and state.get("location_id"):
+                            _sim(state, hid)["pos"] = state["location_id"]
+                        moments.append({"kind": nxt, "name": hvictim.get("name")})
+                        rel_log(state, hid, old_act, "hurt",
+                                f"{hvictim.get('name')} {'重伤濒死' if nxt == 'dying' else '受了伤'}。")
+        # ☠️ DEATH is TWO-STAGE: only the already-dying can die. A killing blow on a
+        # healthy body books them as 濒死 instead — there is always a window to save.
+        died_ref = (directed.get("died") or "").strip()
+        if died_ref:
+            victim = next((c for c in scene_characters(content, state)
+                           if c.get("id") != pcid and (c.get("name") or "")
+                           and ((c["name"] == died_ref) or (c["name"] in died_ref)
+                                or (died_ref in c["name"]))), None)
+            if not victim:
+                _audit(state, "death", False, died_ref, "死的人不在场，改判无效")
+            if victim and char_hp(state, victim.get("id")) != "dying":
+                _audit(state, "death", False, victim.get("name", ""),
+                       "两段式规则：健康之身先判濒死，给施救留窗口")
+                set_char_hp(state, victim["id"], "dying")
+                if state.get("location_id"):
+                    _sim(state, victim["id"])["pos"] = state["location_id"]
+                moments.append({"kind": "dying", "name": victim.get("name")})
+                rel_log(state, victim.get("id"), old_act, "hurt",
+                        f"{victim.get('name')} 重伤濒死。")
+                yield emit({"type": "description", "speaker_name": None,
+                            "text": f"（{victim.get('name')}还吊着一口气，气若游丝。"
+                                    "现在施救，或许还来得及。）"})
+            elif victim:
+                deads = _dead_ids(state)
+                deads.add(victim["id"])
+                state["dead_character_ids"] = sorted(deads)
+                state["following"] = [f for f in (state.get("following") or [])
+                                      if f != victim["id"]]
+                dead_names.append(victim.get("name"))
+                moments.append({"kind": "death", "name": victim.get("name")})
+                rel_log(state, victim.get("id"), old_act, "death",
+                        f"{victim.get('name')} 死了。")
+                for _vp in void_promises_of(state, victim["id"]):
+                    yield emit({"type": "description", "speaker_name": None,
+                                "text": f"（你们约好的（{_vp.get('what','')}），"
+                                        "再也没有人来赴了。）"})
+        # 🚶 booked NPC moves: the model narrated someone setting off — validate and
+        # BOOK it (the turn-end roster diff narrates the departure + destination)
+        for mv in (directed.get("npc_moves") or [])[:2]:
+            if isinstance(mv, dict):
+                booked = apply_char_move(content, state, mv.get("who", ""), mv.get("to", ""))
+                if booked:
+                    _audit(state, "npc_move", True, f"{booked.get('name')}→{booked.get('to_name')}")
+                else:
+                    _audit(state, "npc_move", False,
+                           f"{mv.get('who', '')}→{mv.get('to', '')}",
+                           "不在场/被作息钉住/目的地不存在")
+        # 👋 EMERGENT CHARACTER: the story brought in a brand-new face — make them real
+        nc_raw = (directed.get("new_char") or "").strip()
+        if nc_raw and flags["gen_count"] >= tun["max_new_characters"]:
+            _audit(state, "new_char", False, nc_raw[:20], "本局涌现人数已到上限")
+        if nc_raw and flags["gen_count"] < tun["max_new_characters"]:
+            import re as _re
+            import uuid as _uuid
+            parts = _re.split(r"[｜|：:，,]", nc_raw, maxsplit=1)
+            nc_name = parts[0].strip().strip("「」\"'")[:12]
+            nc_desc = (parts[1].strip() if len(parts) > 1 else "")[:120]
+            exists = any((c.get("name") or "") == nc_name for c in _characters(content))
+            if nc_name and exists:
+                _audit(state, "new_char", False, nc_name, "已有同名角色，不重复登场")
+            if nc_name and not exists:
+                nc_id = f"gen_{_uuid.uuid4().hex[:8]}"
+                emergent_ids.add(nc_id)
+                (content.get("story") or {}).setdefault("characters", []).append({
+                    "id": nc_id,
+                    "name": nc_name,
+                    "role": nc_desc[:24] or "新登场的人物",
+                    "persona_text": nc_desc,
+                    "relation_default": "stranger",
+                    "home_location_id": state.get("location_id"),
+                    "generated": True,
+                })
+                flags["content_mutated"] = True
+                flags["gen_count"] += 1
+                moments.append({"kind": "arrival", "name": nc_name})
+        # 🕸 NPC↔NPC shifts: the scene moved two characters closer/apart (≤2 a turn,
+        # both must be living and present, never the player — engine-enforced)
+        for sh in (directed.get("npc_shifts") or [])[:2]:
+            applied_sh = apply_npc_shift(content, state, sh.get("a"), sh.get("b"),
+                                         sh.get("delta"), sh.get("why", ""), old_act)
+            if applied_sh:
+                moments.append({"kind": "npc_rel", **applied_sh})
+        # 🎖 IDENTITY: the player's role/standing changed for real
+        idt = (directed.get("identity") or "").strip()
+        if idt and not observer and idt != (state.get("identity") or ""):
+            state["identity"] = idt
+            log = list(state.get("identity_log") or [])
+            log.append({"act": old_act, "text": idt})
+            state["identity_log"] = log
+            moments.append({"kind": "identity", "text": idt})
+        # 🛠 CRAFT: the player made something with their own materials — every
+        # material must be in the pocket; a failed fate roll voids the attempt
+        cr = (directed.get("crafted") or "").strip()
+        if cr and dice and dice.get("outcome") in ("fail", "crit_fail"):
+            _audit(state, "item.crafted", False, cr.partition("|")[0], "命运判定失败，制作作废")
+        if cr and not observer \
+                and not (dice and dice.get("outcome") in ("fail", "crit_fail")):
+            cr_name, _, cr_mats = cr.partition("|")
+            mats = [m.strip() for m in _re_split_mats(cr_mats) if m.strip()]
+            inv = state.get("inventory") or []
+            if cr_name.strip() and mats and all(_inv_find(inv, m) >= 0 for m in mats):
+                used = [(_inv_remove(state, m) or {}).get("name") for m in mats]
+                _inv_add(state, cr_name.strip(), "用" + "、".join(u for u in used if u) + "做的")
+                moments.append({"kind": "item", "verb": "crafted", "name": cr_name.strip()})
+            else:
+                _audit(state, "item.crafted", False, cr_name.strip(),
+                       "材料不在身上（或未报材料），引擎不凭空造物")
+        # ✊ SNATCH: the player took something off a character BY FORCE — only a
+        # successful fate roll (or an unresisted grab) makes it stick; the victim
+        # remembers, the relationship pays, the story's pressure feels the noise
+        tk = (directed.get("taken") or "").strip()
+        if tk and dice and dice.get("outcome") in ("fail", "crit_fail"):
+            _audit(state, "item.taken", False, tk.partition("|")[0], "命运判定失败，没抢到")
+        if tk and not observer \
+                and not (dice and dice.get("outcome") in ("fail", "crit_fail")):
+            tk_item, _, tk_who = tk.partition("|")
+            victim_t = next((c for c in scene_characters(content, state)
+                             if c.get("id") != pcid and c.get("name")
+                             and (c["name"] in tk_who or tk_who.strip() in c["name"])), None)
+            if not victim_t:
+                _audit(state, "item.taken", False, tk_item.strip(), "被抢的人不在场")
+            if victim_t:
+                their = char_items(content, state, victim_t["id"])
+                ti = _inv_find(their, tk_item.strip())
+                if ti < 0:
+                    _audit(state, "item.taken", False, tk_item.strip(),
+                           f"{victim_t.get('name')}身上没有这件东西")
+                if ti >= 0:
+                    it = their.pop(ti)
+                    _inv_add(state, it.get("name", ""), it.get("detail", ""))
+                    vid = victim_t["id"]
+                    old_s = rel_all.get(vid) or relationships.new_scores()
+                    rel_all[vid] = relationships.apply_deltas(old_s, -8, 0, tun)
+                    rel_log(state, vid, old_act, "hurt",
+                            f"你从TA手里抢走了{it.get('name')}。TA记住了。")
+                    moments.append({"kind": "item", "verb": "taken",
+                                    "name": it.get("name"), "from": victim_t.get("name")})
+                    if pcfg:
+                        state["pressure"] = min(99, int(state.get("pressure", 0)) + 8)
+        # 🔁 TRADE: a struck bargain — both sides must actually hold their ends
+        tr = (directed.get("trade") or "").strip()
+        if tr and not observer and sp_id:
+            parts = tr.split("|")
+            if len(parts) >= 2:
+                give_n, get_n = parts[0].strip(), parts[1].strip()
+                their = char_items(content, state, sp_id)
+                gi = _inv_find(state.get("inventory") or [], give_n)
+                ti = _inv_find(their, get_n)
+                if gi < 0 or ti < 0:
+                    _audit(state, "item.traded", False, f"{give_n}↔{get_n}",
+                           "你没有这件筹码" if gi < 0 else "对方拿不出那件东西")
+                if gi >= 0 and ti >= 0:
+                    mine = _inv_remove(state, give_n)
+                    theirs = their.pop(ti)
+                    their.append(mine)
+                    _inv_add(state, theirs.get("name", ""), theirs.get("detail", ""))
+                    old_s = rel_all.get(sp_id) or relationships.new_scores()
+                    rel_all[sp_id] = relationships.apply_deltas(old_s, 2, 0, tun)
+                    rel_log(state, sp_id, old_act, "gift",
+                            f"你用{mine.get('name')}换了TA的{theirs.get('name')}。")
+                    moments.append({"kind": "item", "verb": "traded",
+                                    "name": theirs.get("name"), "gave": mine.get("name")})
+        # 🎁 GIFT: the player handed the speaker something of theirs — the receiver
+        # decided (in character) whether to take it and how it landed; kept gifts
+        # become keepsakes they carry and remember
+        g_raw = (directed.get("gift") or "").strip()
+        if g_raw and not observer and sp_id:
+            g_item, _, g_rest = g_raw.partition("|")
+            g_taken = "拒" not in g_rest
+            g_liked = "喜" in g_rest
+            if _inv_find(state.get("inventory") or [], g_item.strip()) < 0:
+                _audit(state, "gift", False, g_item.strip(), "你身上没有这件东西，送不出去")
+            if _inv_find(state.get("inventory") or [], g_item.strip()) >= 0:
+                if g_taken:
+                    it = _inv_remove(state, g_item.strip())
+                    ks = _sim(state, sp_id).setdefault("keepsakes", [])
+                    ks.append({"name": it.get("name"), "at": _time_index(state)})
+                    del ks[:-8]
+                    old_g = rel_all.get(sp_id) or relationships.new_scores()
+                    g_mode = relationships.derive_mode(sp, old_g, tun)
+                    rel_all[sp_id] = relationships.apply_deltas(
+                        old_g, 4 if g_liked else 1,
+                        (2 if g_mode in ("flirt", "lover") else 0) if g_liked else 0, tun)
+                    rel_log(state, sp_id, old_act, "gift",
+                            f"你把{it.get('name')}送给了TA{'，TA很喜欢' if g_liked else ''}。")
+                    moments.append({"kind": "gift", "name": sp_name,
+                                    "item": it.get("name"), "liked": g_liked})
+                else:
+                    rel_log(state, sp_id, old_act, "gift",
+                            f"你想把{g_item.strip()}送给TA，被TA推回来了。")
+        # 💰 MONEY: judged payments/earnings hit a HARD ledger — spending clamps
+        # at the balance, every booking is logged with its reason and hour
+        md = (directed.get("money_delta") or "").strip()
+        if md and not observer and economy_on(state):
+            amt_s, _, m_why = md.partition("|")
+            applied = book_money(content, state, _to_int(amt_s, -9999, 9999), m_why)
+            if not applied:
+                _audit(state, "money", False, md, "没有入账（余额不足或金额无效）")
+            if applied:
+                moments.append({"kind": "money", "delta": applied,
+                                "why": (m_why or "").strip()[:30],
+                                "balance": state["money"]})
+        # 📋 QUEST accepted: a paid errand agreed to in dialogue, booked with a
+        # REAL deadline (real-time sandbox: N days literally means N days)
+        qa = (directed.get("quest_accepted") or "").strip()
+        if qa and not observer:
+            q_parts = qa.split("|")
+            q_title = q_parts[0].strip()[:30]
+            q_reward = _to_int(q_parts[1], 0, 9999) if len(q_parts) > 1 else 0
+            q_days = _to_int(q_parts[2], 0, 30) if len(q_parts) > 2 else 0
+            open_qs = [q for q in (state.get("quests") or []) if q.get("status") == "open"]
+            if q_title and len(open_qs) < 4 and \
+                    all(logic._norm(q.get("title", "")) != logic._norm(q_title) for q in open_qs):
+                import uuid as _uuid_q
+                day_now_q = int((state.get("clock") or {}).get("day", 1) or 1)
+                quests = list(state.get("quests") or [])
+                quests.append({"id": f"q_{_uuid_q.uuid4().hex[:6]}", "title": q_title,
+                               "reward": q_reward, "giver": sp_name, "status": "open",
+                               "deadline_day": (day_now_q + q_days) if q_days else None})
+                state["quests"] = quests[-8:]
+                moments.append({"kind": "quest", "status": "open", "title": q_title,
+                                "reward": q_reward, "days": q_days})
+                yield emit({"type": "description", "speaker_name": None,
+                            "text": f"（你应下了这桩事：{q_title}。"
+                                    + (f"讲好的酬劳是{q_reward}{currency_of(content)}。"
+                                       if q_reward else "")
+                                    + (f"限{q_days}天之内。" if q_days else "") + "）"})
+        # 📋 QUEST delivered: the errand is done for real — the reward pays out
+        qd = (directed.get("quest_done") or "").strip()
+        if qd and not observer:
+            for q in (state.get("quests") or []):
+                if q.get("status") == "open" and (
+                        logic._norm(q.get("title", "")) in logic._norm(qd)
+                        or logic._norm(qd) in logic._norm(q.get("title", ""))):
+                    q["status"] = "done"
+                    q_pay = book_money(content, state, int(q.get("reward") or 0),
+                                       q.get("title", "")) if q.get("reward") else 0
+                    moments.append({"kind": "quest", "status": "done",
+                                    "title": q.get("title"), "reward": q_pay})
+                    if q_pay:
+                        moments.append({"kind": "money", "delta": q_pay,
+                                        "why": q.get("title", ""),
+                                        "balance": state["money"]})
+                    yield emit({"type": "description", "speaker_name": None,
+                                "text": f"（{q.get('title')}，办成了。"
+                                        + (f"{q_pay}{currency_of(content)}的酬劳落进了口袋。"
+                                           if q_pay else "") + "）"})
+                    break
+        # 🌍 场面事实账本: a judged PERSISTENT physical change to this place gets
+        # booked and served back forever (the smashed door stays smashed) — the
+        # world's memory is engine-owned, not vibes
+        wf = (directed.get("world_fact") or "").strip()[:60]
+        if wf and not observer and state.get("location_id"):
+            pf = dict(state.get("place_facts") or {})
+            lst = list(pf.get(state["location_id"]) or [])
+            if all(logic._norm(x.get("text", "")) != logic._norm(wf) for x in lst):
+                lst.append({"text": wf,
+                            "label": (clock_view(content, state) or {}).get("label", "")})
+                pf[state["location_id"]] = lst[-6:]
+                state["place_facts"] = pf
+                moments.append({"kind": "world", "text": wf})
+        # 🎒 ITEMS: gained / lost / stashed at the current place
+        if not observer:
+            g = (directed.get("gained") or "").strip()
+            if g:
+                if _inv_add(state, g):
+                    moments.append({"kind": "item", "verb": "gained", "name": g})
+                else:
+                    _audit(state, "item.gained", False, g, "已在身上，不重复入包")
+            l = (directed.get("lost") or "").strip()
+            if l:
+                it = _inv_remove(state, l)
+                if it:
+                    moments.append({"kind": "item", "verb": "lost", "name": it.get("name")})
+                else:
+                    _audit(state, "item.lost", False, l, "身上没有这件东西，不能凭空失去")
+            st_ref = (directed.get("stashed") or "").strip()
+            if st_ref and state.get("location_id"):   # never remove without a shelf
+                it = _inv_remove(state, st_ref)
+                if not it:
+                    _audit(state, "item.stashed", False, st_ref, "身上没有这件东西")
+                if it:
+                    stashes = dict(state.get("stashes") or {})
+                    stashes.setdefault(state["location_id"], []).append(it)
+                    state["stashes"] = stashes
+                    moments.append({"kind": "item", "verb": "stashed", "name": it.get("name")})
+
+
+def _emit_twin_beats(content, moments, emit, moved, arrival_discoveries,
+                     retrieved, stashed_now, accepted, found_props):
+    """管线 P6 · 确定性旁白: the deterministic twins' narration beats — the move and
+    its arrival discoveries, retrieved/stashed/accepted items, searched evidence —
+    all land BEFORE anyone speaks. First phase physically extracted (刀1)."""
+    if moved:
+        yield emit({"type": "description", "speaker_name": None,
+                    "text": _t(content, f"（你动身去了{moved.get('name','')}。）",
+                               f"(You make your way to {moved.get('name','')}.)")})
+        for d in arrival_discoveries:
+            if d.get("text"):
+                yield emit({"type": "description", "speaker_name": None, "text": d["text"]})
+    for it in retrieved:
+        yield emit({"type": "description", "speaker_name": None,
+                    "text": _t(content, f"（你取回了之前放在这里的{it.get('name','')}。）",
+                               f"(You retrieve the {it.get('name','')} you left here.)")})
+    for it in stashed_now:
+        moments.append({"kind": "item", "verb": "stashed", "name": it.get("name")})
+        yield emit({"type": "description", "speaker_name": None,
+                    "text": _t(content,
+                               f"（你把{it.get('name','')}收放在了这里。想用时回到这里说一声取回。）",
+                               f"(You stash the {it.get('name','')} here. Come back and ask "
+                               "for it when you need it.)")})
+    for it in accepted:
+        moments.append({"kind": "item", "verb": "gained", "name": it.get("name")})
+        yield emit({"type": "description", "speaker_name": None,
+                    "text": _t(content, f"（{it.get('name','')}到手了，已收进背包。）",
+                               f"(The {it.get('name','')} is yours — tucked into your bag.)")})
+
+    # searching paid off → narrate the physical evidence BEFORE anyone reacts to it
+    for pf in found_props:
+        body = _fragment_content(content, pf.get("fragment_id"))
+        if body:
+            yield emit({"type": "description", "speaker_name": None,
+                        "text": _t(content, f"（你翻查{pf['name']}：{body}）",
+                                   f"(You search the {pf['name']}: {body})")})
+        elif pf.get("detail"):
+            yield emit({"type": "description", "speaker_name": None,
+                        "text": _t(content, f"（你翻查{pf['name']}：{pf['detail']}）",
+                                   f"(You search the {pf['name']}: {pf['detail']})")})
+        else:
+            yield emit({"type": "description", "speaker_name": None,
+                        "text": _t(content, f"（你翻查了{pf['name']}，没有发现特别的东西。）",
+                                   f"(You search the {pf['name']} and find nothing unusual.)")})
+
+
 def run_turn_stream(
     content: dict[str, Any],
     state: dict[str, Any],
@@ -3892,7 +4414,22 @@ def run_turn_stream(
 ):
     """Advance one turn as a GENERATOR. Yields ('beat', beat) for each beat the moment
     it's computed (so responders stream out one by one), then a final ('final', result)
-    carrying state/scene/suggestions/ending/cast/goal. Pure w.r.t. DB."""
+    carrying state/scene/suggestions/ending/cast/goal. Pure w.r.t. DB.
+
+    ━━ 回合管线 (the turn pipeline — banners below mark each phase) ━━
+      P0 归一与时钟      state defaults, location normalize, real-clock sync, ghost gate
+      P1 感知           keyword probes → asks, event triggers (provisional, reconciled in P7)
+      P2 确定性孪生      audit reset; move / seek(may end the turn) / props / stash / accept
+      P3 行动解算        verb class → tier → DC → d20 (power invocations never roll)
+      P4 解锁与问候      five-condition gating, threshold moments, comeback pulse
+      P5 选角与脚手架    responder pick, promise-kept, persona, stuck, intent digest, emit()
+      P6 确定性旁白      the twins' narration beats land before anyone speaks
+      P7 导演循环        per speaker: gated prompt → generate → guards → settle its events
+      P8 场后结算        golden moment, observe/think, world pulse, affinity → act advance
+      P9 世界翻页        new places, slot roll + offscreen, arrivals/exits, phone, endings,
+                        memory, final assembly
+    Invariants live in docs/engine-logic.md; each phase's rejections land on the audit
+    sheet. Extraction into module-level phase functions is staged (刀2+): P6 done."""
     llm = lang_llm(llm or get_llm(), content)
     state = {**default_state(), **(state or {})}
     old_act = int(state.get("act", 1))
@@ -3931,6 +4468,7 @@ def run_turn_stream(
     # newly open up (so a new exit never just silently appears — "莫名其妙解锁" fix)
     locs_before = {l.get("id") for l in _locations(content) if location_available(content, state, l)}
 
+    # ━━━━━━━━━━ 管线 P1 · 感知：试探与事件（暂记，P7 对账） ━━━━━━━━━━
     # 1. probing → asks counters (per secret); also note which characters are probed.
     #    Keyword hits are PROVISIONAL (they keep same-turn reveals working) — the primary
     #    director call judges what the player truly probed, and we reconcile after it.
@@ -3947,6 +4485,7 @@ def run_turn_stream(
     _apply_event_triggers(content, state, player_input)
     provisional_events = set(state.get("triggered_event_ids") or []) - _ev_before
 
+    # ━━━━━━━━━━ 管线 P2 · 确定性孪生（移动/找人/搜证/收纳/取回/受赠） ━━━━━━━━━━
     state["last_audit"] = []   # 📋 fresh audit sheet each turn
 
     # 1b. 🚶 说走就走 FIRST: a clear "I go to X" moves the player NOW, so every twin below
@@ -4016,6 +4555,7 @@ def run_turn_stream(
             _inv_add(state, pf.get("name", ""), pf.get("detail", ""))
     content_mutated = False  # set when this turn adds an emergent character
 
+    # ━━━━━━━━━━ 管线 P3 · 行动解算（类目→难度→DC→d20） ━━━━━━━━━━
     # 1c. 🎲 fate check: a risky 做-action gets judged (tiny call) and ROLLED for real.
     #     The result is handed to the director, who must narrate accordingly — no fiat.
     #     A deterministic move is just walking — never a gamble; and invoking a declared
@@ -4056,6 +4596,7 @@ def run_turn_stream(
             dice = _roll_check(risk)
             yield ("dice", dice)
 
+    # ━━━━━━━━━━ 管线 P4 · 解锁评估与回归问候 ━━━━━━━━━━
     # 2. gate on the CURRENT state (asks updated; affinity not yet changed this turn).
     #    asks-driven reveals surface THIS turn so the director can voice them; affinity-
     #    driven ones land NEXT turn (the warmth rose now, the confession follows) — that
@@ -4099,6 +4640,7 @@ def run_turn_stream(
                             "name": ev["name"], "device": ev["device"],
                             "call": bool(ev.get("call"))})
 
+    # ━━━━━━━━━━ 管线 P5 · 选角与提示词脚手架 ━━━━━━━━━━
     # responder selection. With an explicit @target → just that character. With NO target
     # (and not an inner thought) the player is addressing the WHOLE room — every present
     # character may answer, though some can choose to stay silent. Otherwise the router
@@ -4280,46 +4822,17 @@ def run_turn_stream(
     # player's own embodied character)
     rel_active = (not observer)
 
-    if moved:
-        yield emit({"type": "description", "speaker_name": None,
-                    "text": _t(content, f"（你动身去了{moved.get('name','')}。）",
-                               f"(You make your way to {moved.get('name','')}.)")})
-        for d in arrival_discoveries:
-            if d.get("text"):
-                yield emit({"type": "description", "speaker_name": None, "text": d["text"]})
-    for it in retrieved:
-        yield emit({"type": "description", "speaker_name": None,
-                    "text": _t(content, f"（你取回了之前放在这里的{it.get('name','')}。）",
-                               f"(You retrieve the {it.get('name','')} you left here.)")})
-    for it in stashed_now:
-        moments.append({"kind": "item", "verb": "stashed", "name": it.get("name")})
-        yield emit({"type": "description", "speaker_name": None,
-                    "text": _t(content,
-                               f"（你把{it.get('name','')}收放在了这里。想用时回到这里说一声取回。）",
-                               f"(You stash the {it.get('name','')} here. Come back and ask "
-                               "for it when you need it.)")})
-    for it in accepted:
-        moments.append({"kind": "item", "verb": "gained", "name": it.get("name")})
-        yield emit({"type": "description", "speaker_name": None,
-                    "text": _t(content, f"（{it.get('name','')}到手了，已收进背包。）",
-                               f"(The {it.get('name','')} is yours — tucked into your bag.)")})
+    # ━━━━━━━━━━ 管线 P6 · 确定性旁白（孪生的叙事落地）━━━━━━━━━━
+    yield from _emit_twin_beats(content, moments, emit, moved, arrival_discoveries,
+                                retrieved, stashed_now, accepted, found_props)
 
-    # searching paid off → narrate the physical evidence BEFORE anyone reacts to it
-    for pf in found_props:
-        body = _fragment_content(content, pf.get("fragment_id"))
-        if body:
-            yield emit({"type": "description", "speaker_name": None,
-                        "text": _t(content, f"（你翻查{pf['name']}：{body}）",
-                                   f"(You search the {pf['name']}: {body})")})
-        elif pf.get("detail"):
-            yield emit({"type": "description", "speaker_name": None,
-                        "text": _t(content, f"（你翻查{pf['name']}：{pf['detail']}）",
-                                   f"(You search the {pf['name']}: {pf['detail']})")})
-        else:
-            yield emit({"type": "description", "speaker_name": None,
-                        "text": _t(content, f"（你翻查了{pf['name']}，没有发现特别的东西。）",
-                                   f"(You search the {pf['name']} and find nothing unusual.)")})
-
+    # P7 shared flag sheet: the scalars the settle cascade accumulates across speakers
+    flags = {"affinity_delta": affinity_delta, "advance": advance,
+             "model_ending": model_ending, "primary_invite": primary_invite,
+             "primary_name_for_invite": None, "time_skip": time_skip,
+             "pressure_blown": pressure_blown, "content_mutated": content_mutated,
+             "gen_count": gen_count}
+    # ━━━━━━━━━━ 管线 P7 · 导演循环（逐人：门控提示词→生成→守卫→落账） ━━━━━━━━━━
     for idx, sp in enumerate(responders):
         sp_id = sp.get("id")
         sp_name = sp.get("name") or "角色"
@@ -4444,7 +4957,7 @@ def run_turn_stream(
             "deaths": dead_names,
             "player_items": ([i.get("name") for i in (state.get("inventory") or [])]
                              if is_primary else []),
-            "can_new_char": (is_primary and gen_count < tun["max_new_characters"]),
+            "can_new_char": (is_primary and flags["gen_count"] < tun["max_new_characters"]),
             # what the others have ALREADY said this turn → react, don't echo
             "said_this_turn": list(said_this_turn),
         }
@@ -4490,493 +5003,50 @@ def run_turn_stream(
                 "text": b.get("text", ""),
             })
             yield emit(b)
-        this_delta = int(directed.get("affinity_delta", 0) or 0)
-        affinity_delta += this_delta
-        # per-character relationship FLOW: apply this speaker's own closeness (=好感) and
-        # 心动 deltas to their relationship-toward-player scores; the derived mode shifts
-        # gradually (clamped) so next turn this character treats the player accordingly.
-        if rel_active and sp_id and sp_id != pcid:
-            old_scores = rel_all.get(sp_id) or relationships.new_scores()
-            mode_before = relationships.derive_mode(sp, old_scores, tun)
-            rel_all[sp_id] = relationships.apply_deltas(
-                old_scores, this_delta, int(directed.get("romance_delta", 0) or 0), tun,
-            )
-            mode_after = relationships.derive_mode(sp, rel_all[sp_id], tun)
-            dc = int(rel_all[sp_id].get("closeness", 0)) - int(old_scores.get("closeness", 0))
-            dr = int(rel_all[sp_id].get("romance", 0)) - int(old_scores.get("romance", 0))
-            if dc or dr:
-                rel_deltas[sp_id] = {"name": sp_name, "closeness": dc, "romance": dr}
-            # CELEBRATE a tier-up (陌生→朋友→暧昧→恋人): the "高潮=阈值被跨过" moment, made
-            # visible — a strong reward + come-back hook. Only on an UPGRADE, never a downgrade.
-            if mode_after != mode_before and _RANK.get(mode_after, 0) > _RANK.get(mode_before, 0):
-                mn = relationships.name_of(mode_after, lang_of(content))
-                moments.append({"kind": "rel_up", "character_id": sp_id, "name": sp_name,
-                                "mode": mode_after, "mode_name": mn})
-                # 💘 a tier-up is a warm spike — a styled character will pull back next time
-                if relationships.love_style_of(sp):
-                    _sim(state, sp_id)["warm_peak"] = {"t": _time_index(state), "served": False}
-                rel_log(state, sp_id, old_act, "rel_up",
-                        _t(content, f"你们成了「{mn}」。", f"You became “{mn}”."))
-                album_add(content, state, "rel_up",
-                          _t(content, f"成为{mn}", f"Becoming {mn}"),
-                          _last_line_of(said_this_turn, sp_name)
-                          or _t(content, f"你和{sp_name}成了「{mn}」。",
-                                f"You and {sp_name} became “{mn}”."), sp)
-                yield emit({"type": "description", "speaker_name": None,
-                            "text": _t(content,
-                                       f"💗（你感觉到，和{sp_name}的关系又近了一层。现在你们是"
-                                       f"「{mn}」了。）",
-                                       f"💗 (You can feel it — something between you and {sp_name} "
-                                       f"has shifted closer. You are now “{mn}”.)")})
-                # 📮 crossing into 恋人 earns a LETTER: some things TA can only write down
-                if mode_after == "lover" and phone_enabled(content):
-                    lm = compose_letter(content, state, sp, "love_letter",
-                                        "你们刚刚捅破了那层窗户纸，成了恋人。把当面说不出口的"
-                                        "那些话，写成一封信给TA", llm)
-                    yield ("phone", {"char_id": sp_id, "name": sp_name,
-                                     "avatar_url": sp.get("avatar_url"), "mail": True,
-                                     "msgs": [lm["subject"]], "device": phone_device(content)})
-                    moments.append({"kind": "mail", "name": sp_name,
-                                    "device": phone_device(content)})
-        if directed.get("advance_act"):
-            advance = True
-        if is_primary:
-            model_ending = directed.get("ending")  # only the addressed scene can end the run
-            if sandbox_on(content):
-                mk = (model_ending or {}).get("kind") if isinstance(model_ending, dict) \
-                    else (model_ending or "")
-                if "death" in str(mk) and not (directed.get("player_harm") or "").strip():
-                    directed["player_harm"] = "重伤"
-                model_ending = None  # 🏖 the sandbox has no exits
-            # a character may ASK to lead the player elsewhere — captured here, surfaced as a
-            # confirm prompt (never auto-applied; the player relocates via /move on a yes).
-            primary_invite = directed.get("move_invite")
-            primary_name_for_invite = sp_name
-            time_skip = (directed.get("time_skip") or "").strip()
-            # 🤝 the speaker set a future appointment with the player (恋与深空-style
-            # proactive 邀约 at romance tiers) — record it, announce it, hang it in the bar
-            pm = directed.get("promise")
-            if pm and not observer:
-                made = make_promise(content, state, sp, pm, tun)
-                if made:
-                    loc_nm = (_location_by_id(content, made.get("location_id")) or {}).get("name") or "老地方"
-                    when = promise_when_label(content, made, state)
-                    moments.append({"kind": "promise", "status": "made",
-                                    "name": sp_name, "what": made["what"], "when": when,
-                                    "romantic": bool(made.get("romantic"))})
-                    yield emit({"type": "description", "speaker_name": None,
-                                "text": _t(content,
-                                           f"（约定立下了：{when}，{loc_nm}见，{made['what']}。）",
-                                           f"(It's a promise: {when}, at {loc_nm} — "
-                                           f"{made['what']}.)")})
-            emo = (directed.get("player_emotion") or "").strip()
-            if emo:
-                state["player_emotion"] = emo       # carry the emotional read into next turn
-            # RECONCILE ask/event judgment (root fix for keyword-stuffing). When the model
-            # supplies a judgment it becomes the truth: a provisional keyword ask it rejects
-            # is rolled back (unless it already unlocked something — unlocks stay sticky),
-            # and a genuine probe the keywords missed is counted (its reveal lands next
-            # turn, same one-turn lag as affinity reveals). No judgment (mock/prose
-            # fallback) → the keyword result stands, so tests stay deterministic.
-            judged = directed.get("probed")
-            if judged is not None:
-                judged_ids = _match_candidates(probe_cands, judged, "title")
-                for sid in provisional_asks:
-                    if sid not in judged_ids and asks.get(sid, 0) > 0 \
-                            and not _secret_has_newly(content, sid, newly):
-                        asks[sid] -= 1
-                for sid in judged_ids:
-                    if sid not in provisional_asks:
-                        asks[sid] = asks.get(sid, 0) + 1
-                state["asks"] = asks
-            occurred = directed.get("occurred")
-            if occurred is not None:
-                ev_ids = _match_candidates(event_cands, occurred, "label")
-                trig = set(state.get("triggered_event_ids") or [])
-                trig -= (provisional_events - ev_ids)  # roll back denied keyword guesses
-                trig |= ev_ids
-                state["triggered_event_ids"] = sorted(trig)
-            # ⚠️ pressure: apply the judged delta, announce level crossings, remember a blowout
-            if pcfg and directed.get("pressure_delta") is not None:
-                p_old = int(state.get("pressure", 0))
-                p_new = max(0, min(100, p_old + int(directed.get("pressure_delta") or 0)))
-                state["pressure"] = p_new
-                for lv in sorted(pcfg.get("levels") or [], key=lambda x: int(x.get("at", 0))):
-                    at = int(lv.get("at", 0))
-                    if p_old < at <= p_new and (lv.get("note") or "").strip():
-                        yield emit({"type": "description", "speaker_name": None,
-                                    "text": f"（{lv['note']}）"})
-                        moments.append({"kind": "pressure", "note": lv["note"], "value": p_new})
-                if p_new >= 100:
-                    pressure_blown = True
-            # 💀 THE PLAYER'S OWN BODY (sandbox): judged wounds on the same two-stage
-            # ladder as everyone else — a killing blow on the healthy leaves them 濒死,
-            # never instantly dead. Death is not an ending here: the world keeps
-            # running; the dead lose 说 and 做, and can only watch.
-            ph_ref = (directed.get("player_harm") or "").strip()
-            if ph_ref and sandbox_on(content) and not observer \
-                    and (state.get("player_hp") or "healthy") != "dead":
-                cur_php = state.get("player_hp") or "healthy"
-                if any(w in ph_ref for w in ("好转", "救", "包扎", "缓")):
-                    nxt_php = {"dying": "hurt", "hurt": "healthy"}.get(cur_php)
-                    if nxt_php:
-                        state["player_hp"] = nxt_php
-                        moments.append({"kind": "player_hp", "hp": nxt_php})
-                        yield emit({"type": "description", "speaker_name": None,
-                                    "text": "（你缓过来一些了。还疼，但死神松了手。）"
-                                            if nxt_php == "hurt"
-                                            else "（伤势稳住了。你重新站稳了脚。）"})
-                else:
-                    heavy = any(w in ph_ref for w in ("重", "濒", "毙", "致命", "死"))
-                    nxt_php = ("dead" if cur_php == "dying" and heavy else
-                               "dying" if (cur_php in ("hurt", "dying") or heavy) else "hurt")
-                    if nxt_php != cur_php:
-                        state["player_hp"] = nxt_php
-                        moments.append({"kind": "player_hp", "hp": nxt_php})
-                        yield emit({"type": "description", "speaker_name": None, "text": {
-                            "hurt": "（你挂了彩。不致命，但每动一下，伤口都在提醒你。）",
-                            "dying": "（你眼前发黑，力气一丝丝往外漏。再没有人管你，你就交代在这了。）",
-                            "dead": "（世界没有停下来。只是你再也发不出声音，再也碰不到任何东西。"
-                                    "从这一刻起，你成了看客。）"}[nxt_php]})
-            # 🩸 HARM: judged wounds move ONE step on the graded ladder (轻伤/重伤/好转)
-            harm_ref = (directed.get("harmed") or "").strip()
-            if harm_ref:
-                hname, _, hlevel = harm_ref.partition("|")
-                hvictim = next((c for c in scene_characters(content, state)
-                                if c.get("id") != pcid and (c.get("name") or "")
-                                and (c["name"] in hname or hname.strip() in c["name"])), None)
-                if not hvictim:
-                    _audit(state, "harm", False, hname.strip(), "伤的人不在这个场景里")
-                if hvictim and hvictim.get("id") not in _dead_ids(state):
-                    hid, cur_hp = hvictim["id"], char_hp(state, hvictim.get("id"))
-                    hl = hlevel.strip()
-                    if "好转" in hl or "包扎" in hl or "救" in hl:
-                        nxt = {"dying": "hurt", "hurt": None}.get(cur_hp, None)
-                        if cur_hp in ("dying", "hurt"):
-                            set_char_hp(state, hid, nxt)
-                            moments.append({"kind": "recover", "name": hvictim.get("name")})
-                            rel_log(state, hid, old_act, "hurt",
-                                    f"{hvictim.get('name')} 的伤势缓过来了。")
-                    else:
-                        nxt = "dying" if ("重" in hl or "濒" in hl or cur_hp == "hurt") else "hurt"
-                        if nxt != cur_hp:
-                            set_char_hp(state, hid, nxt)
-                            if nxt == "dying" and state.get("location_id"):
-                                _sim(state, hid)["pos"] = state["location_id"]
-                            moments.append({"kind": nxt, "name": hvictim.get("name")})
-                            rel_log(state, hid, old_act, "hurt",
-                                    f"{hvictim.get('name')} {'重伤濒死' if nxt == 'dying' else '受了伤'}。")
-            # ☠️ DEATH is TWO-STAGE: only the already-dying can die. A killing blow on a
-            # healthy body books them as 濒死 instead — there is always a window to save.
-            died_ref = (directed.get("died") or "").strip()
-            if died_ref:
-                victim = next((c for c in scene_characters(content, state)
-                               if c.get("id") != pcid and (c.get("name") or "")
-                               and ((c["name"] == died_ref) or (c["name"] in died_ref)
-                                    or (died_ref in c["name"]))), None)
-                if not victim:
-                    _audit(state, "death", False, died_ref, "死的人不在场，改判无效")
-                if victim and char_hp(state, victim.get("id")) != "dying":
-                    _audit(state, "death", False, victim.get("name", ""),
-                           "两段式规则：健康之身先判濒死，给施救留窗口")
-                    set_char_hp(state, victim["id"], "dying")
-                    if state.get("location_id"):
-                        _sim(state, victim["id"])["pos"] = state["location_id"]
-                    moments.append({"kind": "dying", "name": victim.get("name")})
-                    rel_log(state, victim.get("id"), old_act, "hurt",
-                            f"{victim.get('name')} 重伤濒死。")
-                    yield emit({"type": "description", "speaker_name": None,
-                                "text": f"（{victim.get('name')}还吊着一口气，气若游丝。"
-                                        "现在施救，或许还来得及。）"})
-                elif victim:
-                    deads = _dead_ids(state)
-                    deads.add(victim["id"])
-                    state["dead_character_ids"] = sorted(deads)
-                    state["following"] = [f for f in (state.get("following") or [])
-                                          if f != victim["id"]]
-                    dead_names.append(victim.get("name"))
-                    moments.append({"kind": "death", "name": victim.get("name")})
-                    rel_log(state, victim.get("id"), old_act, "death",
-                            f"{victim.get('name')} 死了。")
-                    for _vp in void_promises_of(state, victim["id"]):
-                        yield emit({"type": "description", "speaker_name": None,
-                                    "text": f"（你们约好的（{_vp.get('what','')}），"
-                                            "再也没有人来赴了。）"})
-            # 🚶 booked NPC moves: the model narrated someone setting off — validate and
-            # BOOK it (the turn-end roster diff narrates the departure + destination)
-            for mv in (directed.get("npc_moves") or [])[:2]:
-                if isinstance(mv, dict):
-                    booked = apply_char_move(content, state, mv.get("who", ""), mv.get("to", ""))
-                    if booked:
-                        _audit(state, "npc_move", True, f"{booked.get('name')}→{booked.get('to_name')}")
-                    else:
-                        _audit(state, "npc_move", False,
-                               f"{mv.get('who', '')}→{mv.get('to', '')}",
-                               "不在场/被作息钉住/目的地不存在")
-            # 👋 EMERGENT CHARACTER: the story brought in a brand-new face — make them real
-            nc_raw = (directed.get("new_char") or "").strip()
-            if nc_raw and gen_count >= tun["max_new_characters"]:
-                _audit(state, "new_char", False, nc_raw[:20], "本局涌现人数已到上限")
-            if nc_raw and gen_count < tun["max_new_characters"]:
-                import re as _re
-                import uuid as _uuid
-                parts = _re.split(r"[｜|：:，,]", nc_raw, maxsplit=1)
-                nc_name = parts[0].strip().strip("「」\"'")[:12]
-                nc_desc = (parts[1].strip() if len(parts) > 1 else "")[:120]
-                exists = any((c.get("name") or "") == nc_name for c in _characters(content))
-                if nc_name and exists:
-                    _audit(state, "new_char", False, nc_name, "已有同名角色，不重复登场")
-                if nc_name and not exists:
-                    nc_id = f"gen_{_uuid.uuid4().hex[:8]}"
-                    emergent_ids.add(nc_id)
-                    (content.get("story") or {}).setdefault("characters", []).append({
-                        "id": nc_id,
-                        "name": nc_name,
-                        "role": nc_desc[:24] or "新登场的人物",
-                        "persona_text": nc_desc,
-                        "relation_default": "stranger",
-                        "home_location_id": state.get("location_id"),
-                        "generated": True,
-                    })
-                    content_mutated = True
-                    gen_count += 1
-                    moments.append({"kind": "arrival", "name": nc_name})
-            # 🕸 NPC↔NPC shifts: the scene moved two characters closer/apart (≤2 a turn,
-            # both must be living and present, never the player — engine-enforced)
-            for sh in (directed.get("npc_shifts") or [])[:2]:
-                applied_sh = apply_npc_shift(content, state, sh.get("a"), sh.get("b"),
-                                             sh.get("delta"), sh.get("why", ""), old_act)
-                if applied_sh:
-                    moments.append({"kind": "npc_rel", **applied_sh})
-            # 🎖 IDENTITY: the player's role/standing changed for real
-            idt = (directed.get("identity") or "").strip()
-            if idt and not observer and idt != (state.get("identity") or ""):
-                state["identity"] = idt
-                log = list(state.get("identity_log") or [])
-                log.append({"act": old_act, "text": idt})
-                state["identity_log"] = log
-                moments.append({"kind": "identity", "text": idt})
-            # 🛠 CRAFT: the player made something with their own materials — every
-            # material must be in the pocket; a failed fate roll voids the attempt
-            cr = (directed.get("crafted") or "").strip()
-            if cr and dice and dice.get("outcome") in ("fail", "crit_fail"):
-                _audit(state, "item.crafted", False, cr.partition("|")[0], "命运判定失败，制作作废")
-            if cr and not observer \
-                    and not (dice and dice.get("outcome") in ("fail", "crit_fail")):
-                cr_name, _, cr_mats = cr.partition("|")
-                mats = [m.strip() for m in _re_split_mats(cr_mats) if m.strip()]
-                inv = state.get("inventory") or []
-                if cr_name.strip() and mats and all(_inv_find(inv, m) >= 0 for m in mats):
-                    used = [(_inv_remove(state, m) or {}).get("name") for m in mats]
-                    _inv_add(state, cr_name.strip(), "用" + "、".join(u for u in used if u) + "做的")
-                    moments.append({"kind": "item", "verb": "crafted", "name": cr_name.strip()})
-                else:
-                    _audit(state, "item.crafted", False, cr_name.strip(),
-                           "材料不在身上（或未报材料），引擎不凭空造物")
-            # ✊ SNATCH: the player took something off a character BY FORCE — only a
-            # successful fate roll (or an unresisted grab) makes it stick; the victim
-            # remembers, the relationship pays, the story's pressure feels the noise
-            tk = (directed.get("taken") or "").strip()
-            if tk and dice and dice.get("outcome") in ("fail", "crit_fail"):
-                _audit(state, "item.taken", False, tk.partition("|")[0], "命运判定失败，没抢到")
-            if tk and not observer \
-                    and not (dice and dice.get("outcome") in ("fail", "crit_fail")):
-                tk_item, _, tk_who = tk.partition("|")
-                victim_t = next((c for c in scene_characters(content, state)
-                                 if c.get("id") != pcid and c.get("name")
-                                 and (c["name"] in tk_who or tk_who.strip() in c["name"])), None)
-                if not victim_t:
-                    _audit(state, "item.taken", False, tk_item.strip(), "被抢的人不在场")
-                if victim_t:
-                    their = char_items(content, state, victim_t["id"])
-                    ti = _inv_find(their, tk_item.strip())
-                    if ti < 0:
-                        _audit(state, "item.taken", False, tk_item.strip(),
-                               f"{victim_t.get('name')}身上没有这件东西")
-                    if ti >= 0:
-                        it = their.pop(ti)
-                        _inv_add(state, it.get("name", ""), it.get("detail", ""))
-                        vid = victim_t["id"]
-                        old_s = rel_all.get(vid) or relationships.new_scores()
-                        rel_all[vid] = relationships.apply_deltas(old_s, -8, 0, tun)
-                        rel_log(state, vid, old_act, "hurt",
-                                f"你从TA手里抢走了{it.get('name')}。TA记住了。")
-                        moments.append({"kind": "item", "verb": "taken",
-                                        "name": it.get("name"), "from": victim_t.get("name")})
-                        if pcfg:
-                            state["pressure"] = min(99, int(state.get("pressure", 0)) + 8)
-            # 🔁 TRADE: a struck bargain — both sides must actually hold their ends
-            tr = (directed.get("trade") or "").strip()
-            if tr and not observer and sp_id:
-                parts = tr.split("|")
-                if len(parts) >= 2:
-                    give_n, get_n = parts[0].strip(), parts[1].strip()
-                    their = char_items(content, state, sp_id)
-                    gi = _inv_find(state.get("inventory") or [], give_n)
-                    ti = _inv_find(their, get_n)
-                    if gi < 0 or ti < 0:
-                        _audit(state, "item.traded", False, f"{give_n}↔{get_n}",
-                               "你没有这件筹码" if gi < 0 else "对方拿不出那件东西")
-                    if gi >= 0 and ti >= 0:
-                        mine = _inv_remove(state, give_n)
-                        theirs = their.pop(ti)
-                        their.append(mine)
-                        _inv_add(state, theirs.get("name", ""), theirs.get("detail", ""))
-                        old_s = rel_all.get(sp_id) or relationships.new_scores()
-                        rel_all[sp_id] = relationships.apply_deltas(old_s, 2, 0, tun)
-                        rel_log(state, sp_id, old_act, "gift",
-                                f"你用{mine.get('name')}换了TA的{theirs.get('name')}。")
-                        moments.append({"kind": "item", "verb": "traded",
-                                        "name": theirs.get("name"), "gave": mine.get("name")})
-            # 🎁 GIFT: the player handed the speaker something of theirs — the receiver
-            # decided (in character) whether to take it and how it landed; kept gifts
-            # become keepsakes they carry and remember
-            g_raw = (directed.get("gift") or "").strip()
-            if g_raw and not observer and sp_id:
-                g_item, _, g_rest = g_raw.partition("|")
-                g_taken = "拒" not in g_rest
-                g_liked = "喜" in g_rest
-                if _inv_find(state.get("inventory") or [], g_item.strip()) < 0:
-                    _audit(state, "gift", False, g_item.strip(), "你身上没有这件东西，送不出去")
-                if _inv_find(state.get("inventory") or [], g_item.strip()) >= 0:
-                    if g_taken:
-                        it = _inv_remove(state, g_item.strip())
-                        ks = _sim(state, sp_id).setdefault("keepsakes", [])
-                        ks.append({"name": it.get("name"), "at": _time_index(state)})
-                        del ks[:-8]
-                        old_g = rel_all.get(sp_id) or relationships.new_scores()
-                        g_mode = relationships.derive_mode(sp, old_g, tun)
-                        rel_all[sp_id] = relationships.apply_deltas(
-                            old_g, 4 if g_liked else 1,
-                            (2 if g_mode in ("flirt", "lover") else 0) if g_liked else 0, tun)
-                        rel_log(state, sp_id, old_act, "gift",
-                                f"你把{it.get('name')}送给了TA{'，TA很喜欢' if g_liked else ''}。")
-                        moments.append({"kind": "gift", "name": sp_name,
-                                        "item": it.get("name"), "liked": g_liked})
-                    else:
-                        rel_log(state, sp_id, old_act, "gift",
-                                f"你想把{g_item.strip()}送给TA，被TA推回来了。")
-            # 💰 MONEY: judged payments/earnings hit a HARD ledger — spending clamps
-            # at the balance, every booking is logged with its reason and hour
-            md = (directed.get("money_delta") or "").strip()
-            if md and not observer and economy_on(state):
-                amt_s, _, m_why = md.partition("|")
-                applied = book_money(content, state, _to_int(amt_s, -9999, 9999), m_why)
-                if not applied:
-                    _audit(state, "money", False, md, "没有入账（余额不足或金额无效）")
-                if applied:
-                    moments.append({"kind": "money", "delta": applied,
-                                    "why": (m_why or "").strip()[:30],
-                                    "balance": state["money"]})
-            # 📋 QUEST accepted: a paid errand agreed to in dialogue, booked with a
-            # REAL deadline (real-time sandbox: N days literally means N days)
-            qa = (directed.get("quest_accepted") or "").strip()
-            if qa and not observer:
-                q_parts = qa.split("|")
-                q_title = q_parts[0].strip()[:30]
-                q_reward = _to_int(q_parts[1], 0, 9999) if len(q_parts) > 1 else 0
-                q_days = _to_int(q_parts[2], 0, 30) if len(q_parts) > 2 else 0
-                open_qs = [q for q in (state.get("quests") or []) if q.get("status") == "open"]
-                if q_title and len(open_qs) < 4 and \
-                        all(logic._norm(q.get("title", "")) != logic._norm(q_title) for q in open_qs):
-                    import uuid as _uuid_q
-                    day_now_q = int((state.get("clock") or {}).get("day", 1) or 1)
-                    quests = list(state.get("quests") or [])
-                    quests.append({"id": f"q_{_uuid_q.uuid4().hex[:6]}", "title": q_title,
-                                   "reward": q_reward, "giver": sp_name, "status": "open",
-                                   "deadline_day": (day_now_q + q_days) if q_days else None})
-                    state["quests"] = quests[-8:]
-                    moments.append({"kind": "quest", "status": "open", "title": q_title,
-                                    "reward": q_reward, "days": q_days})
-                    yield emit({"type": "description", "speaker_name": None,
-                                "text": f"（你应下了这桩事：{q_title}。"
-                                        + (f"讲好的酬劳是{q_reward}{currency_of(content)}。"
-                                           if q_reward else "")
-                                        + (f"限{q_days}天之内。" if q_days else "") + "）"})
-            # 📋 QUEST delivered: the errand is done for real — the reward pays out
-            qd = (directed.get("quest_done") or "").strip()
-            if qd and not observer:
-                for q in (state.get("quests") or []):
-                    if q.get("status") == "open" and (
-                            logic._norm(q.get("title", "")) in logic._norm(qd)
-                            or logic._norm(qd) in logic._norm(q.get("title", ""))):
-                        q["status"] = "done"
-                        q_pay = book_money(content, state, int(q.get("reward") or 0),
-                                           q.get("title", "")) if q.get("reward") else 0
-                        moments.append({"kind": "quest", "status": "done",
-                                        "title": q.get("title"), "reward": q_pay})
-                        if q_pay:
-                            moments.append({"kind": "money", "delta": q_pay,
-                                            "why": q.get("title", ""),
-                                            "balance": state["money"]})
-                        yield emit({"type": "description", "speaker_name": None,
-                                    "text": f"（{q.get('title')}，办成了。"
-                                            + (f"{q_pay}{currency_of(content)}的酬劳落进了口袋。"
-                                               if q_pay else "") + "）"})
-                        break
-            # 🌍 场面事实账本: a judged PERSISTENT physical change to this place gets
-            # booked and served back forever (the smashed door stays smashed) — the
-            # world's memory is engine-owned, not vibes
-            wf = (directed.get("world_fact") or "").strip()[:60]
-            if wf and not observer and state.get("location_id"):
-                pf = dict(state.get("place_facts") or {})
-                lst = list(pf.get(state["location_id"]) or [])
-                if all(logic._norm(x.get("text", "")) != logic._norm(wf) for x in lst):
-                    lst.append({"text": wf,
-                                "label": (clock_view(content, state) or {}).get("label", "")})
-                    pf[state["location_id"]] = lst[-6:]
-                    state["place_facts"] = pf
-                    moments.append({"kind": "world", "text": wf})
-            # 🎒 ITEMS: gained / lost / stashed at the current place
-            if not observer:
-                g = (directed.get("gained") or "").strip()
-                if g:
-                    if _inv_add(state, g):
-                        moments.append({"kind": "item", "verb": "gained", "name": g})
-                    else:
-                        _audit(state, "item.gained", False, g, "已在身上，不重复入包")
-                l = (directed.get("lost") or "").strip()
-                if l:
-                    it = _inv_remove(state, l)
-                    if it:
-                        moments.append({"kind": "item", "verb": "lost", "name": it.get("name")})
-                    else:
-                        _audit(state, "item.lost", False, l, "身上没有这件东西，不能凭空失去")
-                st_ref = (directed.get("stashed") or "").strip()
-                if st_ref and state.get("location_id"):   # never remove without a shelf
-                    it = _inv_remove(state, st_ref)
-                    if not it:
-                        _audit(state, "item.stashed", False, st_ref, "身上没有这件东西")
-                    if it:
-                        stashes = dict(state.get("stashes") or {})
-                        stashes.setdefault(state["location_id"], []).append(it)
-                        state["stashes"] = stashes
-                        moments.append({"kind": "item", "verb": "stashed", "name": it.get("name")})
-            # WHO ELSE speaks this turn: the primary judged who'd naturally chime in
-            # (varies 0~2 by context/personality — not everyone, not a fixed order);
-            # characters named by the player or whose secret was probed always get to
-            # speak. Extending the list mid-iteration is safe (list iterator is indexed).
-            if broadcast and member_pool:
-                picked = directed.get("next_speakers")
-                if picked is None:
-                    chosen = list(member_pool)  # no judgment (mock/prose) → legacy: everyone
-                else:
-                    chosen = []
-                    for nm in picked:
-                        nm = str(nm).strip()
-                        for c in member_pool:
-                            cn = c.get("name") or ""
-                            if nm and cn and (cn == nm or cn in nm or nm in cn) and c not in chosen:
-                                chosen.append(c)
-                    for c in member_pool:  # deterministic must-speaks
-                        if c in chosen:
-                            continue
+        yield from _settle_directed(content, state, tun, sp, sp_id, sp_name,
+                                    is_primary, directed, observer, pcid, old_act,
+                                    dice, pcfg, newly, asks, provisional_asks,
+                                    provisional_events, probe_cands, event_cands,
+                                    moments, rel_deltas, rel_all, rel_active,
+                                    said_this_turn, dead_names, emergent_ids,
+                                    emit, llm, flags)
+        # WHO ELSE speaks this turn: the primary judged who'd naturally chime in
+        # (varies 0~2 by context/personality — not everyone, not a fixed order);
+        # characters named by the player or whose secret was probed always get to
+        # speak. Extending the list mid-iteration is safe (list iterator is indexed).
+        if is_primary and broadcast and member_pool:
+            picked = directed.get("next_speakers")
+            if picked is None:
+                chosen = list(member_pool)  # no judgment (mock/prose) → legacy: everyone
+            else:
+                chosen = []
+                for nm in picked:
+                    nm = str(nm).strip()
+                    for c in member_pool:
                         cn = c.get("name") or ""
-                        if (cn and cn in (player_input or "")) or c.get("id") in probed_char_ids:
+                        if nm and cn and (cn == nm or cn in nm or nm in cn) and c not in chosen:
                             chosen.append(c)
-                    chosen = chosen[:3]
-                responders.extend(chosen)
+                for c in member_pool:  # deterministic must-speaks
+                    if c in chosen:
+                        continue
+                    cn = c.get("name") or ""
+                    if (cn and cn in (player_input or "")) or c.get("id") in probed_char_ids:
+                        chosen.append(c)
+                chosen = chosen[:3]
+            responders.extend(chosen)
 
+    # the flag sheet unpacks back into turn locals for the phases below
+    affinity_delta = flags["affinity_delta"]
+    advance = flags["advance"]
+    model_ending = flags["model_ending"]
+    primary_invite = flags["primary_invite"]
+    primary_name_for_invite = flags["primary_name_for_invite"]
+    time_skip = flags["time_skip"]
+    pressure_blown = flags["pressure_blown"]
+    content_mutated = flags["content_mutated"]
+    gen_count = flags["gen_count"]
+
+    # ━━━━━━━━━━ 管线 P8 · 场后结算（相册/金色瞬间/观察/世界自转/幕推进） ━━━━━━━━━━
     # 🤝 a kept promise is a scene worth keeping: the date goes into the album with the
     # character's own best line from it as the caption.
     if promise_kept:
@@ -5208,6 +5278,7 @@ def run_turn_stream(
         for b in build_act_transition(content, state, old_act, new_act, persona, llm):
             yield emit(b)
 
+    # ━━━━━━━━━━ 管线 P9 · 世界翻页（新去处/时段/进出场/手机/结局/final） ━━━━━━━━━━
     # 5b. announce any places that JUST became reachable this turn (so a new exit never just
     #     silently shows up — the player is told they've learned of a new place to go).
     locs_after = [l for l in _locations(content) if location_available(content, state, l)]
