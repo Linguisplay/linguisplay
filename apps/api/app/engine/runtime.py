@@ -2156,7 +2156,8 @@ def choice_for_act(content: dict[str, Any], state: dict[str, Any], act: int) -> 
 # booked in the ledger, a move actually relocates, and the chosen direction becomes a
 # depth-0 mandate the director must drive toward for the next several turns.
 
-def fate_generate(content: dict[str, Any], state: dict[str, Any], llm) -> dict[str, Any] | None:
+def fate_generate(content: dict[str, Any], state: dict[str, Any], llm,
+                  observer: bool = False) -> dict[str, Any] | None:
     """Draft + VALIDATE one fate choice. Model proposes; engine verifies every target
     (kill → a present living non-player character; move → a known place, or any named
     place in a sandbox) and downgrades anything unverifiable to a story-direction option.
@@ -2165,6 +2166,7 @@ def fate_generate(content: dict[str, Any], state: dict[str, Any], llm) -> dict[s
     loc = current_location(content, state) or {}
     out = llm.generate({
         "fate_choice": True,
+        "observer": observer,   # 👁 god mode → options phrased as decrees of fate
         "cast": [c.get("name") for c in here if c.get("name")],
         "place": loc.get("name", ""),
         "exits": [str(e) for e in (loc.get("exits") or [])],
@@ -5847,15 +5849,16 @@ def run_turn_stream(
             llm, all_beats, player_input, primary, content, state, location, needed_topics, observer
         ) or build_suggestions(sugg_context, content)
 
-    # ⚖️ 命运抉择: every N player turns (tuning key_choice_every, 0=off) the story throws
-    # a high-authority fork generated from the LIVE scene. Options are engine-verified and
+    # ⚖️ 命运抉择: every N turns (tuning key_choice_every, 0=off) the story throws a
+    # high-authority fork generated from the LIVE scene. Options are engine-verified and
     # typed — the pick will be ENFORCED (death booked / relocation applied / direction
-    # mandated at depth-0), not merely narrated.
-    if not observer and not (fired and fired.get("terminal")) and not state.get("ended"):
+    # mandated at depth-0), not merely narrated. God mode gets them too: there the player
+    # IS the hand of fate, and the options read as decrees.
+    if not (fired and fired.get("terminal")) and not state.get("ended"):
         state["fate_turns"] = int(state.get("fate_turns") or 0) + 1
         _every = int(tun.get("key_choice_every") or 0)
         if _every and not state.get("pending_choice") and state["fate_turns"] >= _every:
-            _fc = fate_generate(content, state, llm)
+            _fc = fate_generate(content, state, llm, observer=observer)
             if _fc:
                 state["pending_choice"] = _fc
                 state["fate_turns"] = 0

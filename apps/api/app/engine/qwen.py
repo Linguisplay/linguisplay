@@ -2133,10 +2133,14 @@ class QwenLLM:
         goal = (prompt.get("goal") or "").strip()
         recent = (prompt.get("recent") or "").strip() or "（无）"
         en = (prompt.get("language") or "zh") == "en"
+        god = bool(prompt.get("observer"))
+        label_style = ("上帝视角的一道天命决断(≤20字，如「让某人死于今晚」「命他们即刻动身」)"
+                       if god else "玩家第一人称的一句话或一个决断(≤20字)")
         sys = (
             "你为一个互动剧情游戏设计一次【命运抉择】：此刻剧情里悬而未决、分量最重的那个岔路口。"
-            '只输出一个JSON对象：{"prompt":"摆在玩家面前的抉择(≤40字，紧贴眼下正在发生的事)",'
-            '"options":[{"label":"选项(玩家第一人称的一句话或一个决断,≤20字)",'
+            + ("玩家是俯瞰这一切的无形命运，抉择是TA拨动世界的手。" if god else "")
+            + '只输出一个JSON对象：{"prompt":"摆在玩家面前的抉择(≤40字，紧贴眼下正在发生的事)",'
+            f'"options":[{{"label":"选项({label_style})",'
             '"kind":"story|kill|move","target":"kill填在场角色名/move填地点名/story留空",'
             '"mandate":"选它之后剧情必须坚定走向的方向(≤30字)"}]}。'
             "要求：2~3个选项，方向必须彼此相斥（不是同一件事的三种语气）；"
