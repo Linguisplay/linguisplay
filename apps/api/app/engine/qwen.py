@@ -2309,11 +2309,20 @@ class QwenLLM:
         place = prompt.get("place") or ""
         topics = [t for t in (prompt.get("topics") or []) if t]
         tline = f"可以点到「{topics[0]}」这个话头（只许提名字，绝不许透露内容），" if topics else ""
-        sys = ("你在为一个互动剧情游戏写【玩家暂时离开】时的收尾旁白。写1~2句第三人称旁白，"
-               "留一个让人惦记的钩子：在场的某人欲言又止、一个反常的细节此刻才被注意到、"
+        wf = (prompt.get("world") or "").strip().replace(chr(10), " ")[:140]
+        stl = (prompt.get("style") or "").strip().split("。", 1)[0][:40]
+        sys = ("你在为一个互动剧情游戏写【玩家暂时离开】时的收尾旁白。写1~2句旁白，"
+               "用第二人称：「你」永远只指玩家本人；在场其他人一律称名字，绝不要用无名的"
+               "「有人」「他」去指代任何人，尤其不能指玩家。留一个让人惦记的钩子："
+               "在场的某个具名者欲言又止、一个反常的细节此刻才被注意到、"
                f"或一句没说完的话。{tline}要具体可感，不要总结、不要抒情空话、不要预告。"
-               "只输出旁白本身。" + _STYLE_PUNCT + _lang_rule(prompt))
-        u = f"地点：{place or '（未知）'}\n在场的人：{cast}\n玩家此刻起身离开。写那1~2句收尾旁白。"
+               "所有物件与细节必须属于这个世界观，绝不能出现不属于它的现代物品。"
+               + (f"【世界观】{wf}" if wf else "")
+               + (f"【文风】{stl}。" if stl else "")
+               + "只输出旁白本身。" + _STYLE_PUNCT + _lang_rule(prompt))
+        u = (f"地点：{place or '（未知）'}" + chr(10)
+             + f"在场的人：{cast}" + chr(10)
+             + "玩家此刻起身离开。写那1~2句收尾旁白。")
         try:
             resp = _post_chat(self._url, self._key,
                               {"model": self._model, "messages": [{"role": "system", "content": sys},
@@ -2324,7 +2333,8 @@ class QwenLLM:
             txt = ""
         if not txt:
             hint = f"关于「{topics[0]}」的话" if topics else "有句话"
-            txt = f"（你起身离开。身后有人欲言又止——{hint}，似乎还没说完。）"
+            who = (prompt.get("cast") or ["有人"])[0]
+            txt = f"（你起身离开。身后{who}欲言又止，{hint}似乎还没说完。）"
         return {"beats": [{"type": "description", "speaker_name": None, "text": txt}],
                 "affinity_delta": 0, "advance_act": False, "ending": None}
 

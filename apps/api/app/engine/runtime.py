@@ -4142,7 +4142,8 @@ def build_parting_hook(content: dict[str, Any], state: dict[str, Any],
         hint_en = f"something about “{topics[0]}”" if topics else "something"
         beats = [{"type": "description", "speaker_name": None,
                   "text": _t(content,
-                             f"（你起身离开。身后有人欲言又止，{hint}似乎还没说完。）",
+                             f"（你起身离开。身后{(here[0] if here else '有人')}欲言又止，"
+                             f"{hint}似乎还没说完。）",
                              f"(You rise to leave. Behind you, someone hesitates, "
                              f"{hint_en} left unsaid.)")}]
     beats = beats[:1]
