@@ -49,8 +49,9 @@ def test_generate_validates_and_types_options():
     assert eff["f1"] == {"kind": "kill", "target": "c1", "mandate": "血债血偿的路"}
     assert eff["f2"]["kind"] == "move" and eff["f2"]["target"] == "study"
     assert eff["f3"]["kind"] == "story" and eff["f3"]["target"] == ""  # downgraded
-    # player-facing shape carries NO effects
-    assert all(set(o) == {"id", "label"} for o in fc["options"])
+    # player-facing shape carries NO effects (id + label + omen hint only)
+    assert all(set(o) == {"id", "label", "omen"} for o in fc["options"])
+    assert fc["expires"] == 3
 
 
 def test_generate_move_unknown_place():

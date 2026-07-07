@@ -265,6 +265,16 @@ def _build_system(prompt: dict[str, Any]) -> str:
             lines.append("【就在刚刚这一轮，你开口之前，现场已经发生了（按顺序）】：\n" + convo + "\n"
                          "接住上面某个具体的人刚说的话往下走，只给出你自己的新反应/新主张/新信息。")
 
+    _flog = prompt.get("fate_log") or []
+    if _flog:
+        # 📜 resolved fates are unappealable history — characters may bring them up
+        lines.append("")
+        lines.append(
+            "【命运的既定轨迹】（玩家在关键抉择中亲手选下的、不可翻案的过去；"
+            "你可以自然地提起、埋怨、感激或忌惮它们，但绝不能当作没发生）："
+            + chr(10) + chr(10).join(
+                f"- 第{x.get('day', '?')}日：{x.get('label', '')}（{x.get('outcome', '')}）"
+                for x in _flog))
     _wstyle = (prompt.get("style") or "").strip()
     if _wstyle:
         # ✍️ 文风: the source work's voice outranks any house style — 斗罗 reads 网文,
@@ -2204,8 +2214,14 @@ class QwenLLM:
             + ("玩家是俯瞰这一切的无形命运，抉择是TA拨动世界的手。" if god else "")
             + '只输出一个JSON对象：{"prompt":"摆在玩家面前的抉择(≤40字，紧贴眼下正在发生的事)",'
             f'"options":[{{"label":"选项({label_style})",'
-            '"kind":"story|kill|move","target":"kill填在场角色名/move填地点名/story留空",'
+            '"kind":"story|kill|move|bond|rift|identity|fortune|timeskip",'
+            '"target":"kill/bond/rift填在场角色名；move填地点名；identity填新身份(≤10字)；'
+            'fortune填「横财」或「破财」；timeskip填「次日」或「三日后」；story留空",'
+            '"omen":"≤8字的代价预兆，只暗示不剧透（如：此路见血/有去无回/代价不菲）",'
             '"mandate":"选它之后剧情必须坚定走向的方向(≤30字)"}]}。'
+            "kind 释义：kill=角色就此死去；bond=与此人关系骤然绑深；rift=与此人恩断义绝；"
+            "identity=玩家身份就此改变；fortune=财运剧变；timeskip=时间直接跳过；"
+            "story=纯剧情走向。按剧情自然选用，不要硬凑类型。"
             "要求：2~3个选项，方向必须彼此相斥（不是同一件事的三种语气）；"
             "至少一个选项要有真实代价；kind=kill 只在剧情确实走到生死关头时才用，"
             "target 只能原样抄写在场角色名；kind=move 的 target 优先用已知通路里的地点名；"

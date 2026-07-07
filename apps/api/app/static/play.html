@@ -66,6 +66,10 @@
   #choiceask .opts { display: flex; flex-direction: column; gap: 6px; }
   #choiceask button { text-align: left; font-size: 13px; border-radius: 9px; padding: 8px 12px; cursor: pointer; background: #2c2340; border: 1px solid #4a3a66; color: #e8ddf8; }
   #choiceask button:hover { background: #3a2d54; }
+  #choiceask.fate { background: #1a1024ee; border-color: #7a4fd0; box-shadow: 0 0 24px #7a4fd066, inset 0 0 40px #00000066; }
+  #choiceask.fate .q { color: #e0c8ff; font-size: 15px; }
+  #choiceask .omen { display: block; font-size: 11px; color: #b48ee0; opacity: .8; margin-top: 2px; }
+  #choiceask .fatecount { margin-top: 7px; font-size: 11.5px; color: #d0a8ff; opacity: .85; }
   #placebar { flex: 0 0 auto; margin: 6px 16px 0; padding: 7px 12px; border-radius: 10px; background: #18221bcc; border: 1px solid #2c4233; color: #cfe6d4; font-size: 12.5px; line-height: 1.5; }
   #placebar b { color: #8fe0a6; }
   #placebar .exits { color: #8aa092; }
@@ -931,20 +935,35 @@ async function acceptMove(req) {
 }
 // 关键节点抉择 (VN choice): an authored decision card. Picking applies its effects
 // server-side, then the label is sent as the player's own line so the cast reacts to it.
+let lastFateKey = null;
 function renderChoiceAsk(ch) {
   const el = document.getElementById("choiceask");
-  if (!ch || ended) { el.classList.add("hidden"); el.innerHTML = ""; return; }
+  if (!ch || ended) { el.classList.add("hidden"); el.innerHTML = ""; el.classList.remove("fate"); return; }
   el.innerHTML = "";
+  const isFate = ch.kind === "fate";
+  el.classList.toggle("fate", isFate);
   const q = document.createElement("div"); q.className = "q";
-  q.textContent = `⚖️ ${ch.prompt}`;
+  q.textContent = (isFate ? "⚡ " : "⚖️ ") + ch.prompt;
   const wrap = document.createElement("div"); wrap.className = "opts";
   for (const o of (ch.options || [])) {
     const b = document.createElement("button");
     b.textContent = o.label;
+    if (o.omen) { const om = document.createElement("span"); om.className = "omen"; om.textContent = "☠ " + o.omen; b.appendChild(om); }
     b.onclick = () => pickChoice(o.id);
     wrap.appendChild(b);
   }
-  el.append(q, wrap); el.classList.remove("hidden");
+  el.append(q, wrap);
+  if (isFate && typeof ch.expires === "number") {
+    const cd = document.createElement("div"); cd.className = "fatecount";
+    cd.textContent = B(`⏳ 命运只等你 ${ch.expires} 回合，逾期它将替你选择`, `⏳ Fate waits ${ch.expires} more turn(s), then chooses for you`);
+    el.appendChild(cd);
+  }
+  el.classList.remove("hidden");
+  if (isFate && ch.key !== lastFateKey) {   // the knock: once per fork
+    lastFateKey = ch.key;
+    playSfx("thunder");
+    swapBgm("tense");
+  }
 }
 async function pickChoice(optionId) {
   if (!runId || ended) return;

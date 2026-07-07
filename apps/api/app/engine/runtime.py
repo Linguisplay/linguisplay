@@ -2204,23 +2204,34 @@ def fate_generate(content: dict[str, Any], state: dict[str, Any], llm,
         kind = str((o or {}).get("kind") or "story").strip()
         target: Any = str((o or {}).get("target") or "").strip()
         mandate = str((o or {}).get("mandate") or "").strip()[:40]
-        if kind == "kill":
+        omen = str((o or {}).get("omen") or "").strip()[:10]
+        if kind in ("kill", "bond", "rift"):
             victim = next((c for c in here if c.get("name") == target
                            and c.get("id") not in dead and c.get("id") != pcid), None)
             if victim:
                 target = victim["id"]
             else:
-                kind, target = "story", ""      # unverifiable death → direction only
+                kind, target = "story", ""      # unverifiable person → direction only
         elif kind == "move":
             dest = resolve_location(content, target)
             if dest and dest.get("id"):
                 target = dest["id"]
             elif not (sandbox_on(content) and len(str(target)) >= 2):
                 kind, target = "story", ""      # closed map / no name → direction only
+        elif kind == "identity":
+            target = str(target)[:12]
+            if not target:
+                kind = "story"
+        elif kind == "fortune":
+            if target not in ("横财", "破财") or not economy_on(state):
+                kind, target = "story", ""
+        elif kind == "timeskip":
+            if target not in ("次日", "三日后") or real_time_on(content):
+                kind, target = "story", ""      # real-time worlds cannot skip the clock
         else:
             kind, target = "story", ""
         oid = f"f{i + 1}"
-        opts.append({"id": oid, "label": label})
+        opts.append({"id": oid, "label": label, "omen": omen})
         effects[oid] = {"kind": kind, "target": target, "mandate": mandate or label}
     if not prompt_txt or len(opts) < 2:
         return None
@@ -2228,7 +2239,8 @@ def fate_generate(content: dict[str, Any], state: dict[str, Any], llm,
     state["fate_seq"] = n
     state["fate_effects"] = effects
     return {"key": f"fate{n}", "kind": "fate", "act": int(state.get("act", 1) or 1),
-            "prompt": prompt_txt[:60], "options": opts}
+            "prompt": prompt_txt[:60], "options": opts,
+            "expires": 3}   # ⏳ 3 turns to decide, then fate decides for you
 
 
 def _apply_fate(content: dict[str, Any], state: dict[str, Any], option_id: str) -> dict[str, Any]:
@@ -2265,10 +2277,44 @@ def _apply_fate(content: dict[str, Any], state: dict[str, Any], option_id: str) 
             res["moved_to"] = (dest or {}).get("name", "")
         except Exception:
             _audit(state, "fate.move", False, str(target), "生成失败")
+    if kind in ("bond", "rift") and target:
+        tun = tuning_for(content)
+        rel_all = state.setdefault("rel", {})
+        cd, rd = (8, 6) if kind == "bond" else (-9, -7)
+        rel_all[target] = relationships.apply_deltas(
+            rel_all.get(target) or relationships.new_scores(), cd, rd, tun)
+        nm = _char_name(content, target) or "TA"
+        rel_log(state, target, int(state.get("act", 1) or 1),
+                "fate", f"命运抉择：与{nm}{'关系骤然贴近' if kind == 'bond' else '恩断义绝'}。")
+        _audit(state, f"fate.{kind}", True, nm)
+        res[kind] = nm
+    elif kind == "identity" and target:
+        state["identity"] = str(target)
+        _audit(state, "fate.identity", True, target)
+        res["identity"] = target
+    elif kind == "fortune" and target:
+        bal = int(state.get("money") or 0)
+        delta = max(200, bal) if target == "横财" else -int(bal * 0.8)
+        applied = book_money(content, state, delta, f"命运抉择·{target}")
+        _audit(state, "fate.fortune", True, f"{target}{applied:+d}")
+        res["fortune"] = applied
+    elif kind == "timeskip" and target:
+        clk = dict(state.get("clock") or {})
+        clk.setdefault("day", 1); clk.setdefault("slot", 0); clk["turns_in_slot"] = 0
+        clk["day"] = int(clk["day"]) + (1 if target == "次日" else 3)
+        state["clock"] = clk
+        _audit(state, "fate.timeskip", True, target)
+        res["timeskip"] = target
     md = (eff.get("mandate") or "").strip()
     if md:
         state["mandate"] = {"text": md, "left": 8}   # rides depth-0 for ~8 turns
         _audit(state, "fate.mandate", True, md)
+    # 📜 命运账本: every resolved fate is permanent record — NPCs can hold it against you
+    outcome = (res.get("killed") and f"{res['killed']}死了") or               (res.get("moved_to") and f"迁往{res['moved_to']}") or               (res.get("bond") and f"与{res['bond']}贴近") or               (res.get("rift") and f"与{res['rift']}决裂") or               (res.get("identity") and f"成为{res['identity']}") or               (res.get("fortune") is not None and eff.get("target")) or               (res.get("timeskip") and f"时间跳到{res['timeskip']}") or "既定方向"
+    log = list(state.get("fate_log") or [])
+    log.append({"day": int((state.get("clock") or {}).get("day", 1) or 1),
+                "label": res["label"][:24], "outcome": str(outcome)[:20]})
+    state["fate_log"] = log[-12:]
     answered = dict(state.get("choices") or {})
     answered[pending.get("key") or "fate"] = option_id
     state["choices"] = answered
@@ -4839,6 +4885,25 @@ def run_turn_stream(
     # ━━━━━━━━━━ 管线 P2 · 确定性孪生（移动/找人/搜证/收纳/取回/受赠） ━━━━━━━━━━
     state["last_audit"] = []   # 📋 fresh audit sheet each turn
 
+    # ⏳ 命运不等人: a pending fate loses one grace turn per player turn; at zero the
+    # engine resolves it ITSELF (random pick) — the fork cannot be shelved forever.
+    _pc0 = state.get("pending_choice")
+    if isinstance(_pc0, dict) and _pc0.get("kind") == "fate" and (state.get("mode") or "character") != "god":
+        _pc0["expires"] = int(_pc0.get("expires", 3)) - 1
+        if _pc0["expires"] <= 0:
+            _opt = random.choice(_pc0.get("options") or [{}])
+            try:
+                _fres = _apply_fate(content, state, _opt.get("id"))
+                _audit(state, "fate.forced", True, _fres.get("label", ""))
+                yield ("beat", dedash_beat({
+                    "type": "description", "speaker_name": None,
+                    "text": _t(content,
+                               f"（你迟迟未决。命运替你落了子：{_fres.get('label', '')}）",
+                               f"(You hesitated too long. Fate moved for you: "
+                               f"{_fres.get('label', '')})")}))
+            except ValueError:
+                state["pending_choice"] = None
+
     # 1b. 🚶 说走就走 FIRST: a clear "I go to X" moves the player NOW, so every twin below
     #     and the whole prompt (place anchor, roster, responders) already lives at X.
     moved = None if (state.get("mode") or "character") == "god" else \
@@ -5264,6 +5329,7 @@ def run_turn_stream(
             "memory": sp_mem,   # THIS character's private rolling digest
             "world_facts": (content.get("story") or {}).get("world_facts") or "",
             "style": (content.get("story") or {}).get("style") or "",  # ✍️ 文风
+            "fate_log": list(state.get("fate_log") or [])[-3:],  # 📜 命运的既定轨迹
             "roster": _physical_roster(content, state, persona),  # deterministic headcount
             "place": place,                       # concrete current-location anchor (if authored)
             "intent_digest": intent_digest,       # 🧩 engine-verified referents of the line
@@ -5949,11 +6015,16 @@ def run_turn_stream(
         _lo = int(tun.get("key_choice_min") or 0)
         _hi = max(_lo, int(tun.get("key_choice_max") or 0))
         if _lo and not state.get("pending_choice"):
-            # the fork fires at a RANDOM point inside [min, max] — rolled once per
-            # window, so the player can never clock when fate will knock
+            # the fork ARMS at a random point inside [min, max]; once armed it waits for
+            # a HIGH-TENSION turn (dice rolled / a moment landed / a truth unlocked /
+            # intimate scene / pressure blown) so fate knocks at a dramatic beat, not
+            # over breakfast. If no tension shows for 6 more turns, it fires anyway.
             if not state.get("fate_next"):
                 state["fate_next"] = random.randint(_lo, _hi)
-            if state["fate_turns"] >= int(state["fate_next"]):
+            armed = state["fate_turns"] >= int(state["fate_next"])
+            tension = bool(dice) or bool(moments) or bool(newly)                 or heat_mod.stage(state) >= 1 or bool(flags.get("pressure_blown"))
+            overdue = state["fate_turns"] >= int(state["fate_next"]) + 6
+            if armed and (tension or overdue):
                 _fc = fate_generate(content, state, llm, observer=observer)
                 if _fc:
                     state["pending_choice"] = _fc
