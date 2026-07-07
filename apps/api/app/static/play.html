@@ -736,7 +736,7 @@ async function enterRun(run) {
 }
 // 悬念离场: tell the server we're leaving so it appends ONE cliffhanger beat — the
 // unfinished hook is the last thing we see when we come back.
-function sendLeave() { if (runId) { try { navigator.sendBeacon(`/runs/${runId}/leave`); } catch (e) {} } }
+function sendLeave() { if (runId) { try { navigator.sendBeacon(`${API}/runs/${runId}/leave`); } catch (e) {} } }
 window.addEventListener("pagehide", sendLeave);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") sendLeave(); });
 

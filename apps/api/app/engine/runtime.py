@@ -1421,8 +1421,14 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
     player_char = _char_by_id(content, pcid) if (mode == "character" and pcid) else None
     present = [c.get("name") for c in present_characters(content, 1)
               if c.get("name") and c.get("id") != pcid]
-    # pin the starting place so the player has a concrete spatial anchor from turn 1
-    start = current_location(content, state)
+    # pin the starting place so the player has a concrete spatial anchor from turn 1.
+    # 🏖 sandbox + embodied character: open on THEIR home turf (playing 萧炎 starts at
+    # the tower, not the plaza) — a different character IS a different opening. Authored
+    # stories keep their staged opening place (act-1 events live there).
+    start = None
+    if sandbox_on(content) and player_char:
+        start = _location_by_id(content, player_char.get("home_location_id"))
+    start = start or current_location(content, state)
     if start and start.get("id"):
         state["location_id"] = start["id"]
     # ⏳ the story opens at ITS hour, not at a default 晨 (夜戏 opens at night)

@@ -974,8 +974,14 @@ def _build_intro_system(prompt: dict[str, Any]) -> str:
         lines += [
             "",
             f"玩家将扮演「{name}」（身份：{role}；{persona_text}；{background}）。",
-            f"请写 6~10 句开场，用第二人称「你」称呼玩家：先用一两句让玩家清楚自己是谁（{name}，{role}），"
-            "再具体交代此刻身处何地、什么时间、周围有谁、正在发生什么——细节要足够，玩家才能在脑中拼出画面。",
+            f"【立场重写·最重要】上面的世界观与开场事件介绍，多半是站在默认主角立场写的；"
+            f"你必须把整个开场改写成「{name}」自己的视角：同一件事在TA眼里意味着什么、"
+            f"TA此刻的处境与心事、TA与在场每个人真实的关系与温度，全部以「{name}」为圆心重新落笔。"
+            "扮演不同的角色，看到的必须是不同的开场。",
+            f"请写 6~10 句开场，用第二人称「你」称呼玩家：先用一两句让玩家清楚自己是谁"
+            f"（{name}，{role}，并从TA的小传里带出一两句TA走到今天的来路），"
+            "再具体交代此刻身处何地、什么时间、周围有谁、正在发生什么。细节要足够，"
+            "玩家才能在脑中拼出画面。",
         ]
     else:
         lines += [
@@ -984,7 +990,14 @@ def _build_intro_system(prompt: dict[str, Any]) -> str:
             "正在发生什么，细节要足够让玩家在脑中拼出画面。",
         ]
 
-    if goal:
+    pcw = (pc.get("wants") or "").strip() if pc else ""
+    if pcw:
+        # the embodied character has their OWN authored agenda: the first step belongs
+        # to THEM, not to the default protagonist's template goal
+        lines.append(f"最后，用单独一句话、自然地点出「{(pc or {}).get('name', '你')}」此刻真正"
+                     f"挂心的事：『{pcw}』。这就是玩家开局的第一个方向"
+                     + (f"（剧本的阶段目标『{goal}』若与TA立场相关，可以顺带一笔带过）。" if goal else "。"))
+    elif goal:
         lines.append(f"最后，用单独一句话、自然地点出玩家此刻的第一个小目标：『{goal}』。")
     else:
         lines.append("最后，用一句话给玩家一个此刻可以着手去做的小方向。")
