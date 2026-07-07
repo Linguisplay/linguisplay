@@ -383,3 +383,14 @@ def test_arrival_pan_seeds_the_ledger():
     txt = runtime.arrival_narration(MAP, st, {"name": "我"}, llm=ArriveLLM())
     assert "灯影" in txt
     assert st["char_sim"]["c1"]["pos"] == {"text": "站在吊灯下擦拭烛台", "at": "hall"}
+
+
+def test_suggestions_always_three():
+    # smart partial + weak template → padded to exactly 3, de-duped
+    out = runtime.ensure_three_suggestions(["只有一条"], [], MAP)
+    assert len(out) == 3 and out[0] == "只有一条"
+    out2 = runtime.ensure_three_suggestions([], ["A", "A", "B"], MAP)
+    assert len(out2) == 3 and out2[:2] == ["A", "B"]
+    # already three smart → untouched order, still three
+    out3 = runtime.ensure_three_suggestions(["一", "二", "三"], ["模板"], MAP)
+    assert out3 == ["一", "二", "三"]

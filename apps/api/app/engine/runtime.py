@@ -1859,6 +1859,27 @@ def _smart_suggestions(llm, all_beats, player_input, primary, content, state, lo
         return []
 
 
+def ensure_three_suggestions(primary: list[str], backup: list[str],
+                             content: dict[str, Any]) -> list[str]:
+    """The chip row must ALWAYS hold exactly 3: smart hints first, template hints next,
+    player-voice generic pads last. De-duped, trimmed, never fewer."""
+    en = lang_of(content) == "en"
+    pads = (["I take a careful look around.",
+             "I steer the talk toward what I care about.",
+             "I get up and move somewhere else."] if en else
+            ["我环顾四周，看有什么值得留意的", "我把话题引向我最关心的事", "我起身，去别处走走"])
+    out: list[str] = []
+    seen: set[str] = set()
+    for x in list(primary or []) + list(backup or []) + pads:
+        x = (x or "").strip()
+        if x and x not in seen:
+            seen.add(x)
+            out.append(x)
+        if len(out) == 3:
+            break
+    return out
+
+
 def build_suggestions(context: dict[str, Any], content: dict[str, Any] | None = None) -> list[str]:
     """Nudge the player toward what's close to unlocking, without spoiling content.
 
@@ -6001,9 +6022,10 @@ def run_turn_stream(
     # happened + the current situation; fall back to the deterministic template if it can't.
     suggestions = []
     if not (fired and fired.get("terminal")):
-        suggestions = _smart_suggestions(
-            llm, all_beats, player_input, primary, content, state, location, needed_topics, observer
-        ) or build_suggestions(sugg_context, content)
+        suggestions = ensure_three_suggestions(
+            _smart_suggestions(llm, all_beats, player_input, primary, content, state,
+                               location, needed_topics, observer),
+            build_suggestions(sugg_context, content), content)
 
     # ⚖️ 命运抉择: every N turns (tuning key_choice_every, 0=off) the story throws a
     # high-authority fork generated from the LIVE scene. Options are engine-verified and

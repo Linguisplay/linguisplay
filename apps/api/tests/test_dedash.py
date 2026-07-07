@@ -47,4 +47,6 @@ def test_dedash_guards_the_turn_pipeline():
     assert "灯闪了一下，熄了。" in texts
     assert "你，你怎么进来的，说！" in texts
     assert all("——" not in t for t in texts)
-    assert out["suggestions"] == ["去问问他，那件事"]
+    # dedashed chip leads; the row is ALWAYS topped up to exactly 3
+    assert out["suggestions"][0] == "去问问他，那件事"
+    assert len(out["suggestions"]) == 3
