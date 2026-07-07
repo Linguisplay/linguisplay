@@ -252,6 +252,8 @@ def main() -> None:
             synopsis=SYNOPSIS,
             world_long=WORLD_LONG,
             world_facts=WORLD_FACTS,
+            style=(
+                "玄幻爽文流，扮猪吃虎与打脸节奏的爽文腔。气势渲染要足（一股无形威压铺开，全场骤然一静），等级压制写出实感；主角被轻视时先蓄势，再一鸣惊人，打脸那一下要脆。斗气、丹药、异火术语自然挂嘴边；长者高深莫测，少年锋芒暗藏。关键处用短句砸。忌温吞拖沓，忌文艺腔冲淡爽感。"),
             relations_overview="萧炎他们各有各的路要走；你是新来的，关系全靠自己处。",
             trope_tags=["斗破苍穹", "同人致敬", "玄幻", "修炼", "炼药", "沙盒", "现实同步"],
             characters=CHARACTERS,

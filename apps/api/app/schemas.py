@@ -281,6 +281,7 @@ class StoryInput(BaseModel):
     world_long: Optional[str] = None
     relations_overview: Optional[str] = None
     world_facts: Optional[str] = None
+    style: Optional[str] = None  # ✍️ 文风: source work's narrative voice
     trope_tags: Optional[list[str]] = None
     mature: Optional[bool] = None
     visibility: Optional[Literal["private", "public"]] = None
@@ -306,6 +307,7 @@ class Story(BaseModel):
     world_long: Optional[str] = None
     relations_overview: Optional[str] = None
     world_facts: Optional[str] = None
+    style: str = ""  # ✍️ 文风
     trope_tags: list[str] = []
     mature: bool = False
     visibility: str = "private"

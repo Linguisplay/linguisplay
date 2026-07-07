@@ -263,6 +263,8 @@ def main() -> None:
             synopsis=SYNOPSIS,
             world_long=WORLD_LONG,
             world_facts=WORLD_FACTS,
+            style=(
+                "哥特暗黑史诗腔，庄重压抑带宗教仪式感的战锤 grimdark 腔。旁白像风琴与祷文：机油、熏香、锈与血的意象层层压下来；帝国语汇成体系（帝皇保佑、异端、净化、机魂），人物开口带着阶级与信仰的烙印。残酷不煽情，死亡写得冷，偶尔一丝黑色幽默从缝里漏出来更冷。宏大与卑微并置：万年帝国之下，一个人的命薄如祷纸。忌轻快，忌现代网络语，忌热血少年腔。"),
             relations_overview="蜂巢里每个人都有自己要还的债、要藏的秘密；你是新来的，关系全靠自己处。",
             trope_tags=["战锤40K", "Warhammer40K", "同人致敬", "哥特未来", "蜂巢城市", "沙盒", "现实同步"],
             characters=CHARACTERS,

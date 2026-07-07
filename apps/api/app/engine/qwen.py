@@ -137,6 +137,12 @@ def _depth_anchor(prompt: dict[str, Any]) -> str:
                         if en else
                         "成人模式已开启：亲密处正面、直白、具体地写，不淡化、不跳切、不打哑谜；"
                         "一轮写透当下这一步。")
+    _sty = (prompt.get("style") or "").strip()
+    if _sty:
+        # one-line style tag at depth-0 (the full block lives in the system prompt but
+        # doesn't survive long histories — the tag re-arms it each turn)
+        first = _sty.split("。", 1)[0][:40]
+        bits.append(("[Voice: " + first + "]") if en else ("文风不换台：" + first + "。"))
     md = (prompt.get("mandate") or "").strip()
     if md:
         # ⚖️ a fate pick is LAW for the coming turns — restated at depth-0 every turn
@@ -259,6 +265,13 @@ def _build_system(prompt: dict[str, Any]) -> str:
             lines.append("【就在刚刚这一轮，你开口之前，现场已经发生了（按顺序）】：\n" + convo + "\n"
                          "接住上面某个具体的人刚说的话往下走，只给出你自己的新反应/新主张/新信息。")
 
+    _wstyle = (prompt.get("style") or "").strip()
+    if _wstyle:
+        # ✍️ 文风: the source work's voice outranks any house style — 斗罗 reads 网文,
+        # 40K reads grimdark gothic. Restated here AND tagged at depth-0.
+        lines.append("")
+        lines.append("【文风·必须贴住】这个故事有自己的叙事声音，旁白与叙述必须写成这个腔调"
+                     "（它的优先级高于任何通用文风习惯）：\n" + _wstyle)
     facts = (prompt.get("world_facts") or "").strip()
     roster = (prompt.get("roster") or "").strip()
     if facts or roster:
@@ -888,6 +901,9 @@ def _build_observe_system(prompt: dict[str, Any]) -> str:
         lines.append("【无尽沙盒】这个世界没有终点，不要收束剧情，不要总结抒情。")
     if world:
         lines.append(f"【世界观/场景设定】{world}")
+    _st = (prompt.get("style") or "").strip()
+    if _st:
+        lines.append("【文风·必须贴住】这个故事的叙事声音（优先级高于任何通用文风习惯）：" + _st)
     facts = (prompt.get("world_facts") or "").strip()
     roster = (prompt.get("roster") or "").strip()
     if facts or roster:
@@ -962,6 +978,9 @@ def _build_intro_system(prompt: dict[str, Any]) -> str:
     ]
     if world:
         lines.append(f"【世界观/场景设定】{world}")
+    _st = (prompt.get("style") or "").strip()
+    if _st:
+        lines.append("【文风·必须贴住】这个故事的叙事声音（优先级高于任何通用文风习惯）：" + _st)
     place = (prompt.get("place") or "").strip()
     if place:
         lines.append("【开场所在·空间锚点】（开场就把玩家放在这个具体地点，照它的真实陈设来写，"
@@ -1045,6 +1064,9 @@ def _build_transition_system(prompt: dict[str, Any]) -> str:
     ]
     if world:
         lines.append(f"【世界观/场景设定】{world}")
+    _st = (prompt.get("style") or "").strip()
+    if _st:
+        lines.append("【文风·必须贴住】这个故事的叙事声音（优先级高于任何通用文风习惯）：" + _st)
     place = (prompt.get("place") or "").strip()
     if place:
         lines.append("【当前所在·空间锚点】（照这个具体地点的真实陈设来写）：\n" + place)

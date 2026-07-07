@@ -111,6 +111,10 @@ class Story(Base):
     # Hard physical canon injected into EVERY prompt (spatial layout, props, fixed
     # headcounts/invariants). Spoiler-safe: only observable facts, never locked secrets.
     world_facts: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ✍️ 文风: the SOURCE WORK's narrative voice (author + fandom register) — sentence
+    # rhythm, vocabulary, trope conventions. Injected into every generation so 斗罗大陆
+    # reads like 网文 and Warhammer 40K reads like grimdark gothic, not one house style.
+    style: Mapped[str | None] = mapped_column(Text, nullable=True)
     trope_tags: Mapped[list] = mapped_column(JSON, default=list)
 
     # M1: characters/acts stored as JSON; promote to tables if M2 needs them queryable.

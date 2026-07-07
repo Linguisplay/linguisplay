@@ -1479,6 +1479,7 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
         "mode": mode,
         "player_char": player_char,
         "world": (content.get("story") or {}).get("world_long", "") or "",
+        "style": (content.get("story") or {}).get("style") or "",  # ✍️ 文风
         "act": act1,
         "goal": act1.get("goal", ""),
         "cast": present,
@@ -1560,6 +1561,7 @@ def build_act_transition(content: dict[str, Any], state: dict[str, Any], old_act
         "mode": mode,
         "player_char": player_char,
         "world": (content.get("story") or {}).get("world_long", "") or "",
+        "style": (content.get("story") or {}).get("style") or "",  # ✍️ 文风
         "act": act,
         "prev_title": prev.get("title", ""),
         "goal": act.get("goal", ""),
@@ -4041,6 +4043,7 @@ def _confront_gen(content, state, persona, secret, frag, next_locked, target, ll
         "history": sp_hist,
         "memory": (state.get("memory_by_char", {}) or {}).get(char_id) or state.get("memory", ""),
         "world_facts": (content.get("story") or {}).get("world_facts") or "",
+        "style": (content.get("story") or {}).get("style") or "",  # ✍️ 文风
         "roster": _physical_roster(content, state, persona),
         "place": _physical_place(content, state),
         "eq_style": target.get("eq_style", ""),
@@ -5187,6 +5190,7 @@ def run_turn_stream(
             "history": sp_hist,
             "memory": sp_mem,   # THIS character's private rolling digest
             "world_facts": (content.get("story") or {}).get("world_facts") or "",
+            "style": (content.get("story") or {}).get("style") or "",  # ✍️ 文风
             "roster": _physical_roster(content, state, persona),  # deterministic headcount
             "place": place,                       # concrete current-location anchor (if authored)
             "intent_digest": intent_digest,       # 🧩 engine-verified referents of the line
@@ -5452,6 +5456,7 @@ def run_turn_stream(
             "scene": current_act(content, old_act),
             "world": (content.get("story") or {}).get("world_long", "") or "",
             "world_facts": (content.get("story") or {}).get("world_facts") or "",
+            "style": (content.get("story") or {}).get("style") or "",  # ✍️ 文风
             "roster": _physical_roster(content, state, persona),
             "place": place,
             "knowledge": (observe_target or {}).get("knowledge", "") if observe_target else "",

@@ -241,6 +241,8 @@ def main() -> None:
             synopsis=SYNOPSIS,
             world_long=WORLD_LONG,
             world_facts=WORLD_FACTS,
+            style=(
+                "都市魔法热血流，现代口语加吐槽感的都市异能腔。角色说话像今天的年轻人（有梗、损友互怼），旁白利落带点幽默；一进战斗立刻收紧：星图、元素、魔兽的压迫感写得又快又狠，生死关头不开玩笑。城市烟火气与魔法并置是底色（奶茶店隔壁就是猎者工会）。忌古风腔，忌翻译腔，忌一本正经到底。"),
             relations_overview="莫凡他们各有各的日子要过；你是新来的，关系全靠自己处。",
             trope_tags=["全职法师", "同人致敬", "魔法都市", "校园", "猎者", "沙盒", "现实同步"],
             characters=CHARACTERS,
