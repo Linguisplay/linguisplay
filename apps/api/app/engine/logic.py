@@ -97,7 +97,13 @@ def lint_story(content: dict[str, Any]) -> list[Issue]:
     if not acts:
         err("no_acts", "story", "剧本没有任何幕（acts），无法进行。")
     if not chars:
-        err("no_chars", "story", "剧本没有任何角色。")
+        # 🏖 a pure sandbox conjures its cast from the player's worldview at run start —
+        # an empty authored cast is the designed path there, not a structural hole
+        sb = (content.get("story") or {}).get("sandbox")
+        if isinstance(sb, dict) and sb.get("enabled"):
+            warn("no_chars", "story", "沙盒无 authored 角色：开局将从世界观召唤卡司（设计如此）。")
+        else:
+            err("no_chars", "story", "剧本没有任何角色。")
     if chars and not any(c.get("playable") for c in chars):
         warn("no_playable", "characters",
              "没有任何角色标记 playable —— 引擎会回退到「任选在场角色」，可能让玩家扮演会破坏剧情的角色。")
