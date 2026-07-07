@@ -5013,6 +5013,11 @@ def run_turn_stream(
     _apply_event_triggers(content, state, player_input)
     provisional_events = set(state.get("triggered_event_ids") or []) - _ev_before
 
+    # ▶ 观剧拍: the player just watches this beat — the DIRECTOR drives the plot forward.
+    drive = channel == "drive"
+    if drive:
+        channel, player_input = "say", ""
+
     # ━━━━━━━━━━ 管线 P2 · 确定性孪生（移动/找人/搜证/收纳/取回/受赠） ━━━━━━━━━━
     state["last_audit"] = []   # 📋 fresh audit sheet each turn
 
@@ -5476,6 +5481,7 @@ def run_turn_stream(
             "knowledge": sp.get("knowledge", ""),  # 智能增强: this character's background lore
             "mature": bool(state.get("mature")),   # 18+ run → adult content permitted
             "observer": observer,                  # 👁 god mode: no second-person player
+            "drive": drive,                        # ▶ 观剧拍: director advances, player watches
             "track_note": track_note,              # 🎥 ledger-wins correction (one turn)
             "heat_anchor": heat_anchor,            # 🔥 床戏阶段表 (depth-0, replaces the generic line)
             "mandate": ((state.get("mandate") or {}).get("text") or ""

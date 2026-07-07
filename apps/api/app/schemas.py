@@ -491,7 +491,7 @@ class Beat(BaseModel):
 
 class PlayIn(BaseModel):
     input: str
-    channel: Literal["say", "think", "do"] = "say"
+    channel: Literal["say", "think", "do", "drive"] = "say"  # drive = ▶ 看下去 (director advances)
     target_character_id: Optional[str] = None  # who the player is addressing (optional)
 
 

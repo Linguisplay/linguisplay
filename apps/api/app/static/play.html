@@ -414,6 +414,7 @@
         <option value="think">看/想</option>
       </select>
       <input id="msg" placeholder="说点什么…" onkeydown="if(event.key==='Enter')send()" />
+      <button id="driveBtn" class="ghost hidden" title="剧情自动向前走一拍，你只旁观" onclick="driveTurn()">▶</button>
       <button id="sendBtn" onclick="send()">发送</button>
     </footer>
   </div>
@@ -746,6 +747,11 @@ async function enterRun(run) {
   runId = run.id;
   hide("role");
   try { if (!localStorage.getItem("lp_tut_v1")) openTutorial(); } catch (e) {}
+  try {
+    const st0 = await j(`/stories/${run.story_id}`);
+    document.getElementById("driveBtn").classList.toggle(
+      "hidden", !(st0.sandbox && st0.sandbox.enabled) || playMode === "god");
+  } catch (e) {}
   hide("pick"); show("play"); show("backBtn"); show("soundBtn"); show("journalBtn"); show("mapBtn"); show("phoneBtn");
   resetEnded();
   chat.innerHTML = ""; suggest.innerHTML = ""; state.innerHTML = "";
@@ -1856,10 +1862,16 @@ function toggleSound() {
 function stopBgm(){ try { bgm.pause(); bgm.removeAttribute("src"); curBgmMood=null; } catch(e){} }
 
 // ── send turn (SSE) ───────────────────────────────────
+async function driveTurn() {
+  if (!runId || ended) return;
+  const prev = channel.value, prevMsg = msg.value;
+  channel.value = "drive"; msg.value = "";
+  try { await send(); } finally { channel.value = prev; msg.value = prevMsg; }
+}
 async function send() {
   const text = msg.value.trim();
   if (!runId || ended) return;
-  const canEmpty = playMode === "god" || channel.value === "think";  // observe/watch can be empty
+  const canEmpty = playMode === "god" || channel.value === "think" || channel.value === "drive";
   if (!text && !canEmpty) return;
   msg.value = ""; sendBtn.disabled = true; suggest.innerHTML = "";
   if (text) {

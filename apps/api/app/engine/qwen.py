@@ -371,6 +371,10 @@ def _build_system(prompt: dict[str, Any]) -> str:
                      "追问、警告、透露一句风声，或者干脆自己动手做自己的事让玩家撞见。"
                      "玩家的输入越短、越被动（嗯/哦/随便看看），你越要主动给出一个TA能立刻抓住的具体选择，"
                      "而不是原地寒暄等TA想词。")
+    if prompt.get("drive"):
+        lines.append("【导演推进拍】这一拍没有玩家输入：由你把剧情实际向前推进一件具体的事，"
+                     "让在场角色按各自的目标与心思主动行动（冲突升级/秘密露头/新变故/有人做出决定），"
+                     "绝不要原地渲染气氛或重复现状；结尾自然留一个玩家接得上的口。")
     powers = [str(p) for p in (prompt.get("player_powers") or []) if str(p).strip()]
     if powers:
         lines.append("【玩家的金手指·此世界的更高法则】" + "；".join(powers) + "。\n"
@@ -2441,6 +2445,10 @@ class QwenLLM:
         else:
             cue = ("（开场）" if intro else "（进入新的一幕）" if transition else
                    "（观察四周）" if not prompt.get("observe_target") else "（打量这个人）")
+        if prompt.get("drive") and not player_input:
+            cue = ("(The player just watches this beat. You are the director: move the "
+                   "story FORWARD one concrete step.)" if en else
+                   "（这一拍玩家没有说话也没有行动，只是看着。你是导演：让剧情主动向前走一步。）")
         user_content = player_input or cue
         if is_observer and player_input:
             user_content = offstage.format(player_input)
