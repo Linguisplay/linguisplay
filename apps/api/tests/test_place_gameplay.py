@@ -283,3 +283,17 @@ def test_emergent_destination_offer_sandbox_only():
     assert runtime.player_move_emergent(MAP, st, "去后台", channel="do") is None
     # a character name is a seek, not a place
     assert runtime.player_move_emergent(SANDBOX_MAP, st, "去找Mara", channel="do") is None
+
+
+def test_goal_recentered_on_embodied_character():
+    st = {**runtime.default_state(), "act": 1}
+    # generic player → the act's authored goal
+    base = runtime.goal_for(SANDBOX_MAP, st)
+    assert base == runtime.current_goal(SANDBOX_MAP, 1)
+    # embodying a character WITH wants → THEIR agenda
+    SANDBOX_MAP["story"]["characters"][0]["wants"] = "找到失踪的妹妹"
+    st["player_character_id"] = "c1"
+    assert runtime.goal_for(SANDBOX_MAP, st) == "找到失踪的妹妹"
+    # a character without wants falls back to the act goal
+    SANDBOX_MAP["story"]["characters"][0].pop("wants")
+    assert runtime.goal_for(SANDBOX_MAP, st) == base

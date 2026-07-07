@@ -149,7 +149,7 @@ def _to_run(r: RunModel) -> Run:
             ending=st.get("ending"),
             mode=mode,
             player_character_id=pcid,
-            goal=st.get("goal", "") or runtime.current_goal(r.pinned_content or {}, int(st.get("act", 1))),
+            goal=st.get("goal", "") or runtime.goal_for(r.pinned_content or {}, st),
             progress=runtime.act_progress(r.pinned_content or {}, st, int(st.get("act", 1))),
             location=runtime.location_view(r.pinned_content or {}, st),
             relations=runtime.relations_summary(r.pinned_content or {}, st),
@@ -295,7 +295,7 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
 
     state = {**runtime.default_state(), "scene": runtime.opening_scene(content),
              "mode": body.mode, "player_character_id": pcid}
-    state["goal"] = runtime.current_goal(content, 1)
+    state["goal"] = runtime.goal_for(content, state, 1)
     if runtime.sandbox_on(content) and (body.worldview or "").strip():
         state["worldview"] = body.worldview.strip()[:2000]
     # 💰 the sandbox runs a real cash ledger: start with the authored pocket money

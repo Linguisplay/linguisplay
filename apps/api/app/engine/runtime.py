@@ -1311,6 +1311,18 @@ def current_goal(content: dict[str, Any], act_index: int) -> str:
     return (a or {}).get("goal", "") if a else ""
 
 
+def goal_for(content: dict[str, Any], state: dict[str, Any],
+             act_index: int | None = None) -> str:
+    """The goal re-centered on WHO the player is. Embodying an authored character with
+    their own `wants` shows THEIR agenda (陈妈's goal is not 林晚's; 扮演谁，立场和目标
+    就是谁的); everyone else gets the act's authored objective."""
+    pc = _char_by_id(content, state.get("player_character_id"))
+    if pc and (pc.get("wants") or "").strip():
+        return str(pc["wants"]).strip()
+    return current_goal(content, act_index if act_index is not None
+                        else int(state.get("act", 1) or 1))
+
+
 def _frag_title_map(content: dict[str, Any]) -> dict[str, str]:
     """fragment_id → its secret's title (a sanitized topic label, never the body)."""
     out: dict[str, str] = {}
@@ -3840,8 +3852,13 @@ def _confront_gen(content, state, persona, secret, frag, next_locked, target, ll
     player_char = _char_by_id(content, pcid) if pcid else None
     persona_for_prompt = persona or {}
     if player_char:
+        _pc_bits = [player_char.get("background") or persona_for_prompt.get("background", "")]
+        if (player_char.get("persona_text") or "").strip():
+            _pc_bits.append(f"【TA的为人】{player_char['persona_text'].strip()}")
+        if (player_char.get("wants") or "").strip():
+            _pc_bits.append(f"【TA自己的立场与目标】{player_char['wants'].strip()}")
         persona_for_prompt = {**persona_for_prompt, "name": player_char.get("name"),
-                              "background": player_char.get("background") or persona_for_prompt.get("background", "")}
+                              "background": "　".join(b for b in _pc_bits if b)}
     pl_name = persona_for_prompt.get("name") or "对方"
     sp_hist = history_for(beat_log, char_id) if beat_log is not None else []
     directed = llm.generate({
@@ -3893,7 +3910,7 @@ def _confront_gen(content, state, persona, secret, frag, next_locked, target, ll
         nc = choice_for_act(content, state, new_act)
         if nc:
             state["pending_choice"] = nc
-    state["goal"] = current_goal(content, new_act)
+    state["goal"] = goal_for(content, state, new_act)
     yield ("final", {
         "state": state,
         "newly_unlocked": [forced_id] if forced_id else [],
@@ -4600,7 +4617,7 @@ def run_turn_stream(
         _audit(state, "seek", True, f"{c_s.get('name')}@{l_s.get('name')}")
         pcid_s = state.get("player_character_id")
         mode_s = state.get("mode") or "character"
-        state["goal"] = current_goal(content, old_act)
+        state["goal"] = goal_for(content, state, old_act)
         yield ("beat", dedash_beat({
             "type": "description", "speaker_name": None,
             "text": _t(content, f"（你打听了一圈：{c_s.get('name')}这会儿就在{l_s.get('name')}。）",
@@ -4840,8 +4857,15 @@ def run_turn_stream(
     player_char = _char_by_id(content, pcid) if (mode == "character" and pcid) else None
     persona_for_prompt = persona
     if player_char:
+        # 扮演谁，立场就是谁的: the embodied character's own persona + agenda ride every
+        # turn — NPCs treat the player as THAT person with THAT stake, not a generic guest
+        _pc_bits = [player_char.get("background") or (persona or {}).get("background", "")]
+        if (player_char.get("persona_text") or "").strip():
+            _pc_bits.append(f"【TA的为人】{player_char['persona_text'].strip()}")
+        if (player_char.get("wants") or "").strip():
+            _pc_bits.append(f"【TA自己的立场与目标】{player_char['wants'].strip()}")
         persona_for_prompt = {**(persona or {}), "name": player_char.get("name"),
-                              "background": player_char.get("background") or (persona or {}).get("background", "")}
+                              "background": "　".join(b for b in _pc_bits if b)}
     # 🎖 the player's EVOLVED identity overrides the authored one (升职/揭穿/新头衔) —
     # NPCs address and treat them by who they are NOW
     if state.get("identity"):
@@ -5593,7 +5617,7 @@ def run_turn_stream(
         " ".join(b.get("text", "") for b in all_beats), default_bg=story_default_bg(content)
     )
     state["scene"] = scene
-    state["goal"] = current_goal(content, state["act"])  # small objective for the current act
+    state["goal"] = goal_for(content, state)  # objective re-centered on who the player IS
     progress = act_progress(content, state, state["act"])  # clue checklist for the (new) act
     location = location_view(content, state)  # current place w/ exits filtered to unlocked ones
 
