@@ -297,3 +297,31 @@ def test_goal_recentered_on_embodied_character():
     # a character without wants falls back to the act goal
     SANDBOX_MAP["story"]["characters"][0].pop("wants")
     assert runtime.goal_for(SANDBOX_MAP, st) == base
+
+
+# ── 🧍 姿位账本: pose twin + roster anchor ───────────────────────────────────
+
+def test_pose_twin_books_player_pose():
+    st = {**runtime.default_state(), "location_id": "hall"}
+    assert runtime.player_pose(st, "我坐在窗边", channel="do") == "坐在窗边"
+    assert st["player_pos"] == {"text": "坐在窗边", "at": "hall"}
+    # questions / negations / other people's bodies never book
+    st2 = {**runtime.default_state(), "location_id": "hall"}
+    assert runtime.player_pose(st2, "要不要坐下？", channel="do") is None
+    assert runtime.player_pose(st2, "你坐下", channel="do") is None
+    assert runtime.player_pose(st2, "别躺在这", channel="do") is None
+    assert "player_pos" not in st2
+
+
+def test_roster_carries_fresh_poses_only():
+    st = {**runtime.default_state(), "location_id": "hall"}
+    st["player_pos"] = {"text": "靠着吧台", "at": "hall"}
+    st.setdefault("char_sim", {})["c1"] = {"pos": {"text": "坐在长椅上", "at": "hall"}}
+    roster = runtime._physical_roster(MAP, st, {"name": "我"})
+    first = roster.split("\n", 1)[0]
+    assert "靠着吧台" in first and "坐在长椅上" in first and "姿位有连续性" in first
+    # a pose booked in ANOTHER room is stale → ignored
+    st["char_sim"]["c1"]["pos"]["at"] = "study"
+    st["player_pos"]["at"] = "study"
+    roster2 = runtime._physical_roster(MAP, st, {"name": "我"})
+    assert "靠着吧台" not in roster2 and "坐在长椅上" not in roster2

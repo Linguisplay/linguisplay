@@ -642,6 +642,15 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
         props["self_intent"] = {"type": "string", "description":
                                 "一句话（15字内）：这一场之后你打算做什么（会被记住、约束你之后的言行）；"
                                 "没有新打算就填空字符串"}
+        # 🧍 姿位账本: the body's pose + spot inside the room, engine-tracked per scene
+        props["self_position"] = {"type": "string", "description":
+                                  "默认空字符串。仅当这一轮你的身体姿态或屋内位置发生了变化才填"
+                                  "（12字内，如：坐在吧台后、靠着门框站、躺回床上、走到窗边）；没变不填"}
+    if not observer and not is_member and not is_think:
+        props["player_position"] = {"type": "string", "description":
+                                    "默认空字符串。仅当这一轮剧情改变了【玩家本人】的身体姿态或"
+                                    "屋内位置（被拉起来、被按在墙上、坐到了桌边）才填新的姿态短语"
+                                    "（12字内）；没变不填"}
     if has_map and not is_member and not is_think:
         props["move_invite"] = {"type": "string", "description": "若你这轮提出或答应带玩家去某处，填那个地点名（可以是【可去通路】里的，也可以是对话里自然浮现的新地点；旁白只写到起身相邀为止）；否则填空字符串"}
         props["moved_to"] = {"type": "string", "description":
@@ -1166,6 +1175,10 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
         out["self_state"] = str(d.get("self_state") or "").strip()
     if "self_intent" in d:
         out["self_intent"] = str(d.get("self_intent") or "").strip()
+    if "self_position" in d:
+        out["self_position"] = str(d.get("self_position") or "").strip()
+    if "player_position" in d:
+        out["player_position"] = str(d.get("player_position") or "").strip()
     if "character_harmed" in d:
         out["harmed"] = str(d.get("character_harmed") or "").strip()
     if "gift_received" in d:

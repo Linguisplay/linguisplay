@@ -898,14 +898,40 @@ def _physical_roster(content: dict[str, Any], state: dict[str, Any], persona: di
                 if (c.get("presence") or "present") == "offstage" and c.get("name")]
     lines: list[str] = []
     sep = ", " if en else "、"
+    # 🧍 姿位: engine-tracked pose + spot inside THIS room (fresh entries only — an entry
+    # booked in another location is stale and ignored). Rides the SAME first line as the
+    # headcount, because the depth-0 anchor keeps only the roster's first line.
+    lid = state.get("location_id")
+    pose_bits: list[str] = []
+    if mode != "god":
+        pp = state.get("player_pos")
+        if isinstance(pp, dict) and pp.get("at") == lid and (pp.get("text") or "").strip():
+            pose_bits.append(("you: " if en else "你：") + pp["text"].strip())
+    for c in present:
+        if not c.get("name") or c.get("id") == pcid:
+            continue
+        p = (state.get("char_sim", {}) or {}).get(c.get("id"), {}).get("pos")
+        if isinstance(p, dict) and p.get("at") == lid and (p.get("text") or "").strip():
+            pose_bits.append(f"{c['name']}: {p['text'].strip()}" if en
+                             else f"{c['name']}：{p['text'].strip()}")
+    pose_line = ""
+    if pose_bits:
+        pose_line = (
+            f" Bodies in the room right now: {'; '.join(pose_bits)}. Poses and spots are "
+            "continuous: whoever isn't stated as moving stays exactly where and how they "
+            "were; nobody teleports across the room or changes posture unwritten."
+            if en else
+            f"　此刻各自的姿势与位置：{'；'.join(pose_bits)}。姿位有连续性："
+            "上面没写变化的人保持原姿势原位置，人不会凭空换姿势，也不会瞬移到屋子另一头。")
     if names:
         lines.append(
-            f"Physically present in this scene right now: {sep.join(names)}. That's "
-            f"{len(names)} in total. This number is exact: never miscount, never recount, "
-            "and never write the player out of the scene."
-            if en else
-            f"此刻这个场景里实际在场的人：{'、'.join(names)}——共 {len(names)} 人。"
-            "这个数字是确定的：不要数错、不要重算，也绝不要把“你”（玩家）自己漏掉或排除在外。"
+            (f"Physically present in this scene right now: {sep.join(names)}. That's "
+             f"{len(names)} in total. This number is exact: never miscount, never recount, "
+             "and never write the player out of the scene."
+             if en else
+             f"此刻这个场景里实际在场的人：{'、'.join(names)}——共 {len(names)} 人。"
+             "这个数字是确定的：不要数错、不要重算，也绝不要把“你”（玩家）自己漏掉或排除在外。")
+            + pose_line
         )
     if offstage:
         lines.append(
@@ -3373,6 +3399,35 @@ def player_move_emergent(content: dict[str, Any], state: dict[str, Any], player_
     return None
 
 
+# 🧍 姿位: the player states their own body plainly (坐下/躺到床上/靠在墙边) → engine
+# law, not model memory. Entries carry the location id, so a move auto-stales them.
+_POSE_RE = re.compile(
+    r"(坐到|坐在|坐回|坐下|躺到|躺在|躺回|躺下|跪下|跪在|趴到|趴在|趴下|蹲下|蹲在"
+    r"|靠在|靠着|倚在|倚着|站起来|站起身|站到|站在|起身)"
+    r"([^，。！？!?,.;；、\s]{0,10})")
+
+
+def player_pose(state: dict[str, Any], player_input: str, channel: str = "do") -> str | None:
+    """Deterministic pose twin: an unambiguous first-person posture statement books the
+    player's 姿位 directly. None = not a pose (questions, negations, orders at others)."""
+    if channel not in ("do", "say"):
+        return None
+    text = (player_input or "").strip()
+    if not text or len(text) > 40:
+        return None
+    if any(q in text for q in ("吗", "要不要", "？", "?")):
+        return None
+    m = _POSE_RE.search(text)
+    if not m:
+        return None
+    lead = text[max(0, m.start() - 2):m.start()]
+    if any(w in lead for w in ("你", "他", "她", "让", "请", "别", "不", "TA")):
+        return None                         # someone else's body, or a negation
+    pose = (m.group(1) + m.group(2)).strip()[:14]
+    state["player_pos"] = {"text": pose, "at": state.get("location_id")}
+    return pose
+
+
 # 🔎 找人: 「去找X」 pops a confirmable "TA此刻在Y" prompt — and X WILL be there.
 _SEEK_RE_ZH = re.compile(r"(?:去找|去见|找|见)\s*([^，。！？!?,.、\s]{1,12})")
 _SEEK_RE_EN = re.compile(r"\b(?:find|look for|go see|visit)\s+([A-Za-z' ]{2,30})", re.IGNORECASE)
@@ -4604,6 +4659,11 @@ def run_turn_stream(
     # surface a generate-and-go confirm chip at final — 想去哪就去哪, even somewhere new
     emergent_dest = None if moved else \
         player_move_emergent(content, state, player_input, channel)
+    # 🧍 姿位孪生: a plain first-person posture statement books itself (坐下就是坐下)
+    if (state.get("mode") or "character") != "god":
+        _pose = player_pose(state, player_input, channel)
+        if _pose:
+            _audit(state, "pose", True, _pose)
 
     # 1b². 🔎 找人: 「去找X」→ pop a confirmable "TA此刻在Y，去吗？" and STOP the turn there.
     #      The pin guarantees X is still at Y when the player arrives (作息让位于约见).
@@ -5128,6 +5188,17 @@ def run_turn_stream(
         _intent = (directed.get("self_intent") or "").strip()[:40]
         if _intent and sp_id:
             _sim(state, sp_id)["intent"] = _intent
+        # 🧍 姿位账本: where this body is inside the room and how it's held. Entries
+        # carry the location id, so moving scenes auto-stales them (no cleanup pass).
+        _spos = (directed.get("self_position") or "").strip()[:14]
+        if _spos and sp_id:
+            _sim(state, sp_id)["pos"] = {"text": _spos, "at": state.get("location_id")}
+            _audit(state, "pos.set", True, f"{sp_name}:{_spos}")
+        if is_primary:
+            _ppos = (directed.get("player_position") or "").strip()[:14]
+            if _ppos:
+                state["player_pos"] = {"text": _ppos, "at": state.get("location_id")}
+                _audit(state, "pos.set", True, f"你:{_ppos}")
         # 📟 心象仪: the speaker's own judged inner state rides on their LAST line
         mood = (directed.get("self_state") or "").strip()[:12]
         # 🎭 …and PERSISTS: how this scene left them is how the next one finds them
