@@ -76,3 +76,13 @@ if audit:
     print("── 审计事件榜（! = 驳回）──")
     for k, v in audit.most_common(16):
         print(f"  {k:<24} {v}")
+
+# 🔫 守卫开枪榜: how often each engine LAW had to fire against the model. High rates
+# name the law the model still breaks most — that's the next thing to strengthen.
+GUARDS = ("pov.enforced", "heat.enforced", "power.enforced", "fate.forced",
+          "move.narrated!", "frame.set!", "pos.set!")
+fired = {g: audit.get(g, 0) for g in GUARDS if audit.get(g, 0)}
+if fired and turns_ms:
+    print("── 守卫开枪榜（次数 / 每百回合）──")
+    for k, v in sorted(fired.items(), key=lambda x: -x[1]):
+        print(f"  {k:<24} {v:>4}  {v * 100 / max(1, len(turns_ms)):.1f}/100turn")
