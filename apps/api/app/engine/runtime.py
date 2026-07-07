@@ -1998,6 +1998,11 @@ def arrival_narration(content: dict[str, Any], state: dict[str, Any], persona: d
                             "player_name": (persona or {}).get("name") or ""}) or {}
         txt = next((b.get("text", "") for b in out.get("beats") or []
                     if b.get("type") == "description" and (b.get("text") or "").strip()), "")
+        # 🎬 原画: the pan declared one keyframe per person — open the scene ledger with
+        # every body's state on record (cold-start fix: 看 and 说 read the same sheet
+        # from the very first turn in a place)
+        if txt and out.get("frames"):
+            book_scene_frame(content, state, {"scene_frame": out["frames"]}, sp_id=None)
     except Exception:
         txt = ""
     if txt:
@@ -3536,7 +3541,7 @@ def book_scene_frame(content: dict[str, Any], state: dict[str, Any],
     here = {(c.get("name") or ""): c.get("id") for c in scene_characters(content, state)}
     pcid = state.get("player_character_id")
     booked = 0
-    for f in frames[:3]:
+    for f in frames[:4]:
         nm, fr = (f or {}).get("name") or "", ((f or {}).get("frame") or "").strip()[:16]
         cid = here.get(nm)
         if not cid or not fr or cid == sp_id or cid == pcid:
@@ -3547,6 +3552,24 @@ def book_scene_frame(content: dict[str, Any], state: dict[str, Any],
         _audit(state, "frame.set", True, f"{nm}:{fr}")
         booked += 1
     return booked
+
+
+def unframed_names(content: dict[str, Any], state: dict[str, Any],
+                   exclude_id: str | None = None) -> list[str]:
+    """Present characters with NO fresh frame on the sheet (excluding the player and the
+    current speaker). These are the bodies the next declaration MUST seed — an animation
+    needs its 原画 before tweening means anything."""
+    lid = state.get("location_id")
+    pcid = state.get("player_character_id")
+    out = []
+    for c in scene_characters(content, state):
+        cid = c.get("id")
+        if not c.get("name") or cid in (pcid, exclude_id):
+            continue
+        pos = (state.get("char_sim", {}) or {}).get(cid, {}).get("pos")
+        if not (isinstance(pos, dict) and pos.get("at") == lid and (pos.get("text") or "").strip()):
+            out.append(c["name"])
+    return out[:4]
 
 
 # 🎙 旁白人称铁律: narration speaks to the player as 你; a description beat overrun with
@@ -5256,6 +5279,8 @@ def run_turn_stream(
             "heat_anchor": heat_anchor,            # 🔥 床戏阶段表 (depth-0, replaces the generic line)
             "mandate": ((state.get("mandate") or {}).get("text") or ""
                         if isinstance(state.get("mandate"), dict) else ""),  # ⚖️ 命运已定
+            # 🎬 bodies with no frame yet: the primary MUST seed them this turn
+            "unframed": unframed_names(content, state, exclude_id=sp_id) if is_primary else [],
             "scene": current_act(content, old_act),
             "next_act_title": (next_act or {}).get("title", "") if next_act else "",
             "clock": clock_line,                  # ⏳ 第几天·什么时段 (+ deadline countdown)
@@ -5367,7 +5392,7 @@ def run_turn_stream(
             _sim(state, sp_id)["intent"] = _intent
         # 🧍 姿位账本: where this body is inside the room and how it's held. Entries
         # carry the location id, so moving scenes auto-stales them (no cleanup pass).
-        _spos = (directed.get("self_position") or "").strip()[:14]
+        _spos = (directed.get("self_position") or "").strip()[:16]
         if _spos and sp_id:
             _sim(state, sp_id)["pos"] = {"text": _spos, "at": state.get("location_id")}
             _audit(state, "pos.set", True, f"{sp_name}:{_spos}")

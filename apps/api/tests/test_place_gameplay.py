@@ -359,3 +359,27 @@ def test_pov_break_detection():
     assert runtime._pov_break(bad) is True
     assert runtime._pov_break(ok) is False       # 你-anchored interiority is fine
     assert runtime._pov_break(dlg) is False      # dialogue speaks 我 freely
+
+
+def test_unframed_names_lists_bodies_without_frames():
+    st = {**runtime.default_state(), "location_id": "hall"}
+    # Mara is present (home=hall) and has no frame yet → she needs 原画
+    assert runtime.unframed_names(MAP, st) == ["Mara"]
+    # a fresh frame removes her from the list
+    st.setdefault("char_sim", {})["c1"] = {"pos": {"text": "坐在长椅上", "at": "hall"}}
+    assert runtime.unframed_names(MAP, st) == []
+    # a STALE frame (booked in another room) does not count
+    st["char_sim"]["c1"]["pos"]["at"] = "study"
+    assert runtime.unframed_names(MAP, st) == ["Mara"]
+
+
+def test_arrival_pan_seeds_the_ledger():
+    class ArriveLLM:
+        def generate(self, prompt):
+            assert prompt.get("arrive")
+            return {"beats": [{"type": "description", "text": "门厅里灯影摇晃。"}],
+                    "frames": [{"name": "Mara", "frame": "站在吊灯下擦拭烛台"}]}
+    st = {**runtime.default_state(), "location_id": "hall"}
+    txt = runtime.arrival_narration(MAP, st, {"name": "我"}, llm=ArriveLLM())
+    assert "灯影" in txt
+    assert st["char_sim"]["c1"]["pos"] == {"text": "站在吊灯下擦拭烛台", "at": "hall"}

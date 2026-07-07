@@ -675,15 +675,20 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                                     "（12字内）；没变不填"}
         # 🎬 关键帧: like anime production, only CHANGED frames get declared; the engine
         # carries everyone else forward unchanged (deterministic tweening)
+        _unframed = [str(n) for n in (prompt.get("unframed") or []) if str(n).strip()]
+        _sf_desc = ("这一轮里【可见状态发生了变化】的其他在场角色（不含你自己、不含玩家），"
+                    "每人一帧；谁都没变就填空数组[]。绝不要写不在场的人。")
+        if _unframed:
+            _sf_desc = ("【必须】先为这些还没有状态记录的在场角色各报当前一帧："
+                        + "、".join(_unframed) + "。之后再报本轮状态有变化的人。") + _sf_desc
         props["scene_frame"] = {
-            "type": "array", "maxItems": 3,
+            "type": "array", "maxItems": 4,
             "items": {"type": "object", "properties": {
                 "name": {"type": "string", "description": "在场角色名，原样抄写"},
                 "frame": {"type": "string", "description":
                           "≤16字：TA此刻的姿态/位置/手上的事（如：蹲在货架后清点、退到门边握刀）"}},
                 "required": ["name", "frame"]},
-            "description": "这一轮里【可见状态发生了变化】的其他在场角色（不含你自己、不含玩家），"
-                           "每人一帧；谁都没变就填空数组[]。绝不要写不在场的人。"}
+            "description": _sf_desc}
     if has_map and not is_member and not is_think:
         props["move_invite"] = {"type": "string", "description": "若你这轮提出或答应带玩家去某处，填那个地点名（可以是【可去通路】里的，也可以是对话里自然浮现的新地点；旁白只写到起身相邀为止）；否则填空字符串"}
         props["moved_to"] = {"type": "string", "description":
@@ -2102,17 +2107,29 @@ class QwenLLM:
                  f"时间：{prompt.get('slot','') or '不明'}\n"
                  f"走进来的人：{prompt.get('player_name') or '玩家'}\n"
                  f"此刻在场：\n{plist}")
+        # 🎬 原画: the pan ALSO returns one keyframe per person, so the ledger opens the
+        # scene with every body's state on record (the cold-start fix for 说/看打架)
+        sys += (
+            '\n同时输出严格JSON：{"text":"上面的旁白原文","frames":[{"name":"在场角色名",'
+            '"frame":"≤16字：TA此刻的姿态/位置/手上的事"}]}，frames 覆盖在场每一个人。')
         try:
             resp = _post_chat(self._url, self._key,
                               {"model": self._model, "messages": [{"role": "system", "content": sys},
-                      {"role": "user", "content": u}], "max_tokens": 260, "temperature": 0.9},
+                      {"role": "user", "content": u}], "max_tokens": 420, "temperature": 0.9,
+                      "response_format": {"type": "json_object"}},
                               timeout=25)
-            txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+            import json as _json
+            data = _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
+            txt = str(data.get("text") or "").strip()
+            frames = [{"name": str((f or {}).get("name") or "").strip(),
+                       "frame": str((f or {}).get("frame") or "").strip()}
+                      for f in (data.get("frames") or []) if isinstance(f, dict)]
         except Exception:
-            txt = ""
+            txt, frames = "", []
         if not txt:
             return {}
         return {"beats": [{"type": "description", "speaker_name": None, "text": txt}],
+                "frames": frames,
                 "affinity_delta": 0, "advance_act": False, "ending": None}
 
     def _world_news(self, prompt: dict[str, Any]) -> dict[str, Any]:
