@@ -143,6 +143,20 @@ def _depth_anchor(prompt: dict[str, Any]) -> str:
         # doesn't survive long histories — the tag re-arms it each turn)
         first = _sty.split("。", 1)[0][:40]
         bits.append(("[Voice: " + first + "]") if en else ("文风不换台：" + first + "。"))
+    _pn = ((prompt.get("persona") or {}).get("name") or "").strip()
+    if _pn and not prompt.get("observer"):
+        # 🎙 referent law: 你 = the PLAYER, always. Observed in prod: the model flipped
+        # actor and target (narrated the player's own spell as landing ON them, called
+        # the player 他) and invented body states never booked (凭空赤裸). Anchor both.
+        bits.append(
+            (f"[POV law: 'you' means the player {_pn} and no one else — every other "
+             f"character goes by name. The player's clothing/body state stays as last "
+             f"written; never invent changes. The player's action this turn is done BY "
+             f"{_pn}, not to them.]")
+            if en else
+            (f"旁白视角铁律：「你」永远只指玩家「{_pn}」本人，其他角色一律称名字；"
+             f"玩家这一轮的动作是「{_pn}」主动做出的，不是别人对TA做的，施与受绝不能写反；"
+             f"玩家的衣着与身体状态没写过变化就保持原样，绝不凭空改写。"))
     md = (prompt.get("mandate") or "").strip()
     if md:
         # ⚖️ a fate pick is LAW for the coming turns — restated at depth-0 every turn
@@ -2231,7 +2245,7 @@ class QwenLLM:
                if en else "")
         )
         u = (f"当前地点：{place}\n可去通路：{exits}\n在场角色：{cast}\n"
-             f"玩家当前目标：{goal or '（无）'}\n最近剧情：{recent}")
+             f"玩家当前目标：{goal or '（无）'}\n刚刚正在发生（抉择必须直接从这里长出来，禁止无关事件）：{recent}")
         try:
             resp = _post_chat(self._url, self._key,
                               {"model": self._model,

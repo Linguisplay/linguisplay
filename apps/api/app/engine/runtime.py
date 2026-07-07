@@ -2195,7 +2195,7 @@ def choice_for_act(content: dict[str, Any], state: dict[str, Any], act: int) -> 
 # depth-0 mandate the director must drive toward for the next several turns.
 
 def fate_generate(content: dict[str, Any], state: dict[str, Any], llm,
-                  observer: bool = False) -> dict[str, Any] | None:
+                  observer: bool = False, recent: str = "") -> dict[str, Any] | None:
     """Draft + VALIDATE one fate choice. Model proposes; engine verifies every target
     (kill → a present living non-player character; move → a known place, or any named
     place in a sandbox) and downgrades anything unverifiable to a story-direction option.
@@ -2209,7 +2209,7 @@ def fate_generate(content: dict[str, Any], state: dict[str, Any], llm,
         "place": loc.get("name", ""),
         "exits": [str(e) for e in (loc.get("exits") or [])],
         "goal": state.get("goal", ""),
-        "recent": str(state.get("memory") or "")[-300:],
+        "recent": (recent or str(state.get("memory") or ""))[-400:],
         "mature": bool(state.get("mature")),
         "language": lang_of(content),
     }) or {}
@@ -5363,6 +5363,7 @@ def run_turn_stream(
             "player_emotion": state.get("player_emotion", ""),  # prior emotional read (continuity)
             "knowledge": sp.get("knowledge", ""),  # 智能增强: this character's background lore
             "mature": bool(state.get("mature")),   # 18+ run → adult content permitted
+            "observer": observer,                  # 👁 god mode: no second-person player
             "heat_anchor": heat_anchor,            # 🔥 床戏阶段表 (depth-0, replaces the generic line)
             "mandate": ((state.get("mandate") or {}).get("text") or ""
                         if isinstance(state.get("mandate"), dict) else ""),  # ⚖️ 命运已定
@@ -6047,7 +6048,9 @@ def run_turn_stream(
             tension = bool(dice) or bool(moments) or bool(newly)                 or heat_mod.stage(state) >= 1 or bool(flags.get("pressure_blown"))
             overdue = state["fate_turns"] >= int(state["fate_next"]) + 6
             if armed and (tension or overdue):
-                _fc = fate_generate(content, state, llm, observer=observer)
+                _live = "玩家：" + (player_input or "") + " ／ " + " ".join(
+                    (b.get("text") or "") for b in all_beats[-6:])
+                _fc = fate_generate(content, state, llm, observer=observer, recent=_live)
                 if _fc:
                     state["pending_choice"] = _fc
                     state["fate_turns"] = 0
