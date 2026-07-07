@@ -3416,13 +3416,14 @@ def retrieve_stash(content: dict[str, Any], state: dict[str, Any],
 
 # 🤲 受赠: the player says they take/accept a named thing. Zh + a conservative en set.
 _ACCEPT_RE_ZH = re.compile(
-    r"(?:收下|接过|接下|收好|揣上|揣好)(?:这把|那把|这个|那个|这枚|那枚|这块|那块|这)?"
+    r"(?:收下|接过|接下|收好|揣上|揣好|拿起|捡起|拾起|抄起|拿走|取走|拿上|捡走)"
+    r"(?:这把|那把|这个|那个|这枚|那枚|这块|那块|这)?"
     r"([^，。！？!?,.、\s]{1,12})")
 _ACCEPT_BA_RE_ZH = re.compile(
     r"把(?:这把|那把|这个|那个)?([^，。！？!?,.、\s]{1,12}?)"
     r"(?:收进|收入|放进|装进|收好|揣进|揣好|收起来)")
 _ACCEPT_RE_EN = re.compile(
-    r"(?:\baccept the\b|\bpocket the\b|\btuck the\b|\bput the\b)\s+([a-zA-Z' -]{2,30}?)"
+    r"(?:\baccept the\b|\bpocket the\b|\btuck the\b|\bput the\b|\bpick up the\b|\bgrab the\b)\s+([a-zA-Z' -]{2,30}?)"
     r"(?:\s+(?:in|into|away)\b|[,.!?]|$)", re.IGNORECASE)
 
 
@@ -3470,7 +3471,34 @@ def accept_item(content: dict[str, Any], state: dict[str, Any], player_input: st
             item = {"name": n}
         if item is not None and _inv_add(state, item.get("name", n), item.get("detail", "")):
             got.append(item)
+        elif item is None:
+            # 🎣 环境物件: the player named a thing the ledger can't source (a pole by the
+            # wall the prose is about to invent). Park it; if THIS turn's prose ratifies
+            # the name, settle_pending_takes books it — no loot minted, no pickup lost.
+            pend = list(state.get("_pending_take") or [])
+            if n not in pend:
+                pend.append(n)
+            state["_pending_take"] = pend[:2]
     return got
+
+
+def settle_pending_takes(state: dict[str, Any], all_beats: list[dict[str, Any]]) -> list[str]:
+    """End of turn: a pending environmental take whose name the prose actually used is
+    REAL — book it. Unratified names drop silently (the scene refused the pickup)."""
+    pend = list(state.get("_pending_take") or [])
+    if not pend:
+        return []
+    state["_pending_take"] = []
+    txt = " ".join((b.get("text") or "") for b in all_beats)
+    booked = []
+    for n in pend:
+        if n and n in txt and _inv_find(state.get("inventory") or [], n) < 0:
+            if _inv_add(state, n):
+                _audit(state, "take", True, f"{n}（正文认可）")
+                booked.append(n)
+        elif n:
+            _audit(state, "take", False, n, "正文未认可")
+    return booked
 
 
 # 🚶 说走就走: the player's own clear "go there" EXECUTES, deterministically — the fourth
@@ -6063,6 +6091,8 @@ def run_turn_stream(
         _update_memory(state, history, llm)  # legacy/global (tests, opening)
 
     # 7. immersive scene (background / mood / sfx) from this turn's text
+    # 🎣 pending environmental takes: prose ratified → booked into the pocket
+    settle_pending_takes(state, all_beats)
     # 🎥 场记: the tracker pass re-derives every frame from THIS turn's prose (the
     # ledger follows the text; extraction beats voluntary declaration — see research).
     try:

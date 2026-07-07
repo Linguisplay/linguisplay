@@ -446,3 +446,34 @@ def test_tracker_fail_open():
     runtime.track_scene_frames(MAP, st, {"name": "我"},
                                [{"type": "description", "text": "风吹过门厅。"}], BoomLLM())
     assert st["char_sim"]["c1"]["pos"]["text"] == "坐在长椅上"
+
+
+# ── 🎣 环境物件: 拿起X → 正文追认 → 入包 ─────────────────────────────────────
+
+def test_pickup_ratified_by_prose():
+    st = {**runtime.default_state(), "location_id": "hall"}
+    # 拿起竹竿: nothing sources it (nobody carries one, never mentioned) → parked
+    got = runtime.accept_item(MAP, st, "拿起竹竿", channel="do", history=[])
+    assert got == [] and st["_pending_take"] == ["竹竿"]
+    # this turn's prose ratifies the name → booked
+    beats = [{"type": "description", "text": "他伸手抄起墙根那根青竹竿，掂了掂分量。"}]
+    booked = runtime.settle_pending_takes(st, beats)
+    assert booked == ["竹竿"]
+    assert any(i["name"] == "竹竿" for i in st["inventory"])
+
+
+def test_pickup_unratified_drops():
+    st = {**runtime.default_state(), "location_id": "hall"}
+    runtime.accept_item(MAP, st, "拿起屠龙宝刀", channel="do", history=[])
+    booked = runtime.settle_pending_takes(
+        st, [{"type": "description", "text": "墙角什么都没有，只有灰。"}])
+    assert booked == [] and st["inventory"] == []
+    rejects = [a for a in st["last_audit"] if a["e"] == "take" and not a["ok"]]
+    assert len(rejects) == 1
+
+
+def test_ba_stash_form_still_books_from_history():
+    st = {**runtime.default_state(), "location_id": "hall"}
+    hist = [{"role": "assistant", "content": "他把那根竹竿递到你面前。"}]
+    got = runtime.accept_item(MAP, st, "把竹竿收进背包", channel="do", history=hist)
+    assert got and got[0]["name"] == "竹竿"
