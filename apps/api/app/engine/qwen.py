@@ -137,6 +137,14 @@ def _depth_anchor(prompt: dict[str, Any]) -> str:
                         if en else
                         "成人模式已开启：亲密处正面、直白、具体地写，不淡化、不跳切、不打哑谜；"
                         "一轮写透当下这一步。")
+    md = (prompt.get("mandate") or "").strip()
+    if md:
+        # ⚖️ a fate pick is LAW for the coming turns — restated at depth-0 every turn
+        bits.append(f"[Fate is set — the player chose: {md}. Drive the story firmly in "
+                    f"this direction; never dilute, stall, or walk it back.]"
+                    if en else
+                    f"【命运已定】玩家在关键抉择中已选定：{md}。剧情必须朝这个方向坚定推进，"
+                    f"不稀释、不拖延、不反悔。")
     place = (prompt.get("place") or "").strip()
     if place:
         # keep only the concrete locator sentence (first line), drop the long instructions
@@ -2115,6 +2123,46 @@ class QwenLLM:
         except Exception:
             return {}
 
+    def _fate_choice(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """⚖️ 命运抉择: draft ONE high-stakes decision grounded in the live scene. Strict
+        JSON with TYPED options the engine can enforce (kill / move / story). Degrades to
+        {} — the turn simply carries no choice this time."""
+        cast = "、".join(prompt.get("cast") or []) or "（无）"
+        place = (prompt.get("place") or "").strip() or "（未知）"
+        exits = "、".join(prompt.get("exits") or []) or "（无）"
+        goal = (prompt.get("goal") or "").strip()
+        recent = (prompt.get("recent") or "").strip() or "（无）"
+        en = (prompt.get("language") or "zh") == "en"
+        sys = (
+            "你为一个互动剧情游戏设计一次【命运抉择】：此刻剧情里悬而未决、分量最重的那个岔路口。"
+            '只输出一个JSON对象：{"prompt":"摆在玩家面前的抉择(≤40字，紧贴眼下正在发生的事)",'
+            '"options":[{"label":"选项(玩家第一人称的一句话或一个决断,≤20字)",'
+            '"kind":"story|kill|move","target":"kill填在场角色名/move填地点名/story留空",'
+            '"mandate":"选它之后剧情必须坚定走向的方向(≤30字)"}]}。'
+            "要求：2~3个选项，方向必须彼此相斥（不是同一件事的三种语气）；"
+            "至少一个选项要有真实代价；kind=kill 只在剧情确实走到生死关头时才用，"
+            "target 只能原样抄写在场角色名；kind=move 的 target 优先用已知通路里的地点名；"
+            "不许出现与眼下剧情无关的凭空事件。"
+            + ("本局为成人向沙盒，抉择可以大胆、狠辣。" if prompt.get("mature") else "")
+            + ("Write all player-facing text (prompt/label/mandate) in English."
+               if en else "")
+        )
+        u = (f"当前地点：{place}\n可去通路：{exits}\n在场角色：{cast}\n"
+             f"玩家当前目标：{goal or '（无）'}\n最近剧情：{recent}")
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model,
+                               "messages": [{"role": "system", "content": sys},
+                                            {"role": "user", "content": u}],
+                               "max_tokens": 380, "temperature": 0.9,
+                               "response_format": {"type": "json_object"}},
+                              timeout=30)
+            import json as _json
+            data = _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
     def _parting(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """悬念离场: ONE cliffhanger narration when the player leaves mid-run — an unfinished
         beat that pulls them back. Spoiler-safe: may point at a topic LABEL, never content."""
@@ -2177,6 +2225,8 @@ class QwenLLM:
             return self._start_place(prompt)
         if prompt.get("sandbox_cast"):
             return self._sandbox_cast(prompt)
+        if prompt.get("fate_choice"):
+            return self._fate_choice(prompt)
         if prompt.get("world_news"):
             return self._world_news(prompt)
         if prompt.get("parting"):

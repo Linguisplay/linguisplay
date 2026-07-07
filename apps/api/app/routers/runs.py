@@ -955,14 +955,21 @@ def choose(run_id: str, body: ChooseIn, user: User = Depends(current_user), db: 
     if (r.state or {}).get("ended"):
         raise HTTPException(409, "这局已经结束了")
     st = dict(r.state or {})
+    content = r.pinned_content or {}
     try:
-        res = runtime.apply_choice(r.pinned_content or {}, st, body.option_id)
+        res = runtime.apply_choice(content, st, body.option_id)
     except ValueError as e:
         raise HTTPException(400, {"no pending choice": "现在没有待决定的抉择",
                                   "unknown option": "没有这个选项"}.get(str(e), "不行"))
     r.state = st
+    if res.pop("content_mutated", False):
+        # ⚖️ a fate move conjured a brand-new place → persist the run's private copy + bg
+        r.pinned_content = content
+        flag_modified(r, "pinned_content")
+        _spawn_location_bg(content, runtime.current_location(content, st))
     db.commit()
-    return {"label": res.get("label", ""), "flag": res.get("flag")}
+    return {"label": res.get("label", ""), "flag": res.get("flag"),
+            "killed": res.get("killed"), "moved_to": res.get("moved_to")}
 
 
 @router.post("/{run_id}/verdict")

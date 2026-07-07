@@ -197,6 +197,7 @@ DEFAULT_TUNING = {
     "rom_taper_den": 110,       # per-char 心动 gain taper denominator
     "min_turns_per_act": 6,     # soft acts: no advance (model OR backstop) before this many turns
     "max_new_characters": 4,    # 👋 emergent mid-story characters a run may accumulate
+    "key_choice_every": 10,     # ⚖️ 命运抉择 cadence in player turns (0 = off)
     "world_event_every": 4,     # 🌊 after this many quiet turns an authored act event fires itself (0 = off)
     "turns_per_slot": 6,        # ⏳ turns per 时段 (晨/午/夜); a day = 3 slots. 0 = clock off
     "confront_base": 55,        # 🃏 evidence-confrontation base success %, + closeness//2
@@ -2149,6 +2150,115 @@ def choice_for_act(content: dict[str, Any], state: dict[str, Any], act: int) -> 
             "options": [{"id": o["id"], "label": o["label"]} for o in opts]}
 
 
+# ═══════════════════ ⚖️ 命运抉择: engine-scheduled high-authority forks ═══════════════════
+# Every N player turns the story throws a key choice GENERATED from the live scene.
+# Options are TYPED (story / kill / move) so the engine can ENFORCE the pick: a death is
+# booked in the ledger, a move actually relocates, and the chosen direction becomes a
+# depth-0 mandate the director must drive toward for the next several turns.
+
+def fate_generate(content: dict[str, Any], state: dict[str, Any], llm) -> dict[str, Any] | None:
+    """Draft + VALIDATE one fate choice. Model proposes; engine verifies every target
+    (kill → a present living non-player character; move → a known place, or any named
+    place in a sandbox) and downgrades anything unverifiable to a story-direction option.
+    Returns the player-facing pending dict (effects stay server-side) or None."""
+    here = scene_characters(content, state)
+    loc = current_location(content, state) or {}
+    out = llm.generate({
+        "fate_choice": True,
+        "cast": [c.get("name") for c in here if c.get("name")],
+        "place": loc.get("name", ""),
+        "exits": [str(e) for e in (loc.get("exits") or [])],
+        "goal": state.get("goal", ""),
+        "recent": str(state.get("memory") or "")[-300:],
+        "mature": bool(state.get("mature")),
+        "language": lang_of(content),
+    }) or {}
+    prompt_txt = str(out.get("prompt") or "").strip()
+    pcid = state.get("player_character_id")
+    dead = _dead_ids(state)
+    opts: list[dict[str, Any]] = []
+    effects: dict[str, dict[str, Any]] = {}
+    for i, o in enumerate((out.get("options") or [])[:3]):
+        label = str((o or {}).get("label") or "").strip()[:24]
+        if not label:
+            continue
+        kind = str((o or {}).get("kind") or "story").strip()
+        target: Any = str((o or {}).get("target") or "").strip()
+        mandate = str((o or {}).get("mandate") or "").strip()[:40]
+        if kind == "kill":
+            victim = next((c for c in here if c.get("name") == target
+                           and c.get("id") not in dead and c.get("id") != pcid), None)
+            if victim:
+                target = victim["id"]
+            else:
+                kind, target = "story", ""      # unverifiable death → direction only
+        elif kind == "move":
+            dest = resolve_location(content, target)
+            if dest and dest.get("id"):
+                target = dest["id"]
+            elif not (sandbox_on(content) and len(str(target)) >= 2):
+                kind, target = "story", ""      # closed map / no name → direction only
+        else:
+            kind, target = "story", ""
+        oid = f"f{i + 1}"
+        opts.append({"id": oid, "label": label})
+        effects[oid] = {"kind": kind, "target": target, "mandate": mandate or label}
+    if not prompt_txt or len(opts) < 2:
+        return None
+    n = int(state.get("fate_seq") or 0) + 1
+    state["fate_seq"] = n
+    state["fate_effects"] = effects
+    return {"key": f"fate{n}", "kind": "fate", "act": int(state.get("act", 1) or 1),
+            "prompt": prompt_txt[:60], "options": opts}
+
+
+def _apply_fate(content: dict[str, Any], state: dict[str, Any], option_id: str) -> dict[str, Any]:
+    """Enforce the picked fate option. 权能很高: the engine BOOKS the outcome (death /
+    relocation) and hangs the chosen direction as a decaying depth-0 mandate."""
+    pending = state.get("pending_choice") or {}
+    picked = next((o for o in pending.get("options", []) if o.get("id") == option_id), None)
+    eff = (state.get("fate_effects") or {}).get(option_id)
+    if picked is None or eff is None:
+        raise ValueError("unknown option")
+    res: dict[str, Any] = {"label": picked.get("label") or "", "flag": None}
+    kind, target = eff.get("kind"), eff.get("target")
+    if kind == "kill" and target:
+        deads = _dead_ids(state)
+        if target not in deads:
+            deads.add(target)
+            state["dead_character_ids"] = sorted(deads)
+            state["following"] = [f for f in (state.get("following") or []) if f != target]
+            void_promises_of(state, target)
+            nm = _char_name(content, target) or "TA"
+            rel_log(state, target, int(state.get("act", 1) or 1), "death", f"{nm} 死了。")
+            _audit(state, "fate.kill", True, nm)
+            res["killed"] = nm
+    elif kind == "move" and target:
+        dest = _location_by_id(content, target)
+        try:
+            if dest:
+                _drop_pins_on_leave(state, state.get("location_id"))
+                state["location_id"] = dest["id"]
+            else:                                # sandbox: the named place becomes real
+                dest = generate_and_move(content, state, str(target))
+                res["content_mutated"] = True
+            _audit(state, "fate.move", True, (dest or {}).get("name", ""))
+            res["moved_to"] = (dest or {}).get("name", "")
+        except Exception:
+            _audit(state, "fate.move", False, str(target), "生成失败")
+    md = (eff.get("mandate") or "").strip()
+    if md:
+        state["mandate"] = {"text": md, "left": 8}   # rides depth-0 for ~8 turns
+        _audit(state, "fate.mandate", True, md)
+    answered = dict(state.get("choices") or {})
+    answered[pending.get("key") or "fate"] = option_id
+    state["choices"] = answered
+    state["pending_choice"] = None
+    state["fate_effects"] = None
+    state["fate_turns"] = 0
+    return res
+
+
 def apply_choice(content: dict[str, Any], state: dict[str, Any], option_id: str) -> dict[str, Any]:
     """Resolve the pending decision: apply its deterministic effects (flag → endings can
     gate on it; global 好感; optional per-character relationship deltas), record the answer,
@@ -2157,6 +2267,8 @@ def apply_choice(content: dict[str, Any], state: dict[str, Any], option_id: str)
     pending = state.get("pending_choice") or {}
     if not pending:
         raise ValueError("no pending choice")
+    if pending.get("kind") == "fate":
+        return _apply_fate(content, state, option_id)
     a = current_act(content, int(pending.get("act") or state.get("act", 1) or 1)) or {}
     picked = next((o for o in _choice_options(a) if o["id"] == option_id), None)
     if picked is None:
@@ -4664,6 +4776,12 @@ def run_turn_stream(
         _pose = player_pose(state, player_input, channel)
         if _pose:
             _audit(state, "pose", True, _pose)
+    # ⚖️ a standing fate mandate decays one notch per turn (fresh picks last ~8 turns)
+    _md = state.get("mandate")
+    if isinstance(_md, dict):
+        _md["left"] = int(_md.get("left") or 0) - 1
+        if _md["left"] <= 0:
+            state["mandate"] = None
 
     # 1b². 🔎 找人: 「去找X」→ pop a confirmable "TA此刻在Y，去吗？" and STOP the turn there.
     #      The pin guarantees X is still at Y when the player arrives (作息让位于约见).
@@ -5079,6 +5197,8 @@ def run_turn_stream(
             "knowledge": sp.get("knowledge", ""),  # 智能增强: this character's background lore
             "mature": bool(state.get("mature")),   # 18+ run → adult content permitted
             "heat_anchor": heat_anchor,            # 🔥 床戏阶段表 (depth-0, replaces the generic line)
+            "mandate": ((state.get("mandate") or {}).get("text") or ""
+                        if isinstance(state.get("mandate"), dict) else ""),  # ⚖️ 命运已定
             "scene": current_act(content, old_act),
             "next_act_title": (next_act or {}).get("title", "") if next_act else "",
             "clock": clock_line,                  # ⏳ 第几天·什么时段 (+ deadline countdown)
@@ -5726,6 +5846,20 @@ def run_turn_stream(
         suggestions = _smart_suggestions(
             llm, all_beats, player_input, primary, content, state, location, needed_topics, observer
         ) or build_suggestions(sugg_context, content)
+
+    # ⚖️ 命运抉择: every N player turns (tuning key_choice_every, 0=off) the story throws
+    # a high-authority fork generated from the LIVE scene. Options are engine-verified and
+    # typed — the pick will be ENFORCED (death booked / relocation applied / direction
+    # mandated at depth-0), not merely narrated.
+    if not observer and not (fired and fired.get("terminal")) and not state.get("ended"):
+        state["fate_turns"] = int(state.get("fate_turns") or 0) + 1
+        _every = int(tun.get("key_choice_every") or 0)
+        if _every and not state.get("pending_choice") and state["fate_turns"] >= _every:
+            _fc = fate_generate(content, state, llm)
+            if _fc:
+                state["pending_choice"] = _fc
+                state["fate_turns"] = 0
+                _audit(state, "fate.offered", True, _fc["prompt"][:30])
 
     yield ("final", {
         "state": state,
