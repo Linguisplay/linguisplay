@@ -919,12 +919,15 @@ def _physical_roster(content: dict[str, Any], state: dict[str, Any], persona: di
     pose_line = ""
     if pose_bits:
         pose_line = (
-            f" Bodies in the room right now: {'; '.join(pose_bits)}. Poses and spots are "
-            "continuous: whoever isn't stated as moving stays exactly where and how they "
-            "were; nobody teleports across the room or changes posture unwritten."
+            f" Bodies in the room right now: {'; '.join(pose_bits)}. Frames are "
+            "continuous: whoever isn't stated as changing stays exactly where and how they "
+            "were, doing what they were doing; nobody teleports, shifts posture, or swaps "
+            "activity unwritten. Whether the player asks, looks or acts, this sheet is the "
+            "single truth."
             if en else
-            f"　此刻各自的姿势与位置：{'；'.join(pose_bits)}。姿位有连续性："
-            "上面没写变化的人保持原姿势原位置，人不会凭空换姿势，也不会瞬移到屋子另一头。")
+            f"　此刻各自的姿位与手上的事：{'；'.join(pose_bits)}。姿位有连续性："
+            "上面没写变化的人保持原姿势原位置、继续做原来的事；人不会凭空换姿势、"
+            "瞬移，也不会凭空换一件事做。无论玩家是问、是看还是做，这份现场状态都是同一份事实。")
     if names:
         lines.append(
             (f"Physically present in this scene right now: {sep.join(names)}. That's "
@@ -1785,7 +1788,9 @@ def _logic_guard(llm, prompt: dict[str, Any], directed: dict[str, Any], content:
     heat_broke = (bool(state.get("mature"))
                   and heat_mod.broke(state, prompt.get("player_input") or "",
                                      directed.get("beats", [])))
-    if not verdict["hard"] and not lang_broke and not power_broke and not heat_broke:
+    # 🎙 fifth check: narration hijacked into a character's first person (旁白人称乱)
+    pov_broke = _pov_break(directed)
+    if not verdict["hard"] and not lang_broke and not power_broke and not heat_broke             and not pov_broke:
         return directed
     # regenerate once, telling the model exactly what broke (labels only — never the secret body)
     corr_parts: list[str] = []
@@ -1804,6 +1809,10 @@ def _logic_guard(llm, prompt: dict[str, Any], directed: dict[str, Any], content:
         corr_parts.append(heat_mod.correction(lang_of(content)))
         _audit(state, "heat.enforced", True, prompt.get("speaker_name") or "",
                "上一版回避了正面描写，已强制重写")
+    if pov_broke:
+        corr_parts.append(_POV_CORRECTION)
+        _audit(state, "pov.enforced", True, prompt.get("speaker_name") or "",
+               "旁白滑成角色第一人称，已强制重写")
     retry = llm.generate({**prompt, "logic_correction": "\n".join(corr_parts)})
     if not _check(retry)["hard"]:
         return retry  # a lingering language slip is tolerable; a logic break is not
@@ -3514,6 +3523,47 @@ def player_move_emergent(content: dict[str, Any], state: dict[str, Any], player_
             continue                      # names a person, not a place
         return ref
     return None
+
+
+# 🎬 关键帧落账: the primary declares which OTHER present bodies visibly changed this
+# turn; the engine validates each name against the live roster and books the frame.
+# Everyone undeclared is carried forward unchanged — deterministic tweening, like anime.
+def book_scene_frame(content: dict[str, Any], state: dict[str, Any],
+                     directed: dict[str, Any], sp_id: str | None) -> int:
+    frames = directed.get("scene_frame") or []
+    if not frames:
+        return 0
+    here = {(c.get("name") or ""): c.get("id") for c in scene_characters(content, state)}
+    pcid = state.get("player_character_id")
+    booked = 0
+    for f in frames[:3]:
+        nm, fr = (f or {}).get("name") or "", ((f or {}).get("frame") or "").strip()[:16]
+        cid = here.get(nm)
+        if not cid or not fr or cid == sp_id or cid == pcid:
+            if nm:
+                _audit(state, "frame.set", False, nm, "不在场或不可代报")
+            continue
+        _sim(state, cid)["pos"] = {"text": fr, "at": state.get("location_id")}
+        _audit(state, "frame.set", True, f"{nm}:{fr}")
+        booked += 1
+    return booked
+
+
+# 🎙 旁白人称铁律: narration speaks to the player as 你; a description beat overrun with
+# 我 and empty of 你 is a hijacked narrator (observed in prod) — regeneratable violation.
+_POV_CORRECTION = ("上一版旁白的人称错了：旁白必须以第二人称「你」对玩家叙述；"
+                   "角色的心思用TA的台词、神态与动作透出来，绝不能把旁白写成某个角色的"
+                   "第一人称独白。重写这一轮。")
+
+
+def _pov_break(directed: dict[str, Any]) -> bool:
+    for b in directed.get("beats", []) or []:
+        if b.get("type") == "dialogue":
+            continue
+        t = b.get("text") or ""
+        if len(re.findall(r"我", t)) >= 3 and "你" not in t:
+            return True
+    return False
 
 
 # 🧍 姿位: the player states their own body plainly (坐下/躺到床上/靠在墙边) → engine
@@ -5326,6 +5376,8 @@ def run_turn_stream(
             if _ppos:
                 state["player_pos"] = {"text": _ppos, "at": state.get("location_id")}
                 _audit(state, "pos.set", True, f"你:{_ppos}")
+            # 🎬 and the rest of the room: declared keyframes for other present bodies
+            book_scene_frame(content, state, directed, sp_id)
         # 📟 心象仪: the speaker's own judged inner state rides on their LAST line
         mood = (directed.get("self_state") or "").strip()[:12]
         # 🎭 …and PERSISTS: how this scene left them is how the next one finds them
@@ -5448,7 +5500,7 @@ def run_turn_stream(
     # secrets are never passed in, so observation can't leak locked truths.
     if is_think or narrate_only:
         observe_target = _char_by_id(content, target_character_id) if (is_think and target_character_id) else None
-        directed = llm.generate({
+        _obs_prompt = {
             "observe": True,
             "observe_target": observe_target,
             "persona": persona_for_prompt,
@@ -5468,7 +5520,14 @@ def run_turn_stream(
             "history": (history_for(beat_log, pcid) if beat_log is not None else (history or [])),
             "memory": (state.get("memory_by_char", {}) or {}).get(pcid) or state.get("memory", ""),
             "cast": [c.get("name") for c in all_chars if c.get("name")],
-        })
+        }
+        directed = llm.generate(_obs_prompt)
+        if _pov_break(directed):
+            # 🎙 the looking-around narration hijacked a character's first person → one retry
+            _audit(state, "pov.enforced", True, "旁白", "观察旁白人称错误，已重写")
+            retry = llm.generate({**_obs_prompt, "logic_correction": _POV_CORRECTION})
+            if retry.get("beats"):
+                directed = retry
         obs = [b for b in directed.get("beats", []) if b.get("type") == "description"]
         if not obs:
             obs = [{"type": "description", "speaker_name": None,

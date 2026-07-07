@@ -663,15 +663,27 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
         props["self_intent"] = {"type": "string", "description":
                                 "一句话（15字内）：这一场之后你打算做什么（会被记住、约束你之后的言行）；"
                                 "没有新打算就填空字符串"}
-        # 🧍 姿位账本: the body's pose + spot inside the room, engine-tracked per scene
+        # 🧍 帧表: the body's pose + spot + what their hands are on, engine-tracked
         props["self_position"] = {"type": "string", "description":
-                                  "默认空字符串。仅当这一轮你的身体姿态或屋内位置发生了变化才填"
-                                  "（12字内，如：坐在吧台后、靠着门框站、躺回床上、走到窗边）；没变不填"}
+                                  "默认空字符串。仅当这一轮你的姿态、屋内位置或手上正在做的事"
+                                  "发生了变化才填（16字内，如：坐在吧台后擦枪、倚着门框翻数据板、"
+                                  "走到窗边张望）；没变不填"}
     if not observer and not is_member and not is_think:
         props["player_position"] = {"type": "string", "description":
                                     "默认空字符串。仅当这一轮剧情改变了【玩家本人】的身体姿态或"
                                     "屋内位置（被拉起来、被按在墙上、坐到了桌边）才填新的姿态短语"
                                     "（12字内）；没变不填"}
+        # 🎬 关键帧: like anime production, only CHANGED frames get declared; the engine
+        # carries everyone else forward unchanged (deterministic tweening)
+        props["scene_frame"] = {
+            "type": "array", "maxItems": 3,
+            "items": {"type": "object", "properties": {
+                "name": {"type": "string", "description": "在场角色名，原样抄写"},
+                "frame": {"type": "string", "description":
+                          "≤16字：TA此刻的姿态/位置/手上的事（如：蹲在货架后清点、退到门边握刀）"}},
+                "required": ["name", "frame"]},
+            "description": "这一轮里【可见状态发生了变化】的其他在场角色（不含你自己、不含玩家），"
+                           "每人一帧；谁都没变就填空数组[]。绝不要写不在场的人。"}
     if has_map and not is_member and not is_think:
         props["move_invite"] = {"type": "string", "description": "若你这轮提出或答应带玩家去某处，填那个地点名（可以是【可去通路】里的，也可以是对话里自然浮现的新地点；旁白只写到起身相邀为止）；否则填空字符串"}
         props["moved_to"] = {"type": "string", "description":
@@ -1209,6 +1221,11 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
         out["self_position"] = str(d.get("self_position") or "").strip()
     if "player_position" in d:
         out["player_position"] = str(d.get("player_position") or "").strip()
+    if "scene_frame" in d:
+        out["scene_frame"] = [
+            {"name": str((x or {}).get("name") or "").strip(),
+             "frame": str((x or {}).get("frame") or "").strip()}
+            for x in (d.get("scene_frame") or []) if isinstance(x, dict)]
     if "character_harmed" in d:
         out["harmed"] = str(d.get("character_harmed") or "").strip()
     if "gift_received" in d:

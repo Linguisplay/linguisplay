@@ -325,3 +325,37 @@ def test_roster_carries_fresh_poses_only():
     st["player_pos"]["at"] = "study"
     roster2 = runtime._physical_roster(MAP, st, {"name": "我"})
     assert "靠着吧台" not in roster2 and "坐在长椅上" not in roster2
+
+
+# ── 🎬 关键帧: declared frames book, undeclared carry forward, POV guard ─────
+
+def test_scene_frame_books_present_only():
+    st = {**runtime.default_state(), "location_id": "hall"}
+    directed = {"scene_frame": [
+        {"name": "Mara", "frame": "退到门边握刀"},
+        {"name": "不存在的人", "frame": "凭空出现"},
+    ]}
+    n = runtime.book_scene_frame(MAP, st, directed, sp_id=None)
+    assert n == 1
+    assert st["char_sim"]["c1"]["pos"] == {"text": "退到门边握刀", "at": "hall"}
+    # the invalid name landed on the audit sheet as a rejection
+    rejects = [a for a in st["last_audit"] if a["e"] == "frame.set" and not a["ok"]]
+    assert len(rejects) == 1
+
+
+def test_scene_frame_never_overrides_speaker_or_player():
+    st = {**runtime.default_state(), "location_id": "hall",
+          "player_character_id": "c1"}
+    directed = {"scene_frame": [{"name": "Mara", "frame": "跪下求饶"}]}
+    assert runtime.book_scene_frame(MAP, st, directed, sp_id=None) == 0
+
+
+def test_pov_break_detection():
+    bad = {"beats": [{"type": "description",
+                      "text": "我咬住下唇，我数着尘埃，我控制不住地发抖。"}]}
+    ok = {"beats": [{"type": "description",
+                     "text": "你心里翻来覆去只有一个念头：我不能输，我不能先服软。"}]}
+    dlg = {"beats": [{"type": "dialogue", "text": "我不去，我不想去，我就是不去。"}]}
+    assert runtime._pov_break(bad) is True
+    assert runtime._pov_break(ok) is False       # 你-anchored interiority is fine
+    assert runtime._pov_break(dlg) is False      # dialogue speaks 我 freely
