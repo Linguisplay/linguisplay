@@ -197,7 +197,8 @@ DEFAULT_TUNING = {
     "rom_taper_den": 110,       # per-char 心动 gain taper denominator
     "min_turns_per_act": 6,     # soft acts: no advance (model OR backstop) before this many turns
     "max_new_characters": 4,    # 👋 emergent mid-story characters a run may accumulate
-    "key_choice_every": 10,     # ⚖️ 命运抉择 cadence in player turns (0 = off)
+    "key_choice_min": 6,        # ⚖️ 命运抉择 window: fires at a RANDOM turn count in
+    "key_choice_max": 12,       #    [min, max] so the fork is never predictable (min 0 = off)
     "world_event_every": 4,     # 🌊 after this many quiet turns an authored act event fires itself (0 = off)
     "turns_per_slot": 6,        # ⏳ turns per 时段 (晨/午/夜); a day = 3 slots. 0 = clock off
     "confront_base": 55,        # 🃏 evidence-confrontation base success %, + closeness//2
@@ -5856,13 +5857,20 @@ def run_turn_stream(
     # IS the hand of fate, and the options read as decrees.
     if not (fired and fired.get("terminal")) and not state.get("ended"):
         state["fate_turns"] = int(state.get("fate_turns") or 0) + 1
-        _every = int(tun.get("key_choice_every") or 0)
-        if _every and not state.get("pending_choice") and state["fate_turns"] >= _every:
-            _fc = fate_generate(content, state, llm, observer=observer)
-            if _fc:
-                state["pending_choice"] = _fc
-                state["fate_turns"] = 0
-                _audit(state, "fate.offered", True, _fc["prompt"][:30])
+        _lo = int(tun.get("key_choice_min") or 0)
+        _hi = max(_lo, int(tun.get("key_choice_max") or 0))
+        if _lo and not state.get("pending_choice"):
+            # the fork fires at a RANDOM point inside [min, max] — rolled once per
+            # window, so the player can never clock when fate will knock
+            if not state.get("fate_next"):
+                state["fate_next"] = random.randint(_lo, _hi)
+            if state["fate_turns"] >= int(state["fate_next"]):
+                _fc = fate_generate(content, state, llm, observer=observer)
+                if _fc:
+                    state["pending_choice"] = _fc
+                    state["fate_turns"] = 0
+                    state["fate_next"] = random.randint(_lo, _hi)
+                    _audit(state, "fate.offered", True, _fc["prompt"][:30])
 
     yield ("final", {
         "state": state,
