@@ -66,6 +66,13 @@
   #choiceask .opts { display: flex; flex-direction: column; gap: 6px; }
   #choiceask button { text-align: left; font-size: 13px; border-radius: 9px; padding: 8px 12px; cursor: pointer; background: #2c2340; border: 1px solid #4a3a66; color: #e8ddf8; }
   #choiceask button:hover { background: #3a2d54; }
+  #tutov { position: fixed; inset: 0; background: #000000b8; z-index: 90; display: grid; place-items: center; }
+  #tutov .tcard { width: min(560px, 92vw); max-height: 86vh; overflow-y: auto; background: #14141d; border: 1px solid #34344a; border-radius: 16px; padding: 20px 22px; box-shadow: 0 14px 56px rgba(0,0,0,.7); }
+  #tutov h3 { margin: 0 0 4px; color: #e8e9f2; }
+  #tutov .tsec { margin: 14px 0 0; padding: 10px 12px; background: #1a1a26; border: 1px solid #26263a; border-radius: 10px; font-size: 13.5px; line-height: 1.8; color: #cfd4e4; }
+  #tutov .tsec b { color: #aebcff; }
+  #tutov .tsec .k { display: inline-block; background: #262638; border: 1px solid #3a3a52; border-radius: 6px; padding: 0 7px; margin: 0 2px; color: #e6e9f5; font-size: 12.5px; }
+  #tutov button.go { margin-top: 16px; width: 100%; padding: 10px; border-radius: 10px; background: #2c4a35; border: 1px solid #3c6a4a; color: #dff1e3; font-size: 14px; cursor: pointer; }
   #choiceask.fate { background: #1a1024ee; border-color: #7a4fd0; box-shadow: 0 0 24px #7a4fd066, inset 0 0 40px #00000066; }
   #choiceask.fate .q { color: #e0c8ff; font-size: 15px; }
   #choiceask .omen { display: block; font-size: 11px; color: #b48ee0; opacity: .8; margin-top: 2px; }
@@ -307,6 +314,7 @@
     <b>LinguisPlay <span class="muted" style="font-weight:400">· AI 虚构内容</span></b>
     <span style="display:flex; gap:8px; align-items:center">
       <button id="langBtn" class="iconbtn" title="界面语言 / UI language" onclick="toggleLang()">🌐</button>
+      <button id="helpBtn" class="iconbtn" title="怎么玩 / How to play" onclick="openTutorial()">❓</button>
       <button id="phoneBtn" class="iconbtn hidden" title="小手机：消息、日历、通讯录" onclick="openPhone()">📱<span id="phoneBadge" class="pbadge hidden"></span></button>
       <button id="mapBtn" class="iconbtn hidden" title="地图" onclick="openMap()">🗺</button>
       <button id="journalBtn" class="iconbtn hidden" title="档案" onclick="openJournal()">📔</button>
@@ -387,6 +395,17 @@
     <div id="moveask" class="hidden"></div>
     <div id="choiceask" class="hidden"></div>
     <div id="state"></div>
+    <div id="tutov" class="hidden" onclick="if(event.target===this)closeTutorial()">
+      <div class="tcard">
+        <h3>🧭 <span class="tut-t">怎么玩</span></h3>
+        <div class="muted tut-sub" style="font-size:12px">一分钟看懂界面（右上角 ❓ 随时可再打开）</div>
+        <div class="tsec tut-1"></div>
+        <div class="tsec tut-2"></div>
+        <div class="tsec tut-3"></div>
+        <div class="tsec tut-4"></div>
+        <button class="go" onclick="closeTutorial()"><span class="tut-go">明白了，开始玩</span></button>
+      </div>
+    </div>
     <footer>
       <select id="channel" onchange="updatePlaceholder()">
         <option value="say">说</option>
@@ -699,6 +718,25 @@ async function resumeRun(id) {
   const run = await j(`/runs/${id}`);
   await enterRun(run);
 }
+function fillTutorial() {
+  const T = (sel, html) => { const el = document.querySelector(sel); if (el) el.innerHTML = html; };
+  T(".tut-t", B("怎么玩", "How to play"));
+  T(".tut-sub", B("一分钟看懂界面（右上角 ❓ 随时可再打开）", "One minute to the whole interface (reopen anytime via ❓)"));
+  T(".tut-1", B(
+    '<b>三种行动</b>：底部下拉选<span class="k">说</span>开口说话；<span class="k">做</span>身体动作，想去哪直接打「去某地」、想拿就「拿起某物」，引擎立刻执行；<span class="k">看/想</span>观察四周或内心活动，没人听得见。',
+    '<b>Three actions</b>: <span class="k">Say</span> to speak; <span class="k">Do</span> for physical acts — type "go to X" or "pick up X" and the engine executes instantly; <span class="k">Look/Think</span> to observe or think privately.'));
+  T(".tut-2", B(
+    '<b>点一下就走</b>：💡 三条建议是可直接点的下一步（第一条永远顺着你的意图）；⚡ 紫色卡是<b>命运抉择</b>，选了会真实改变世界（有人会死、地点会换），只等你 3 回合；🚪/🧭 绿色条是移动确认。',
+    '<b>Tap to act</b>: the three 💡 chips are ready next moves (chip 1 always follows YOUR intent); the purple ⚡ card is a <b>fate choice</b> — it really changes the world and waits only 3 turns; green 🚪/🧭 bars confirm travel.'));
+  T(".tut-3", B(
+    '<b>状态条</b>：🎯 当前目标 · 📍 你所在的位置（想换地方就在「做」里说「去哪」）· 🤝 约定 · 🔍 线索 · 角色气泡下的 📟 是TA此刻的真实心境。',
+    '<b>Status bars</b>: 🎯 current goal · 📍 where you are (move by typing "go to …" under Do) · 🤝 promises · 🔍 clues · 📟 under a bubble is that character’s true inner state.'));
+  T(".tut-4", B(
+    '<b>顶栏工具</b>：📱 小手机（角色会主动给你发消息）· 🗺 地图（点地名直接移动）· 📔 档案（已解锁的真相与结局）· 🔊 音乐开关。上方头像可点：切换你在跟谁说话。',
+    '<b>Top bar</b>: 📱 phone (characters text you first) · 🗺 map (tap a place to travel) · 📔 dossier (unlocked truths & endings) · 🔊 sound. Tap an avatar to address that character.'));
+}
+function openTutorial() { fillTutorial(); show("tutov"); }
+function closeTutorial() { hide("tutov"); try { localStorage.setItem("lp_tut_v1", "1"); } catch (e) {} }
 async function enterRun(run) {
   avatarMap = {};
   try { mergeAvatars((await j(`/stories/${run.story_id}`)).characters); } catch (e) {}
@@ -706,6 +744,7 @@ async function enterRun(run) {
   myName = (playMode === "character" && run.state && run.state.player_character_name) || B("我", "Me");
   runId = run.id;
   hide("role");
+  try { if (!localStorage.getItem("lp_tut_v1")) openTutorial(); } catch (e) {}
   hide("pick"); show("play"); show("backBtn"); show("soundBtn"); show("journalBtn"); show("mapBtn"); show("phoneBtn");
   resetEnded();
   chat.innerHTML = ""; suggest.innerHTML = ""; state.innerHTML = "";
