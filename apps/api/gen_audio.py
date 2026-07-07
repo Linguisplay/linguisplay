@@ -31,6 +31,11 @@ BGM_PROMPTS = {
     "lonely":   "desolate minimal ambient, single distant piano notes with long reverb tail, empty and cold, loopable",
     "tense":    "tense suspenseful underscore, low pulsing drone with staccato string stabs, unsettling, loopable, no melody",
     "eerie":    "eerie horror ambience, dissonant drones, faint metallic scrapes, ghostly whispers of wind, dark and hollow",
+    # world-flavored beds for the fan sandboxes (keyword-triggered in engine/scene.py)
+    "battle":   "driving percussive battle underscore, taiko drums and low staccato strings, urgent but controlled, loopable instrumental, no melody",
+    "mystery":  "quiet investigative underscore, plucked pizzicato strings, soft clock-tick percussion, curious and uneasy, loopable instrumental",
+    "ancient":  "Chinese wuxia ambient instrumental, guzheng and bamboo flute over soft strings, ancient and serene with hidden strength, loopable",
+    "grimdark": "dark gothic cathedral ambience, deep pipe organ drone, distant monastic choir hum, ominous and vast, slow, loopable",
 }
 BGM_SECONDS = 24
 

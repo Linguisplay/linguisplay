@@ -36,6 +36,11 @@ _BG = [
 
 # mood keyword -> mood (matches /scene/bgm/<mood>.mp3 + client gradient)
 _MOOD = [
+    # world-flavored beds first (battle outranks tense when both keywords appear)
+    ("战斗", "battle"), ("厮杀", "battle"), ("打斗", "battle"), ("激战", "battle"), ("交手", "battle"),
+    ("帝皇", "grimdark"), ("蜂巢", "grimdark"), ("审判庭", "grimdark"), ("祷文", "grimdark"),
+    ("斗气", "ancient"), ("魂力", "ancient"), ("武魂", "ancient"), ("修炼", "ancient"), ("宗门", "ancient"),
+    ("调查", "mystery"), ("线索", "mystery"), ("真相", "mystery"), ("蹊跷", "mystery"),
     ("紧张", "tense"), ("害怕", "tense"), ("恐惧", "tense"), ("发抖", "tense"), ("不安", "tense"),
     ("诡异", "eerie"), ("镜子", "eerie"), ("黑暗", "eerie"), ("阴森", "eerie"), ("影子", "eerie"),
     ("温馨", "warm"), ("温柔", "warm"), ("陪", "warm"), ("依偎", "warm"),
@@ -56,6 +61,19 @@ _SFX = [
     ("海浪", "waves"), ("浪", "waves"),
     ("心跳", "heartbeat"),
     ("电话铃", "ringtone"), ("铃", "ringtone"),
+    # CC0 foley (Kenney packs): blades, coin, glass, blows, arcana, ambience one-shots
+    ("拔刀", "draw"), ("拔剑", "draw"),
+    ("挥剑", "sword"), ("剑光", "sword"), ("刀光", "sword"), ("斩", "sword"), ("劈", "sword"),
+    ("金铁", "clash"), ("兵刃", "clash"), ("刀剑相", "clash"),
+    ("金币", "coin"), ("铜板", "coin"), ("星币", "coin"), ("数钱", "coin"),
+    ("玻璃", "glass"), ("碎裂", "glass"),
+    ("一拳", "punch"), ("挥拳", "punch"), ("拳砸", "punch"),
+    ("爆炸", "explosion"), ("轰然", "explosion"),
+    ("枪响", "laser"), ("开枪", "laser"), ("激光", "laser"), ("爆矢", "laser"),
+    ("施法", "magic"), ("法术", "magic"), ("术法", "magic"), ("咒文", "magic"),
+    ("钟声", "bell"), ("钟响", "bell"), ("敲钟", "bell"),
+    ("翻书", "book"), ("书页", "book"),
+    ("吱呀", "creak"), ("嘎吱", "creak"),
 ]
 
 _NIGHT = ["夜", "深夜", "凌晨", "末班", "晚上", "灯灭", "黑"]
