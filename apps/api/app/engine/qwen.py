@@ -157,6 +157,11 @@ def _depth_anchor(prompt: dict[str, Any]) -> str:
             (f"旁白视角铁律：「你」永远只指玩家「{_pn}」本人，其他角色一律称名字；"
              f"玩家这一轮的动作是「{_pn}」主动做出的，不是别人对TA做的，施与受绝不能写反；"
              f"玩家的衣着与身体状态没写过变化就保持原样，绝不凭空改写。"))
+    _tn = (prompt.get("track_note") or "").strip()
+    if _tn:
+        bits.append((f"[Last turn the prose conflicted with the scene ledger ({_tn}); "
+                     f"this turn the ledger is the truth.]") if en else
+                    (f"上一轮旁白与现场帧表冲突（{_tn}）；本轮一切以【姿位帧表】为准。"))
     md = (prompt.get("mandate") or "").strip()
     if md:
         # ⚖️ a fate pick is LAW for the coming turns — restated at depth-0 every turn
@@ -2210,6 +2215,43 @@ class QwenLLM:
         except Exception:
             return {}
 
+    def _track_scene(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🎥 场记 (turn-end tracker pass): EXTRACT every present body's state from the
+        prose that was just generated — the ledger follows the text instead of hoping
+        the text's author files paperwork. Also flags hard contradictions against the
+        previous frame. Strict JSON; degrades to {} (ledger keeps last frames)."""
+        prev = prompt.get("present") or []
+        plist = chr(10).join(f"- {x.get('name', '')}（上一帧：{x.get('prev') or '无记录'}）" for x in prev) or "（无）"
+        pl = prompt.get("player") or {}
+        en = (prompt.get("language") or "zh") == "en"
+        sys = (
+            "你是剧组场记。根据【本轮正文】更新场上每个人的状态帧。只输出JSON："
+            '{"frames":[{"name":"角色名(原样抄写)","pos":"姿态与屋内位置(≤14字)",'
+            '"doing":"手上的事(≤10字,可空)","wear":"衣着(≤10字,仅正文提到才填)"}],'
+            '"player":{"pos":"...","doing":"...","wear":"..."},'
+            '"contradictions":["正文与上一帧的硬矛盾(无过渡的位置/姿态/衣着跳变),没有则空数组"]}。'
+            "规则：只记录正文明确写到或可直接推断的状态；正文没提到的人，把上一帧原样抄回来；"
+            "wear 只在正文出现衣着信息时才填；不要发明正文里没有的细节；不要写不在名单里的人。"
+            + ("Respond with the SAME JSON schema but write values in English." if en else "")
+        )
+        u = (f"地点：{prompt.get('place') or '（未知）'}" + chr(10)
+             + f"在场名单与上一帧：" + chr(10) + plist + chr(10)
+             + f"玩家：{pl.get('name') or '玩家'}（上一帧：{pl.get('prev') or '无记录'}）" + chr(10)
+             + f"【本轮正文】{prompt.get('beats') or ''}")
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model,
+                               "messages": [{"role": "system", "content": sys},
+                                            {"role": "user", "content": u}],
+                               "max_tokens": 400, "temperature": 0.2,
+                               "response_format": {"type": "json_object"}},
+                              timeout=18)
+            import json as _json
+            data = _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
     def _fate_choice(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """⚖️ 命运抉择: draft ONE high-stakes decision grounded in the live scene. Strict
         JSON with TYPED options the engine can enforce (kill / move / story). Degrades to
@@ -2324,6 +2366,8 @@ class QwenLLM:
             return self._sandbox_cast(prompt)
         if prompt.get("fate_choice"):
             return self._fate_choice(prompt)
+        if prompt.get("track_scene"):
+            return self._track_scene(prompt)
         if prompt.get("world_news"):
             return self._world_news(prompt)
         if prompt.get("parting"):

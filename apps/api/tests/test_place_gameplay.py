@@ -394,3 +394,55 @@ def test_suggestions_always_three():
     # already three smart → untouched order, still three
     out3 = runtime.ensure_three_suggestions(["一", "二", "三"], ["模板"], MAP)
     assert out3 == ["一", "二", "三"]
+
+
+# ── 🎥 场记: extraction updates the ledger, validates names, flags conflicts ──
+
+class TrackLLM:
+    def __init__(self, out):
+        self.out = out
+
+    def generate(self, prompt):
+        assert prompt.get("track_scene")
+        return self.out
+
+
+def test_tracker_books_frames_and_wear():
+    st = {**runtime.default_state(), "location_id": "hall"}
+    beats = [{"type": "description", "text": "Mara走到窗边，解下外套搭在臂弯。"}]
+    llm = TrackLLM({"frames": [
+        {"name": "Mara", "pos": "站在窗边", "doing": "望着街口", "wear": "解了外套"},
+        {"name": "路人甲", "pos": "站着"},   # not on the roster → rejected
+    ], "player": {"pos": "坐在长椅上"}, "contradictions": []})
+    runtime.track_scene_frames(MAP, st, {"name": "我"}, beats, llm)
+    e = st["char_sim"]["c1"]["pos"]
+    assert e["text"] == "站在窗边·望着街口" and e["wear"] == "解了外套" and e["at"] == "hall"
+    assert st["player_pos"]["text"] == "坐在长椅上"
+    rejects = [a for a in st["last_audit"] if a["e"] == "track.update" and not a["ok"]]
+    assert len(rejects) == 1
+    # the roster line now carries the wear
+    roster = runtime._physical_roster(MAP, st, {"name": "我"})
+    assert "站在窗边·望着街口·着解了外套" in roster.split("\n", 1)[0]
+
+
+def test_tracker_conflict_sets_note():
+    st = {**runtime.default_state(), "location_id": "hall"}
+    st.setdefault("char_sim", {})["c1"] = {"pos": {"text": "坐在长椅上", "at": "hall"}}
+    beats = [{"type": "description", "text": "Mara忽然出现在门口。"}]
+    llm = TrackLLM({"frames": [{"name": "Mara", "pos": "站在门口"}],
+                    "contradictions": ["Mara上一帧坐在长椅上，正文无过渡地写她在门口"]})
+    runtime.track_scene_frames(MAP, st, {"name": "我"}, beats, llm)
+    assert st["char_sim"]["c1"]["pos"]["text"] == "站在门口"   # ledger follows the text
+    assert "无过渡" in st["track_note"]
+
+
+def test_tracker_fail_open():
+    st = {**runtime.default_state(), "location_id": "hall"}
+    st.setdefault("char_sim", {})["c1"] = {"pos": {"text": "坐在长椅上", "at": "hall"}}
+
+    class BoomLLM:
+        def generate(self, prompt):
+            return {}   # aux degraded → previous frames stay untouched
+    runtime.track_scene_frames(MAP, st, {"name": "我"},
+                               [{"type": "description", "text": "风吹过门厅。"}], BoomLLM())
+    assert st["char_sim"]["c1"]["pos"]["text"] == "坐在长椅上"

@@ -25,6 +25,8 @@ class CasterLLM:
         self.calls = []
 
     def generate(self, prompt):
+        if prompt.get("track_scene"):
+            return {}                      # 🎥 the tracker pass is not a casting call
         if prompt.get("intro") or prompt.get("observe") or prompt.get("suggest"):
             return {"beats": [{"type": "description", "speaker_name": None, "text": "x"}],
                     "affinity_delta": 0, "advance_act": False, "ending": None}

@@ -907,15 +907,16 @@ def _physical_roster(content: dict[str, Any], state: dict[str, Any], persona: di
     pose_bits: list[str] = []
     if mode != "god":
         pp = state.get("player_pos")
-        if isinstance(pp, dict) and pp.get("at") == lid and (pp.get("text") or "").strip():
-            pose_bits.append(("you: " if en else "你：") + pp["text"].strip())
+        if isinstance(pp, dict) and pp.get("at") == lid and ((pp.get("text") or "").strip() or pp.get("wear")):
+            _pt = (pp.get("text") or "").strip() + (f"·着{pp['wear']}" if pp.get("wear") else "")
+            pose_bits.append(("you: " if en else "你：") + _pt)
     for c in present:
         if not c.get("name") or c.get("id") == pcid:
             continue
         p = (state.get("char_sim", {}) or {}).get(c.get("id"), {}).get("pos")
-        if isinstance(p, dict) and p.get("at") == lid and (p.get("text") or "").strip():
-            pose_bits.append(f"{c['name']}: {p['text'].strip()}" if en
-                             else f"{c['name']}：{p['text'].strip()}")
+        if isinstance(p, dict) and p.get("at") == lid and ((p.get("text") or "").strip() or p.get("wear")):
+            _pt = (p.get("text") or "").strip() + (f"·着{p['wear']}" if p.get("wear") else "")
+            pose_bits.append(f"{c['name']}: {_pt}" if en else f"{c['name']}：{_pt}")
     pose_line = ""
     if pose_bits:
         pose_line = (
@@ -3621,6 +3622,81 @@ def book_scene_frame(content: dict[str, Any], state: dict[str, Any],
     return booked
 
 
+def track_scene_frames(content: dict[str, Any], state: dict[str, Any],
+                       persona: dict[str, Any], all_beats: list[dict[str, Any]],
+                       llm) -> None:
+    """🎥 场记 (turn-end tracker pass): one small extraction call reads THIS turn's prose
+    and re-derives every present body's frame (pos·doing·wear). The ledger follows the
+    text — declarations and twins remain fast-path hints, the tracker is the authority.
+    Hard contradictions against last frame land in state.track_note (next turn's anchor
+    tells the model the ledger wins) + the audit sheet. Fail-open: any error keeps the
+    previous frames."""
+    txt = " ".join((b.get("text") or "") for b in all_beats if b.get("text")).strip()[:1500]
+    if not txt:
+        return
+    here = scene_characters(content, state)
+    lid = state.get("location_id")
+    pcid = state.get("player_character_id")
+    sim = state.get("char_sim", {}) or {}
+    prev = []
+    for c in here:
+        if not c.get("name") or c.get("id") == pcid:
+            continue
+        e = (sim.get(c["id"], {}) or {}).get("pos")
+        line = ""
+        if isinstance(e, dict) and e.get("at") == lid:
+            line = (e.get("text") or "") + (f"·着{e['wear']}" if e.get("wear") else "")
+        prev.append({"name": c["name"], "prev": line})
+    pc = _char_by_id(content, pcid) if pcid else None
+    pname = (pc or {}).get("name") or (persona or {}).get("name") or "玩家"
+    pp = state.get("player_pos") if isinstance(state.get("player_pos"), dict) else {}
+    pprev = ((pp.get("text") or "") + (f"·着{pp['wear']}" if pp.get("wear") else "")) if pp.get("at") == lid else ""
+    _tp = {"track_scene": True, "beats": txt, "present": prev,
+           "player": {"name": pname, "prev": pprev},
+           "place": (current_location(content, state) or {}).get("name", ""),
+           "mature": bool(state.get("mature"))}
+    if lang_of(content) == "en":      # the language stamp rides EN runs only (convention)
+        _tp["language"] = "en"
+    out = llm.generate(_tp) or {}
+
+    def _entry(f, old):
+        pos = str((f or {}).get("pos") or "").strip()[:14]
+        doing = str((f or {}).get("doing") or "").strip()[:10]
+        wear = str((f or {}).get("wear") or "").strip()[:10]
+        text = (pos + ("·" + doing if doing and doing not in pos else "")).strip("·")[:22]
+        if not text and not wear:
+            return None
+        e = {"text": text or ((old or {}).get("text") or ""), "at": lid}
+        w = wear or ((old or {}).get("wear") if (old or {}).get("at") == lid else "")
+        if w:
+            e["wear"] = w
+        return e if e["text"] or e.get("wear") else None
+
+    name2id = {c.get("name"): c.get("id") for c in here if c.get("id") != pcid}
+    booked = 0
+    for f in (out.get("frames") or [])[:8]:
+        nm = str((f or {}).get("name") or "").strip()
+        cid = name2id.get(nm)
+        if not cid:
+            if nm:
+                _audit(state, "track.update", False, nm, "不在名单")
+            continue
+        e = _entry(f, (sim.get(cid, {}) or {}).get("pos"))
+        if e:
+            _sim(state, cid)["pos"] = e
+            booked += 1
+    pe = _entry(out.get("player") or {}, pp)
+    if pe:
+        state["player_pos"] = pe
+        booked += 1
+    if booked:
+        _audit(state, "track.update", True, f"{booked}帧")
+    cons = [str(c).strip()[:40] for c in (out.get("contradictions") or []) if str(c).strip()][:2]
+    if cons:
+        state["track_note"] = cons[0]
+        _audit(state, "track.conflict", False, cons[0])
+
+
 def unframed_names(content: dict[str, Any], state: dict[str, Any],
                    exclude_id: str | None = None) -> list[str]:
     """Present characters with NO fresh frame on the sheet (excluding the player and the
@@ -4941,6 +5017,8 @@ def run_turn_stream(
         _pose = player_pose(state, player_input, channel)
         if _pose:
             _audit(state, "pose", True, _pose)
+    # 🎥 last turn's tracker conflict rides this turn's anchor once, then clears
+    track_note = str(state.pop("track_note", "") or "")
     # ⚖️ a standing fate mandate decays one notch per turn (fresh picks last ~8 turns)
     _md = state.get("mandate")
     if isinstance(_md, dict):
@@ -5364,6 +5442,7 @@ def run_turn_stream(
             "knowledge": sp.get("knowledge", ""),  # 智能增强: this character's background lore
             "mature": bool(state.get("mature")),   # 18+ run → adult content permitted
             "observer": observer,                  # 👁 god mode: no second-person player
+            "track_note": track_note,              # 🎥 ledger-wins correction (one turn)
             "heat_anchor": heat_anchor,            # 🔥 床戏阶段表 (depth-0, replaces the generic line)
             "mandate": ((state.get("mandate") or {}).get("text") or ""
                         if isinstance(state.get("mandate"), dict) else ""),  # ⚖️ 命运已定
@@ -5984,6 +6063,12 @@ def run_turn_stream(
         _update_memory(state, history, llm)  # legacy/global (tests, opening)
 
     # 7. immersive scene (background / mood / sfx) from this turn's text
+    # 🎥 场记: the tracker pass re-derives every frame from THIS turn's prose (the
+    # ledger follows the text; extraction beats voluntary declaration — see research).
+    try:
+        track_scene_frames(content, state, persona, all_beats, llm)
+    except Exception:
+        pass
     scene = scene_mod.classify_scene(
         " ".join(b.get("text", "") for b in all_beats), default_bg=story_default_bg(content)
     )
