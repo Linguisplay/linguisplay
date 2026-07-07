@@ -3723,6 +3723,11 @@ def track_scene_frames(content: dict[str, Any], state: dict[str, Any],
     if cons:
         state["track_note"] = cons[0]
         _audit(state, "track.conflict", False, cons[0])
+    try:
+        from .. import metrics as _metrics
+        _metrics.log("track", booked=booked, conflict=len(cons))
+    except Exception:
+        pass
 
 
 def unframed_names(content: dict[str, Any], state: dict[str, Any],
@@ -6093,12 +6098,6 @@ def run_turn_stream(
     # 7. immersive scene (background / mood / sfx) from this turn's text
     # 🎣 pending environmental takes: prose ratified → booked into the pocket
     settle_pending_takes(state, all_beats)
-    # 🎥 场记: the tracker pass re-derives every frame from THIS turn's prose (the
-    # ledger follows the text; extraction beats voluntary declaration — see research).
-    try:
-        track_scene_frames(content, state, persona, all_beats, llm)
-    except Exception:
-        pass
     scene = scene_mod.classify_scene(
         " ".join(b.get("text", "") for b in all_beats), default_bg=story_default_bg(content)
     )
@@ -6207,6 +6206,14 @@ def run_turn_stream(
         # from moments — the debuggable "what the engine decided and why" sheet
         "audit": _finish_audit(state, moments),
     })
+
+    # 🎥 场记 (post-final): re-derives every frame from THIS turn's prose. Runs after the
+    # final event so the player never waits on it; the router persists state at stream
+    # end, so the bookings still land in this turn's save.
+    try:
+        track_scene_frames(content, state, persona, all_beats, llm)
+    except Exception:
+        pass
 
 
 def scene_cast(content: dict[str, Any], state: dict[str, Any],

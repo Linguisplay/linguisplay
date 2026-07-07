@@ -37,6 +37,9 @@ for ln in path.open(encoding="utf-8"):
             llm[r.get("kind", "?")].append(int(r.get("ms", 0)))
         else:
             llm_fail[r.get("kind", "?")] += 1
+    elif r.get("e") == "track":
+        audit["track.conflict!"] += int(r.get("conflict") or 0)
+        audit["track.update"] += 1 if r.get("booked") else 0
     elif r.get("e") == "turn":
         turns_ms.append(int(r.get("ms", 0)))
         turns_beats.append(int(r.get("beats", 0)))
