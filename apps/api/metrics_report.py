@@ -83,7 +83,7 @@ if audit:
 # 🔫 守卫开枪榜: how often each engine LAW had to fire against the model. High rates
 # name the law the model still breaks most — that's the next thing to strengthen.
 GUARDS = ("pov.enforced", "heat.enforced", "power.enforced", "fate.forced",
-          "move.narrated!", "frame.set!", "pos.set!")
+          "move.narrated!", "frame.set!", "pos.set!", "track.conflict!")
 fired = {g: audit.get(g, 0) for g in GUARDS if audit.get(g, 0)}
 if fired and turns_ms:
     print("── 守卫开枪榜（次数 / 每百回合）──")
