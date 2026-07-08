@@ -3626,6 +3626,128 @@ def player_move_emergent(content: dict[str, Any], state: dict[str, Any], player_
     return None
 
 
+# ═══════════════════ ⚡ 修为数值账本 (story-defined progression ladder) ═══════════════════
+# The STORY defines the ladder (sandbox.progression = {name, ranks:[...]}); the engine
+# owns the numbers. Design after 一念逍遥/鬼谷八荒 research: visible progress, breakthrough
+# as a RISKY ritual, diminishing returns on grinding, offline trickle, 境界碾压 as law.
+
+_TRAIN_RE = re.compile(r"修炼|修行|打坐|苦修|练功|冥想|吐纳|炼化|闭关|参悟|温养")
+_BREAK_RE = re.compile(r"突破|冲击(境界|瓶颈|下一)")
+
+
+def cult_cfg(content: dict[str, Any]) -> dict[str, Any] | None:
+    sb = (content.get("story") or {}).get("sandbox")
+    pg = (sb or {}).get("progression") if isinstance(sb, dict) else None
+    if isinstance(pg, dict) and pg.get("ranks") and pg.get("name"):
+        return pg
+    return None
+
+
+def _cult(state: dict[str, Any]) -> dict[str, Any]:
+    c = state.get("cult")
+    if not isinstance(c, dict):
+        c = {"rank": 0, "prog": 0, "streak": 0}
+        state["cult"] = c
+    return c
+
+
+def cult_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
+    cfg = cult_cfg(content)
+    if not cfg:
+        return None
+    c = _cult(state)
+    ranks = cfg["ranks"]
+    ri = min(int(c.get("rank") or 0), len(ranks) - 1)
+    return {"name": cfg["name"], "rank": ranks[ri], "rank_index": ri,
+            "prog": int(c.get("prog") or 0), "cap": ri >= len(ranks) - 1,
+            "ready": int(c.get("prog") or 0) >= 100 and ri < len(ranks) - 1}
+
+
+def player_train(content: dict[str, Any], state: dict[str, Any], player_input: str,
+                 channel: str = "do") -> dict[str, Any] | None:
+    """修炼孪生: a plain training action gains progress NOW (d20-flavored), with
+    diminishing returns on back-to-back grinding (streak halves the gain)."""
+    cfg = cult_cfg(content)
+    if not cfg or channel not in ("do", "say"):
+        return None
+    text = (player_input or "").strip()
+    if not text or len(text) > 40 or not _TRAIN_RE.search(text):
+        return None
+    if any(w in text for w in ("别", "不", "陪", "教", "你去", "他", "她")):
+        return None
+    c = _cult(state)
+    if c["prog"] >= 100:
+        return {"full": True}
+    roll = random.randint(1, 20)
+    gain = max(2, (8 + roll // 2) >> min(int(c.get("streak") or 0), 3))
+    c["prog"] = min(100, int(c["prog"]) + gain)
+    c["streak"] = int(c.get("streak") or 0) + 1
+    _audit(state, "cult.train", True, f"+{gain}%→{c['prog']}%")
+    return {"gain": gain, "prog": c["prog"], "roll": roll, "full": c["prog"] >= 100}
+
+
+def player_breakthrough(content: dict[str, Any], state: dict[str, Any], player_input: str,
+                        channel: str = "do") -> dict[str, Any] | None:
+    """突破孪生: at a full bottleneck, 突破 is a RISKY ritual (鬼谷八荒 style): d20,
+    8+ succeeds (rank up), 18+ is a flawless ascension (head-start progress), fail
+    burns progress. The world sees the new rank via the anchor immediately."""
+    cfg = cult_cfg(content)
+    if not cfg or channel not in ("do", "say"):
+        return None
+    text = (player_input or "").strip()
+    if not text or len(text) > 30 or not _BREAK_RE.search(text):
+        return None
+    c = _cult(state)
+    ranks = cfg["ranks"]
+    if int(c.get("rank") or 0) >= len(ranks) - 1:
+        return {"capped": True}
+    if int(c.get("prog") or 0) < 100:
+        return {"not_ready": True, "prog": int(c.get("prog") or 0)}
+    roll = random.randint(1, 20)
+    if roll >= 8:
+        c["rank"] = int(c.get("rank") or 0) + 1
+        c["prog"] = 20 if roll >= 18 else 0
+        c["streak"] = 0
+        _audit(state, "cult.breakthrough", True, ranks[min(c["rank"], len(ranks) - 1)])
+        return {"success": True, "crit": roll >= 18, "roll": roll,
+                "rank_name": ranks[min(c["rank"], len(ranks) - 1)]}
+    c["prog"] = max(50, int(c["prog"]) - 40)
+    _audit(state, "cult.breakthrough", False, f"roll{roll}", "冲击失败，气息受挫")
+    return {"success": False, "roll": roll, "prog": c["prog"]}
+
+
+def cult_offline_gain(content: dict[str, Any], state: dict[str, Any],
+                      away_hours: float) -> int:
+    """一念逍遥 lesson: the numbers grow a little while you're away (温养), capped and
+    never past the bottleneck — coming back always feels like motion, never like a skip."""
+    cfg = cult_cfg(content)
+    if not cfg or away_hours < 3:
+        return 0
+    c = _cult(state)
+    if c["prog"] >= 100 or int(c.get("rank") or 0) >= len(cfg["ranks"]) - 1:
+        return 0
+    gain = min(15, int(away_hours // 2))
+    if gain <= 0:
+        return 0
+    c["prog"] = min(100, int(c["prog"]) + gain)
+    c["streak"] = 0
+    _audit(state, "cult.offline", True, f"+{gain}%→{c['prog']}%")
+    return gain
+
+
+def cult_anchor(content: dict[str, Any], state: dict[str, Any]) -> str:
+    """One depth-0 line: your rank is LAW — the world treats you by it (境界碾压)."""
+    v = cult_view(content, state)
+    if not v:
+        return ""
+    line = f"你的{v['name']}修为：{v['rank']}（瓶颈进度{v['prog']}%）。"
+    if v["ready"]:
+        line += "瓶颈已满：可尝试【突破】，有失败风险。"
+    line += ("境界即铁律：高境界对低境界是碾压性的差距，跨大境界如隔天堑；"
+             "在场者按这个修为对待你，你的表现也不能超出这个修为该有的水平（金手指除外）。")
+    return line
+
+
 # 🎬 关键帧落账: the primary declares which OTHER present bodies visibly changed this
 # turn; the engine validates each name against the live roster and books the frame.
 # Everyone undeclared is carried forward unchanged — deterministic tweening, like anime.
@@ -5070,6 +5192,52 @@ def run_turn_stream(
             _audit(state, "pose", True, _pose)
     # 🎥 last turn's tracker conflict rides this turn's anchor once, then clears
     track_note = str(state.pop("track_note", "") or "")
+    # ⚡ 修为: offline trickle (温养), then the training / breakthrough twins
+    cult_beat = None
+    if cult_cfg(content) and (state.get("mode") or "character") != "god":
+        _og = cult_offline_gain(content, state, away_hours if returning else 0)
+        if _og:
+            _v0 = cult_view(content, state)
+            cult_beat = _t(content,
+                           f"（离开的这段时间里，你的{_v0['name']}在温养中悄然增长了{_og}%。）",
+                           f"(While you were away, your {_v0['name']} quietly grew {_og}%.)")
+        _tr = player_train(content, state, player_input, channel)
+        if _tr and _tr.get("gain"):
+            _v1 = cult_view(content, state)
+            cult_beat = _t(content,
+                           f"（这一番修行让你的{_v1['name']}进度推进了{_tr['gain']}%，"
+                           f"当前【{_v1['rank']}·{_tr['prog']}%】。"
+                           + ("瓶颈已满，可尝试突破。" if _tr.get("full") else "）"),
+                           f"(Training pushed your {_v1['name']} up {_tr['gain']}%, now "
+                           f"[{_v1['rank']} · {_tr['prog']}%].)")
+        elif _tr and _tr.get("full") and not _tr.get("gain"):
+            cult_beat = _t(content, "（你的瓶颈早已充盈到极限，再修无益：是时候尝试【突破】了。）",
+                           "(Your bottleneck is already full — it is time to attempt a breakthrough.)")
+        _bk = player_breakthrough(content, state, player_input, channel)
+        if _bk is not None:
+            if _bk.get("success"):
+                cult_beat = _t(content,
+                               ("（雷鸣般的气息自你体内炸开，一步踏入【" + _bk["rank_name"] + "】！"
+                                + ("这一步走得圆满无瑕，根基愈发深厚。）" if _bk.get("crit") else "）")),
+                               f"(Power erupts within you — you ascend to [{_bk['rank_name']}]!)")
+            elif _bk.get("not_ready"):
+                cult_beat = _t(content,
+                               f"（瓶颈尚未充盈（{_bk['prog']}%），强行冲击只会自伤。再积累些吧。）",
+                               f"(The bottleneck is not full yet ({_bk['prog']}%) — forcing it would only hurt.)")
+            elif _bk.get("capped"):
+                cult_beat = _t(content, "（你已站在这条路已知的顶点。）",
+                               "(You already stand at the known summit of this path.)")
+            elif _bk.get("success") is False:
+                cult_beat = _t(content,
+                               f"（气息在关口轰然溃散，冲击失败：进度跌回{_bk['prog']}%，你胸口一闷，脸色发白。）",
+                               f"(The surge collapses at the gate — breakthrough FAILED, progress falls to {_bk['prog']}%.)")
+    if cult_beat:
+        yield ("beat", dedash_beat({"type": "description", "speaker_name": None,
+                                    "text": cult_beat}))
+
+    if cult_cfg(content) and not _TRAIN_RE.search((player_input or "")[:40]):
+        _cult(state)["streak"] = 0
+
     # ⚖️ a standing fate mandate decays one notch per turn (fresh picks last ~8 turns)
     _md = state.get("mandate")
     if isinstance(_md, dict):
@@ -5495,6 +5663,7 @@ def run_turn_stream(
             "observer": observer,                  # 👁 god mode: no second-person player
             "drive": drive,                        # ▶ 观剧拍: director advances, player watches
             "track_note": track_note,              # 🎥 ledger-wins correction (one turn)
+            "cult": cult_anchor(content, state),   # ⚡ 修为是铁律 (depth-0)
             # 📈 剧情欠账: 2+ stalled turns → this turn MUST pay the thread off
             "stall": (state.get("stall") if isinstance(state.get("stall"), dict)
                       and int((state.get("stall") or {}).get("n") or 0) >= 2 else None),
@@ -6222,6 +6391,7 @@ def run_turn_stream(
         "relations": relations_summary(content, state),  # {cid:{mode,mode_name,...}} toward player
         # 📋 the turn's event audit: rejections logged where they happened + accepts derived
         # from moments — the debuggable "what the engine decided and why" sheet
+        "cultivation": cult_view(content, state),  # ⚡ rank + bottleneck progress (or None)
         "audit": _finish_audit(state, moments),
     })
 

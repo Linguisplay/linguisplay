@@ -250,6 +250,7 @@ def main() -> None:
             endings=[],      # a sandbox has no exits
             locations=LOCATIONS,
             sandbox={"enabled": True, "real_time": True, "currency": "元", "start_money": 400,
+                     "progression": {"name": "魔法修为", "ranks": ["星子初凝", "星轨初成", "星轨娴熟", "星云初聚", "星云大成", "星宫初开"]},
                      "default_powers": [
                          "隐藏第二系：在已登记的一系之外，你还悄悄觉醒了第二系（系别自选），"
                          "从未示人——在人前施展会引来注视与真正的麻烦"]},

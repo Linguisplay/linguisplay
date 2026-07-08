@@ -261,6 +261,7 @@ def main() -> None:
             endings=[],      # a sandbox has no exits
             locations=LOCATIONS,
             sandbox={"enabled": True, "real_time": True, "currency": "金币", "start_money": 500,
+                     "progression": {"name": "斗气", "ranks": ["斗之气九段", "斗者", "斗师", "大斗师", "斗灵", "斗王", "斗皇", "斗宗", "斗尊"]},
                      "default_powers": [
                          "异火亲和之体：你天生不惧火毒，有资格尝试吞纳炼化传说中的异火；"
                          "但每一次吞纳都是以命相搏的豪赌，成则脱胎换骨，败则化灰"]},

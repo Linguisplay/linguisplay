@@ -157,6 +157,9 @@ def _depth_anchor(prompt: dict[str, Any]) -> str:
             (f"旁白视角铁律：「你」永远只指玩家「{_pn}」本人，其他角色一律称名字；"
              f"玩家这一轮的动作是「{_pn}」主动做出的，不是别人对TA做的，施与受绝不能写反；"
              f"玩家的衣着与身体状态没写过变化就保持原样，绝不凭空改写。"))
+    _cl = (prompt.get("cult") or "").strip()
+    if _cl:
+        bits.append(_cl)
     _stall = prompt.get("stall") or None
     if isinstance(_stall, dict) and _stall.get("thread"):
         bits.append((f"[Story debt: '{_stall['thread']}' has hung unresolved for "

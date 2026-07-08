@@ -79,6 +79,10 @@
   #choiceask .omen { display: block; font-size: 11px; color: #b48ee0; opacity: .8; margin-top: 2px; }
   #choiceask .fatecount { margin-top: 7px; font-size: 11.5px; color: #d0a8ff; opacity: .85; }
   #placebar { flex: 0 0 auto; margin: 6px 16px 0; padding: 7px 12px; border-radius: 10px; background: #18221bcc; border: 1px solid #2c4233; color: #cfe6d4; font-size: 12.5px; line-height: 1.5; }
+  #cultbar { flex: 0 0 auto; margin: 6px 16px 0; padding: 7px 12px; border-radius: 10px; background: #241f10cc; border: 1px solid #4a4018; color: #f0e2b0; font-size: 12.5px; line-height: 1.5; position: relative; overflow: hidden; }
+  #cultbar .fill { position: absolute; inset: 0; background: #8a6d1a33; transform-origin: left; z-index: 0; }
+  #cultbar span { position: relative; z-index: 1; }
+  #cultbar.ready { border-color: #c9a227; box-shadow: 0 0 12px #c9a22755; }
   #placebar b { color: #8fe0a6; }
   #placebar .exits { color: #8aa092; }
   #placebar .exit { cursor: pointer; text-decoration: underline dotted; padding: 0 1px; }
@@ -384,6 +388,7 @@
     <div id="barsToggle" class="hidden" onclick="toggleBars()"></div>
     <div id="bars">
       <div id="placebar" class="hidden"></div>
+      <div id="cultbar" class="hidden"></div>
       <div id="promisebar" class="hidden"></div>
       <div id="verdictbar" class="hidden"></div>
       <div id="goalbar" class="hidden"></div>
@@ -911,6 +916,16 @@ function updateCast(next) {
   renderCast(); updatePlaceholder();
 }
 // apply a Run object's state to the scene UI (used by move / follow responses)
+function renderCult(cv) {
+  const el = document.getElementById("cultbar");
+  if (!cv) { el.classList.add("hidden"); return; }
+  el.classList.toggle("ready", !!cv.ready);
+  el.innerHTML = `<div class="fill" style="transform:scaleX(${Math.min(100, cv.prog) / 100})"></div>` +
+    `<span>⚡ <b>${escapeHtml(cv.name)}</b>${B("：", ": ")}${escapeHtml(cv.rank)}` +
+    (cv.cap ? B("（已至顶点）", " (summit)") : ` · ${cv.prog}%`) +
+    (cv.ready ? B("　🔥 瓶颈已满，输入「突破」一搏", "　🔥 bottleneck full — type Breakthrough") : "") + `</span>`;
+  el.classList.remove("hidden");
+}
 function applyRunUpdate(run) {
   const st = run && run.state || {};
   cast = st.here || run.cast || [];
@@ -919,6 +934,7 @@ function applyRunUpdate(run) {
   if (target && !cast.some(c => c.id === target)) target = null;
   renderCast(); updatePlaceholder();
   if (st.location !== undefined) renderPlace(st.location);
+  if (st.cultivation !== undefined) renderCult(st.cultivation);
 }
 async function moveTo(name) {
   if (!runId || ended) return;
@@ -1474,6 +1490,7 @@ function renderState(st) {
   if (st.goal !== undefined) renderGoal(st.goal);
   if (st.progress !== undefined) renderProgress(st.progress);
   if (st.location !== undefined) renderPlace(st.location);
+  if (st.cultivation !== undefined) renderCult(st.cultivation);
   if (st.promises !== undefined) renderPromises(st.promises);
   if (st.phone_unread !== undefined) setPhoneBadge(st.phone_unread);
   if (st.verdict !== undefined) renderVerdictBar(st.verdict);

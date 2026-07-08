@@ -255,6 +255,7 @@ def main() -> None:
             endings=[],      # a sandbox has no exits
             locations=LOCATIONS,
             sandbox={"enabled": True, "real_time": True, "currency": "金魂币", "start_money": 30,
+                     "progression": {"name": "魂力", "ranks": ["魂士", "魂师", "大魂师", "魂尊", "魂宗", "魂王", "魂帝", "魂圣", "斗罗", "封号斗罗"]},
                      "default_powers": [
                          "先天满魂力：觉醒当日便是十级魂力，万中无一的修炼资质",
                          "双生武魂：在觉醒的本命武魂之外，你还沉睡着第二武魂；"
