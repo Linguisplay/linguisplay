@@ -319,6 +319,42 @@ def test_scout_mints_the_sought_character_for_real():
     assert out["state"]["location_id"] == "l1"     # the chip moves the player, not the mint
 
 
+def test_opening_never_writes_absent_characters():
+    """开场白不要胡写 (Yi): the opening roster is the SCENE at the pinned start place,
+    not the whole act-1 cast — and a known-but-absent name in the prose triggers one
+    corrective rewrite."""
+    story = {"story": {"id": "o", "characters": [
+        {"id": "c1", "name": "竹清", "is_lead": True, "home_location_id": "hall"},
+        {"id": "c2", "name": "沐白", "home_location_id": "study"}],
+        "acts": [{"index": 1, "title": "一"}],
+        "locations": [{"id": "hall", "name": "门厅", "exits": []},
+                      {"id": "study", "name": "书房", "exits": []}]}, "secrets": []}
+
+    class IntroLLM:
+        def __init__(self):
+            self.casts = []
+
+        def generate(self, prompt):
+            if prompt.get("intro"):
+                self.casts.append(prompt.get("cast"))
+                if prompt.get("logic_correction"):
+                    return {"beats": [{"type": "description", "speaker_name": None,
+                                       "text": "门厅里只有竹清守着灯。"}],
+                            "affinity_delta": 0, "advance_act": False, "ending": None}
+                return {"beats": [{"type": "description", "speaker_name": None,
+                                   "text": "竹清站在灯下，沐白靠在墙边打盹。"}],
+                        "affinity_delta": 0, "advance_act": False, "ending": None}
+            return {}
+
+    llm = IntroLLM()
+    st = runtime.default_state()
+    beats = runtime.build_opening(story, st, llm=llm)
+    txt = " ".join(b.get("text", "") for b in beats)
+    assert llm.casts[0] == ["竹清"]        # scene roster, not the act-1 cast
+    assert "沐白" not in txt               # the intruder was rewritten out
+    assert "竹清" in txt
+
+
 def test_scout_denial_denies_honestly_and_mints_nothing():
     import copy
 

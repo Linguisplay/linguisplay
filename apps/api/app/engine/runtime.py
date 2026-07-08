@@ -1500,8 +1500,6 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
     pcid = state.get("player_character_id")
     act1 = current_act(content, 1) or {}
     player_char = _char_by_id(content, pcid) if (mode == "character" and pcid) else None
-    present = [c.get("name") for c in present_characters(content, 1)
-              if c.get("name") and c.get("id") != pcid]
     # pin the starting place so the player has a concrete spatial anchor from turn 1.
     # 🏖 sandbox + embodied character: open on THEIR home turf (playing 萧炎 starts at
     # the tower, not the plaza) — a different character IS a different opening. Authored
@@ -1514,6 +1512,10 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
         state["location_id"] = start["id"]
     # ⏳ the story opens at ITS hour, not at a default 晨 (夜戏 opens at night)
     align_clock_to_act(content, state, 1)
+    # WHO IS ACTUALLY HERE: the scene roster at the pinned opening place — never the
+    # whole act-1 cast (writing absent people into the opening was turn-zero 文与实分家)
+    present = [c.get("name") for c in scene_characters(content, state)
+               if c.get("name") and c.get("id") != pcid]
     prompt = {
         "intro": True,
         "clock": (clock_view(content, state) or {}).get("label", ""),
@@ -1530,6 +1532,26 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
     directed = _lang_guard(llm, prompt, llm.generate(prompt), content)
     beats = [b for b in directed.get("beats", []) if b.get("type") == "description"]
     beats = beats or [{"type": "description", "speaker_name": None, "text": opening_narration(content)}]
+    # 🛡 开场人物越界守卫: a KNOWN character who isn't in the scene must not appear in
+    # the opening prose — one corrective rewrite, keyed to the exact intruders.
+    absent = [c.get("name") for c in _characters(content)
+              if c.get("name") and c.get("id") != pcid and c.get("name") not in present]
+
+    def _intruders(bts: list[dict[str, Any]]) -> list[str]:
+        txt = " ".join(b.get("text", "") for b in bts)
+        return [n for n in absent if n in txt]
+
+    bad = _intruders(beats)
+    if bad:
+        _audit(state, "intro.roster", False, "、".join(bad)[:40], "开场写入了不在场角色，已重写")
+        corr = (f"【重写·人物越界】此刻在场的只有：{('、'.join(present)) or '玩家自己一个人'}。"
+                f"你却把不在场的（{'、'.join(bad)}）写进了开场。重写整段开场，"
+                f"不在场的人一个字都不许提。")
+        retry = _lang_guard(llm, prompt,
+                            llm.generate({**prompt, "logic_correction": corr}), content)
+        rb = [b for b in retry.get("beats", []) if b.get("type") == "description"]
+        if rb and not _intruders(rb):
+            beats = rb
     # ✨ 首局魔法时刻: within the first screen, someone SEES the player — one concrete
     # gesture, one crack of something withheld, one line spoken straight at them. The
     # "earned intimacy" promise made perceivable in 30 seconds.

@@ -1153,7 +1153,12 @@ def _build_intro_system(prompt: dict[str, Any]) -> str:
     if act_events:
         lines.append(f"【开场正在发生】{act_events}")
     if cast:
-        lines.append(f"【此刻在场的人】{('、'.join(cast))}")
+        lines.append(f"【此刻在场的人·铁律】只有这些人在场：{('、'.join(cast))}。"
+                     "这个世界的其他角色此刻都不在这里——开场里【一个字都不许提】不在场的人，"
+                     "不许写他们的动作神态，也不许说他们「在旁边」「在远处」。")
+    else:
+        lines.append("【此刻在场的人·铁律】此刻这里没有别人，只有玩家自己。"
+                     "开场不许写任何角色在场，环境与心境写足即可。")
 
     if mode == "god":
         lines += [
