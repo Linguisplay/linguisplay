@@ -220,6 +220,18 @@ def _depth_anchor(prompt: dict[str, Any]) -> str:
         bits.append((f"[Last turn the prose conflicted with the scene ledger ({_tn}); "
                      f"this turn the ledger is the truth.]") if en else
                     (f"上一轮旁白与现场帧表冲突（{_tn}）；本轮一切以【姿位帧表】为准。"))
+    # 🥊 比试判定 rides the depth anchor — adjacency beats anything buried mid-system
+    _chk_a = prompt.get("check") or {}
+    if _chk_a.get("contest"):
+        _cvv = {"crit_success": "完胜，对方心服口服",
+                "success": "险胜，技高一筹",
+                "mixed": "惨胜，你也付出看得见的代价",
+                "fail": "落败，输得不冤但保住体面",
+                "crit_fail": "一败涂地，被干脆放倒"}.get(_chk_a.get("outcome"), "")
+        bits.append(f"【比试判定·天命已掷】玩家 vs {_chk_a.get('contest')}：d20 掷出 "
+                    f"{_chk_a.get('roll')}（需≥{_chk_a.get('dc') or '?'}）→ 玩家{_cvv}。"
+                    "这一拍必须把这场较量【从过招到分出胜负】完整演出来并就此收束：具体的攻防、"
+                    "决定性的那一下、结果落定。不许热身、不许报数、不许把开打拖到下一拍。")
     _sk = (prompt.get("seek_unknown") or "").strip()
     if _sk:
         if prompt.get("sandbox") and not prompt.get("seek_denied"):
