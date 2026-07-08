@@ -4243,6 +4243,42 @@ def seek_unknown(content: dict[str, Any], state: dict[str, Any], player_input: s
     return toks[0][:12]
 
 
+def mint_sought_character(content: dict[str, Any], state: dict[str, Any], name: str,
+                          scout: dict[str, Any], llm: LLM | None) -> dict[str, Any] | None:
+    """The scout confirmed the sought name belongs in this world — make them REAL, now,
+    deterministically: character into the cast, their whereabouts minted as a first-class
+    location, ready for the standard seek confirm chip (which pins them there). 文与实
+    不分家：账本先动，散文跟上 — the player never again hunts a name for 20 turns.
+    Mutates `content` (caller must flag content_mutated). Returns {"char", "loc"}."""
+    import uuid as _uuid
+    nm = (name or "").strip()[:12]
+    if not nm:
+        return None
+    tun = tuning_for(content)
+    gen_now = sum(1 for c in _characters(content) if c.get("generated"))
+    if gen_now >= tun["max_new_characters"]:
+        _audit(state, "seek.scout", False, nm, "本局涌现人数已到上限")
+        return None
+    where = (scout.get("where") or "").strip() or _t(content, "附近的去处", "somewhere near")
+    prev = state.get("location_id")
+    try:
+        loc = generate_and_move(content, state, where, llm=llm)
+    except ValueError:
+        return None
+    state["location_id"] = prev   # the confirm chip moves the player, not the mint
+    char = {
+        "id": f"gen_{_uuid.uuid4().hex[:8]}",
+        "name": nm,
+        "role": (scout.get("who") or "").strip()[:24] or "打听来的人物",
+        "persona_text": (scout.get("persona") or scout.get("who") or "").strip()[:160],
+        "relation_default": "stranger",
+        "home_location_id": loc.get("id"),
+        "generated": True,
+    }
+    (content.get("story") or {}).setdefault("characters", []).append(char)
+    return {"char": char, "loc": loc}
+
+
 def character_profile(content: dict[str, Any], state: dict[str, Any],
                       char_id: str) -> dict[str, Any] | None:
     """Everything the player may KNOW about one character, gathered for the 档案卡:
@@ -5542,6 +5578,38 @@ def run_turn_stream(
     #      The pin guarantees X is still at Y when the player arrives (作息让位于约见).
     seek = None if (moved or (state.get("mode") or "character") == "god") else \
         player_seek(content, state, player_input, channel)
+    # 1b²⁺. 🔎 找一个引擎里还没有的名字 — 合同（Yi 拍板 2026-07-08）：先做一次智能检索
+    #       （Tavily 落地 + 模型判断）确认这名字属不属于本世界观；属于就【当场造真】：
+    #       角色入册、去处生成为一等地点、行踪钉住，走同一条「TA此刻在Y，去吗？」确认片。
+    #       玩家绝不再为一个名字空转十几个回合。判定不属于才交给导演在世界观内如实否认。
+    seek_minted = False
+    seek_denied = False
+    seek_unknown_tok = None
+    if seek is None and not moved and (state.get("mode") or "character") != "god":
+        seek_unknown_tok = seek_unknown(content, state, player_input, channel)
+    if seek_unknown_tok and sandbox_on(content):
+        story_s = content.get("story") or {}
+        try:
+            scout = llm.generate({"scout_char": seek_unknown_tok,
+                                  "story_title": story_s.get("title") or "",
+                                  "world": (story_s.get("world_facts")
+                                            or story_s.get("world_long") or ""),
+                                  "cast": [c.get("name") for c in _characters(content)],
+                                  "mature": bool(state.get("mature"))}) or {}
+        except Exception:
+            scout = {}
+        if scout.get("fits"):
+            minted = mint_sought_character(content, state, seek_unknown_tok, scout, llm)
+            if minted:
+                _audit(state, "seek.scout", True,
+                       f"{seek_unknown_tok}@{(minted['loc'] or {}).get('name', '')}")
+                seek, seek_minted = minted, True
+                seek_unknown_tok = None   # resolved for real — no directive needed
+        elif scout:
+            seek_denied = True
+            _audit(state, "seek.scout", False, seek_unknown_tok, "检索判定不属于本世界观")
+    if seek_unknown_tok:
+        _audit(state, "seek.unknown", True, seek_unknown_tok)
     if seek and seek.get("loc"):
         c_s, l_s = seek["char"], seek["loc"]
         pins = dict(state.get("char_pins") or {})
@@ -5562,7 +5630,7 @@ def run_turn_stream(
             "here": scene_cast(content, state, exclude_id=pcid_s if mode_s == "character" else None),
             "following": list(state.get("following") or []),
             "goal": state["goal"], "progress": act_progress(content, state, old_act),
-            "hint": "", "moments": [], "dice": None, "content_mutated": False,
+            "hint": "", "moments": [], "dice": None, "content_mutated": seek_minted,
             "pressure_view": None, "clock_view": clock_view(content, state),
             "promises": promises_view(content, state),
             "phone_unread": phone_total_unread(content, state),
@@ -5584,13 +5652,6 @@ def run_turn_stream(
                        "恐怕得等TA自己露面。）",
                        f"(You ask around, but no one can say where {seek['char'].get('name')} "
                        "is at this hour.)")}))
-    # 1b³. 🔎 找一个不存在的名字: the engine can't resolve it, but the DIRECTOR must not
-    #      let it spin (the 20-turns-hunting-a-nonexistent-person failure) — hand the
-    #      name to the prompt so the打听 lands: mint/refer in a sandbox, deny in canon.
-    seek_unknown_tok = None if (moved or seek) else \
-        seek_unknown(content, state, player_input, channel)
-    if seek_unknown_tok:
-        _audit(state, "seek.unknown", True, seek_unknown_tok)
 
     #     现场搜查: naming a searchable prop at THIS place (做/看 channel) turns it over —
     #     physical evidence unlocks directly, its story event fires. Deterministic.
@@ -5984,6 +6045,8 @@ def run_turn_stream(
                       and int((state.get("stall") or {}).get("n") or 0) >= 2 else None),
             # 🔎 hunting a name the engine can't resolve → the打听 must land this turn
             "seek_unknown": seek_unknown_tok if is_primary else None,
+            # …and when the scout ruled the name OUT of this world, deny — don't mint
+            "seek_denied": seek_denied if is_primary else False,
             "heat_anchor": heat_anchor,            # 🔥 床戏阶段表 (depth-0, replaces the generic line)
             "mandate": ((state.get("mandate") or {}).get("text") or ""
                         if isinstance(state.get("mandate"), dict) else ""),  # ⚖️ 命运已定

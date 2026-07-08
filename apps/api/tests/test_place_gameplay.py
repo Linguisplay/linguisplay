@@ -257,6 +257,86 @@ def test_seek_unknown_surfaces_only_unresolvable_names():
     assert any(p.get("seek_unknown") == "蓝信一" for p in llm.prompts)
 
 
+SANDBOX = {
+    "story": {
+        "id": "sb",
+        "sandbox": {"enabled": True},
+        "characters": [{"id": "c1", "name": "Mara", "is_lead": True}],
+        "acts": [{"index": 1, "title": "无尽"}],
+        "locations": [{"id": "l1", "name": "小巷", "exits": []}],
+        "tuning": {"max_new_characters": 5},
+    },
+    "secrets": [],
+}
+
+
+class _ScoutBase:
+    """Aux-safe stub; subclasses script the scout verdict."""
+
+    def __init__(self):
+        self.prompts = []
+
+    def generate(self, prompt):
+        if prompt.get("scout_char"):
+            return self.scout(prompt)
+        if prompt.get("describe_place"):
+            return {"detail": "一方晒不到太阳的天台。"}
+        if prompt.get("summarize"):
+            return {"memory": ""}
+        if prompt.get("suggest"):
+            return {"suggestions": []}
+        if not any(prompt.get(k) for k in ("arrive", "offscreen", "farewell", "world_news",
+                                           "golden_moment", "risk_judge", "track_scene",
+                                           "sandbox_cast", "opening_hook")):
+            self.prompts.append(prompt)
+        return {"beats": [{"type": "dialogue", "speaker_name": "Mara", "text": "嗯。"}],
+                "affinity_delta": 0, "advance_act": False, "ending": None}
+
+
+def test_scout_mints_the_sought_character_for_real():
+    """找人合同（2026-07-08）：智能检索说「属于这个世界」→ 角色入册、地点造真、
+    行踪钉住、同款确认片弹出 — 文与实不分家，绝不再空转。"""
+    import copy
+
+    class FitsLLM(_ScoutBase):
+        def scout(self, prompt):
+            assert prompt.get("scout_char") == "蓝信一"
+            return {"fits": True, "who": "天台画画的怪人", "where": "天台画室",
+                    "persona": "寡言，画比话多。"}
+
+    content = copy.deepcopy(SANDBOX)
+    st = {**runtime.default_state(), "location_id": "l1", "act": 1}
+    out = runtime.run_turn(content, st, {"name": "我"}, "我想找蓝信一",
+                           channel="say", llm=FitsLLM())
+    mr = out.get("move_request")
+    assert mr and mr.get("seek") and mr["by_name"] == "蓝信一"
+    assert out["content_mutated"] is True          # caller must persist the new canon
+    minted = next(c for c in content["story"]["characters"] if c.get("name") == "蓝信一")
+    assert minted.get("generated") and minted["home_location_id"] == mr["to"]
+    loc = next(l for l in content["story"]["locations"] if l["id"] == mr["to"])
+    assert loc["name"] == "天台画室" and loc.get("generated")
+    assert out["state"]["char_pins"] == {minted["id"]: mr["to"]}   # TA就在那儿等着
+    assert out["state"]["location_id"] == "l1"     # the chip moves the player, not the mint
+
+
+def test_scout_denial_denies_honestly_and_mints_nothing():
+    import copy
+
+    class DenyLLM(_ScoutBase):
+        def scout(self, prompt):
+            return {"fits": False, "who": "", "where": "", "persona": ""}
+
+    content = copy.deepcopy(SANDBOX)
+    llm = DenyLLM()
+    out = runtime.run_turn(content, {**runtime.default_state(), "location_id": "l1", "act": 1},
+                           {"name": "我"}, "我想找钢铁侠", channel="say", llm=llm)
+    assert not out.get("move_request")
+    assert all(not c.get("generated") for c in content["story"]["characters"])
+    # the director is told to deny in-world, not to mint
+    assert any(p.get("seek_unknown") == "钢铁侠" and p.get("seek_denied")
+               for p in llm.prompts)
+
+
 def test_apply_move_walks_multi_hop_now():
     m = {"story": {"id": "m5", "characters": [], "acts": [{"index": 1, "title": "一"}],
                    "locations": [

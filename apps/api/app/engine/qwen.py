@@ -219,7 +219,7 @@ def _depth_anchor(prompt: dict[str, Any]) -> str:
                     (f"上一轮旁白与现场帧表冲突（{_tn}）；本轮一切以【姿位帧表】为准。"))
     _sk = (prompt.get("seek_unknown") or "").strip()
     if _sk:
-        if prompt.get("sandbox"):
+        if prompt.get("sandbox") and not prompt.get("seek_denied"):
             bits.append((f"[The player seems to be hunting for '{_sk}' — no such person "
                          f"or place exists yet. Make the search LAND this turn: someone "
                          f"gives a real lead or introduction (a new person enters via the "
@@ -2714,9 +2714,48 @@ class QwenLLM:
             ending["reason"] = text[:200]  # the plan judged it before the prose existed
         yield ("final", plan)
 
+    def _scout(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🔎 角色检索 (the seek contract, Yi 2026-07-08): does the sought NAME belong in
+        this story's world? Grounded in live web search when Tavily is configured (canon
+        characters of adapted IPs get found), model knowledge otherwise. Returns
+        {fits, who, where, persona} — runtime.mint_sought_character consumes it."""
+        import json as _json
+        name = str(prompt.get("scout_char") or "").strip()
+        title = str(prompt.get("story_title") or "").strip()
+        world = str(prompt.get("world") or "").replace("\n", " ")[:600]
+        cast = "、".join([str(c) for c in (prompt.get("cast") or []) if c][:12])
+        web = _tavily_search(f"{title} {name} 人物 角色", max_results=2)
+        sys = ("你在为一个互动剧情游戏做【角色检索】。判断玩家要找的名字是否属于这个故事的"
+               "世界观：原著/原型作品里的人物算；这个世界观下合理存在的普通人也算；"
+               "明显来自别的作品、或与世界观格格不入的不算。只输出一个 JSON 对象，"
+               '不要任何其他文字，键：{"fits": true或false, "who": "TA的身份一句话(20字内)", '
+               '"where": "TA此刻最可能出现的具体地点名(4~10字，如 天台画室、码头仓库)", '
+               '"persona": "两三句人设：性格、说话方式、与这个世界的关系"}。'
+               "fits 为 false 时其余键都给空字符串。" + _lang_rule(prompt))
+        u = (f"故事：《{title}》\n世界观：{world or '（未知）'}\n已有角色：{cast or '（无）'}\n"
+             + (f"网上检索到的资料：\n{web[:800]}\n" if web else "")
+             + f"玩家要找的人：「{name}」")
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model,
+                               "messages": [{"role": "system", "content": sys},
+                                            {"role": "user", "content": u}],
+                               "max_tokens": 220, "temperature": 0.3},
+                              timeout=25, kind="scout")
+            txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+            d = _json.loads(txt[txt.find("{"):txt.rfind("}") + 1])
+            return {"fits": bool(d.get("fits")),
+                    "who": str(d.get("who") or "").strip()[:24],
+                    "where": str(d.get("where") or "").strip()[:12],
+                    "persona": str(d.get("persona") or "").strip()[:160]}
+        except Exception:
+            return {}
+
     def generate(self, prompt: dict[str, Any]) -> dict[str, Any]:
         if prompt.get("summarize"):
             return self._summarize(prompt)
+        if prompt.get("scout_char"):
+            return self._scout(prompt)
         if prompt.get("suggest"):
             return self._suggest(prompt)
         if prompt.get("describe_place"):

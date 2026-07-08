@@ -74,6 +74,11 @@ class MockLLM:
             digest = (prior + " " + " ".join(lines)).strip()
             return {"memory": digest[-2000:]}
 
+        # 🔎 character scout: mock says the name fits, with stub whereabouts — the
+        # minting twin's tests drive the interesting cases with their own LLMs.
+        if prompt.get("scout_char"):
+            return {"fits": True, "who": "打听来的人物", "where": "附近的去处", "persona": ""}
+
         # emergent location: deterministic stub description (real model writes the prose).
         if prompt.get("describe_place"):
             name = prompt.get("place_name", "")
