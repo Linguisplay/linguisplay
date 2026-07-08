@@ -66,14 +66,14 @@
   #choiceask .opts { display: flex; flex-direction: column; gap: 6px; }
   #choiceask button { text-align: left; font-size: 13px; border-radius: 9px; padding: 8px 12px; cursor: pointer; background: #2c2340; border: 1px solid #4a3a66; color: #e8ddf8; }
   #choiceask button:hover { background: #3a2d54; }
-  #tutov { position: fixed; inset: 0; background: #000000b8; z-index: 90; display: grid; place-items: center; }
-  #tutov.hidden { display: none; }   /* the ID rule outguns .hidden — pin it */
-  #tutov .tcard { width: min(560px, 92vw); max-height: 86vh; overflow-y: auto; background: #14141d; border: 1px solid #34344a; border-radius: 16px; padding: 20px 22px; box-shadow: 0 14px 56px rgba(0,0,0,.7); }
-  #tutov h3 { margin: 0 0 4px; color: #e8e9f2; }
-  #tutov .tsec { margin: 14px 0 0; padding: 10px 12px; background: #1a1a26; border: 1px solid #26263a; border-radius: 10px; font-size: 13.5px; line-height: 1.8; color: #cfd4e4; }
-  #tutov .tsec b { color: #aebcff; }
-  #tutov .tsec .k { display: inline-block; background: #262638; border: 1px solid #3a3a52; border-radius: 6px; padding: 0 7px; margin: 0 2px; color: #e6e9f5; font-size: 12.5px; }
-  #tutov button.go { margin-top: 16px; width: 100%; padding: 10px; border-radius: 10px; background: #2c4a35; border: 1px solid #3c6a4a; color: #dff1e3; font-size: 14px; cursor: pointer; }
+  #tutov, #howto { position: fixed; inset: 0; background: #000000b8; z-index: 90; display: grid; place-items: center; }
+  #tutov.hidden, #howto.hidden { display: none; }   /* the ID rule outguns .hidden — pin it */
+  #tutov .tcard, #howto .tcard { width: min(560px, 92vw); max-height: 86vh; overflow-y: auto; background: #14141d; border: 1px solid #34344a; border-radius: 16px; padding: 20px 22px; box-shadow: 0 14px 56px rgba(0,0,0,.7); }
+  #tutov h3, #howto h3 { margin: 0 0 4px; color: #e8e9f2; }
+  #tutov .tsec, #howto .tsec { margin: 14px 0 0; padding: 10px 12px; background: #1a1a26; border: 1px solid #26263a; border-radius: 10px; font-size: 13.5px; line-height: 1.8; color: #cfd4e4; }
+  #tutov .tsec b, #howto .tsec b { color: #aebcff; }
+  #tutov .tsec .k, #howto .tsec .k { display: inline-block; background: #262638; border: 1px solid #3a3a52; border-radius: 6px; padding: 0 7px; margin: 0 2px; color: #e6e9f5; font-size: 12.5px; }
+  #tutov button.go, #howto button.go { margin-top: 16px; width: 100%; padding: 10px; border-radius: 10px; background: #2c4a35; border: 1px solid #3c6a4a; color: #dff1e3; font-size: 14px; cursor: pointer; }
   #choiceask.fate { background: #1a1024ee; border-color: #7a4fd0; box-shadow: 0 0 24px #7a4fd066, inset 0 0 40px #00000066; }
   #choiceask.fate .q { color: #e0c8ff; font-size: 15px; }
   #choiceask .omen { display: block; font-size: 11px; color: #b48ee0; opacity: .8; margin-top: 2px; }
@@ -179,6 +179,13 @@
   .castitem .follow.locked { opacity:.5; }
   .castitem .core { font-size:10px; color:#ffd479; }
   .castitem .nextrel { font-size:9.5px; color:#8a93a8; white-space:nowrap; line-height:1.3; }
+  /* 差一点微光: within 3 of the next tier — the daily "one more step" pull lights up */
+  .castitem .nextrel.close { color:#ffd76a; text-shadow:0 0 7px rgba(255,215,106,.55); animation: nearglow 2.2s ease-in-out infinite; }
+  @keyframes nearglow { 0%,100%{opacity:.75} 50%{opacity:1} }
+  /* 分型角标: story vs sandbox are different games — the card says which */
+  .stype { font-size:10.5px; padding:1px 7px; border-radius:9px; margin-left:6px; white-space:nowrap; vertical-align:1px; }
+  .stype.st { background:rgba(122,162,255,.16); color:#9db8ff; border:1px solid rgba(122,162,255,.35); }
+  .stype.sb { background:rgba(120,220,170,.13); color:#8fdcb4; border:1px solid rgba(120,220,170,.32); }
   #clues { flex: 0 0 auto; margin: 6px 16px 0; padding: 8px 12px; border-radius: 10px; background: #161c2acc; border: 1px solid #2a3350; font-size: 12.5px; line-height: 1.7; }
   #clues .hd { color: #9fb0ff; font-weight: 600; }
   #clues .it { color: #c9c9d4; } #clues .it.done { color: #6fe0a6; }
@@ -401,6 +408,15 @@
     <div id="moveask" class="hidden"></div>
     <div id="choiceask" class="hidden"></div>
     <div id="state"></div>
+    <div id="howto" class="hidden" onclick="if(event.target===this)closeHowto()">
+      <div class="tcard">
+        <h3 class="ht-t"></h3>
+        <div class="tsec ht-1"></div>
+        <div class="tsec ht-2"></div>
+        <div class="tsec ht-3"></div>
+        <button class="go" onclick="closeHowto()"><span class="ht-go">明白了</span></button>
+      </div>
+    </div>
     <div id="tutov" class="hidden" onclick="if(event.target===this)closeTutorial()">
       <div class="tcard">
         <h3>🧭 <span class="tut-t">怎么玩</span></h3>
@@ -619,11 +635,21 @@ async function afterAuth() {
   page.items.forEach(s => {
     const div = document.createElement("div");
     div.className = "card"; div.style.margin = "10px 0"; div.style.cursor = "pointer";
+    // 分型即玩法: a story card and a sandbox card are DIFFERENT games — say so up front
+    const badge = s.sandbox
+      ? `<span class="stype sb">🏖 ${B("无尽沙盒", "Endless sandbox")}</span>`
+      : `<span class="stype st">📖 ${B(`${s.acts_count || "?"}幕 · 主线`, `${s.acts_count || "?"} acts · story`)}</span>`;
     const stats = [];
-    if (s.secrets_count) stats.push(B(`🔒 ${s.secrets_count} 个秘密`, `🔒 ${s.secrets_count} secrets`));
-    if (s.endings_count) stats.push(B(`🏆 ${s.endings_count} 种结局`, `🏆 ${s.endings_count} endings`));
-    if (s.characters_count) stats.push(B(`👥 ${s.characters_count} 个角色`, `👥 ${s.characters_count} characters`));
-    div.innerHTML = `<b>${escapeHtml(s.title)}</b>` +
+    if (s.sandbox) {
+      if (s.progression) stats.push(`🪜 ${escapeHtml(s.progression)}`);
+      stats.push(B("🌱 无主线 · 世界随你生长", "🌱 no main plot · the world grows with you"));
+      if (s.characters_count) stats.push(B(`👥 ${s.characters_count} 个角色起步`, `👥 starts with ${s.characters_count} characters`));
+    } else {
+      if (s.secrets_count) stats.push(B(`🔒 ${s.secrets_count} 个秘密`, `🔒 ${s.secrets_count} secrets`));
+      if (s.endings_count) stats.push(B(`🏆 ${s.endings_count} 种结局`, `🏆 ${s.endings_count} endings`));
+      if (s.characters_count) stats.push(B(`👥 ${s.characters_count} 个角色`, `👥 ${s.characters_count} characters`));
+    }
+    div.innerHTML = `<b>${escapeHtml(s.title)}</b> ${badge}` +
       (stats.length ? `<div class="scStats">${stats.join("　")}</div>` : "") +
       `<div class="muted" style="margin-top:4px">${escapeHtml(s.one_liner||"")}</div>`;
     div.onclick = () => chooseRole(s.id);
@@ -743,20 +769,64 @@ function fillTutorial() {
     '<b>Top bar</b>: 📱 phone (characters text you first) · 🗺 map (tap a place to travel) · 📔 dossier (unlocked truths & endings) · 🔊 sound. Tap an avatar to address that character.'));
 }
 function openTutorial() { fillTutorial(); show("tutov"); }
-function closeTutorial() { hide("tutov"); try { localStorage.setItem("lp_tut_v1", "1"); } catch (e) {} }
+function closeTutorial() {
+  hide("tutov"); try { localStorage.setItem("lp_tut_v1", "1"); } catch (e) {}
+  if (_pendingHowto) { const f = _pendingHowto; _pendingHowto = null; f(); }
+}
+// 玩法卡 (docs/ux-design.md P0): once per run, before the first beat — WHICH game is
+// this and where to watch progress. A sandbox and a story are different games; a player
+// once hunted a story character through a sandbox for 20 turns because nothing said so.
+let _pendingHowto = null;
+function maybeShowHowto(st0, run, defer) {
+  if (!st0 || !run) return;
+  try { if (localStorage.getItem(`lp_howto_${run.id}`)) return; } catch (e) {}
+  const fill = () => {
+    const T = (sel, html) => { const el = document.querySelector(sel); if (el) el.innerHTML = html; };
+    if (st0.sandbox && st0.sandbox.enabled) {
+      const ladder = (((st0.sandbox.progression || {}).ranks) || []).join(" → ");
+      T(".ht-t", B("🏖 这是一个无尽沙盒", "🏖 This is an endless sandbox"));
+      T(".ht-1", B("<b>没有固定主线，也没有结局</b>——这个世界跟着你长：想找谁、想去哪、想做什么，直接说出来，引擎会把它造成真的。",
+                   "<b>No fixed plot, no ending</b> — the world grows with you: name a person, a place, a deed, and the engine makes it real."));
+      T(".ht-2", ladder
+        ? B(`<b>你的成长阶梯</b>：${escapeHtml(ladder)}。顶栏 ⚡ 随时看进度；头像下能看到每段关系差多少升下一档。`,
+            `<b>Your ladder</b>: ${escapeHtml(ladder)}. Watch ⚡ up top; each avatar shows how close the next bond tier is.`)
+        : B("<b>经营关系</b>：头像下能看到每段关系差多少升下一档。",
+            "<b>Build bonds</b>: each avatar shows how close the next tier is."));
+      T(".ht-3", B("<b>世界自己会动</b>：离开再回来会有新鲜事等你；角色记仇也记情，约好的事TA当真。",
+                   "<b>The world keeps moving</b>: leave and return to find news; characters remember grudges, favors, and promises."));
+    } else {
+      const acts = (st0.acts || []).length;
+      const g1 = ((st0.acts || [])[0] || {}).goal || "";
+      const ecount = (st0.endings || []).length;
+      T(".ht-t", B(`📖 这是一个${acts || "多"}幕剧情本`, `📖 A ${acts || "multi"}-act story`));
+      T(".ht-1", g1
+        ? B(`<b>第一幕目标</b>：${escapeHtml(g1)}`, `<b>Act 1 goal</b>: ${escapeHtml(g1)}`)
+        : B("<b>有主线、有秘密、有结局</b>——每一幕都有要弄清的事。",
+            "<b>Main plot, secrets, endings</b> — every act has something to untangle."));
+      T(".ht-2", B(`<b>怎么推进</b>：顶栏 🎯 是当前幕目标，🔍 线索集齐、关系到位就翻下一幕${ecount ? `；共 ${ecount} 种结局` : ""}。`,
+                   `<b>How to advance</b>: 🎯 shows the act goal; gather 🔍 clues and build bonds to turn the act${ecount ? `; ${ecount} endings` : ""}.`));
+      T(".ht-3", B("<b>秘密要自己挖</b>：没有人会主动告诉你。追问、去现场翻证据、拿证据当面对质。",
+                   "<b>Secrets must be dug out</b>: press people, search places, confront with evidence."));
+    }
+    const go = document.querySelector("#howto .ht-go"); if (go) go.textContent = B("明白了，进入故事", "Got it");
+    show("howto");
+  };
+  if (defer) _pendingHowto = fill; else fill();
+}
+function closeHowto() { hide("howto"); try { localStorage.setItem(`lp_howto_${runId}`, "1"); } catch (e) {} }
 async function enterRun(run) {
   avatarMap = {};
-  try { mergeAvatars((await j(`/stories/${run.story_id}`)).characters); } catch (e) {}
+  let st0 = null;
+  try { st0 = await j(`/stories/${run.story_id}`); mergeAvatars(st0.characters); } catch (e) {}
+  isSandbox = !!(st0 && st0.sandbox && st0.sandbox.enabled);
   playMode = (run.state && run.state.mode) || "character";
   myName = (playMode === "character" && run.state && run.state.player_character_name) || B("我", "Me");
   runId = run.id;
   hide("role");
-  try { if (!localStorage.getItem("lp_tut_v1")) openTutorial(); } catch (e) {}
-  try {
-    const st0 = await j(`/stories/${run.story_id}`);
-    document.getElementById("driveBtn").classList.toggle(
-      "hidden", !(st0.sandbox && st0.sandbox.enabled) || playMode === "god");
-  } catch (e) {}
+  let tutOpen = false;
+  try { if (!localStorage.getItem("lp_tut_v1")) { openTutorial(); tutOpen = true; } } catch (e) {}
+  document.getElementById("driveBtn").classList.toggle("hidden", !isSandbox || playMode === "god");
+  maybeShowHowto(st0, run, tutOpen);
   hide("pick"); show("play"); show("backBtn"); show("soundBtn"); show("journalBtn"); show("mapBtn"); show("phoneBtn");
   resetEnded();
   chat.innerHTML = ""; suggest.innerHTML = ""; state.innerHTML = "";
@@ -888,8 +958,10 @@ function renderCast() {
       d.appendChild(t);
       // proximity hook: "差X→朋友" — the daily "one more step" pull
       if (rel.next && rel.next.name) {
-        const nx = document.createElement("span"); nx.className = "nextrel";
+        const near = (rel.next.to_next | 0) <= 3;   // 差一点 → the chip lights up
+        const nx = document.createElement("span"); nx.className = "nextrel" + (near ? " close" : "");
         nx.textContent = B(`差${rel.next.to_next}→${rel.next.name}`, `${rel.next.to_next} to ${rel.next.name}`);
+        if (near) nx.title = B("就差一点了，再聊聊", "Almost there — one more talk");
         d.appendChild(nx);
       }
     }
@@ -1475,6 +1547,10 @@ function updatePlaceholder() {
 
 function renderState(st) {
   if (!st) return;
+  if (st.act != null && st.act !== curActNum) {
+    curActNum = st.act;
+    if (lastGoal) renderGoal(lastGoal);   // act turned — restamp the pursuit bar prefix
+  }
   if (st.player_hp !== undefined) renderPlayerHp(st.player_hp);
   renderRebirth(!!st.can_reincarnate);
   if (st.money != null) { curMoney = st.money; curCurrency = st.currency || ""; }
@@ -1663,10 +1739,18 @@ function renderPromises(list) {
   el.innerHTML = s;
   el.classList.remove("hidden");
 }
+let isSandbox = false, curActNum = null, lastGoal = "";
 function renderGoal(goal) {
   queueMicrotask(refreshStrip);
+  lastGoal = goal || "";
   const el = document.getElementById("goalbar");
-  if (goal) { el.innerHTML = `🎯 <b>${B("当前目标", "Current goal")}</b>${B("：", ": ")}${escapeHtml(goal)}`; el.classList.remove("hidden"); }
+  if (goal) {
+    // 追求条: an authored story anchors the goal to its act (第2幕 ▸ …) — the player
+    // always knows which chapter of the climb they're on
+    const pre = (!isSandbox && curActNum) ? B(`第${curActNum}幕 ▸ `, `Act ${curActNum} ▸ `) : "";
+    el.innerHTML = `🎯 <b>${B("当前目标", "Current goal")}</b>${B("：", ": ")}${pre}${escapeHtml(goal)}`;
+    el.classList.remove("hidden");
+  }
   else el.classList.add("hidden");
 }
 function renderHint(hint) {

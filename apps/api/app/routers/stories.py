@@ -66,6 +66,9 @@ def _to_story(s: StoryModel) -> Story:
 
 
 def _to_card(s: StoryModel, secrets_count: int = 0) -> StoryCard:
+    sandbox = bool((s.sandbox or {}).get("enabled"))
+    ranks = ((s.sandbox or {}).get("progression") or {}).get("ranks") or []
+    ladder = " → ".join(str(r) for r in ranks if r) if sandbox else ""
     return StoryCard(
         id=s.id,
         title=s.title,
@@ -75,6 +78,9 @@ def _to_card(s: StoryModel, secrets_count: int = 0) -> StoryCard:
         secrets_count=secrets_count,
         endings_count=len(s.endings or []),
         characters_count=len(s.characters or []),
+        sandbox=sandbox,
+        acts_count=len(s.acts or []),
+        progression=ladder[:60] or None,
     )
 
 

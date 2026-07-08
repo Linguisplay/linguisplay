@@ -336,6 +336,11 @@ class StoryCard(BaseModel):
     secrets_count: int = 0
     endings_count: int = 0
     characters_count: int = 0
+    # 分型 (docs/ux-design.md P0): a sandbox plays nothing like an authored story —
+    # the card must say which game this is, or players hunt story characters in sandboxes
+    sandbox: bool = False
+    acts_count: int = 0
+    progression: Optional[str] = None  # sandbox growth ladder, e.g. 生面人 → … → 城寨王
 
 
 class StoryCardPage(BaseModel):
