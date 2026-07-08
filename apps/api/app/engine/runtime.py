@@ -3723,6 +3723,18 @@ def track_scene_frames(content: dict[str, Any], state: dict[str, Any],
     if cons:
         state["track_note"] = cons[0]
         _audit(state, "track.conflict", False, cons[0])
+    # 📈 欠账追讨: a thread teased without CONCRETE progress builds debt; at 2+ stalled
+    # turns the next anchor demands payoff (爆发/揭晓/后果), not more atmosphere.
+    prog = out.get("progressed")
+    prog = (str(prog).strip().lower() != "false") if prog is not None else True
+    hang = str(out.get("hanging") or "").strip()[:16]
+    st_prev = state.get("stall") if isinstance(state.get("stall"), dict) else None
+    if not prog:
+        state["stall"] = {"n": int((st_prev or {}).get("n") or 0) + 1,
+                          "thread": hang or (st_prev or {}).get("thread") or ""}
+        _audit(state, "stall", False, f"{state['stall']['n']}轮:{state['stall']['thread']}")
+    else:
+        state["stall"] = None
     try:
         from .. import metrics as _metrics
         _metrics.log("track", booked=booked, conflict=len(cons))
@@ -5483,6 +5495,9 @@ def run_turn_stream(
             "observer": observer,                  # 👁 god mode: no second-person player
             "drive": drive,                        # ▶ 观剧拍: director advances, player watches
             "track_note": track_note,              # 🎥 ledger-wins correction (one turn)
+            # 📈 剧情欠账: 2+ stalled turns → this turn MUST pay the thread off
+            "stall": (state.get("stall") if isinstance(state.get("stall"), dict)
+                      and int((state.get("stall") or {}).get("n") or 0) >= 2 else None),
             "heat_anchor": heat_anchor,            # 🔥 床戏阶段表 (depth-0, replaces the generic line)
             "mandate": ((state.get("mandate") or {}).get("text") or ""
                         if isinstance(state.get("mandate"), dict) else ""),  # ⚖️ 命运已定

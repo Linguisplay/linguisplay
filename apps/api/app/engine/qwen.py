@@ -157,6 +157,15 @@ def _depth_anchor(prompt: dict[str, Any]) -> str:
             (f"旁白视角铁律：「你」永远只指玩家「{_pn}」本人，其他角色一律称名字；"
              f"玩家这一轮的动作是「{_pn}」主动做出的，不是别人对TA做的，施与受绝不能写反；"
              f"玩家的衣着与身体状态没写过变化就保持原样，绝不凭空改写。"))
+    _stall = prompt.get("stall") or None
+    if isinstance(_stall, dict) and _stall.get("thread"):
+        bits.append((f"[Story debt: '{_stall['thread']}' has hung unresolved for "
+                     f"{_stall.get('n')} turns. THIS turn it must land: eruption, "
+                     f"revelation, or consequence. No more teasing, no more atmosphere.]")
+                    if en else
+                    (f"【剧情欠账】「{_stall['thread']}」已经原地悬了{_stall.get('n')}轮："
+                     f"这一轮必须让它落地出结果（爆发、揭晓或后果砸下来），"
+                     f"不许再拖、不许只是把气氛再加强一格。"))
     _tn = (prompt.get("track_note") or "").strip()
     if _tn:
         bits.append((f"[Last turn the prose conflicted with the scene ledger ({_tn}); "
@@ -2214,7 +2223,7 @@ class QwenLLM:
             '{"frames":[{"name":"角色名(原样抄写)","pos":"姿态与屋内位置(≤14字)",'
             '"doing":"手上的事(≤10字,可空)","wear":"衣着(≤10字,仅正文提到才填)"}],'
             '"player":{"pos":"...","doing":"...","wear":"..."},'
-            '"contradictions":["正文与上一帧的硬矛盾(无过渡的位置/姿态/衣着跳变),没有则空数组"]}。'
+            '"contradictions":["正文与上一帧的硬矛盾(无过渡的位置/姿态/衣着跳变),没有则空数组"]，"progressed":"本轮剧情是否有具体的事向前发生了(新事件/新决定/局面实变，单纯气氛加强或重复警告不算)，true或false","hanging":"≤16字：当前悬而未决的最大钩子(如：古镜异动将醒)，没有则空字符串"}。'
             "规则：只记录正文明确写到或可直接推断的状态；正文没提到的人，把上一帧原样抄回来；"
             "wear 只在正文出现衣着信息时才填；不要发明正文里没有的细节；"
             "只记名单里列出的具名角色：名单之外的路人、龙套、无名氏一律不记、不输出。"
@@ -2297,9 +2306,10 @@ class QwenLLM:
         tline = f"可以点到「{topics[0]}」这个话头（只许提名字，绝不许透露内容），" if topics else ""
         wf = (prompt.get("world") or "").strip().replace(chr(10), " ")[:140]
         stl = (prompt.get("style") or "").strip().split("。", 1)[0][:40]
-        sys = ("你在为一个互动剧情游戏写【玩家暂时离开】时的收尾旁白。写1~2句旁白，"
+        sys = ("你在为一个互动剧情游戏写【玩家暂时放下这一刻】的定格旁白。写1~2句，"
                "用第二人称：「你」永远只指玩家本人；在场其他人一律称名字，绝不要用无名的"
-               "「有人」「他」去指代任何人，尤其不能指玩家。留一个让人惦记的钩子："
+               "「有人」「他」去指代任何人。【铁律】玩家人在原地、姿势不变，绝不要替玩家"
+               "做任何动作（不许写你转身/你起身/你离开/你迈步这类）；写的是现场悬着的那口气："
                "在场的某个具名者欲言又止、一个反常的细节此刻才被注意到、"
                f"或一句没说完的话。{tline}要具体可感，不要总结、不要抒情空话、不要预告。"
                "所有物件与细节必须属于这个世界观，绝不能出现不属于它的现代物品。"

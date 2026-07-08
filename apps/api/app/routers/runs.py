@@ -1027,6 +1027,10 @@ def leave(run_id: str, user: User = Depends(current_user), db: Session = Depends
         return
     if int(st.get("parting_seq") or -1) == len(r.beats):
         return  # the last beat is already this leave's hook
+    # 📵 mobile visibility events spam beacons — at most one hook per 10 minutes
+    now_ts = _time_mod.time()
+    if now_ts - float(st.get("parting_ts") or 0) < 600:
+        return
     if not any(b.author == "player" for b in r.beats):
         return  # no conversation yet — nothing to hang a hook on
     persona = db.get(PersonaModel, r.persona_id)
@@ -1036,7 +1040,7 @@ def leave(run_id: str, user: User = Depends(current_user), db: Session = Depends
         db.add(BeatModel(run_id=r.id, seq=r.beats[-1].seq + 1, type="description",
                          speaker_name=None, text=b.get("text", ""), author="engine",
                          present_ids=present_ids))
-    r.state = {**st, "parting_seq": len(r.beats) + 1}
+    r.state = {**st, "parting_seq": len(r.beats) + 1, "parting_ts": now_ts}
     db.commit()
 
 
