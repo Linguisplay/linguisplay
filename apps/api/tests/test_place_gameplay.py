@@ -486,3 +486,18 @@ def test_bad_place_names_never_mint_locations():
         assert runtime.player_move_emergent(SANDBOX_MAP, st, junk, channel="do") is None, junk
     # legit new places still offer
     assert runtime.player_move_emergent(SANDBOX_MAP, st, "去炼金塔", channel="do") == "炼金塔"
+
+
+
+def test_pov_break_catches_third_person_player():
+    # embodying 萧薰儿: a description beat that NAMES her (3rd person, no 你) is a break
+    third = {"beats": [{"type": "description", "text": "萧薰儿猛地甩开对方的手，贴到铁门前。"}]}
+    assert runtime._pov_break(third, "萧薰儿") is True
+    # correct second-person narration passes
+    ok = {"beats": [{"type": "description", "text": "你猛地甩开萧炎的手，贴到铁门前。"}]}
+    assert runtime._pov_break(ok, "萧薰儿") is False
+    # a dialogue beat may name her freely
+    dlg = {"beats": [{"type": "dialogue", "text": "萧薰儿说得对。"}]}
+    assert runtime._pov_break(dlg, "萧薰儿") is False
+    # no embodied name → falls back to 我-hijack only
+    assert runtime._pov_break(third, "") is False

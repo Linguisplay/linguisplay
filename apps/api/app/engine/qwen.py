@@ -154,9 +154,11 @@ def _depth_anchor(prompt: dict[str, Any]) -> str:
              f"written; never invent changes. The player's action this turn is done BY "
              f"{_pn}, not to them.]")
             if en else
-            (f"旁白视角铁律：「你」永远只指玩家「{_pn}」本人，其他角色一律称名字；"
-             f"玩家这一轮的动作是「{_pn}」主动做出的，不是别人对TA做的，施与受绝不能写反；"
-             f"玩家的衣着与身体状态没写过变化就保持原样，绝不凭空改写。"))
+            (f"旁白视角铁律：玩家就是「{_pn}」，旁白【自始至终】用第二人称「你」称呼TA，"
+             f"绝不用「{_pn}」这个名字或「他/她」来指玩家（哪怕TA在原著里是知名角色也一样）；"
+             f"在场其他所有角色（包括原著主角）一律用名字称呼，绝不能把「你」安到别人头上。"
+             f"玩家这一轮的动作是「{_pn}」主动做出的，施与受绝不能写反；"
+             f"玩家的衣着与身体状态没写过变化就保持原样。"))
     _cl = (prompt.get("cult") or "").strip()
     if _cl:
         bits.append(_cl)
@@ -2261,8 +2263,11 @@ class QwenLLM:
         recent = (prompt.get("recent") or "").strip() or "（无）"
         en = (prompt.get("language") or "zh") == "en"
         god = bool(prompt.get("observer"))
+        _pcn = (prompt.get("player_name") or "").strip()
+        _who = f"玩家（扮演「{_pcn}」）" if _pcn else "玩家"
         label_style = ("上帝视角的一道天命决断(≤20字，如「让某人死于今晚」「命他们即刻动身」)"
-                       if god else "玩家第一人称的一句话或一个决断(≤20字)")
+                       if god else f"{_who}第一人称的一句话或一个决断(≤20字)，"
+                       "口吻与立场必须是这个角色本人")
         sys = (
             "你为一个互动剧情游戏设计一次【命运抉择】：此刻剧情里悬而未决、分量最重的那个岔路口。"
             + ("玩家是俯瞰这一切的无形命运，抉择是TA拨动世界的手。" if god else "")

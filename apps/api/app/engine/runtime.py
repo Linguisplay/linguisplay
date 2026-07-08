@@ -1790,7 +1790,8 @@ def _logic_guard(llm, prompt: dict[str, Any], directed: dict[str, Any], content:
                   and heat_mod.broke(state, prompt.get("player_input") or "",
                                      directed.get("beats", [])))
     # 🎙 fifth check: narration hijacked into a character's first person (旁白人称乱)
-    pov_broke = _pov_break(directed)
+    _pcn = _char_name(content, state.get("player_character_id")) or ""
+    pov_broke = _pov_break(directed, _pcn)
     if not verdict["hard"] and not lang_broke and not power_broke and not heat_broke             and not pov_broke:
         return directed
     # regenerate once, telling the model exactly what broke (labels only — never the secret body)
@@ -2203,9 +2204,12 @@ def fate_generate(content: dict[str, Any], state: dict[str, Any], llm,
     Returns the player-facing pending dict (effects stay server-side) or None."""
     here = scene_characters(content, state)
     loc = current_location(content, state) or {}
+    _pc = _char_by_id(content, state.get("player_character_id"))
+    _pcn = (_pc or {}).get("name") or ""
     out = llm.generate({
         "fate_choice": True,
         "observer": observer,   # 👁 god mode → options phrased as decrees of fate
+        "player_name": _pcn,    # 🎭 whose first-person voice the options speak in
         "cast": [c.get("name") for c in here if c.get("name")],
         "place": loc.get("name", ""),
         "exits": [str(e) for e in (loc.get("exits") or [])],
@@ -3897,17 +3901,24 @@ def unframed_names(content: dict[str, Any], state: dict[str, Any],
 
 # 🎙 旁白人称铁律: narration speaks to the player as 你; a description beat overrun with
 # 我 and empty of 你 is a hijacked narrator (observed in prod) — regeneratable violation.
-_POV_CORRECTION = ("上一版旁白的人称错了：旁白必须以第二人称「你」对玩家叙述；"
-                   "角色的心思用TA的台词、神态与动作透出来，绝不能把旁白写成某个角色的"
-                   "第一人称独白。重写这一轮。")
+_POV_CORRECTION = ("上一版旁白的人称错了：旁白必须自始至终用第二人称「你」称呼玩家本人，"
+                   "在场的其他所有角色（包括原著里的知名主角）一律用名字称呼，绝不能反过来"
+                   "把玩家写成第三人称（用玩家角色的名字或「他/她」指玩家），更不能把「你」安到"
+                   "别的角色身上，也不能把旁白写成某个角色的第一人称独白。重写这一轮。")
 
 
-def _pov_break(directed: dict[str, Any]) -> bool:
+def _pov_break(directed: dict[str, Any], player_name: str = "") -> bool:
+    pn = (player_name or "").strip()
     for b in directed.get("beats", []) or []:
         if b.get("type") == "dialogue":
             continue
         t = b.get("text") or ""
+        # 我-hijack: narration slipped into a character's first person
         if len(re.findall(r"我", t)) >= 3 and "你" not in t:
+            return True
+        # 3rd-person-player: the embodied character is a canonical figure (萧薰儿), so the
+        # model narrates them by name instead of 你 — the referent inversion, deterministic
+        if pn and pn in t and "你" not in t:
             return True
     return False
 
@@ -5947,7 +5958,7 @@ def run_turn_stream(
             "cast": [c.get("name") for c in all_chars if c.get("name")],
         }
         directed = llm.generate(_obs_prompt)
-        if _pov_break(directed):
+        if _pov_break(directed, _char_name(content, pcid) or ""):
             # 🎙 the looking-around narration hijacked a character's first person → one retry
             _audit(state, "pov.enforced", True, "旁白", "观察旁白人称错误，已重写")
             retry = llm.generate({**_obs_prompt, "logic_correction": _POV_CORRECTION})
