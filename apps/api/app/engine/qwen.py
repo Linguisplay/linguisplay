@@ -2822,14 +2822,20 @@ class QwenLLM:
         # speech into a NAMED bubble from its first character (旁白与台词分家) and a
         # spoken line physically cannot hide inside narration.
         seg = _LineSegmenter(speaker)
+        # a member's render is speech-only: narration it sneaks in gets dropped at parse,
+        # so those tokens must not reach the player either (draft和正文不许分家)
+        member = group_mode == "member"
         try:
             for delta in _post_chat_stream(self._url, self._key, body_r,
                                            timeout=60, kind="render"):
                 parts.append(delta)
                 for k2, who, t2 in seg.feed(delta):
+                    if member and k2 != "speech":
+                        continue
                     yield ("token", {"kind": k2, "speaker": who or speaker, "text": t2})
             for k2, who, t2 in seg.flush():
-                yield ("token", {"kind": k2, "speaker": who or speaker, "text": t2})
+                if not (member and k2 != "speech"):
+                    yield ("token", {"kind": k2, "speaker": who or speaker, "text": t2})
         except Exception:
             pass  # broke mid-stream → parse what arrived; nothing at all → fallback below
         text = "".join(parts).strip()
@@ -2841,9 +2847,16 @@ class QwenLLM:
                  or (_parse_reply(text, speaker, channel, group_mode).get("beats") or [])) \
             if text else []
         if group_mode == "member":
-            beats = [b for b in beats
-                     if (b.get("text") or "").strip("。！!（）() ") not in ("无", "")]
-            plan["beats"] = beats       # empty = silence, still a valid member render
+            dlg = [b for b in beats if b.get("type") == "dialogue"
+                   and (b.get("text") or "").strip("。！!（）() ") not in ("无", "")]
+            if not dlg:
+                # the member narrated their own line (弯引号/旁白行 dodge) — salvage the
+                # quoted words as their dialogue instead of losing them to the filter
+                import re as _re
+                spans = _re.findall(r"[「“]([^」”]{2,80})[」”]", text)
+                dlg = [{"type": "dialogue", "speaker_name": speaker, "text": sp}
+                       for sp in spans[:2]]
+            plan["beats"] = dlg         # empty = silence, still a valid member render
             yield ("final", plan)
             return
         if not beats:
