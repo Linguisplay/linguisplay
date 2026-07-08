@@ -56,11 +56,13 @@ class MockLLM:
     def plan_and_render(self, prompt: dict[str, Any]):
         """Deterministic twin of the two-beat contract (docs/plan-render.md): same
         observable result as generate(), emitted through the plan/render seam so the
-        v2 path is testable without a real model."""
+        v2 path is testable without a real model. Tokens carry {kind, text} — kind
+        follows the beat type so the client-side bubble routing is exercised too."""
         out = self.generate(prompt)
-        text = " ".join(b.get("text", "") for b in out.get("beats", []) if b.get("text"))
-        if text:
-            yield ("token", text)
+        for b in out.get("beats", []):
+            if b.get("text"):
+                yield ("token", {"kind": ("speech" if b.get("type") == "dialogue"
+                                          else "narration"), "text": b["text"]})
         yield ("final", out)
 
     def generate(self, prompt: dict[str, Any]) -> dict[str, Any]:

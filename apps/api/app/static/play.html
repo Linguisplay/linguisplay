@@ -1910,7 +1910,7 @@ async function send(chOverride) {
 // them one-by-one (typed) the moment they arrive. Used by normal turns AND confrontations.
 async function streamTurn(url, bodyObj) {
   playQ = []; playing = false; streamDone = false; firstBeat = true;
-  liveEl = null; liveText = "";
+  clearLive(); liveText = "";
   afterPlay = { suggest: null, ending: undefined, moveReq: null, moments: null, relDeltas: null, choice: null };
   renderMoveAsk(null);  // clear any prior pending move prompt
   try {
@@ -1929,7 +1929,7 @@ async function streamTurn(url, bodyObj) {
         if (!line.startsWith("data:")) continue;
         const ev = JSON.parse(line.slice(5));
         if (ev.event === "beat") { if (firstBeat){ hideTyping(); firstBeat=false; }
-          if (liveEl) { liveEl.remove(); liveEl = null; }
+          clearLive();
           if (liveText && ev.beat && ev.beat.text
               && _normLive(liveText).indexOf(_normLive(ev.beat.text).slice(0, 30)) >= 0) ev.beat._instant = true;
           playQ.push(ev.beat); pump(); }
@@ -1989,17 +1989,33 @@ async function confrontClue(fragId, charId) {
 }
 // ── streaming beat queue: play arrivals one-by-one while more stream in ──
 let playQ = [], playing = false, streamDone = false, firstBeat = true, afterPlay = null;
-// 双拍渲染的逐字直出 (docs/plan-render.md): draft prose streams into ONE live block the
-// moment the model writes it; the canonical beats then replace it (matched → instant,
-// so the reader never reads the same sentence twice).
-let liveEl = null, liveText = "";
+// 双拍渲染的逐字直出 (docs/plan-render.md): the server splits the prose stream on 「」,
+// so narration pours into a desc block and speech pours into a NAMED dialogue bubble
+// the moment each is written (旁白与台词分家，从第一个字就分). The canonical beats then
+// replace the live draft (matched → instant, so nothing reads twice).
+let liveEls = [], liveCur = null, liveKind = null, liveText = "";
 const _normLive = s => (s || "").replace(/[「」『』——…—，。！？；：、\s]/g, "");
+function clearLive() {
+  liveEls.forEach(el => el.remove());
+  liveEls = []; liveCur = null; liveKind = null;
+}
 function onToken(t) {
   if (!t || !t.text) return;
   if (firstBeat) { hideTyping(); firstBeat = false; }
-  if (!liveEl) { liveEl = document.createElement("div"); liveEl.className = "desc"; chat.appendChild(liveEl); }
   liveText += t.text;
-  liveEl.textContent = liveText;
+  const kind = t.kind === "speech" ? "speech" : "narration";
+  if (!liveCur || kind !== liveKind) {
+    liveKind = kind;
+    if (kind === "speech") {
+      liveCur = makeTypingRow("left", t.speaker || "");   // .said CSS adds the 「」
+      liveEls.push(liveCur.closest(".row"));
+    } else {
+      liveCur = document.createElement("div"); liveCur.className = "desc";
+      chat.appendChild(liveCur);
+      liveEls.push(liveCur);
+    }
+  }
+  liveCur.textContent += t.text;
   chat.scrollTop = chat.scrollHeight;
 }
 async function pump() {

@@ -1173,25 +1173,36 @@ def generate_and_move(content: dict[str, Any], state: dict[str, Any], place_name
     cur = current_location(content, state)
     story = content.get("story") or {}
     world = story.get("world_facts") or story.get("world_long") or ""
-    detail = ""
+    detail, clean = "", ""
     try:
-        detail = (llm.generate({"describe_place": True, "place_name": place_name, "world": world,
-                                "from_place": (cur or {}).get("name", ""),
-                                "mature": bool(state.get("mature"))}) or {}).get("detail") or ""
+        dp = llm.generate({"describe_place": True, "place_name": place_name, "world": world,
+                           "from_place": (cur or {}).get("name", ""),
+                           "mature": bool(state.get("mature"))}) or {}
+        detail = dp.get("detail") or ""
+        clean = (dp.get("name") or "").strip()
     except Exception:
         detail = ""
+    # 地名提炼: the player's raw phrase may be a whole intent（「铁皮顶那屋摸个底」）—
+    # the describe call distills the PLACE out of it, so the map never holds an action.
+    # If the distilled name matches a place that already exists, go there instead.
+    final_name = clean or place_name
+    if clean and clean != place_name:
+        existing = resolve_location(content, clean)
+        if existing and existing.get("id"):
+            state["location_id"] = existing["id"]
+            return existing
     import uuid
     lid = "loc_gen_" + uuid.uuid4().hex[:8]
     back = [(cur or {}).get("name")] if cur and cur.get("name") else []
-    new_loc = {"id": lid, "name": place_name, "detail": detail.strip(),
+    new_loc = {"id": lid, "name": final_name, "detail": detail.strip(),
                "exits": back, "unlock": {}, "generated": True}
     story.setdefault("locations", []).append(new_loc)
     content["story"] = story
     # link current place → new place so the exit shows up (and you can walk back and forth)
     if cur is not None:
         exits = cur.setdefault("exits", [])
-        if place_name not in exits:
-            exits.append(place_name)
+        if final_name not in exits:
+            exits.append(final_name)
     state["location_id"] = lid
     return new_loc
 
@@ -6131,7 +6142,9 @@ def run_turn_stream(
             directed = None
             for _pr_kind, _pr_val in llm.plan_and_render(prompt):
                 if _pr_kind == "token":
-                    yield ("token", {"speaker": sp_name, "text": _pr_val})
+                    tok = _pr_val if isinstance(_pr_val, dict) else \
+                        {"kind": "narration", "text": str(_pr_val)}
+                    yield ("token", {"speaker": sp_name, **tok})
                 elif _pr_kind == "final":
                     directed = _pr_val
             if directed is None:  # backend yielded nothing usable — old contract

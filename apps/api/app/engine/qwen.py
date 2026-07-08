@@ -2042,16 +2042,26 @@ class QwenLLM:
         name = (prompt.get("place_name") or "").strip()
         world = (prompt.get("world") or "").replace("\n", " ")[:400]
         frm = (prompt.get("from_place") or "").strip()
-        sys = ("你在为一个互动剧情游戏即时生成一个新地点的环境描写。只写这个地点里此刻实际能看到的"
-               "具体陈设、光线、声响、气味，30~60字，一段话，第三人称、有画面感、贴合世界观；"
-               "画面里不要出现任何人物，不要台词，不要解释或标题。" + _lang_rule(prompt))
-        u = f"世界观：{world or '（未知）'}\n新地点名称：{name}\n玩家刚从「{frm or '别处'}」走过来。\n只输出这段环境描写。"
+        sys = ("你在为一个互动剧情游戏即时生成一个新地点。输出两行：\n"
+               "第一行：把玩家的原话提炼成一个干净的【地名】（2~8字，只留地点本体，"
+               "去掉动作、目的和语气，如「铁皮顶那屋摸个底」→「铁皮顶屋」、"
+               "「去后巷看看情况」→「后巷」；原话本身已是干净地名就照抄）。\n"
+               "第二行：这个地点的环境描写：只写此刻实际能看到的具体陈设、光线、声响、气味，"
+               "30~60字，一段话，第三人称、有画面感、贴合世界观；画面里不要出现任何人物，"
+               "不要台词，不要解释或标题。" + _lang_rule(prompt))
+        u = f"世界观：{world or '（未知）'}\n玩家的原话：{name}\n玩家刚从「{frm or '别处'}」走过来。\n输出两行。"
         try:
             resp = _post_chat(self._url, self._key,
                               {"model": self._model, "messages": [{"role": "system", "content": sys},
-                      {"role": "user", "content": u}], "max_tokens": 200, "temperature": 0.85},
+                      {"role": "user", "content": u}], "max_tokens": 220, "temperature": 0.85},
                               timeout=25)
-            return {"detail": (resp.json()["choices"][0]["message"]["content"] or "").strip()}
+            txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+            lines = [l.strip().strip("「」\"'") for l in txt.splitlines() if l.strip()]
+            clean = lines[0][:12] if lines else ""
+            detail = " ".join(lines[1:]).strip() if len(lines) > 1 else ""
+            if not detail:      # model collapsed to one line — treat it as the detail
+                clean, detail = "", lines[0] if lines else ""
+            return {"name": clean, "detail": detail}
         except Exception:
             return {"detail": ""}
 
@@ -2695,11 +2705,31 @@ class QwenLLM:
         if prompt.get("mature"):
             body_r["frequency_penalty"] = 0.3
         parts: list[str] = []
+        # 「」 state machine: tokens are routed as narration vs speech WHILE they stream,
+        # so the client can pour them into the right bubble live (旁白与台词分家 —
+        # without this the draft reads as one narration block with quotes inside it).
+        inside = False
         try:
             for delta in _post_chat_stream(self._url, self._key, body_r,
                                            timeout=60, kind="render"):
                 parts.append(delta)
-                yield ("token", delta)
+                cur: list[str] = []
+                for ch in delta:
+                    if ch == "「" and not inside:
+                        if cur:
+                            yield ("token", {"kind": "narration", "text": "".join(cur)})
+                            cur = []
+                        inside = True
+                    elif ch == "」" and inside:
+                        if cur:
+                            yield ("token", {"kind": "speech", "text": "".join(cur)})
+                            cur = []
+                        inside = False
+                    else:
+                        cur.append(ch)
+                if cur:
+                    yield ("token", {"kind": "speech" if inside else "narration",
+                                     "text": "".join(cur)})
         except Exception:
             pass  # broke mid-stream → parse what arrived; nothing at all → fallback below
         text = "".join(parts).strip()
