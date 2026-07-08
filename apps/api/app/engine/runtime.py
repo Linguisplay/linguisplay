@@ -554,6 +554,20 @@ def _own_rank_line(content: dict[str, Any], state: dict[str, Any], char: dict[st
     return "".join(bits)
 
 
+def clip_sentence(s: str, n: int) -> str:
+    """Cut at the last COMPLETE sentence within n chars — a bio must end like a sentence,
+    never trail off mid-word or with an ellipsis (Yi: 简介以…结束)."""
+    s = (s or "").strip().rstrip("…·.")
+    if len(s) <= n:
+        return s
+    cut = s[:n]
+    best = max(cut.rfind(p) for p in "。！？!?；;")
+    if best >= n // 3:
+        return cut[:best + 1]
+    i = max(cut.rfind("，"), cut.rfind(","))
+    return (cut[:i] + "。") if i >= n // 3 else cut
+
+
 # 🥊 竞技合同 (Yi): an agreed contest + the player's start signal = the dice decide NOW
 _CONTEST_RE = re.compile(
     r"(开始吧|开始了|来吧|放马过来|出招|开打|动手吧|上吧|见真章|分个高下|比试|切磋|较量"
@@ -4613,8 +4627,8 @@ def mint_sought_character(content: dict[str, Any], state: dict[str, Any], name: 
     char = {
         "id": f"gen_{_uuid.uuid4().hex[:8]}",
         "name": nm,
-        "role": (scout.get("who") or "").strip()[:24] or "打听来的人物",
-        "persona_text": (scout.get("persona") or scout.get("who") or "").strip()[:160],
+        "role": clip_sentence(scout.get("who") or "", 24).rstrip("。") or "打听来的人物",
+        "persona_text": clip_sentence(scout.get("persona") or scout.get("who") or "", 200),
         "relation_default": "stranger",
         "home_location_id": loc.get("id"),
         "generated": True,
@@ -5436,7 +5450,7 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
             import uuid as _uuid
             parts = _re.split(r"[｜|：:，,]", nc_raw, maxsplit=1)
             nc_name = parts[0].strip().strip("「」\"'")[:12]
-            nc_desc = (parts[1].strip() if len(parts) > 1 else "")[:120]
+            nc_desc = clip_sentence(parts[1].strip() if len(parts) > 1 else "", 140)
             exists = any((c.get("name") or "") == nc_name for c in _characters(content))
             if nc_name and exists:
                 _audit(state, "new_char", False, nc_name, "已有同名角色，不重复登场")

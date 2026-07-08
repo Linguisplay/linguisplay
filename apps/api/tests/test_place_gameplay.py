@@ -373,6 +373,15 @@ def test_scout_denial_denies_honestly_and_mints_nothing():
                for p in llm.prompts)
 
 
+def test_bios_end_like_sentences():
+    """简介不许以…结束 (Yi): clips land on sentence boundaries, ellipses stripped."""
+    long = "他是城寨里最会看人下菜的掌柜。年轻时跑过船，见过风浪。如今只想守着铺子过安稳日子，可惜树欲静而风不止，总有旧相识找上门来"
+    out = runtime.clip_sentence(long, 40)
+    assert out.endswith("。") and len(out) <= 40
+    assert runtime.clip_sentence("短的。", 40) == "短的。"
+    assert runtime.clip_sentence("尾巴是省略号的简介……", 40) == "尾巴是省略号的简介"
+
+
 def test_compound_qu_never_mints_a_destination():
     """「擦去汗水」的去不是出发 (Yi): 去 as a compound-verb tail must not trigger
     movement — neither known-place moves nor emergent destination minting."""

@@ -2989,14 +2989,14 @@ class QwenLLM:
                               {"model": self._model,
                                "messages": [{"role": "system", "content": sys},
                                             {"role": "user", "content": u}],
-                               "max_tokens": 220, "temperature": 0.3},
+                               "max_tokens": 320, "temperature": 0.3},
                               timeout=25, kind="scout")
             txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
             d = _json.loads(txt[txt.find("{"):txt.rfind("}") + 1])
             return {"fits": bool(d.get("fits")),
-                    "who": str(d.get("who") or "").strip()[:24],
+                    "who": str(d.get("who") or "").strip()[:30],
                     "where": str(d.get("where") or "").strip()[:12],
-                    "persona": str(d.get("persona") or "").strip()[:160]}
+                    "persona": str(d.get("persona") or "").strip()[:220]}
         except Exception:
             return {}
 
