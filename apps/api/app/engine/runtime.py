@@ -4465,9 +4465,11 @@ def _pov_break(directed: dict[str, Any], player_name: str = "") -> bool:
         if b.get("type") == "dialogue":
             continue
         t = b.get("text") or ""
-        # 我-hijack: narration slipped into a character's first person. Quoted speech
-        # inside narration may legitimately say 我 — strip 「」 spans, then judge.
+        # 我-hijack: narration slipped into a character's first person. Two spans may
+        # legitimately say 我 — quoted speech (「…」) and 你-anchored interiority
+        # (「你心里只有一个念头：我不能输」) — strip both, then judge what's left.
         bare = re.sub(r"「[^」]*」", "", t)
+        bare = re.sub(r"：[^。！？!?]*", "", bare)
         if len(re.findall(r"我", bare)) >= 2:
             return True
         # 3rd-person-player: the player is 你, ALWAYS — their name appearing in narration
