@@ -1651,7 +1651,7 @@ async function openCharCard(cid) {
       <button class="ghost" onclick="document.getElementById('charcard').remove()">${B("关闭", "Close")}</button></div>
     <div class="chead">${av}<div class="cmeta">
       ${p.role ? `<div class="jwho">${escapeHtml(p.role)}</div>` : ""}
-      <div class="cdesc">${escapeHtml((p.persona_text || "").slice(0, 90))}${(p.persona_text||"").length>90?"…":""}</div>
+      <div class="cdesc">${escapeHtml(p.persona_text || "")}</div>
       ${p.where ? `<div class="jwho">📍 ${escapeHtml(p.where)}</div>` : ""}
       ${p.hp === "hurt" ? `<div class="jwho">${B("🩸 带着伤", "🩸 Wounded")}</div>` : p.hp === "dying" ? `<div class="jwho" style="color:#ff7a7a">${B("🩸 重伤濒死，需要救治", "🩸 Dying — needs help now")}</div>` : ""}
       ${followBtn}
