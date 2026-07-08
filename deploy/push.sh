@@ -9,6 +9,7 @@ rsync -av \
   --exclude='.venv' --exclude='__pycache__' --exclude='*.pyc' \
   --exclude='*.db' --exclude='data/' --exclude='.pytest_cache' \
   --exclude='node_modules' --exclude='dist' --exclude='.env' \
+  --exclude='metrics.jsonl' \
   "$LOCAL/apps/api/" "$REMOTE/apps/api/"
 
 # deploy scripts + env
