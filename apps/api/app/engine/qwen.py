@@ -1613,6 +1613,13 @@ def _render_directive(prompt: dict[str, Any], speaker: str, outline: list[str]) 
     if outline:
         L.append("【导演分镜·已定案】这一拍按此顺序演出来，不加戏、不预支后续剧情：\n"
                  + "\n".join(f"{i + 1}. {s}" for i, s in enumerate(outline)))
+    if prompt.get("group_mode") == "member":
+        pl = (prompt.get("persona") or {}).get("name") or "对方"
+        L.append(f"【输出格式·铁律】你是这一拍插话的成员。只输出「{speaker}：」开头的台词行"
+                 f"（1~2行，行首是你的名字，话在「」里），不写任何旁白行。"
+                 f"只说你自己的话：别人问{pl}的问题由{pl}自己答，绝不替TA作答。"
+                 "这一刻不想接话，就只输出一行：无")
+        return "\n".join(L)
     if channel == "think":
         L.append(f"【输出格式·铁律】逐行输出，每行以「旁白：」开头，写第三人称的内心独白式旁白"
                  f"（共3~5句），细腻写出「{player_namesafe(prompt)}」此刻的思绪、身体感官、"
@@ -2826,9 +2833,19 @@ class QwenLLM:
         except Exception:
             pass  # broke mid-stream → parse what arrived; nothing at all → fallback below
         text = "".join(parts).strip()
+        if group_mode == "member" and text.strip("。！!（）() ") in ("无", "-", ""):
+            plan["beats"] = []          # a member choosing silence is a VALID render
+            yield ("final", plan)
+            return
         beats = (_parse_line_beats(text)
                  or (_parse_reply(text, speaker, channel, group_mode).get("beats") or [])) \
             if text else []
+        if group_mode == "member":
+            beats = [b for b in beats
+                     if (b.get("text") or "").strip("。！!（）() ") not in ("无", "")]
+            plan["beats"] = beats       # empty = silence, still a valid member render
+            yield ("final", plan)
+            return
         if not beats:
             yield ("final", self.generate(prompt))
             return
@@ -2875,6 +2892,33 @@ class QwenLLM:
                     "persona": str(d.get("persona") or "").strip()[:160]}
         except Exception:
             return {}
+
+    def narrate_stream(self, prompt: dict[str, Any]):
+        """Streamed twin of the narration-only paths (observe/想/intro/transition):
+        plain prose, zero judgments, yielded as narration tokens then ONE description
+        beat. Any failure falls back to the generate() shape — never worse, only live."""
+        speaker = prompt.get("speaker_name") or "角色"
+        system = (_build_intro_system(prompt) if prompt.get("intro") else
+                  _build_transition_system(prompt) if prompt.get("transition") else
+                  _build_observe_system(prompt)) + _lang_rule(prompt)
+        messages = _turn_messages(prompt, system, speaker)
+        body = {"model": self._model, "messages": messages,
+                "max_tokens": 600, "temperature": 0.85, "presence_penalty": 0.3}
+        parts: list[str] = []
+        try:
+            for delta in _post_chat_stream(self._url, self._key, body,
+                                           timeout=60, kind="render"):
+                parts.append(delta)
+                yield ("token", {"kind": "narration", "text": delta})
+        except Exception:
+            pass
+        text = "".join(parts).strip()
+        if not text:
+            yield ("final", self.generate(prompt))
+            return
+        yield ("final", {"beats": [{"type": "description", "speaker_name": None,
+                                    "text": text}],
+                         "affinity_delta": 0, "advance_act": False, "ending": None})
 
     def generate(self, prompt: dict[str, Any]) -> dict[str, Any]:
         if prompt.get("summarize"):

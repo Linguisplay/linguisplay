@@ -278,6 +278,14 @@ class _LangLLM:
             prompt = {**prompt, "language": self._lang}
         yield from self._inner.plan_and_render(prompt)
 
+    def narrate_stream(self, prompt: dict[str, Any]):
+        if not hasattr(self._inner, "narrate_stream"):
+            yield ("final", self.generate(prompt))
+            return
+        if isinstance(prompt, dict) and "language" not in prompt:
+            prompt = {**prompt, "language": self._lang}
+        yield from self._inner.narrate_stream(prompt)
+
 
 def lang_llm(llm: LLM, content: dict[str, Any]) -> LLM:
     lang = lang_of(content)
@@ -6142,9 +6150,11 @@ def run_turn_stream(
             # what the others have ALREADY said this turn → react, don't echo
             "said_this_turn": list(said_this_turn),
         }
-        if is_primary and plan_render_on(content) and hasattr(llm, "plan_and_render"):
+        if plan_render_on(content) and hasattr(llm, "plan_and_render"):
             # 双拍合同 (docs/plan-render.md): the prose streams out token-by-token while
             # it's being written; the judgments arrived in the fast plan beat before it.
+            # Members ride the same seam: their line-protocol render is speech-only and
+            # 「无」 is a valid (silent) result — no fallback double-call on silence.
             directed = None
             for _pr_kind, _pr_val in llm.plan_and_render(prompt):
                 if _pr_kind == "token":
@@ -6344,7 +6354,18 @@ def run_turn_stream(
             "memory": (state.get("memory_by_char", {}) or {}).get(pcid) or state.get("memory", ""),
             "cast": [c.get("name") for c in all_chars if c.get("name")],
         }
-        directed = llm.generate(_obs_prompt)
+        if plan_render_on(content) and hasattr(llm, "narrate_stream"):
+            # 想/观察也逐字直出 — narration-only, so every token is kind=narration
+            directed = None
+            for _ns_kind, _ns_val in llm.narrate_stream(_obs_prompt):
+                if _ns_kind == "token":
+                    yield ("token", {"speaker": "", **_ns_val})
+                elif _ns_kind == "final":
+                    directed = _ns_val
+            if directed is None:
+                directed = llm.generate(_obs_prompt)
+        else:
+            directed = llm.generate(_obs_prompt)
         if _pov_break(directed, _char_name(content, pcid) or ""):
             # 🎙 the looking-around narration hijacked a character's first person → one retry
             _audit(state, "pov.enforced", True, "旁白", "观察旁白人称错误，已重写")
