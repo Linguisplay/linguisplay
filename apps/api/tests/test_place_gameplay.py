@@ -373,6 +373,23 @@ def test_scout_denial_denies_honestly_and_mints_nothing():
                for p in llm.prompts)
 
 
+def test_compound_qu_never_mints_a_destination():
+    """「擦去汗水」的去不是出发 (Yi): 去 as a compound-verb tail must not trigger
+    movement — neither known-place moves nor emergent destination minting."""
+    sb = {"story": {"id": "q", "sandbox": {"enabled": True},
+                    "characters": [{"id": "c1", "name": "Mara", "is_lead": True}],
+                    "acts": [{"index": 1, "title": "一"}],
+                    "locations": [{"id": "l1", "name": "校场", "exits": []}]},
+          "secrets": []}
+    st = {**runtime.default_state(), "location_id": "l1"}
+    for phrase in ("我擦去汗水", "抹去眼角的湿意", "拭去剑上的血",
+                   "望去远处的山", "他死去多年了", "我失去了耐心"):
+        assert runtime.player_move(sb, st, phrase, "do") is None, phrase
+        assert runtime.player_move_emergent(sb, st, phrase, "do") is None, phrase
+    # real departures still depart
+    assert runtime.player_move_emergent(sb, st, "我去后巷看看", "do") == "后巷"
+
+
 def test_apply_move_walks_multi_hop_now():
     m = {"story": {"id": "m5", "characters": [], "acts": [{"index": 1, "title": "一"}],
                    "locations": [

@@ -3865,7 +3865,11 @@ _MOVE_OTHER_RE = re.compile(
     r"(?:你|您|你们|他|她|它|TA|他们|她们)\s*(?:先|自己)?\s*(?:去|回|前往)"
     r"|(?:让|叫|派|请|带|催|送)\s*\S{1,6}?(?:去|回|前往)")
 _MOVE_DEST_ZH = re.compile(
-    r"(?:前往|走到|走去|走回|赶到|赶去|赶回|动身去|出发去|走进|进入|踏入|穿过|去(?!死|了)|回到|回(?!头|想|忆|味|应|答|复|收|避|绝|放|礼|敬|嘴|神|过头))"
+    r"(?:前往|走到|走去|走回|赶到|赶去|赶回|动身去|出发去|走进|进入|踏入|穿过"
+    # 去 only counts as SETTING OUT when it isn't the tail of a compound verb —
+    # 擦去汗水/抹去/拭去/失去/死去/褪去/望去 never mint「汗水」as a destination
+    r"|(?<![擦抹拭挥拂褪失死逝除减略抛甩撇掸洗刮剪削隐退散拿送递寄捎传望看离夺])去(?!死|了)"
+    r"|回到|回(?!头|想|忆|味|应|答|复|收|避|绝|放|礼|敬|嘴|神|过头))"
     r"([^，。！？!?,.;；、\s]{1,20})")
 # directionless leave (「离开」「出去」): only unambiguous with exactly ONE way out
 _LEAVE_RE = re.compile(r"^(?:我)?(?:先)?(?:离开|出去|出门)(?:这里|这儿|吧|了)?$")
@@ -4502,7 +4506,9 @@ def player_pose(state: dict[str, Any], player_input: str, channel: str = "do") -
 
 
 # 🔎 找人: 「去找X」 pops a confirmable "TA此刻在Y" prompt — and X WILL be there.
-_SEEK_RE_ZH = re.compile(r"(?:去找|去见|找|见)\s*([^，。！？!?,.、\s]{1,12})")
+_SEEK_RE_ZH = re.compile(
+    r"(?:去找|去见|(?<![寻搜查])找|(?<![意遇碰撞听看再相偏成瞧望瞥])见)"
+    r"\s*([^，。！？!?,.、\s]{1,12})")
 _SEEK_RE_EN = re.compile(r"\b(?:find|look for|go see|visit)\s+([A-Za-z' ]{2,30})", re.IGNORECASE)
 
 
