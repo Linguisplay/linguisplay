@@ -3515,7 +3515,8 @@ _MOVE_DEST_ZH = re.compile(
 _LEAVE_RE = re.compile(r"^(?:我)?(?:先)?(?:离开|出去|出门)(?:这里|这儿|吧|了)?$")
 # a plausible PLACE NAME never contains pronouns, gaze verbs or question tails —
 # the parser once minted a location called 「头看看他跟不跟」 (from 回头看看…)
-_BAD_PLACE_RE = re.compile(r"[他她你我您谁]|看看|跟不跟|[吗呢吧么]$")
+_BAD_PLACE_RE = re.compile(r"[他她你我您谁]|看看|跟不跟|[吗呢吧么]$"
+                           r"|^(情况|动静|热闹|究竟|风景|一眼|一圈|一趟|一下)$")
 
 
 def _bad_place_name(n: str) -> bool:
