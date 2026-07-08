@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     # (Tavily) instead of the model's own knowledge.
     tavily_api_key: str = ""
 
+    # plan/render 双拍合同 (docs/plan-render.md): the primary speaker's turn runs as a fast
+    # structured plan call + a streamed prose render instead of one overloaded call.
+    # Default OFF; a story can override either way via tuning.plan_render (pilot switch).
+    plan_render: bool = False
+
     # Logic backstop: after the addressed character's turn is generated, a deterministic guard
     # verifies it against the live scene (no absent character walks in, no locked secret leaks)
     # and regenerates once if broken. On by default; set LOGIC_GUARD=0 to disable.

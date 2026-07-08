@@ -1760,13 +1760,17 @@ async function playBeat(b) {
   if (pendingSfx) { const n = pendingSfx; pendingSfx = null; playSfx(n); }
   if (b.type === "description") {
     const node = document.createElement("div"); node.className = "desc"; chat.appendChild(node);
-    await typeInto(node, b.text, 16);   // narration types a bit faster
+    if (b._instant) node.textContent = b.text || "";   // already read as live tokens
+    else await typeInto(node, b.text, 16);   // narration types a bit faster
   } else {
-    showTyping(b.speaker_name || "");
-    await sleep(450 + Math.random()*500);   // "thinking" beat before they speak
-    hideTyping();
+    if (!b._instant) {
+      showTyping(b.speaker_name || "");
+      await sleep(450 + Math.random()*500);   // "thinking" beat before they speak
+      hideTyping();
+    }
     const txt = makeTypingRow("left", b.speaker_name || "");
-    await typeInto(txt, b.text, 22);
+    if (b._instant) { txt.textContent = b.text || ""; }
+    else await typeInto(txt, b.text, 22);
     if (b.mood) { const row = txt.closest(".row"); if (row) attachMood(row, b.mood); }
   }
   chat.scrollTop = chat.scrollHeight;
@@ -1906,6 +1910,7 @@ async function send(chOverride) {
 // them one-by-one (typed) the moment they arrive. Used by normal turns AND confrontations.
 async function streamTurn(url, bodyObj) {
   playQ = []; playing = false; streamDone = false; firstBeat = true;
+  liveEl = null; liveText = "";
   afterPlay = { suggest: null, ending: undefined, moveReq: null, moments: null, relDeltas: null, choice: null };
   renderMoveAsk(null);  // clear any prior pending move prompt
   try {
@@ -1923,7 +1928,12 @@ async function streamTurn(url, bodyObj) {
         const line = buf.slice(0, idx).trim(); buf = buf.slice(idx+2);
         if (!line.startsWith("data:")) continue;
         const ev = JSON.parse(line.slice(5));
-        if (ev.event === "beat") { if (firstBeat){ hideTyping(); firstBeat=false; } playQ.push(ev.beat); pump(); }
+        if (ev.event === "beat") { if (firstBeat){ hideTyping(); firstBeat=false; }
+          if (liveEl) { liveEl.remove(); liveEl = null; }
+          if (liveText && ev.beat && ev.beat.text
+              && _normLive(liveText).indexOf(_normLive(ev.beat.text).slice(0, 30)) >= 0) ev.beat._instant = true;
+          playQ.push(ev.beat); pump(); }
+        else if (ev.event === "token") { onToken(ev.t); }
         else if (ev.event === "state") { renderState(ev.state); }
         else if (ev.event === "scene") { applyScene(ev.scene); }
         else if (ev.event === "cast") { updateCast(ev.cast); }
@@ -1979,6 +1989,19 @@ async function confrontClue(fragId, charId) {
 }
 // ── streaming beat queue: play arrivals one-by-one while more stream in ──
 let playQ = [], playing = false, streamDone = false, firstBeat = true, afterPlay = null;
+// 双拍渲染的逐字直出 (docs/plan-render.md): draft prose streams into ONE live block the
+// moment the model writes it; the canonical beats then replace it (matched → instant,
+// so the reader never reads the same sentence twice).
+let liveEl = null, liveText = "";
+const _normLive = s => (s || "").replace(/[「」『』——…—，。！？；：、\s]/g, "");
+function onToken(t) {
+  if (!t || !t.text) return;
+  if (firstBeat) { hideTyping(); firstBeat = false; }
+  if (!liveEl) { liveEl = document.createElement("div"); liveEl.className = "desc"; chat.appendChild(liveEl); }
+  liveText += t.text;
+  liveEl.textContent = liveText;
+  chat.scrollTop = chat.scrollHeight;
+}
 async function pump() {
   if (playing) return; playing = true;
   while (playQ.length) await playBeat(playQ.shift());

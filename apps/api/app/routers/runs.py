@@ -549,6 +549,11 @@ def play(
                 if kind == "phone":
                     yield _event({"event": "phone", "message": payload})
                     continue
+                if kind == "token":
+                    # 双拍合同的渲染拍逐 token 直出 — not persisted; the assembled beats
+                    # follow as normal "beat" events and are the durable record.
+                    yield _event({"event": "token", "t": payload})
+                    continue
                 if kind == "beat":
                     eb = BeatModel(
                         run_id=run_id, seq=seq, type=payload.get("type", "description"),
@@ -914,6 +919,8 @@ def confront(run_id: str, body: ConfrontIn, user: User = Depends(current_user),
             for kind, payload in gen:
                 if kind == "dice":
                     yield _event({"event": "dice", "dice": payload})
+                elif kind == "token":
+                    yield _event({"event": "token", "t": payload})
                 elif kind == "beat":
                     eb = BeatModel(run_id=run_id, seq=seq, type=payload.get("type", "description"),
                                    speaker_name=payload.get("speaker_name"),

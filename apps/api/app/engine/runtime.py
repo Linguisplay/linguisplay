@@ -270,12 +270,30 @@ class _LangLLM:
             prompt = {**prompt, "language": self._lang}
         return self._inner.generate(prompt)
 
+    def plan_and_render(self, prompt: dict[str, Any]):
+        if not hasattr(self._inner, "plan_and_render"):
+            yield ("final", self.generate(prompt))
+            return
+        if isinstance(prompt, dict) and "language" not in prompt:
+            prompt = {**prompt, "language": self._lang}
+        yield from self._inner.plan_and_render(prompt)
+
 
 def lang_llm(llm: LLM, content: dict[str, Any]) -> LLM:
     lang = lang_of(content)
     if lang == "zh" or isinstance(llm, _LangLLM):
         return llm
     return _LangLLM(llm, lang)
+
+
+def plan_render_on(content: dict[str, Any]) -> bool:
+    """plan/render 双拍合同 (docs/plan-render.md): engine default from settings, story
+    tuning overrides either way (the single-story pilot switch). zh only for now — the
+    render beat's speech splitter is 「」-shaped."""
+    t = (content.get("story") or {}).get("tuning") or {}
+    on = bool(t["plan_render"]) if isinstance(t, dict) and "plan_render" in t \
+        else bool(get_settings().plan_render)
+    return on and lang_of(content) == "zh"
 
 
 def _t(content: dict[str, Any], zh: str, en: str) -> str:
@@ -6004,7 +6022,19 @@ def run_turn_stream(
             # what the others have ALREADY said this turn → react, don't echo
             "said_this_turn": list(said_this_turn),
         }
-        directed = llm.generate(prompt)
+        if is_primary and plan_render_on(content) and hasattr(llm, "plan_and_render"):
+            # 双拍合同 (docs/plan-render.md): the prose streams out token-by-token while
+            # it's being written; the judgments arrived in the fast plan beat before it.
+            directed = None
+            for _pr_kind, _pr_val in llm.plan_and_render(prompt):
+                if _pr_kind == "token":
+                    yield ("token", {"speaker": sp_name, "text": _pr_val})
+                elif _pr_kind == "final":
+                    directed = _pr_val
+            if directed is None:  # backend yielded nothing usable — old contract
+                directed = llm.generate(prompt)
+        else:
+            directed = llm.generate(prompt)
         if prompt.get("broken_promise"):
             # the grudge got its scene — from here on it's history, not a broken record
             for p in (state.get("promises") or []):

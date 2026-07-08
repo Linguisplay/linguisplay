@@ -25,6 +25,11 @@ class LLM(Protocol):
                                    # (only honored if it matches an authored location)
         }
         Keys other than "beats" are optional; runtime reads them defensively with .get().
+
+        Backends MAY also provide plan_and_render(prompt) — a generator yielding
+        ("token", str) while prose streams, then ("final", <generate()-shaped dict>).
+        The runtime feature-detects it with hasattr; absence just means the old
+        single-beat contract (docs/plan-render.md).
         """
         ...
 
@@ -47,6 +52,16 @@ def get_llm() -> "LLM":
 
 class MockLLM:
     """Deterministic stand-in. Reflects gate decisions so behavior is observable."""
+
+    def plan_and_render(self, prompt: dict[str, Any]):
+        """Deterministic twin of the two-beat contract (docs/plan-render.md): same
+        observable result as generate(), emitted through the plan/render seam so the
+        v2 path is testable without a real model."""
+        out = self.generate(prompt)
+        text = " ".join(b.get("text", "") for b in out.get("beats", []) if b.get("text"))
+        if text:
+            yield ("token", text)
+        yield ("final", out)
 
     def generate(self, prompt: dict[str, Any]) -> dict[str, Any]:
         # suggestions: mock returns none → runtime falls back to its deterministic template.

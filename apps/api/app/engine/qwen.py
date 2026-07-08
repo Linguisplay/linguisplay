@@ -69,6 +69,47 @@ def _post_chat(url: str, key: str, body: dict, timeout: int = 25,
     raise last  # type: ignore[misc]
 
 
+def _post_chat_stream(url: str, key: str, body: dict, timeout: int = 60,
+                      kind: str = "render"):
+    """Streaming twin of _post_chat: yields content deltas as they arrive. One metrics
+    line per call carries total ms + time-to-first-token (the latency number the player
+    actually feels). No transport retry: a stream that breaks mid-way hands back what
+    already arrived (the call site decides), one that breaks before the first byte
+    raises so the call site can degrade."""
+    import json
+    t0 = _time.perf_counter()
+    ttft = 0
+    try:
+        with httpx.stream("POST", url,
+                          headers={"Authorization": f"Bearer {key}",
+                                   "Content-Type": "application/json"},
+                          json={**body, "stream": True}, timeout=timeout) as resp:
+            resp.raise_for_status()
+            for line in resp.iter_lines():
+                if not line or not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    delta = ((json.loads(data)["choices"][0].get("delta") or {})
+                             .get("content"))
+                except Exception:
+                    continue
+                if delta:
+                    if not ttft:
+                        ttft = int((_time.perf_counter() - t0) * 1000)
+                    yield delta
+        metrics.log("llm", kind=kind, ok=True,
+                    ms=int((_time.perf_counter() - t0) * 1000), ttft=ttft,
+                    model=str(body.get("model") or ""))
+    except Exception:
+        metrics.log("llm", kind=kind, ok=False,
+                    ms=int((_time.perf_counter() - t0) * 1000), ttft=ttft,
+                    model=str(body.get("model") or ""))
+        raise
+
+
 # 18+ permission block, appended only when the run is mature (story flagged 18+ and the
 # player is age-gated 18+ at signup). Mirrors the old persona R18 feature.
 _R18_BLOCK = (
@@ -881,6 +922,44 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
         "parameters": {"type": "object", "properties": props, "required": required}}}
 
 
+# plan/render 双拍合同 (docs/plan-render.md): the plan beat judges, the render beat writes.
+# Prose fields leave the plan tool; every judgment field keeps its render_turn name and
+# semantics, so _parse_tool_args and the settle cascade serve both contracts unchanged.
+_PLAN_DROPS = ("inner_read", "narration", "speech")
+
+
+def _plan_tool(prompt: dict[str, Any], speaker: str, observer: bool,
+               group_mode: str | None, channel: str, advance_hint: str) -> dict[str, Any]:
+    """The plan_turn schema = render_turn minus prose, plus grounding + outline (the shot
+    list the render beat performs). Built FROM _render_tool so the judgment fields can
+    never drift apart between the two contracts."""
+    tool = _render_tool(prompt, speaker, observer, group_mode, channel, advance_hint)
+    fn = tool["function"]
+    props: dict[str, Any] = fn["parameters"]["properties"]
+    for f in _PLAN_DROPS:
+        props.pop(f, None)
+    required = [r for r in fn["parameters"]["required"] if r not in _PLAN_DROPS]
+    head: dict[str, Any] = {
+        "grounding": {"type": "string", "description":
+                      "两个短语（各≤12字，引擎不展示）：①此刻在场的只有谁；"
+                      "②对方情绪+哪件事还不能说破。别把不在场的人排进分镜，别替玩家做决定。"},
+        "outline": {"type": "array", "minItems": 1, "maxItems": 4,
+                    "items": {"type": "string"},
+                    "description": "这一拍的分镜：按顺序1~4条、每条≤20字，写谁做什么/透露什么/"
+                                   "情绪怎么转；开口说话只概括用意，不写台词原文。"
+                                   "只排当下这一拍，不预支后续剧情。"},
+    }
+    fn["parameters"]["properties"] = {**head, **props}
+    fn["parameters"]["required"] = ["grounding", "outline"] + required
+    fn["name"] = "plan_turn"
+    # 速度铁律: every needlessly-emitted empty field is latency the player feels — the
+    # plan beat sits BEFORE the first visible token (docs/plan-render.md TTFT budget).
+    fn["description"] = ("导演拍：先落实场面事实，再给出这一拍的分镜与结算裁决。不写正文。"
+                         "【只输出有内容的字段】：判断为空字符串/空数组/0/false 的可选字段"
+                         "一律直接省略，不要输出。")
+    return tool
+
+
 def _output_spec(prompt: dict[str, Any], speaker: str, observer: bool,
                  group_mode: str | None, channel: str, advance_hint: str) -> str:
     """Output contract = ONE natural Chinese-fiction passage where every spoken line is in
@@ -1495,6 +1574,140 @@ def _separate_speech(narration: str, dialogue: str) -> tuple[str, str]:
     clean_narr = re.sub(r'\s{2,}', " ", " ".join(p for p in narr_parts if p)).strip()
     speech = " ".join(s for s in speech_parts if s).strip()
     return clean_narr, speech
+
+
+def _render_directive(prompt: dict[str, Any], speaker: str, outline: list[str]) -> str:
+    """The render beat's closing instruction: the plan's shot list plus a prose-only
+    contract (channel-aware, mirrors _output_spec's leads). No metadata lines — every
+    judgment already lives in the plan, the prose only has to perform it."""
+    channel = prompt.get("channel") or "say"
+    L: list[str] = []
+    if outline:
+        L.append("【导演分镜·已定案】这一拍按此顺序演出来，不加戏、不预支后续剧情：\n"
+                 + "\n".join(f"{i + 1}. {s}" for i, s in enumerate(outline)))
+    if channel == "think":
+        L.append(f"【写法】写一段第三人称的内心独白式旁白（3~5句），细腻写出「{player_namesafe(prompt)}」"
+                 "此刻的思绪、身体感官、周遭环境的微妙变化。这一轮【没有任何台词，绝不要出现「」对白】。")
+    elif channel == "do":
+        L.append(f"【写法】写成一段自然的第三人称中文小说叙事（3~6句）：先把玩家那个【动作】造成的"
+                 f"具体、连锁的后果一步步演出来，再带出在场角色的神态。用「{speaker}」的名字称呼自己，"
+                 "绝不用「我」。你这一轮若开口，每句台词都用「」括进叙事；只用动作神态回应也可以。")
+    elif prompt.get("observer"):
+        L.append(f"【写法】写成一段自然的第三人称中文小说叙事（2~5句），铺陈在场众人此刻的互动、"
+                 f"气氛与神态。「{speaker}」对其他人说出口的每句话都用「」括进叙事。")
+    else:
+        L.append(f"【写法】写成一段自然的第三人称中文小说叙事（2~5句），写出对方这句话此刻激起的"
+                 f"神态、动作、气氛。用「{speaker}」的名字称呼自己，绝不用「我」。你【被直接搭话，"
+                 "必须开口】：说出口的每一句话都用「」括进叙事，哪怕冷淡、敷衍、拒答。"
+                 "【铁律】凡是说出口的话都必须在「」里；「」之外只写动作、神态、环境。")
+    L.append("只写正文：不要元数据行、不要编号、不要标题、不要解释。")
+    return "\n".join(L)
+
+
+def _turn_messages(prompt: dict[str, Any], system: str, speaker: str) -> list[dict[str, str]]:
+    """Assemble the message stream for one turn (history, cued user line, depth anchor,
+    same-turn said lines, re-anchor, optional guard correction). Extracted from generate()
+    verbatim so the plan and render beats see EXACTLY the context the single-beat contract
+    saw — one assembly, three call sites."""
+    intro = bool(prompt.get("intro"))
+    transition = bool(prompt.get("transition"))
+    en = (prompt.get("language") or "zh") == "en"
+    channel = prompt.get("channel") or "say"
+    player_input = prompt.get("player_input", "")
+    history = prompt.get("history") or []
+
+    is_observer = bool(prompt.get("observer"))
+    # 🌐 the cues that sit RIGHT AT the generation point pull the output language far
+    # harder than anything buried in the system prompt — for en stories they must be
+    # English, or the model keeps drifting back into Chinese.
+    offstage = ("(Off-stage direction, no one in the scene hears this: {})" if en
+                else "（画外引导，场景里无人听见：{}）")
+    messages = [{"role": "system", "content": system}]
+    if not intro and not transition:
+        hist = history[-14:]  # recent turns for continuity (matches MEMORY_WINDOW)
+        if is_observer:
+            # 👁 god mode: the viewer's lines are STAGE DIRECTIONS, never audible —
+            # mark every one (current AND past) so no character ever "hears" them
+            hist = [dict(m, content=offstage.format(m.get("content", "")))
+                    if m.get("role") == "user" and m.get("content")
+                    and not str(m.get("content", "")).startswith(("（画外引导",
+                                                                  "(Off-stage direction"))
+                    else m for m in hist]
+        messages += hist
+    # observe/intro/transition is a one-off narration; nudge with a neutral cue
+    if en:
+        cue = ("(The story opens.)" if intro else
+               "(A new act begins.)" if transition else
+               "(You look around.)" if not prompt.get("observe_target")
+               else "(You study them closely.)")
+    else:
+        cue = ("（开场）" if intro else "（进入新的一幕）" if transition else
+               "（观察四周）" if not prompt.get("observe_target") else "（打量这个人）")
+    if prompt.get("drive") and not player_input:
+        cue = ("(The player just watches this beat. You are the director: move the "
+               "story FORWARD one concrete step.)" if en else
+               "（这一拍玩家没有说话也没有行动，只是看着。你是导演：让剧情主动向前走一步。）")
+    user_content = player_input or cue
+    if is_observer and player_input:
+        user_content = offstage.format(player_input)
+    elif player_input and not intro and not transition:
+        # 🎬 depth-0 channel marker: the raw text of a 做/想 turn reads exactly like a
+        # spoken line, so mark WHAT it is right where generation happens — the system
+        # prompt's channel rules alone don't survive a long history.
+        pl = (prompt.get("persona") or {}).get("name") or ("the player" if en else "玩家")
+        if channel == "do":
+            user_content = (f"(ACTION — {pl} physically does this, without saying it: "
+                            f"{player_input})" if en else
+                            f"（{pl}【做出动作】，并没有开口说话：{player_input}）")
+        elif channel == "think":
+            user_content = (f"({pl} thinks this to themselves — unspoken, inaudible: "
+                            f"{player_input})" if en else
+                            f"（{pl}只在心里想，没有说出口，谁也听不见：{player_input}）")
+    # DEPTH INJECTION (SillyTavern @Depth trick): besides the full world_facts/place in
+    # the system prompt (which history pushes far from the generation point), restate a
+    # SHORT physical anchor right next to the user's turn. Adjacency makes the model
+    # adhere far better — fixes the "drifts/contradicts the physical world" problem.
+    if not intro and not transition:
+        anchor = _depth_anchor(prompt)
+        if anchor:
+            user_content = f"{user_content}\n\n{anchor}"
+    if en:
+        # recency nudge: the LAST thing before generation states the output language
+        user_content = f"{user_content}\n\n(Reply entirely in English.)"
+    messages.append({"role": "user", "content": user_content})
+    # GROUP TURNS: put what others ALREADY said THIS turn into the message stream as
+    # assistant turns (not just the system prompt) so this speaker CONTINUES the
+    # conversation instead of re-answering the player from scratch (which caused verbatim
+    # echo between co-present characters).
+    said_appended = False
+    for s in (prompt.get("said_this_turn") or []):
+        if s.get("text"):
+            sp = s.get("speaker") or ("Narrator" if en else "旁白")
+            sep = ": " if en else "："
+            messages.append({"role": "assistant", "content": f"{sp}{sep}{s['text']}"})
+            said_appended = True
+    if said_appended:
+        # RE-ANCHOR whose turn it is. Without this, generation continues the assistant
+        # chain conversationally — e.g. the primary just asked the PLAYER a question, so
+        # the "natural next line" is the player's ANSWER, and a member speaks it as if
+        # it were their own (the 十二少-answers-for-the-player bug). A closing user-role
+        # cue breaks that continuation: the model now responds to the cue AS ITSELF.
+        pl = (prompt.get("persona") or {}).get("name") or ("them" if en else "对方")
+        if en:
+            messages.append({"role": "user", "content":
+                             f"(Your turn: speak only as {speaker}, in English. If anyone "
+                             f"above asked {pl} a question, {pl} answers it themselves. "
+                             f"Never answer for {pl}. Stay silent if you have nothing "
+                             f"to add.)"})
+        else:
+            messages.append({"role": "user", "content":
+                             f"（该你了：只以「{speaker}」自己的身份接话。上面若有人向{pl}发问，"
+                             f"要由{pl}自己来答——你绝不能替{pl}作答。不想搭话就保持沉默。）"})
+    # a logic-guard regeneration passes a targeted correction (what broke last attempt)
+    corr = prompt.get("logic_correction")
+    if corr:
+        messages.append({"role": "system", "content": corr})
+    return messages
 
 
 def _build_summary_system() -> str:
@@ -2400,6 +2613,80 @@ class QwenLLM:
         detail = " ".join(lines[1:])[:120] if len(lines) > 1 else ""
         return {"name": name, "detail": detail}
 
+    def plan_and_render(self, prompt: dict[str, Any]):
+        """两拍合同 (docs/plan-render.md)。拍1 plan_turn：函数调用，只裁决＋出分镜，低温快包；
+        拍2 render：照分镜写纯散文，stream=true 逐 token 流出。渲染拍不产生任何状态，所以
+        它不可能弄脏状态。Yields ("token", str) while prose streams, then ("final", directed)
+        — directed 的形状与 generate() 返回完全一致，settle 级联零改动。
+        任何一拍整体失败都回退旧单拍合同：flag 打开永远不会比旧路径更糟，只会更快。
+        目前仅服务 zh 剧本的角色回合（en 的引号切分器与旁白路径仍走旧拍）。"""
+        import json
+        speaker = prompt.get("speaker_name") or "角色"
+        channel = prompt.get("channel") or "say"
+        group_mode = prompt.get("group_mode")
+        nt = prompt.get("next_act_title")
+        advance_hint = (f"本幕目标已达成、可进入下一幕《{nt}》时填 true，否则 false" if nt
+                        else "本章已是最后一章，填 false")
+        system = _build_system(prompt) + _lang_rule(prompt)
+        messages = _turn_messages(prompt, system, speaker)
+
+        # ── 拍1 · 导演：落实场面 → 分镜 → 结算裁决（整包，但小而快） ──
+        plan: dict[str, Any] | None = None
+        outline: list[str] = []
+        try:
+            body_p = {"model": self._model, "messages": messages,
+                      "max_tokens": 500, "temperature": 0.4,
+                      "tools": [_plan_tool(prompt, speaker, bool(prompt.get("observer")),
+                                           group_mode, channel, advance_hint)],
+                      "tool_choice": {"type": "function",
+                                      "function": {"name": "plan_turn"}}}
+            resp = _post_chat(self._url, self._key, body_p, timeout=30, kind="plan")
+            msg = resp.json()["choices"][0]["message"]
+            tool_calls = msg.get("tool_calls") or []
+            if tool_calls:
+                args = ((tool_calls[0] or {}).get("function") or {}).get("arguments")
+                plan = _parse_tool_args(args, speaker, channel, group_mode)
+                try:
+                    raw = json.loads(args or "{}")
+                    outline = [str(x).strip() for x in (raw.get("outline") or [])
+                               if str(x).strip()][:4]
+                except Exception:
+                    outline = []
+        except Exception:
+            plan = None
+        if plan is None:
+            yield ("final", self.generate(prompt))
+            return
+
+        # ── 拍2 · 演员：照分镜写正文，逐 token 流出 ──
+        body_r = {"model": self._model,
+                  "messages": messages + [{"role": "system",
+                                           "content": _render_directive(prompt, speaker,
+                                                                        outline)}],
+                  "max_tokens": 900 if prompt.get("mature") else 600,
+                  "temperature": 0.85, "presence_penalty": 0.3}
+        if prompt.get("mature"):
+            body_r["frequency_penalty"] = 0.3
+        parts: list[str] = []
+        try:
+            for delta in _post_chat_stream(self._url, self._key, body_r,
+                                           timeout=60, kind="render"):
+                parts.append(delta)
+                yield ("token", delta)
+        except Exception:
+            pass  # broke mid-stream → parse what arrived; nothing at all → fallback below
+        text = "".join(parts).strip()
+        beats = _parse_reply(text, speaker, channel, group_mode).get("beats") or [] \
+            if text else []
+        if not beats:
+            yield ("final", self.generate(prompt))
+            return
+        plan["beats"] = beats
+        ending = plan.get("ending")
+        if isinstance(ending, dict) and not str(ending.get("reason") or "").strip():
+            ending["reason"] = text[:200]  # the plan judged it before the prose existed
+        yield ("final", plan)
+
     def generate(self, prompt: dict[str, Any]) -> dict[str, Any]:
         if prompt.get("summarize"):
             return self._summarize(prompt)
@@ -2449,101 +2736,7 @@ class QwenLLM:
                   _build_transition_system(prompt) if transition else
                   _build_observe_system(prompt) if observe else _build_system(prompt))
         system += _lang_rule(prompt)  # 🌐 en story → perform in English
-        en = (prompt.get("language") or "zh") == "en"
-        player_input = prompt.get("player_input", "")
-        history = prompt.get("history") or []
-
-        is_observer = bool(prompt.get("observer"))
-        # 🌐 the cues that sit RIGHT AT the generation point pull the output language far
-        # harder than anything buried in the system prompt — for en stories they must be
-        # English, or the model keeps drifting back into Chinese.
-        offstage = ("(Off-stage direction, no one in the scene hears this: {})" if en
-                    else "（画外引导，场景里无人听见：{}）")
-        messages = [{"role": "system", "content": system}]
-        if not intro and not transition:
-            hist = history[-14:]  # recent turns for continuity (matches MEMORY_WINDOW)
-            if is_observer:
-                # 👁 god mode: the viewer's lines are STAGE DIRECTIONS, never audible —
-                # mark every one (current AND past) so no character ever "hears" them
-                hist = [dict(m, content=offstage.format(m.get("content", "")))
-                        if m.get("role") == "user" and m.get("content")
-                        and not str(m.get("content", "")).startswith(("（画外引导",
-                                                                      "(Off-stage direction"))
-                        else m for m in hist]
-            messages += hist
-        # observe/intro/transition is a one-off narration; nudge with a neutral cue
-        if en:
-            cue = ("(The story opens.)" if intro else
-                   "(A new act begins.)" if transition else
-                   "(You look around.)" if not prompt.get("observe_target")
-                   else "(You study them closely.)")
-        else:
-            cue = ("（开场）" if intro else "（进入新的一幕）" if transition else
-                   "（观察四周）" if not prompt.get("observe_target") else "（打量这个人）")
-        if prompt.get("drive") and not player_input:
-            cue = ("(The player just watches this beat. You are the director: move the "
-                   "story FORWARD one concrete step.)" if en else
-                   "（这一拍玩家没有说话也没有行动，只是看着。你是导演：让剧情主动向前走一步。）")
-        user_content = player_input or cue
-        if is_observer and player_input:
-            user_content = offstage.format(player_input)
-        elif player_input and not intro and not transition:
-            # 🎬 depth-0 channel marker: the raw text of a 做/想 turn reads exactly like a
-            # spoken line, so mark WHAT it is right where generation happens — the system
-            # prompt's channel rules alone don't survive a long history.
-            pl = (prompt.get("persona") or {}).get("name") or ("the player" if en else "玩家")
-            if channel == "do":
-                user_content = (f"(ACTION — {pl} physically does this, without saying it: "
-                                f"{player_input})" if en else
-                                f"（{pl}【做出动作】，并没有开口说话：{player_input}）")
-            elif channel == "think":
-                user_content = (f"({pl} thinks this to themselves — unspoken, inaudible: "
-                                f"{player_input})" if en else
-                                f"（{pl}只在心里想，没有说出口，谁也听不见：{player_input}）")
-        # DEPTH INJECTION (SillyTavern @Depth trick): besides the full world_facts/place in
-        # the system prompt (which history pushes far from the generation point), restate a
-        # SHORT physical anchor right next to the user's turn. Adjacency makes the model
-        # adhere far better — fixes the "drifts/contradicts the physical world" problem.
-        if not intro and not transition:
-            anchor = _depth_anchor(prompt)
-            if anchor:
-                user_content = f"{user_content}\n\n{anchor}"
-        if en:
-            # recency nudge: the LAST thing before generation states the output language
-            user_content = f"{user_content}\n\n(Reply entirely in English.)"
-        messages.append({"role": "user", "content": user_content})
-        # GROUP TURNS: put what others ALREADY said THIS turn into the message stream as
-        # assistant turns (not just the system prompt) so this speaker CONTINUES the
-        # conversation instead of re-answering the player from scratch (which caused verbatim
-        # echo between co-present characters).
-        said_appended = False
-        for s in (prompt.get("said_this_turn") or []):
-            if s.get("text"):
-                sp = s.get("speaker") or ("Narrator" if en else "旁白")
-                sep = ": " if en else "："
-                messages.append({"role": "assistant", "content": f"{sp}{sep}{s['text']}"})
-                said_appended = True
-        if said_appended:
-            # RE-ANCHOR whose turn it is. Without this, generation continues the assistant
-            # chain conversationally — e.g. the primary just asked the PLAYER a question, so
-            # the "natural next line" is the player's ANSWER, and a member speaks it as if
-            # it were their own (the 十二少-answers-for-the-player bug). A closing user-role
-            # cue breaks that continuation: the model now responds to the cue AS ITSELF.
-            pl = (prompt.get("persona") or {}).get("name") or ("them" if en else "对方")
-            if en:
-                messages.append({"role": "user", "content":
-                                 f"(Your turn: speak only as {speaker}, in English. If anyone "
-                                 f"above asked {pl} a question, {pl} answers it themselves. "
-                                 f"Never answer for {pl}. Stay silent if you have nothing "
-                                 f"to add.)"})
-            else:
-                messages.append({"role": "user", "content":
-                                 f"（该你了：只以「{speaker}」自己的身份接话。上面若有人向{pl}发问，"
-                                 f"要由{pl}自己来答——你绝不能替{pl}作答。不想搭话就保持沉默。）"})
-        # a logic-guard regeneration passes a targeted correction (what broke last attempt)
-        corr = prompt.get("logic_correction")
-        if corr:
-            messages.append({"role": "system", "content": corr})
+        messages = _turn_messages(prompt, system, speaker)
 
         body = {
             "model": self._model,
