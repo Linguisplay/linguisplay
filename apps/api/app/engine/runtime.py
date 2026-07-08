@@ -2238,8 +2238,8 @@ def fate_generate(content: dict[str, Any], state: dict[str, Any], llm,
             dest = resolve_location(content, target)
             if dest and dest.get("id"):
                 target = dest["id"]
-            elif not (sandbox_on(content) and len(str(target)) >= 2):
-                kind, target = "story", ""      # closed map / no name → direction only
+            elif not (sandbox_on(content) and not _bad_place_name(str(target))):
+                kind, target = "story", ""      # closed map / bad name → direction only
         elif kind == "identity":
             target = str(target)[:12]
             if not target:
@@ -3509,10 +3509,20 @@ _MOVE_OTHER_RE = re.compile(
     r"(?:你|您|你们|他|她|它|TA|他们|她们)\s*(?:先|自己)?\s*(?:去|回|前往)"
     r"|(?:让|叫|派|请|带|催|送)\s*\S{1,6}?(?:去|回|前往)")
 _MOVE_DEST_ZH = re.compile(
-    r"(?:前往|走到|走去|走回|赶到|赶去|赶回|动身去|出发去|走进|进入|踏入|穿过|去|回到|回)"
+    r"(?:前往|走到|走去|走回|赶到|赶去|赶回|动身去|出发去|走进|进入|踏入|穿过|去(?!死|了)|回到|回(?!头|想|忆|味|应|答|复|收|避|绝|放|礼|敬|嘴|神|过头))"
     r"([^，。！？!?,.;；、\s]{1,20})")
 # directionless leave (「离开」「出去」): only unambiguous with exactly ONE way out
 _LEAVE_RE = re.compile(r"^(?:我)?(?:先)?(?:离开|出去|出门)(?:这里|这儿|吧|了)?$")
+# a plausible PLACE NAME never contains pronouns, gaze verbs or question tails —
+# the parser once minted a location called 「头看看他跟不跟」 (from 回头看看…)
+_BAD_PLACE_RE = re.compile(r"[他她你我您谁]|看看|跟不跟|[吗呢吧么]$")
+
+
+def _bad_place_name(n: str) -> bool:
+    n = (n or "").strip()
+    return not n or len(n) < 2 or len(n) > 12 or n in _DEICTIC or bool(_BAD_PLACE_RE.search(n))
+
+
 # deictics that name a direction, not a place — never a generatable destination
 _DEICTIC = ("哪里", "哪儿", "那里", "这里", "那边", "这边", "前面", "后面",
             "里面", "外面", "附近", "别处", "远处")
@@ -3618,6 +3628,8 @@ def player_move_emergent(content: dict[str, Any], state: dict[str, Any], player_
             continue
         if ref[0] in "找见寻接等约":
             continue                      # 「去找X」「去见X」 are seeks, not places
+        if _bad_place_name(ref):
+            continue                      # pronouns/gaze/question tails are never places
         if resolve_location(content, ref):
             continue                      # known place → player_move's business, not ours
         if any(n == ref or n in ref for n in names):
@@ -4605,7 +4617,7 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
                 _drop_pins_on_leave(state, (cur_l or {}).get("id"))
                 state["location_id"] = dest_l["id"]
                 _audit(state, "move.narrated", True, mv_to)
-            elif not dest_l and sandbox_on(content):
+            elif not dest_l and sandbox_on(content) and not _bad_place_name(mv_to):
                 try:
                     generate_and_move(content, state, mv_to, llm=llm)
                     flags["content_mutated"] = True    # run grew a location → persist content

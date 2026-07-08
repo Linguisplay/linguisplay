@@ -477,3 +477,12 @@ def test_ba_stash_form_still_books_from_history():
     hist = [{"role": "assistant", "content": "他把那根竹竿递到你面前。"}]
     got = runtime.accept_item(MAP, st, "把竹竿收进背包", channel="do", history=hist)
     assert got and got[0]["name"] == "竹竿"
+
+
+def test_bad_place_names_never_mint_locations():
+    st = {**runtime.default_state(), "location_id": "hall"}
+    # 「回头看看…」 minted a location in prod — pronouns/gaze/question tails are barred
+    for junk in ("回头看看他跟不跟", "去你那里", "去看看情况", "回味一下"):
+        assert runtime.player_move_emergent(SANDBOX_MAP, st, junk, channel="do") is None, junk
+    # legit new places still offer
+    assert runtime.player_move_emergent(SANDBOX_MAP, st, "去炼金塔", channel="do") == "炼金塔"
