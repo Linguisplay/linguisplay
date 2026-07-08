@@ -127,6 +127,12 @@ def test_line_protocol_parse_and_stream():
         joined[(k, w)] = joined.get((k, w), "") + t
     assert joined[("narration", None)] == "方叔摸出一根烟。"
     assert joined[("speech", "方叔")] == "那屋啊。"
+    # 台词行只有话: （动作神态）从解析和流式两层都剥掉（小舞替玩家收回手的病例）
+    beats2 = _parse_line_beats("小舞：「（装作若无其事地收回手）哎呀，手滑了。」")
+    assert beats2[0]["text"] == "哎呀，手滑了。"
+    seg2 = _LineSegmenter("小舞")
+    t2 = "".join(t for _, _, t in seg2.feed("小舞：「（挠了挠头）手滑了。」\n"))
+    assert t2 == "手滑了。"
 
 
 def test_tokens_stream_before_beats_and_plan_settles():

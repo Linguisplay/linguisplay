@@ -1658,8 +1658,11 @@ def _render_directive(prompt: dict[str, Any], speaker: str, outline: list[str]) 
     if prompt.get("group_mode") == "member":
         pl = (prompt.get("persona") or {}).get("name") or "对方"
         L.append(f"【输出格式·铁律】你是这一拍插话的成员。只输出「{speaker}：」开头的台词行"
-                 f"（1~2行，行首是你的名字，话在「」里），不写任何旁白行。"
-                 f"只说你自己的话：别人问{pl}的问题由{pl}自己答，绝不替TA作答。"
+                 f"（1~2行，行首是你的名字，话在「」里），不写任何旁白行、"
+                 f"台词里也不许夹（动作神态）——你只有嘴。"
+                 f"只说你自己的话：别人问{pl}的问题由{pl}自己答，绝不替TA作答；"
+                 f"【{pl}刚做的事是{pl}做的】——TA的手、TA的动作、TA惹的事，"
+                 f"轮不到你替TA收场或找补，你只能以自己的身份对这件事说话（笑话TA/骂TA/看热闹都行）。"
                  "这一刻不想接话，就只输出一行：无")
         return "\n".join(L)
     if channel == "think":
@@ -1711,6 +1714,7 @@ class _LineSegmenter:
         self._head = ""        # undecided start of the current line
         self._kind: str | None = None
         self._who: str | None = None
+        self._paren = 0        # （动作）depth inside a speech line — suppressed live
 
     def _decide(self, out: list) -> None:
         m = _line_prefix_re().match(self._head)
@@ -1743,12 +1747,22 @@ class _LineSegmenter:
                 _flush_seg()
                 if self._kind is None and self._head.strip():
                     out.append(("narration", None, self._head))
-                self._head, self._kind, self._who = "", None, None
+                self._head, self._kind, self._who, self._paren = "", None, None, 0
                 continue
             if self._kind is None:
                 self._head += ch
                 self._decide(out)
             else:
+                # a speech line carries WORDS only — （动作神态） never reaches the bubble
+                if self._kind == "speech":
+                    if ch in "（(":
+                        self._paren += 1
+                        continue
+                    if ch in "）)" and self._paren:
+                        self._paren -= 1
+                        continue
+                    if self._paren:
+                        continue
                 seg.append(ch)
         _flush_seg()
         # speech text carries no 「」 — the UI's .said style re-adds the quotes
@@ -1779,7 +1793,10 @@ def _parse_line_beats(text: str) -> list[dict[str, Any]] | None:
                 if body:
                     beats.append({"type": "description", "speaker_name": None, "text": body})
             else:
+                import re as _re2
                 body = body.strip().strip("「」『』“”\"'")
+                # 台词行只有说出口的话 — （动作神态）夹带一律剥掉（动作属于旁白行）
+                body = _re2.sub(r"[（(][^）)]*[）)]", "", body).strip()
                 if body:
                     beats.append({"type": "dialogue", "speaker_name": who[:12], "text": body})
         else:
@@ -2947,9 +2964,10 @@ class QwenLLM:
                 # the member narrated their own line (弯引号/旁白行 dodge) — salvage the
                 # quoted words as their dialogue instead of losing them to the filter
                 import re as _re
-                spans = _re.findall(r"[「“]([^」”]{2,80})[」”]", text)
+                spans = [_re.sub(r"[（(][^）)]*[）)]", "", sp).strip()
+                         for sp in _re.findall(r"[「“]([^」”]{2,80})[」”]", text)]
                 dlg = [{"type": "dialogue", "speaker_name": speaker, "text": sp}
-                       for sp in spans[:2]]
+                       for sp in spans[:2] if sp]
             plan["beats"] = dlg         # empty = silence, still a valid member render
             yield ("final", plan)
             return
