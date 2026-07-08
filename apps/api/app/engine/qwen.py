@@ -2357,6 +2357,12 @@ class QwenLLM:
              if call else
              f"TA不在你身边，是通过{device}给你捎话。你在忙你自己的事，回不回、回多少、什么语气，"
              "全凭你此刻的心情和你们的关系。"),
+            ("【通话铁律】对方【看不见】你：挑眉、摆手、扬下巴这些一概不存在，绝不写任何动作神态、"
+             "绝不用（括号）描述自己；能被听见的动静（火柴声、风声、你把东西放下）只写进「背景」那一行。"
+             if call else
+             "【短信体铁律】你发的是消息，不是小说：对方只看得到字，看不见你——绝不写动作、神态、"
+             "场景描写，绝不用（括号）写你在做什么。像真人打字：每条短（20字内为佳），"
+             "想说的多就拆成两三条连发；可以省略主语、可以带语气词，但绝不要台词腔的长句。"),
             "【铁律】你只能基于下面列出的「可透露信息」谈及内情；此外的任何秘密你都不知道，绝不能写出来——"
             "被追问就回避、岔开，或干脆不回。" if (reveal or new_reveal or has_hidden) else "",
             ("【TA这句话问到了要害，你守不住了——把下面这个实情，用你自己的话、你此刻的情绪说出来"
@@ -2422,7 +2428,11 @@ class QwenLLM:
                 msgs = []
                 break
             else:
-                msgs.append(s.strip("「」\"'")[:120])
+                # 短信体强制: stage directions can't ride a text message — strip any
+                # （动作神态）chunks; a line that was ONLY narration disappears entirely
+                s = _re.sub(r"[（(][^）)]*[）)]", "", s).strip()
+                if s:
+                    msgs.append(s.strip("「」\"'")[:120])
         out: dict[str, Any] = {"msgs": msgs[:3], "closeness": dc, "romance": dr,
                                "coming": coming, "task": task}
         if call:
