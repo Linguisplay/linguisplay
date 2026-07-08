@@ -4415,9 +4415,10 @@ def _pov_break(directed: dict[str, Any], player_name: str = "") -> bool:
         # 我-hijack: narration slipped into a character's first person
         if len(re.findall(r"我", t)) >= 3 and "你" not in t:
             return True
-        # 3rd-person-player: the embodied character is a canonical figure (萧薰儿), so the
-        # model narrates them by name instead of 你 — the referent inversion, deterministic
-        if pn and pn in t and "你" not in t:
+        # 3rd-person-player: the player is 你, ALWAYS — their name appearing in narration
+        # at all is the referent inversion (worst form: 「你」 pinned on an NPC while the
+        # player walks by in third person — the field case had BOTH in one beat)
+        if pn and pn in t:
             return True
     return False
 
@@ -6434,6 +6435,15 @@ def run_turn_stream(
                 directed = llm.generate(prompt)
         else:
             directed = llm.generate(prompt)
+        # 🎙 人称守卫 (Yi field case: 「你」被安到NPC头上、玩家名字进旁白): the referent
+        # inversion is deterministic to catch — one corrective rewrite, then settle.
+        _pn_guard = ((_char_name(content, pcid) if pcid else "")
+                     or (persona_for_prompt or {}).get("name") or "")
+        if is_primary and not observer and _pov_break(directed, _pn_guard):
+            _audit(state, "pov.enforced", True, sp_name, "旁白人称错位，已重写")
+            _rt = llm.generate({**prompt, "logic_correction": _POV_CORRECTION})
+            if _rt.get("beats") and not _pov_break(_rt, _pn_guard):
+                directed = _rt
         if prompt.get("broken_promise"):
             # the grudge got its scene — from here on it's history, not a broken record
             for p in (state.get("promises") or []):

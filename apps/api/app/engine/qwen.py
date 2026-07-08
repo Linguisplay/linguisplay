@@ -1639,6 +1639,7 @@ def _render_directive(prompt: dict[str, Any], speaker: str, outline: list[str]) 
                 f"写出对方这句话此刻激起的神态、动作、气氛。")
         must_speak = ("" if channel == "do" or prompt.get("observer") else
                       f"你被直接搭话，必须至少有一行「{speaker}：」的台词行，哪怕冷淡、敷衍、拒答。")
+        pl = player_namesafe(prompt)
         L.append(
             "【输出格式·铁律】逐行输出，每行是独立的一拍，行首必须声明身份，只有两种行：\n"
             f"旁白：一段第三人称叙事（{lead}用「{speaker}」的名字称呼自己，绝不用「我」）\n"
@@ -1646,6 +1647,10 @@ def _render_directive(prompt: dict[str, Any], speaker: str, outline: list[str]) 
             "两种行交替出现，共3~6行。【凡是人物说出口的话，必须单独成行、行首是说话人的名字】——"
             "旁白行里绝不许出现任何说出口的话，也不许转述（『他说让你小心』这种是废稿；"
             "要么让TA自己说一行，要么别提）。旁白行只写动作、神态、环境。" + must_speak)
+        L.append(f"【人称铁律】旁白里的「你」永远且只能指玩家「{pl}」本人；"
+                 f"「{speaker}」和其他任何角色一律用名字称呼——绝不能把「你」安到{speaker}"
+                 f"或别人头上，也绝不能把玩家「{pl}」写成第三人称（写TA的名字或他/她）。"
+                 f"玩家的动作由玩家主动做出、效果落在别人身上，谁施谁受不许写反。")
     L.append("只写这两种行：不要元数据、不要编号、不要标题、不要解释。")
     return "\n".join(L)
 
@@ -2718,7 +2723,10 @@ class QwenLLM:
                        "口吻与立场必须是这个角色本人")
         sys = (
             "你为一个互动剧情游戏设计一次【命运抉择】：此刻剧情里悬而未决、分量最重的那个岔路口。"
-            + ("玩家是俯瞰这一切的无形命运，抉择是TA拨动世界的手。" if god else "")
+            + ("玩家是俯瞰这一切的无形命运，抉择是TA拨动世界的手。" if god else
+               f"【人称铁律】抉择永远摆在玩家「{_pcn or '玩家'}」本人面前：prompt 里的「你」"
+               f"只指玩家；每个选项都必须是玩家自己此刻能亲口说出/亲手做出的决定，"
+               "绝不能写成任何其他角色的视角、决定或内心活动。")
             + '只输出一个JSON对象：{"prompt":"摆在玩家面前的抉择(≤40字，紧贴眼下正在发生的事)",'
             f'"options":[{{"label":"选项({label_style})",'
             '"kind":"story|kill|move|bond|rift|identity|fortune|timeskip",'

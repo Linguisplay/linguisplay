@@ -83,6 +83,21 @@ def test_render_directive_prose_only():
     assert "内心独白" in t
 
 
+def test_pov_break_catches_the_referent_inversion():
+    """Yi field case: 「你」 pinned on the NPC while the player (唐三) walks through the
+    narration in third person — both in one beat. The old check required 你 to be
+    ABSENT, so this exact failure sailed through."""
+    bad = {"beats": [{"type": "description", "speaker_name": None,
+                      "text": "你察觉到不对了。视野里唐三的影子晃了晃。"}]}
+    assert runtime._pov_break(bad, "唐三") is True
+    ok = {"beats": [{"type": "description", "speaker_name": None,
+                     "text": "你握紧拳头，蓝银草缠向对面那人的脚踝。"}]}
+    assert runtime._pov_break(ok, "唐三") is False
+    # a vocative inside dialogue is fine — dialogue beats are exempt
+    dlg = {"beats": [{"type": "dialogue", "speaker_name": "M", "text": "唐三，你小子行啊。"}]}
+    assert runtime._pov_break(dlg, "唐三") is False
+
+
 def test_line_protocol_parse_and_stream():
     """行协议（2026-07-08 深夜）：每行声明 旁白：/名字：，台词物理上进不了旁白行；
     切分器边流边给出 (kind, speaker, text)，气泡从第一个字就是对的。"""
