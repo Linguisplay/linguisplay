@@ -1347,9 +1347,9 @@ function showDice(d) {
   const row = document.createElement("div");
   row.className = "dice";
   const label = (uiLang === "en"
-    ? { crit_success: "Critical success!", success: "Success", fail: "Fail", crit_fail: "Critical fail!" }
-    : { crit_success: "大成功！", success: "成功", fail: "失败", crit_fail: "大失败！" })[d.outcome] || "";
-  const cls = (d.outcome === "success" || d.outcome === "crit_success") ? "win" : "lose";
+    ? { crit_success: "Critical success!", success: "Success", mixed: "Scraped by…", fail: "Fail", crit_fail: "Critical fail!" }
+    : { crit_success: "大成功！", success: "成功", mixed: "险成（有代价）", fail: "失败", crit_fail: "大失败！" })[d.outcome] || "";
+  const cls = (d.outcome === "success" || d.outcome === "crit_success" || d.outcome === "mixed") ? "win" : "lose";
   row.innerHTML = `${B("🎲 命运判定 d20 · 需要", "🎲 Fate check d20 · need")} ≥${d.dc || "?"} <b class="roll">--</b>`;
   chat.appendChild(row); chat.scrollTop = chat.scrollHeight;
   const rollEl = row.querySelector(".roll");
@@ -2074,10 +2074,12 @@ function showMoments(moments, relDeltas) {
         `🎒 Lost: ${m.name}`), m.verb === "taken" ? "t-press" : "t-unlock", i++ * 650);
     else if (m.kind === "event") pushToast(`🌊 ${m.label || B("起变故了", "Something happened")}`, "t-act", i++ * 650);
     else if (m.kind === "confront") pushToast(B(
-      { crit_success: `🃏 一击即中：${m.name}彻底松口了`,
+      { mixed: `🃏 半推半就：${m.name}松了口，但这笔账TA记下了`,
+        crit_success: `🃏 一击即中：${m.name}彻底松口了`,
         success: `🃏 对质奏效：${m.name}松了口`, fail: `🃏 ${m.name}扛住了你的对质`,
         crit_fail: `🃏 弄巧成拙：${m.name}反将你一军` }[m.outcome] || "🃏 对质",
-      { crit_success: `🃏 Dead on: ${m.name} gave it all up`,
+      { mixed: `🃏 Grudging: ${m.name} talked, but won't forget this`,
+        crit_success: `🃏 Dead on: ${m.name} gave it all up`,
         success: `🃏 It landed: ${m.name} cracked`, fail: `🃏 ${m.name} held the line`,
         crit_fail: `🃏 It backfired: ${m.name} turned it on you` }[m.outcome] || "🃏 Confrontation"),
       m.outcome === "fail" || m.outcome === "crit_fail" ? "t-press" : "t-unlock", i++ * 650);

@@ -217,6 +217,29 @@ def _depth_anchor(prompt: dict[str, Any]) -> str:
         bits.append((f"[Last turn the prose conflicted with the scene ledger ({_tn}); "
                      f"this turn the ledger is the truth.]") if en else
                     (f"上一轮旁白与现场帧表冲突（{_tn}）；本轮一切以【姿位帧表】为准。"))
+    _sk = (prompt.get("seek_unknown") or "").strip()
+    if _sk:
+        if prompt.get("sandbox"):
+            bits.append((f"[The player seems to be hunting for '{_sk}' — no such person "
+                         f"or place exists yet. Make the search LAND this turn: someone "
+                         f"gives a real lead or introduction (a new person enters via the "
+                         f"new_character field, keeping the name '{_sk}'), '{_sk}' shows up "
+                         f"in person (same field), or someone states plainly nobody here "
+                         f"goes by that name and points at who might know. Never vamp.]")
+                        if en else
+                        (f"【打听要有着落】玩家像是在找「{_sk}」，可场面账本上还没有这号人物或去处。"
+                         f"这一拍必须给出实在的下文，三选一：①在场者给出确凿线索或引荐"
+                         f"（若因此引出新人物，用 new_character 字段让TA真实登场，名字就叫「{_sk}」）；"
+                         f"②「{_sk}」本人恰好现身（同样走 new_character）；"
+                         f"③明说这一带没这号人，并指出可以去问谁。绝不许含糊敷衍拖过这一轮。"))
+        else:
+            bits.append((f"[The player is asking after '{_sk}', who does not exist in this "
+                         f"story. Say so honestly IN-WORLD this turn — nobody here knows "
+                         f"that name; point at who or where might actually help.]")
+                        if en else
+                        (f"【打听要有着落】玩家在找「{_sk}」，但这个故事里并没有这号人物。"
+                         f"这一拍就要把话在世界观内说明白：在场者如实表示不认识、没听说过，"
+                         f"并点一句现在真正能帮上忙的人或去处，别让玩家再空等。"))
     md = (prompt.get("mandate") or "").strip()
     if md:
         # ⚖️ a fate pick is LAW for the coming turns — restated at depth-0 every turn
@@ -534,6 +557,8 @@ def _build_system(prompt: dict[str, Any]) -> str:
                             "这一轮把下面【必须说出来】的内容亲口和盘托出；说完，你对TA反而生出一丝复杂的敬意。",
             "success": "证据摆在眼前，赖不掉了。你可以恼、可以苦笑、可以骂TA咄咄逼人，但你松了口——"
                        "把下面【必须说出来】的内容亲口说出来，带着被拆穿之人真实的情绪。",
+            "mixed": "证据压得你喘不过气，你半推半就松了口——把下面【必须说出来】的内容说出来，"
+                     "但语气里带着怨气：这笔账你记下了，你们的关系当场蒙上一层阴影。",
             "fail": "证据虽真，你却扛住了。你冷下脸不认、反问TA什么居心，或干脆闭嘴走开——"
                     "任何还锁着的事你半个字都不吐，且从此对TA多了几分戒备。",
             "crit_fail": "这一手彻底激怒了你。你不但半个字不认，还当场反将一军——质问TA的来路和居心，"
@@ -673,6 +698,8 @@ def _build_system(prompt: dict[str, Any]) -> str:
             if chk:
                 verdict = {"crit_success": "大成功——干得超预期地漂亮，甚至带来意外之喜",
                            "success": "成功——如愿做成了",
+                           "mixed": "险险成了——事情做成了，但当场付出一个看得见的小代价"
+                                    "（惊动了人/蹭破了皮/留下痕迹/欠了个人情），旁白把代价演出来",
                            "fail": "失败——没做成，并付出一点小代价或引来注意",
                            "crit_fail": "大失败——不但没成，还出了岔子、把局面搞得更糟"}.get(chk.get("outcome"), "")
                 lines.append(f"【命运判定已掷出（d20 掷出 {chk.get('roll')}，需要 ≥{chk.get('dc') or '?'}）：{verdict}】"

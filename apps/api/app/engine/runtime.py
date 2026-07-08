@@ -2505,38 +2505,39 @@ def map_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
 _rng = random.Random()  # module-level so tests can monkeypatch/seed
 
 
+def _outcome_of(roll: int, dc: int) -> str:
+    """Shared d20 verdict bands. A natural 20 always triumphs, a natural 1 always
+    bites; a near-miss (within 3 under the DC) is "mixed" — 成功但有代价 — so the
+    scene keeps moving forward instead of slapping the player with a flat no
+    (fail-forward; the 74%-fail curve of the first 318 turns is the counterexample)."""
+    if roll == 20:
+        return "crit_success"
+    if roll == 1:
+        return "crit_fail"
+    if roll >= dc:
+        return "success"
+    if roll >= dc - 3:
+        return "mixed"
+    return "fail"
+
+
 def _roll_check(risk: int) -> dict[str, Any]:
     """🎲 d20 fate roll. `risk` is still the judged success chance % (0~99); it maps
-    onto the twenty-die as a DC (each face worth 5%): succeed on roll >= dc. A natural
-    20 always triumphs, a natural 1 always bites — the tabletop rule players know."""
+    onto the twenty-die as a DC (each face worth 5%): succeed on roll >= dc."""
     roll = _rng.randint(1, 20)
     faces = max(1, min(19, round(int(risk) / 5)))  # how many faces succeed
     dc = 21 - faces
-    if roll == 20:
-        outcome = "crit_success"
-    elif roll == 1:
-        outcome = "crit_fail"
-    elif roll >= dc:
-        outcome = "success"
-    else:
-        outcome = "fail"
-    return {"risk": int(risk), "roll": roll, "dc": dc, "die": 20, "outcome": outcome}
+    return {"risk": int(risk), "roll": roll, "dc": dc, "die": 20,
+            "outcome": _outcome_of(roll, dc)}
 
 
 def _roll_dc(dc: int) -> dict[str, Any]:
     """🎲 d20 against an ENGINE-SET DC (the action-resolution path). Same shape and
-    crit rules as _roll_check; `risk` reported as the implied success chance."""
+    verdict bands as _roll_check; `risk` reported as the implied success chance."""
     dc = max(2, min(19, int(dc)))
     roll = _rng.randint(1, 20)
-    if roll == 20:
-        outcome = "crit_success"
-    elif roll == 1:
-        outcome = "crit_fail"
-    elif roll >= dc:
-        outcome = "success"
-    else:
-        outcome = "fail"
-    return {"risk": (21 - dc) * 5, "roll": roll, "dc": dc, "die": 20, "outcome": outcome}
+    return {"risk": (21 - dc) * 5, "roll": roll, "dc": dc, "die": 20,
+            "outcome": _outcome_of(roll, dc)}
 
 
 def pressure_cfg(content: dict[str, Any]) -> dict[str, Any] | None:
@@ -3879,12 +3880,13 @@ def cult_absorb(content: dict[str, Any], state: dict[str, Any], outcome: str) ->
         return _t(content,
                   f"（那股力量在你经脉里暴走反噬！{v0['name']}进度倒退{loss}%，你强行压下翻涌的气血。）",
                   f"(The energy turns on you inside your meridians — {v0['name']} falls back {loss}%.)")
-    if outcome not in ("success", "crit_success"):
+    if outcome not in ("success", "crit_success", "mixed"):
         return ""
     if int(c.get("prog") or 0) >= 100:
         return _t(content, "（那股力量涌入体内，却被已然充盈的瓶颈挡在门外：先突破，再谈吞吸。）",
                   "(The energy pours in but the full bottleneck turns it away — break through first.)")
-    gain = int((22 if outcome == "crit_success" else 10) * mult)
+    # 险成 absorbs too, just rougher: half the take (the prose narrates the cost)
+    gain = int((22 if outcome == "crit_success" else 5 if outcome == "mixed" else 10) * mult)
     c["prog"] = min(100, int(c.get("prog") or 0) + gain)
     c["streak"] = 0
     v = cult_view(content, state)
@@ -4211,6 +4213,34 @@ def player_seek(content: dict[str, Any], state: dict[str, Any], player_input: st
                 return {"char": c, "loc": None}
             return {"char": c, "loc": loc}
     return None
+
+
+def seek_unknown(content: dict[str, Any], state: dict[str, Any], player_input: str,
+                 channel: str = "say") -> str | None:
+    """A seek-shaped input whose target matches NO known character or place. The engine
+    can't resolve it — but the director must not let the player spin on it turn after
+    turn, so the name is surfaced into the prompt (mint/refer in a sandbox, honest deny
+    in an authored story). Returns the sought name, or None when this isn't that."""
+    if channel not in ("do", "say"):
+        return None
+    text = (player_input or "").strip()
+    if not text or len(text) > 60:
+        return None
+    if any(n in text for n in ("别去", "不去", "不想", "别找", "不找")):
+        return None
+    toks = [m.strip() for m in _SEEK_RE_ZH.findall(text)]
+    toks += [m.strip() for m in _SEEK_RE_EN.findall(text)]
+    toks = [t for t in toks if len(t) >= 2]
+    if not toks:
+        return None
+    act = int(state.get("act", 1) or 1)
+    known = [(c.get("name") or "").strip() for c in present_characters(content, act, set())]
+    known += [(l.get("name") or "").strip() for l in _locations(content)]
+    known = [n for n in known if n]
+    for tok in toks:
+        if any(n == tok or n in tok or tok in n for n in known):
+            return None      # a real someone/somewhere — the resolvers above own it
+    return toks[0][:12]
 
 
 def character_profile(content: dict[str, Any], state: dict[str, Any],
@@ -4590,7 +4620,7 @@ def _confront_gen(content, state, persona, secret, frag, next_locked, target, ll
         chance = min(95, chance + INSTINCT_BONUS)
     dice = _roll_check(chance)
     yield ("dice", dice)
-    success = dice["outcome"] in ("success", "crit_success")
+    success = dice["outcome"] in ("success", "crit_success", "mixed")
     if success:
         state["confronts_won"] = int(state.get("confronts_won") or 0) + 1
     forced_id = next_locked.get("id") if success else None
@@ -4599,7 +4629,8 @@ def _confront_gen(content, state, persona, secret, frag, next_locked, target, ll
                                                 | {forced_id})
     # being cornered stings even when they yield; a 大成功 lands so true it costs nothing
     cost = tun["confront_cost"]
-    dc = {"crit_success": 0, "success": -cost, "fail": -cost * 2, "crit_fail": -cost * 3}[dice["outcome"]]
+    dc = {"crit_success": 0, "success": -cost, "mixed": -cost * 2,
+          "fail": -cost * 2, "crit_fail": -cost * 3}[dice["outcome"]]
     rel_deltas: dict[str, dict[str, int]] = {}
     if dc:
         rel_all[char_id] = relationships.apply_deltas(scores, dc, 0, tun)
@@ -5553,6 +5584,13 @@ def run_turn_stream(
                        "恐怕得等TA自己露面。）",
                        f"(You ask around, but no one can say where {seek['char'].get('name')} "
                        "is at this hour.)")}))
+    # 1b³. 🔎 找一个不存在的名字: the engine can't resolve it, but the DIRECTOR must not
+    #      let it spin (the 20-turns-hunting-a-nonexistent-person failure) — hand the
+    #      name to the prompt so the打听 lands: mint/refer in a sandbox, deny in canon.
+    seek_unknown_tok = None if (moved or seek) else \
+        seek_unknown(content, state, player_input, channel)
+    if seek_unknown_tok:
+        _audit(state, "seek.unknown", True, seek_unknown_tok)
 
     #     现场搜查: naming a searchable prop at THIS place (做/看 channel) turns it over —
     #     physical evidence unlocks directly, its story event fires. Deterministic.
@@ -5944,6 +5982,8 @@ def run_turn_stream(
             # 📈 剧情欠账: 2+ stalled turns → this turn MUST pay the thread off
             "stall": (state.get("stall") if isinstance(state.get("stall"), dict)
                       and int((state.get("stall") or {}).get("n") or 0) >= 2 else None),
+            # 🔎 hunting a name the engine can't resolve → the打听 must land this turn
+            "seek_unknown": seek_unknown_tok if is_primary else None,
             "heat_anchor": heat_anchor,            # 🔥 床戏阶段表 (depth-0, replaces the generic line)
             "mandate": ((state.get("mandate") or {}).get("text") or ""
                         if isinstance(state.get("mandate"), dict) else ""),  # ⚖️ 命运已定

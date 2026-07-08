@@ -17,19 +17,19 @@ STORY = {
 def test_classify_tiers_and_modifiers():
     st = runtime.default_state()
     a = actions.classify(STORY, st, "我偷偷溜进后院顺走那串钥匙")
-    assert a and a["cls"] == "潜行" and a["tier"] == "hard" and a["dc"] == 15
+    assert a and a["cls"] == "潜行" and a["tier"] == "hard" and a["dc"] == 12
     # wounds raise the bar; a fitting tool lowers it
     st2 = {**runtime.default_state(), "player_hp": "hurt",
            "inventory": [{"name": "撬棍"}]}
     b = actions.classify(STORY, st2, "用撬棍撬开库房的铁锁")
-    assert b and b["cls"] == "破闯" and b["dc"] == 15 + 2 - 2
+    assert b and b["cls"] == "破闯" and b["dc"] == 12 + 2 - 2
     # plain speech / unclassified stunts stay off this path
     assert actions.classify(STORY, st, "跟守卫聊聊天") is None
     assert actions.classify(STORY, st, "打开窗户透透气") is None  # 打开≠强攻
 
 
 def test_model_opinion_moves_at_most_one_tier():
-    base = {"cls": "破闯", "tier": "hard", "dc": 15, "mods": []}
+    base = {"cls": "破闯", "tier": "hard", "dc": 12, "mods": []}
     assert actions.resolve_dc(base, 90)["tier"] == "normal"    # model says easy → clamp to normal
     assert actions.resolve_dc(base, 10)["tier"] == "extreme"   # model says极难 → one step up
     assert actions.resolve_dc(base, 100)["tier"] == "hard"     # model saw no risk → base stands
@@ -52,7 +52,7 @@ def test_classified_action_always_rolls_even_if_model_says_safe():
 
     out = runtime.run_turn(STORY, st, {"name": "我"}, "我撬开库房的铁锁", channel="do",
                            llm=SafeLLM())
-    assert out.get("dice") and out["dice"]["dc"] == 15
+    assert out.get("dice") and out["dice"]["dc"] == 12
     assert any(e["e"] == "check" and "破闯" in e.get("data", "") for e in out["audit"])
     # …while an unclassified action with risk=100 still doesn't roll (legacy path intact)
     out2 = runtime.run_turn(STORY, st, {"name": "我"}, "把窗台上的花摆正", channel="do",

@@ -18,7 +18,11 @@ from __future__ import annotations
 
 from typing import Any
 
-TIER_DC = {"easy": 5, "normal": 10, "hard": 15, "extreme": 19}
+# Calibrated down 2026-07-08: the first 318 live turns failed 74% of rolls — a
+# companionship game must not slap the player that often. With the "mixed" near-miss
+# band (runtime._outcome_of) flat failure now needs a miss of 4+:
+#   easy 4 → 85% 成 / 15% 险成;  normal 8 → 65/15/15;  hard 12 → 45/15/35;  extreme 17 → 20/15/60
+TIER_DC = {"easy": 4, "normal": 8, "hard": 12, "extreme": 17}
 _TIER_ORDER = ["easy", "normal", "hard", "extreme"]
 
 # (class label zh, keywords, base tier)

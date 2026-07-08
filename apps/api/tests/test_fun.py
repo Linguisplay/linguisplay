@@ -56,20 +56,24 @@ def test_roll_check_mapping():
             assert (a, b) == (1, 20)              # the fate die is a d20 now
             return self.v
 
-    # risk 60% → 12 of 20 faces succeed → DC 9; nat 20/1 override everything
-    for v, want in ((20, "crit_success"), (1, "crit_fail"), (9, "success"), (8, "fail")):
+    # risk 60% → 12 of 20 faces succeed → DC 9; nat 20/1 override everything;
+    # a near-miss (within 3 under the DC) is "mixed" — 成功但有代价 (fail-forward)
+    for v, want in ((20, "crit_success"), (1, "crit_fail"), (9, "success"),
+                    (8, "mixed"), (6, "mixed"), (5, "fail")):
         runtime._rng = FixedRng(v)
         d = runtime._roll_check(60)
         assert d["dc"] == 9 and d["die"] == 20 and d["outcome"] == want
-    # near-impossible: only the natural 20 lands it
+    # near-impossible: a 19 scrapes by at a cost; anything lower flat-fails
     runtime._rng = FixedRng(19)
+    assert runtime._roll_check(1)["outcome"] == "mixed"
+    runtime._rng = FixedRng(16)
     assert runtime._roll_check(1)["outcome"] == "fail"
     runtime._rng = FixedRng(20)
     assert runtime._roll_check(1)["outcome"] == "crit_success"
     # a real sequence shows the full spread
     runtime._rng = random.Random(7)
     seen = {runtime._roll_check(60)["outcome"] for _ in range(300)}
-    assert seen == {"crit_success", "success", "fail", "crit_fail"}
+    assert seen == {"crit_success", "success", "mixed", "fail", "crit_fail"}
 
 
 def test_risky_do_action_rolls_and_briefs_the_director():
@@ -78,7 +82,7 @@ def test_risky_do_action_rolls_and_briefs_the_director():
     out = runtime.run_turn(BASE, runtime.default_state(), {"name": "我"}, "我翻墙进去",
                            channel="do", llm=llm)
     d = out["dice"]
-    assert d and d["risk"] == 55 and 1 <= d["roll"] <= 20 and d["die"] == 20
+    assert d and d["risk"] == 65 and 1 <= d["roll"] <= 20 and d["die"] == 20
     assert 2 <= d["dc"] <= 20
     assert llm.prompts[0].get("check") == d          # the director must narrate the result
 

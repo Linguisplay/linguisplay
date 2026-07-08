@@ -224,6 +224,39 @@ def test_seek_ignores_people_already_here_and_non_people():
     assert runtime.player_seek(MAP, st2, "别找Mara了", "say") is None
 
 
+def test_seek_unknown_surfaces_only_unresolvable_names():
+    """找一个不存在的名字：the engine flags it for the director instead of letting the
+    player hunt a ghost for 20 turns (the 蓝信一-in-the-wrong-story failure)."""
+    st = {**runtime.default_state(), "location_id": "hall", "act": 1}
+    assert runtime.seek_unknown(MAP, st, "去找蓝信一", "say") == "蓝信一"
+    # known character / known place / negation / not-a-seek → stays silent
+    assert runtime.seek_unknown(MAP, st, "去找Mara", "say") is None
+    assert runtime.seek_unknown(MAP, st, "去找书房", "say") is None
+    assert runtime.seek_unknown(MAP, st, "别找蓝信一了", "say") is None
+    assert runtime.seek_unknown(MAP, st, "今天天气不错", "say") is None
+    # …and the turn pipeline hands it to the primary director prompt
+    class SpyLLM:
+        def __init__(self):
+            self.prompts = []
+
+        def generate(self, prompt):
+            if prompt.get("summarize"):
+                return {"memory": ""}
+            if prompt.get("suggest"):
+                return {"suggestions": []}
+            if not any(prompt.get(k) for k in ("arrive", "offscreen", "farewell",
+                                               "golden_moment", "risk_judge",
+                                               "track_scene", "world_news")):
+                self.prompts.append(prompt)
+            return {"beats": [{"type": "dialogue", "speaker_name": "Mara", "text": "嗯。"}],
+                    "affinity_delta": 0, "advance_act": False, "ending": None}
+
+    llm = SpyLLM()
+    runtime.run_turn(MAP, {**runtime.default_state(), "location_id": "hall", "act": 1},
+                     {"name": "我"}, "我想找蓝信一", channel="say", llm=llm)
+    assert any(p.get("seek_unknown") == "蓝信一" for p in llm.prompts)
+
+
 def test_apply_move_walks_multi_hop_now():
     m = {"story": {"id": "m5", "characters": [], "acts": [{"index": 1, "title": "一"}],
                    "locations": [
