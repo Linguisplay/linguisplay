@@ -706,22 +706,7 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                                     "默认空字符串。仅当这一轮剧情改变了【玩家本人】的身体姿态或"
                                     "屋内位置（被拉起来、被按在墙上、坐到了桌边）才填新的姿态短语"
                                     "（12字内）；没变不填"}
-        # 🎬 关键帧: like anime production, only CHANGED frames get declared; the engine
-        # carries everyone else forward unchanged (deterministic tweening)
-        _unframed = [str(n) for n in (prompt.get("unframed") or []) if str(n).strip()]
-        _sf_desc = ("这一轮里【可见状态发生了变化】的其他在场角色（不含你自己、不含玩家），"
-                    "每人一帧；谁都没变就填空数组[]。绝不要写不在场的人。")
-        if _unframed:
-            _sf_desc = ("【必须】先为这些还没有状态记录的在场角色各报当前一帧："
-                        + "、".join(_unframed) + "。之后再报本轮状态有变化的人。") + _sf_desc
-        props["scene_frame"] = {
-            "type": "array", "maxItems": 4,
-            "items": {"type": "object", "properties": {
-                "name": {"type": "string", "description": "在场角色名，原样抄写"},
-                "frame": {"type": "string", "description":
-                          "≤16字：TA此刻的姿态/位置/手上的事（如：蹲在货架后清点、退到门边握刀）"}},
-                "required": ["name", "frame"]},
-            "description": _sf_desc}
+
     if has_map and not is_member and not is_think:
         props["move_invite"] = {"type": "string", "description": "若你这轮提出或答应带玩家去某处，填那个地点名（可以是【可去通路】里的，也可以是对话里自然浮现的新地点；旁白只写到起身相邀为止）；否则填空字符串"}
         props["moved_to"] = {"type": "string", "description":
@@ -1259,11 +1244,7 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
         out["self_position"] = str(d.get("self_position") or "").strip()
     if "player_position" in d:
         out["player_position"] = str(d.get("player_position") or "").strip()
-    if "scene_frame" in d:
-        out["scene_frame"] = [
-            {"name": str((x or {}).get("name") or "").strip(),
-             "frame": str((x or {}).get("frame") or "").strip()}
-            for x in (d.get("scene_frame") or []) if isinstance(x, dict)]
+
     if "character_harmed" in d:
         out["harmed"] = str(d.get("character_harmed") or "").strip()
     if "gift_received" in d:
@@ -2235,7 +2216,8 @@ class QwenLLM:
             '"player":{"pos":"...","doing":"...","wear":"..."},'
             '"contradictions":["正文与上一帧的硬矛盾(无过渡的位置/姿态/衣着跳变),没有则空数组"]}。'
             "规则：只记录正文明确写到或可直接推断的状态；正文没提到的人，把上一帧原样抄回来；"
-            "wear 只在正文出现衣着信息时才填；不要发明正文里没有的细节；不要写不在名单里的人。"
+            "wear 只在正文出现衣着信息时才填；不要发明正文里没有的细节；"
+            "只记名单里列出的具名角色：名单之外的路人、龙套、无名氏一律不记、不输出。"
             + ("Respond with the SAME JSON schema but write values in English." if en else "")
         )
         u = (f"地点：{prompt.get('place') or '（未知）'}" + chr(10)

@@ -5486,8 +5486,6 @@ def run_turn_stream(
             "heat_anchor": heat_anchor,            # 🔥 床戏阶段表 (depth-0, replaces the generic line)
             "mandate": ((state.get("mandate") or {}).get("text") or ""
                         if isinstance(state.get("mandate"), dict) else ""),  # ⚖️ 命运已定
-            # 🎬 bodies with no frame yet: the primary MUST seed them this turn
-            "unframed": unframed_names(content, state, exclude_id=sp_id) if is_primary else [],
             "scene": current_act(content, old_act),
             "next_act_title": (next_act or {}).get("title", "") if next_act else "",
             "clock": clock_line,                  # ⏳ 第几天·什么时段 (+ deadline countdown)
@@ -5608,8 +5606,6 @@ def run_turn_stream(
             if _ppos:
                 state["player_pos"] = {"text": _ppos, "at": state.get("location_id")}
                 _audit(state, "pos.set", True, f"你:{_ppos}")
-            # 🎬 and the rest of the room: declared keyframes for other present bodies
-            book_scene_frame(content, state, directed, sp_id)
         # 📟 心象仪: the speaker's own judged inner state rides on their LAST line
         mood = (directed.get("self_state") or "").strip()[:12]
         # 🎭 …and PERSISTS: how this scene left them is how the next one finds them
