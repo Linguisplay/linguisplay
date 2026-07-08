@@ -96,6 +96,14 @@ def test_pov_break_catches_the_referent_inversion():
     # a vocative inside dialogue is fine — dialogue beats are exempt
     dlg = {"beats": [{"type": "dialogue", "speaker_name": "M", "text": "唐三，你小子行啊。"}]}
     assert runtime._pov_break(dlg, "唐三") is False
+    # 我-hijack even when 你 is also present (the second field case: 拍向我腕脉)
+    mix = {"beats": [{"type": "description", "speaker_name": None,
+                      "text": "你侧身让过我的手刀，掌心拍向我腕脉。我手腕一翻卸开了力道。"}]}
+    assert runtime._pov_break(mix, "唐三") is True
+    # quoted speech inside narration may say 我 — stripped before judging
+    q = {"beats": [{"type": "description", "speaker_name": None,
+                    "text": "你听见她低声说了句「我记住你了」，转身走进了雨里。"}]}
+    assert runtime._pov_break(q, "唐三") is False
 
 
 def test_line_protocol_parse_and_stream():

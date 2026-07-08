@@ -4465,8 +4465,10 @@ def _pov_break(directed: dict[str, Any], player_name: str = "") -> bool:
         if b.get("type") == "dialogue":
             continue
         t = b.get("text") or ""
-        # 我-hijack: narration slipped into a character's first person
-        if len(re.findall(r"我", t)) >= 3 and "你" not in t:
+        # 我-hijack: narration slipped into a character's first person. Quoted speech
+        # inside narration may legitimately say 我 — strip 「」 spans, then judge.
+        bare = re.sub(r"「[^」]*」", "", t)
+        if len(re.findall(r"我", bare)) >= 2:
             return True
         # 3rd-person-player: the player is 你, ALWAYS — their name appearing in narration
         # at all is the referent inversion (worst form: 「你」 pinned on an NPC while the
