@@ -1604,31 +1604,133 @@ def _separate_speech(narration: str, dialogue: str) -> tuple[str, str]:
 
 
 def _render_directive(prompt: dict[str, Any], speaker: str, outline: list[str]) -> str:
-    """The render beat's closing instruction: the plan's shot list plus a prose-only
-    contract (channel-aware, mirrors _output_spec's leads). No metadata lines — every
-    judgment already lives in the plan, the prose only has to perform it."""
+    """The render beat's closing instruction: the plan's shot list plus a LINE-PROTOCOL
+    output contract — every line declares itself 旁白： or 名字：「…」, so a spoken line
+    physically cannot hide inside narration (转述台词 was the failure mode of free
+    prose). No metadata lines — every judgment already lives in the plan."""
     channel = prompt.get("channel") or "say"
     L: list[str] = []
     if outline:
         L.append("【导演分镜·已定案】这一拍按此顺序演出来，不加戏、不预支后续剧情：\n"
                  + "\n".join(f"{i + 1}. {s}" for i, s in enumerate(outline)))
     if channel == "think":
-        L.append(f"【写法】写一段第三人称的内心独白式旁白（3~5句），细腻写出「{player_namesafe(prompt)}」"
-                 "此刻的思绪、身体感官、周遭环境的微妙变化。这一轮【没有任何台词，绝不要出现「」对白】。")
-    elif channel == "do":
-        L.append(f"【写法】写成一段自然的第三人称中文小说叙事（3~6句）：先把玩家那个【动作】造成的"
-                 f"具体、连锁的后果一步步演出来，再带出在场角色的神态。用「{speaker}」的名字称呼自己，"
-                 "绝不用「我」。你这一轮若开口，每句台词都用「」括进叙事；只用动作神态回应也可以。")
-    elif prompt.get("observer"):
-        L.append(f"【写法】写成一段自然的第三人称中文小说叙事（2~5句），铺陈在场众人此刻的互动、"
-                 f"气氛与神态。「{speaker}」对其他人说出口的每句话都用「」括进叙事。")
+        L.append(f"【输出格式·铁律】逐行输出，每行以「旁白：」开头，写第三人称的内心独白式旁白"
+                 f"（共3~5句），细腻写出「{player_namesafe(prompt)}」此刻的思绪、身体感官、"
+                 "周遭环境的微妙变化。这一轮没有任何人说话，不许出现任何台词行。")
     else:
-        L.append(f"【写法】写成一段自然的第三人称中文小说叙事（2~5句），写出对方这句话此刻激起的"
-                 f"神态、动作、气氛。用「{speaker}」的名字称呼自己，绝不用「我」。你【被直接搭话，"
-                 "必须开口】：说出口的每一句话都用「」括进叙事，哪怕冷淡、敷衍、拒答。"
-                 "【铁律】凡是说出口的话都必须在「」里；「」之外只写动作、神态、环境。")
-    L.append("只写正文：不要元数据行、不要编号、不要标题、不要解释。")
+        lead = (f"先把玩家那个【动作】造成的具体、连锁的后果一步步演出来，再带出在场角色的神态。"
+                if channel == "do" else
+                f"铺陈在场众人此刻的互动、气氛与神态。" if prompt.get("observer") else
+                f"写出对方这句话此刻激起的神态、动作、气氛。")
+        must_speak = ("" if channel == "do" or prompt.get("observer") else
+                      f"你被直接搭话，必须至少有一行「{speaker}：」的台词行，哪怕冷淡、敷衍、拒答。")
+        L.append(
+            "【输出格式·铁律】逐行输出，每行是独立的一拍，行首必须声明身份，只有两种行：\n"
+            f"旁白：一段第三人称叙事（{lead}用「{speaker}」的名字称呼自己，绝不用「我」）\n"
+            f"{speaker}：「这一拍{speaker}亲口说出的话」\n"
+            "两种行交替出现，共3~6行。【凡是人物说出口的话，必须单独成行、行首是说话人的名字】——"
+            "旁白行里绝不许出现任何说出口的话，也不许转述（『他说让你小心』这种是废稿；"
+            "要么让TA自己说一行，要么别提）。旁白行只写动作、神态、环境。" + must_speak)
+    L.append("只写这两种行：不要元数据、不要编号、不要标题、不要解释。")
     return "\n".join(L)
+
+
+_LINE_PREFIX_RE = None  # built lazily (module import order)
+
+
+def _line_prefix_re():
+    global _LINE_PREFIX_RE
+    if _LINE_PREFIX_RE is None:
+        import re
+        _LINE_PREFIX_RE = re.compile(r"^\s*([^：:\s「」『』（）()]{1,12})\s*[：:]")
+    return _LINE_PREFIX_RE
+
+
+class _LineSegmenter:
+    """Streaming splitter for the render beat's line protocol (旁白：… / 名字：「…」).
+    Feed deltas as they arrive; get (kind, speaker, text) segments the moment each
+    line's identity is decidable — so the client can pour speech into a named bubble
+    from its first character. Lines with no prefix degrade to narration."""
+
+    def __init__(self, speaker: str):
+        self._speaker = speaker
+        self._head = ""        # undecided start of the current line
+        self._kind: str | None = None
+        self._who: str | None = None
+
+    def _decide(self, out: list) -> None:
+        m = _line_prefix_re().match(self._head)
+        if m:
+            who = m.group(1)
+            rest = self._head[m.end():]
+            if who in ("旁白", "Narrator", "narrator"):
+                self._kind, self._who = "narration", None
+            else:
+                self._kind, self._who = "speech", who
+            self._head = ""
+            if rest:
+                out.append((self._kind, self._who, rest))
+        elif len(self._head) > 14:      # prose without a prefix — treat as narration
+            self._kind, self._who = "narration", None
+            out.append((self._kind, None, self._head))
+            self._head = ""
+
+    def feed(self, delta: str) -> list[tuple[str, str | None, str]]:
+        out: list[tuple[str, str | None, str]] = []
+        seg: list[str] = []
+
+        def _flush_seg():
+            if seg:
+                out.append((self._kind, self._who, "".join(seg)))
+                seg.clear()
+
+        for ch in delta or "":
+            if ch == "\n":
+                _flush_seg()
+                if self._kind is None and self._head.strip():
+                    out.append(("narration", None, self._head))
+                self._head, self._kind, self._who = "", None, None
+                continue
+            if self._kind is None:
+                self._head += ch
+                self._decide(out)
+            else:
+                seg.append(ch)
+        _flush_seg()
+        # speech text carries no 「」 — the UI's .said style re-adds the quotes
+        return [(k, w, t.replace("「", "").replace("」", "")) if k == "speech" else (k, w, t)
+                for k, w, t in out if t and (k != "speech" or t.replace("「", "").replace("」", ""))]
+
+    def flush(self) -> list[tuple[str, str | None, str]]:
+        if self._kind is None and self._head.strip():
+            h, self._head = self._head, ""
+            return [("narration", None, h)]
+        return []
+
+
+def _parse_line_beats(text: str) -> list[dict[str, Any]] | None:
+    """Deterministic parse of the line protocol → beats. Returns None when the text
+    carries no prefixed line at all (caller falls back to the prose+quotes parser)."""
+    beats: list[dict[str, Any]] = []
+    matched = 0
+    for ln in (text or "").splitlines():
+        ln = ln.strip()
+        if not ln:
+            continue
+        m = _line_prefix_re().match(ln)
+        if m:
+            who, body = m.group(1), ln[m.end():].strip()
+            matched += 1
+            if who in ("旁白", "Narrator", "narrator"):
+                if body:
+                    beats.append({"type": "description", "speaker_name": None, "text": body})
+            else:
+                body = body.strip().strip("「」『』“”\"'")
+                if body:
+                    beats.append({"type": "dialogue", "speaker_name": who[:12], "text": body})
+        else:
+            beats.append({"type": "description", "speaker_name": None, "text": ln})
+    return beats if matched else None
 
 
 def _turn_messages(prompt: dict[str, Any], system: str, speaker: str) -> list[dict[str, str]]:
@@ -1999,6 +2101,8 @@ class QwenLLM:
                 "主角亲口/亲手的“你昨晚究竟去了哪？”“让我走近看看”才是对的。"
                 "只输出 3 条，每行一条，不要编号、不要解释。"
                 "★第1条必须【顺着玩家的意志走】：玩家刚才那句话在推什么、要什么，第1条就是把这件事再往前推一步的说法或做法——服务玩家的意图，不转弯、不泼冷水、不改道。"
+                "若资料里写了玩家【当前的目标】或【正要去见的人】，第1条永远直接服务它；"
+                "玩家的问题若没得到正面回答，第1条就是把同一个问题逼得更紧。"
                 "第2、3条再给不同方向的可能性（新话头、新动作、新去处）。"
                 "每条都要：紧扣刚发生的对话与此刻处境、"
                 "具体可操作、贴合这个角色的性格与说话方式、尽量精炼（十来个字最好，最多一句话说完）。"
@@ -2013,6 +2117,8 @@ class QwenLLM:
                 f"可以去的地方：{ '、'.join(ctx.get('exits') or []) or '暂无'}\n"
                 f"这一章你还想弄清：{ '、'.join(ctx.get('topics') or []) or '随你探索'}\n"
                 f"你和{ctx.get('speaker','对方')}此刻的关系：{ctx.get('relation','普通')}"
+                + (f"\n你当前的目标：{ctx['goal']}" if ctx.get("goal") else "")
+                + (f"\n你正要去见的人：{ctx['pursuit']}" if ctx.get("pursuit") else "")
             )
         try:
             resp = _post_chat(self._url, self._key,
@@ -2705,35 +2811,23 @@ class QwenLLM:
         if prompt.get("mature"):
             body_r["frequency_penalty"] = 0.3
         parts: list[str] = []
-        # 「」 state machine: tokens are routed as narration vs speech WHILE they stream,
-        # so the client can pour them into the right bubble live (旁白与台词分家 —
-        # without this the draft reads as one narration block with quotes inside it).
-        inside = False
+        # line-protocol splitter: each line declares 旁白：/名字：, so the client pours
+        # speech into a NAMED bubble from its first character (旁白与台词分家) and a
+        # spoken line physically cannot hide inside narration.
+        seg = _LineSegmenter(speaker)
         try:
             for delta in _post_chat_stream(self._url, self._key, body_r,
                                            timeout=60, kind="render"):
                 parts.append(delta)
-                cur: list[str] = []
-                for ch in delta:
-                    if ch == "「" and not inside:
-                        if cur:
-                            yield ("token", {"kind": "narration", "text": "".join(cur)})
-                            cur = []
-                        inside = True
-                    elif ch == "」" and inside:
-                        if cur:
-                            yield ("token", {"kind": "speech", "text": "".join(cur)})
-                            cur = []
-                        inside = False
-                    else:
-                        cur.append(ch)
-                if cur:
-                    yield ("token", {"kind": "speech" if inside else "narration",
-                                     "text": "".join(cur)})
+                for k2, who, t2 in seg.feed(delta):
+                    yield ("token", {"kind": k2, "speaker": who or speaker, "text": t2})
+            for k2, who, t2 in seg.flush():
+                yield ("token", {"kind": k2, "speaker": who or speaker, "text": t2})
         except Exception:
             pass  # broke mid-stream → parse what arrived; nothing at all → fallback below
         text = "".join(parts).strip()
-        beats = _parse_reply(text, speaker, channel, group_mode).get("beats") or [] \
+        beats = (_parse_line_beats(text)
+                 or (_parse_reply(text, speaker, channel, group_mode).get("beats") or [])) \
             if text else []
         if not beats:
             yield ("final", self.generate(prompt))

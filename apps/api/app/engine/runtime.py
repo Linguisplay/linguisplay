@@ -1873,12 +1873,18 @@ def _smart_suggestions(llm, all_beats, player_input, primary, content, state, lo
     player_name = (pc or {}).get("name") or ""
     player_desc = ((pc or {}).get("role") or (pc or {}).get("persona_text")
                    or (pc or {}).get("background") or "").strip()[:60]
+    # 顺着玩家: what the player is ACTUALLY pursuing right now rides into the call, so
+    # chip 1 serves the hunt instead of offering scenery (Yi: 建议要顺着玩家).
+    pins = state.get("char_pins") or {}
+    pursuit = "、".join(n for n in ((_char_by_id(content, cid) or {}).get("name")
+                                   for cid in pins) if n)[:30]
     try:
         out = llm.generate({"suggest": True, "sugg": {
             "speaker": primary_name, "player_input": player_input, "reply": reply[:120],
             "present": present, "exits": exits, "topics": needed_topics, "relation": rel_name,
             "player_name": player_name, "player_desc": player_desc,
             "place": (location or {}).get("name") or "",
+            "goal": (state.get("goal") or "")[:60], "pursuit": pursuit,
         }})
         outs = [dedash(s) for s in (out.get("suggestions") or []) if s][:3]
         # en story hard backstop: a chip that came back in Chinese never reaches the UI

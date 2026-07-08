@@ -83,6 +83,29 @@ def test_render_directive_prose_only():
     assert "内心独白" in t
 
 
+def test_line_protocol_parse_and_stream():
+    """行协议（2026-07-08 深夜）：每行声明 旁白：/名字：，台词物理上进不了旁白行；
+    切分器边流边给出 (kind, speaker, text)，气泡从第一个字就是对的。"""
+    from app.engine.qwen import _LineSegmenter, _parse_line_beats
+
+    text = "旁白：方叔摸出一根烟。\n方叔：「那屋啊。」\n旁白：他顿了顿。"
+    beats = _parse_line_beats(text)
+    assert [b["type"] for b in beats] == ["description", "dialogue", "description"]
+    assert beats[1]["speaker_name"] == "方叔" and beats[1]["text"] == "那屋啊。"
+    assert _parse_line_beats("没有任何前缀的自由散文，两句都没有冒号收尾") is None
+
+    seg = _LineSegmenter("方叔")
+    toks = []
+    for d in ("旁白：方叔摸出", "一根烟。\n方叔：「那", "屋啊。」\n"):
+        toks += seg.feed(d)
+    toks += seg.flush()
+    joined: dict = {}
+    for k, w, t in toks:
+        joined[(k, w)] = joined.get((k, w), "") + t
+    assert joined[("narration", None)] == "方叔摸出一根烟。"
+    assert joined[("speech", "方叔")] == "那屋啊。"
+
+
 def test_tokens_stream_before_beats_and_plan_settles():
     llm = TwoBeatLLM()
     st = runtime.default_state()
