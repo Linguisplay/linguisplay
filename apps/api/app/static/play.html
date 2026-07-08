@@ -253,6 +253,13 @@
 .dice .roll { font-size:15px; color:#ffd479; min-width:2ch; display:inline-block; text-align:center; }
 .dice.win { border-color:#3c8a52; } .dice.win b:last-child { color:#8fe0a6; }
 .dice.lose { border-color:#8a3c3c; } .dice.lose b:last-child { color:#ff9a8f; }
+/* 险成: made it, at a cost — amber, with a little wobble as the die settles */
+.dice.mix { border-color:#8a7a2c; } .dice.mix b:last-child { color:#ffd76a; }
+.dice.mix .roll { animation: dshake .5s ease 1; }
+@keyframes dshake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-3px)} 75%{transform:translateX(3px)} }
+/* chip 分型: chip 1 follows the player's intent — it reads louder */
+#suggest .chip.prime { border-color:#5b79c9; background:#1d2438; color:#c9d6ff; }
+#suggest .chip.redo { border-color:#6a5b2c; color:#e8d9a0; }
 
 /* ── mobile: uncramp the pinned stack, bigger readable text ── */
 #barsToggle { display: none; }  /* mobile-only strip; desktop keeps the full bars */
@@ -330,6 +337,7 @@
       <button id="phoneBtn" class="iconbtn hidden" title="小手机：消息、日历、通讯录" onclick="openPhone()">📱<span id="phoneBadge" class="pbadge hidden"></span></button>
       <button id="mapBtn" class="iconbtn hidden" title="地图" onclick="openMap()">🗺</button>
       <button id="journalBtn" class="iconbtn hidden" title="档案" onclick="openJournal()">📔</button>
+      <button id="spdBtn" class="iconbtn hidden" title="文字速度" onclick="cycleSpeed()">🐇</button>
       <button id="soundBtn" class="iconbtn hidden" title="背景音乐" onclick="toggleSound()">🔊</button>
       <button id="backBtn" class="ghost hidden" style="padding:5px 10px" onclick="backToPick()">← 剧本</button>
       <span id="who" class="muted"></span>
@@ -827,7 +835,7 @@ async function enterRun(run) {
   try { if (!localStorage.getItem("lp_tut_v1")) { openTutorial(); tutOpen = true; } } catch (e) {}
   document.getElementById("driveBtn").classList.toggle("hidden", !isSandbox || playMode === "god");
   maybeShowHowto(st0, run, tutOpen);
-  hide("pick"); show("play"); show("backBtn"); show("soundBtn"); show("journalBtn"); show("mapBtn"); show("phoneBtn");
+  hide("pick"); show("play"); show("backBtn"); show("soundBtn"); show("journalBtn"); show("mapBtn"); show("phoneBtn"); show("spdBtn"); applySpeedIcon();
   resetEnded();
   chat.innerHTML = ""; suggest.innerHTML = ""; state.innerHTML = "";
   curBgmMood = null; curScene = null; curLocId = null;
@@ -892,6 +900,7 @@ function renderBeat(b) {
   if (b.author === "player") {
     if (b.type === "think") { node = document.createElement("div"); node.className = "beat think"; node.textContent = B("（观察）", "(Observing) ") + b.text; }
     else { node = makeRow("right", myName, b.text); }
+    if (b.seq != null) armRewind(node, b.seq);   // 长按回溯: this turn is a save point
   } else if (b.type === "description") {
     node = document.createElement("div"); node.className = "desc"; node.textContent = b.text;
   } else {
@@ -900,6 +909,58 @@ function renderBeat(b) {
   }
   chat.appendChild(node); chat.scrollTop = chat.scrollHeight;
   return node;
+}
+// ⏪ 重说/回溯 (docs/ux-design.md P1): a bad beat needs an exit that isn't a bug report.
+let lastTurnBody = null;
+function armRewind(node, seq) {
+  let t = null;
+  const start = () => { t = setTimeout(() => {
+    t = null;
+    if (!confirm(B("回到这句话之前重新开始？之后的剧情会被抹掉。",
+                   "Rewind to before this line? Everything after will be erased."))) return;
+    (async () => {
+      try {
+        await j(`/runs/${runId}/rewind`, { method: "POST", body: JSON.stringify({ seq }) });
+        lastTurnBody = null;
+        await reloadChat();
+        pushToast(B("⏪ 已回到这一拍之前，写你的新走向", "⏪ Rewound — take it somewhere new"), "t-act", 2400);
+      } catch (e) { pushToast("⚠️ " + escapeHtml(e.message), "", 2800); }
+    })();
+  }, 650); };
+  const cancel = () => { if (t) { clearTimeout(t); t = null; } };
+  node.addEventListener("pointerdown", start);
+  node.addEventListener("pointerup", cancel);
+  node.addEventListener("pointerleave", cancel);
+  node.title = B("长按：回到这一拍之前重来", "Long-press: rewind to before this line");
+}
+async function doRetry() {
+  if (!lastTurnBody || !runId) return;
+  sendBtn.disabled = true;
+  try {
+    await j(`/runs/${runId}/rewind`, { method: "POST", body: JSON.stringify({}) });
+    await reloadChat();
+    showTyping("");
+    await streamTurn(`${API}/runs/${runId}/play`, lastTurnBody);
+  } catch (e) { pushToast("⚠️ " + escapeHtml(e.message), "", 2800); sendBtn.disabled = false; }
+}
+function maybeAddRetryChip() {
+  if (!lastTurnBody || ended || suggest.querySelector(".redo")) return;
+  const c = document.createElement("span"); c.className = "chip redo";
+  c.textContent = B("↻ 重说这拍", "↻ Redo turn");
+  c.title = B("对这一拍不满意？回到你说话前，重演一次", "Not happy with this beat? Rewind and replay it");
+  c.onclick = doRetry;
+  suggest.appendChild(c);
+}
+async function reloadChat() {
+  const run = await j(`/runs/${runId}`);
+  resetEnded();
+  chat.innerHTML = ""; suggest.innerHTML = "";
+  const beats = await j(`/runs/${runId}/play`);
+  beats.forEach(renderBeat);
+  applyRunUpdate(run);
+  renderState(run.state);
+  curClock = (run.state && run.state.clock) || null;
+  if (curClock) renderClock(curClock);
 }
 // 📟 心象仪: the speaker's TRUE inner state, pinned under the bubble (may contradict the words)
 function attachMood(row, mood) {
@@ -1421,7 +1482,8 @@ function showDice(d) {
   const label = (uiLang === "en"
     ? { crit_success: "Critical success!", success: "Success", mixed: "Scraped by…", fail: "Fail", crit_fail: "Critical fail!" }
     : { crit_success: "大成功！", success: "成功", mixed: "险成（有代价）", fail: "失败", crit_fail: "大失败！" })[d.outcome] || "";
-  const cls = (d.outcome === "success" || d.outcome === "crit_success" || d.outcome === "mixed") ? "win" : "lose";
+  const cls = d.outcome === "mixed" ? "mix"
+    : (d.outcome === "success" || d.outcome === "crit_success") ? "win" : "lose";
   row.innerHTML = `${B("🎲 命运判定 d20 · 需要", "🎲 Fate check d20 · need")} ≥${d.dc || "?"} <b class="roll">--</b>`;
   chat.appendChild(row); chat.scrollTop = chat.scrollHeight;
   const rollEl = row.querySelector(".roll");
@@ -1770,8 +1832,9 @@ function renderProgress(prog) {
 }
 function renderSuggest(items) {
   suggest.innerHTML = "";
-  (items||[]).forEach(t => {
-    const c = document.createElement("span"); c.className = "chip"; c.textContent = "💡 " + t;
+  (items||[]).forEach((t, i) => {
+    // chip 1 is engine-guaranteed to follow the player's own intent — mark it
+    const c = document.createElement("span"); c.className = "chip" + (i === 0 ? " prime" : ""); c.textContent = "💡 " + t;
     c.title = t;  // display may ellipsize; hover shows — and clicking pastes — the full line
     c.onclick = () => { const isAct = t.startsWith("用「做」") || t.startsWith("Use “Do”"); msg.value = isAct ? "" : t; if (isAct) channel.value = "do"; msg.focus(); };
     suggest.appendChild(c);
@@ -1829,14 +1892,29 @@ function makeTypingRow(side, name) {
   row.appendChild(bub); chat.appendChild(row); chat.scrollTop = chat.scrollHeight;
   return txt;
 }
+// VN 标配 (docs/ux-design.md P1): text-speed gears + tap-to-skip. Gear persists.
+const SPEEDS = [{ f: 1, icon: "🐢", label: "慢" }, { f: 1.8, icon: "🐇", label: "中" }, { f: 3.4, icon: "⚡", label: "快" }];
+let spdIdx = Math.min(2, parseInt(localStorage.getItem("lp_speed") || "1", 10) || 1);
+let skipType = false;   // set by tapping the chat while a turn is playing out
+function applySpeedIcon() { const b = document.getElementById("spdBtn"); if (b) { b.textContent = SPEEDS[spdIdx].icon; b.title = B(`文字速度：${SPEEDS[spdIdx].label}`, `Text speed: ${SPEEDS[spdIdx].icon}`); } }
+function cycleSpeed() {
+  spdIdx = (spdIdx + 1) % SPEEDS.length;
+  try { localStorage.setItem("lp_speed", String(spdIdx)); } catch (e) {}
+  applySpeedIcon();
+  pushToast(`${SPEEDS[spdIdx].icon} ${B("文字速度：", "Text speed: ")}${SPEEDS[spdIdx].label}`, "", 1200);
+}
 async function typeInto(el, text, ms=22) {
   el.textContent = "";
+  if (skipType) { el.textContent = text || ""; chat.scrollTop = chat.scrollHeight; return; }
+  const f = SPEEDS[spdIdx].f;
   for (const ch of (text||"")) {
+    if (skipType) { el.textContent = text; break; }
     el.textContent += ch;
     chat.scrollTop = chat.scrollHeight;
     // a touch of cadence: linger on punctuation so it reads like real typing
-    await sleep("，。！？…、—".includes(ch) ? ms*5 : ms);
+    await sleep(("，。！？…、—".includes(ch) ? ms*5 : ms) / f);
   }
+  chat.scrollTop = chat.scrollHeight;
 }
 // play one engine beat with a "typing…" pause then a typewriter reveal
 async function playBeat(b) {
@@ -1847,7 +1925,7 @@ async function playBeat(b) {
     if (b._instant) node.textContent = b.text || "";   // already read as live tokens
     else await typeInto(node, b.text, 16);   // narration types a bit faster
   } else {
-    if (!b._instant) {
+    if (!b._instant && !skipType) {
       showTyping(b.speaker_name || "");
       await sleep(450 + Math.random()*500);   // "thinking" beat before they speak
       hideTyping();
@@ -1994,7 +2072,8 @@ async function send(chOverride) {
 // them one-by-one (typed) the moment they arrive. Used by normal turns AND confrontations.
 async function streamTurn(url, bodyObj) {
   playQ = []; playing = false; streamDone = false; firstBeat = true;
-  clearLive(); liveText = "";
+  clearLive(); liveText = ""; skipType = false;
+  if (url.endsWith("/play") && bodyObj && (bodyObj.input || "").trim()) lastTurnBody = bodyObj;
   afterPlay = { suggest: null, ending: undefined, moveReq: null, moments: null, relDeltas: null, choice: null };
   renderMoveAsk(null);  // clear any prior pending move prompt
   try {
@@ -2223,8 +2302,11 @@ function finishTurn() {
     if (afterPlay.ending !== undefined) showEnding(afterPlay.ending);
     afterPlay = null;
   }
+  maybeAddRetryChip();   // a bad beat's exit lives right next to the suggestions
   sendBtn.disabled = false; msg.focus();
 }
+// tap the story area while a turn plays out → skip the typewriter, show it all
+chat.addEventListener("click", () => { if (playing || !streamDone) skipType = true; });
 </script>
 </body>
 </html>

@@ -17,8 +17,8 @@ from ..models import Persona as PersonaModel
 from ..models import Run as RunModel
 from ..models import Story as StoryModel
 from ..models import StoryMeta, StorySnapshot, User
-from ..schemas import (Beat, ChooseIn, ConfrontIn, FollowIn, MoveIn, PhoneSendIn, PlayIn, Run,
-                       RunCreate, RunState, RunSummary, VerdictIn)
+from ..schemas import (Beat, ChooseIn, ConfrontIn, FollowIn, MoveIn, PhoneSendIn, PlayIn,
+                       RewindIn, Run, RunCreate, RunState, RunSummary, VerdictIn)
 from .stories import _to_secret, _to_story
 
 router = APIRouter(prefix="/runs", tags=["runs"])
@@ -182,8 +182,8 @@ def _to_run(r: RunModel) -> Run:
 
 
 def _to_beat(b: BeatModel) -> Beat:
-    return Beat(id=b.id, type=b.type, speaker_name=b.speaker_name, text=b.text, author=b.author,
-                mood=b.mood)
+    return Beat(id=b.id, seq=b.seq, type=b.type, speaker_name=b.speaker_name, text=b.text,
+                author=b.author, mood=b.mood)
 
 
 def _persona_dict(p: PersonaModel) -> dict:
@@ -404,6 +404,34 @@ def delete_run(run_id: str, user: User = Depends(current_user), db: Session = De
     db.commit()
 
 
+@router.post("/{run_id}/rewind", response_model=Run)
+def rewind_run(run_id: str, body: RewindIn,
+               user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """重说/回溯 (docs/ux-design.md P1): restore the run to how it stood BEFORE a player
+    turn and drop everything from that turn on. seq omitted = the latest player turn
+    (the 重说 button); explicit seq = that turn (长按回溯). The client then either
+    re-sends the same input (重说) or lets the player type anew (回溯). Emergent
+    content minted after the rewind point stays in the world — the ledger of what
+    exists only grows; only what HAPPENED is unwound."""
+    r = _own_run(run_id, user, db)
+    with _TURN_GUARD:
+        if run_id in _TURN_ACTIVE:
+            raise HTTPException(409, "回合进行中，等它说完再重来")
+    q = db.query(BeatModel).filter(BeatModel.run_id == run_id,
+                                   BeatModel.author == "player",
+                                   BeatModel.state_before.isnot(None))
+    b = (q.filter(BeatModel.seq == body.seq).first() if body.seq is not None
+         else q.order_by(BeatModel.seq.desc()).first())
+    if not b:
+        raise HTTPException(400, "没有可回溯的落点（这局更早的回合没有留存档快照）")
+    r.state = b.state_before
+    db.query(BeatModel).filter(BeatModel.run_id == run_id,
+                               BeatModel.seq >= b.seq).delete()
+    db.commit()
+    db.refresh(r)
+    return _to_run(r)
+
+
 @router.post("/{run_id}/reincarnate", response_model=Run)
 def reincarnate_run(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     """🔄 沙盒转生: a dead sandbox player returns as a new face in the same world.
@@ -508,6 +536,7 @@ def play(
             text=("（旁观指引）" + body.input) if mode == "god" else body.input,
             author="player",
             present_ids=present_ids,
+            state_before=(r.state or {}),  # 重说/回溯: this turn is a rewind point
         ))
         next_seq += 1
     db.commit()

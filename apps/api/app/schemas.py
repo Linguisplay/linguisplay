@@ -488,6 +488,7 @@ class RunCreate(BaseModel):
 
 class Beat(BaseModel):
     id: str
+    seq: int = 0   # turn ordering; player beats double as 回溯 rewind points
     type: Literal["description", "think", "dialogue"] = "description"
     speaker_name: Optional[str] = None
     text: str = ""
@@ -499,6 +500,12 @@ class PlayIn(BaseModel):
     input: str
     channel: Literal["say", "think", "do", "drive"] = "say"  # drive = ▶ 看下去 (director advances)
     target_character_id: Optional[str] = None  # who the player is addressing (optional)
+
+
+class RewindIn(BaseModel):
+    """重说/回溯: rewind the run to how it stood before a player turn. seq omitted →
+    the latest player turn (the 重说 button); explicit seq → that turn (长按回溯)."""
+    seq: Optional[int] = None
 
 
 class MoveIn(BaseModel):

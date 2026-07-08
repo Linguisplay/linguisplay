@@ -280,6 +280,9 @@ class Beat(Base):
     present_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # 📟 心象仪: the speaker's judged TRUE inner state when this line landed (nullable)
     mood: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    # 重说/回溯 (docs/ux-design.md P1): run state as it stood BEFORE this player turn —
+    # every player beat is a rewind point. NULL on engine beats / legacy rows.
+    state_before: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
