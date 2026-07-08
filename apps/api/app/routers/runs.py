@@ -425,6 +425,16 @@ def rewind_run(run_id: str, body: RewindIn,
     if not b:
         raise HTTPException(400, "没有可回溯的落点（这局更早的回合没有留存档快照）")
     r.state = b.state_before
+    # 内容也回卷 (Yi: 重说要清记忆): the FIRST content snapshot at/after the rewind point
+    # is the story copy as it stood back then — everything the erased timeline minted
+    # (characters, places, world facts) vanishes with the timeline that made it.
+    cb = (db.query(BeatModel)
+          .filter(BeatModel.run_id == run_id, BeatModel.seq >= b.seq,
+                  BeatModel.content_before.isnot(None))
+          .order_by(BeatModel.seq.asc()).first())
+    if cb is not None:
+        r.pinned_content = cb.content_before
+        flag_modified(r, "pinned_content")
     db.query(BeatModel).filter(BeatModel.run_id == run_id,
                                BeatModel.seq >= b.seq).delete()
     db.commit()
@@ -545,6 +555,10 @@ def play(
     state0 = r.state or {}
     persona_dict = _persona_dict(persona) if persona else {}
     start_seq = next_seq
+    # pre-turn content snapshot: only PERSISTED if this turn ends up mutating content —
+    # then a rewind can erase everything the erased timeline created (Yi: 重说要清记忆)
+    content_snapshot = copy.deepcopy(content)
+    turn_first_seq = start_seq - 1 if (body.input or "").strip() else start_seq
 
     # 🔒 one turn at a time per run: a double-submit (double click / two tabs) would race
     # two streams over the same state and silently clobber it — refuse the second.
@@ -613,6 +627,14 @@ def play(
                     flag_modified(run, "pinned_content")
                     # 🧭 a moved_to may have generated the place mid-turn: queue its bg
                     _spawn_location_bg(content, runtime.current_location(content, final["state"]))
+                if final.get("content_mutated"):
+                    # pin the pre-turn content to this turn's first beat: the rewind
+                    # anchor that lets an erased timeline take its creations with it
+                    fb = (db2.query(BeatModel)
+                          .filter(BeatModel.run_id == run_id,
+                                  BeatModel.seq == turn_first_seq).first())
+                    if fb is not None and fb.content_before is None:
+                        fb.content_before = content_snapshot
                 db2.commit()
                 yield _event({"event": "state", "state": _to_run(run).state.model_dump()})
                 yield _event({"event": "scene", "scene": final.get("scene")})

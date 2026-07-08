@@ -283,6 +283,10 @@ class Beat(Base):
     # 重说/回溯 (docs/ux-design.md P1): run state as it stood BEFORE this player turn —
     # every player beat is a rewind point. NULL on engine beats / legacy rows.
     state_before: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # …and when a turn MUTATED the run's story copy (minted a character/place, wrote a
+    # world fact), the pre-turn content snapshot rides the turn's first beat — so a
+    # rewind erases the whole timeline, including what only that timeline created.
+    content_before: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 

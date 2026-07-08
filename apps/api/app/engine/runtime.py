@@ -3130,8 +3130,10 @@ def _phone_exchange(content: dict[str, Any], state: dict[str, Any], persona: dic
                             mode, mature=bool(state.get("mature"))),
                         "context": ctx,
                         "player_name": (pc or {}).get("name") or (persona or {}).get("name") or "",
-                        "memory": (state.get("memory_by_char", {}) or {}).get(char_id)
-                        or state.get("memory", ""),
+                        # 信息不开天眼: strictly THIS character's own digest — the global
+                        # digest is the PLAYER's whole life and must never leak into a
+                        # character who wasn't there for it
+                        "memory": (state.get("memory_by_char", {}) or {}).get(char_id) or "",
                         "thread_tail": _thread_tail(state, char_id, 8),
                         "text": text}) or {}
     dc = int(out.get("closeness", 0) or 0)
@@ -3283,8 +3285,8 @@ def compose_letter(content: dict[str, Any], state: dict[str, Any], char: dict[st
                             "relation": relationships.name_of(
                                 relationships.derive_mode(char, scores, tun)),
                             "reason": reason, "hint": hint,
-                            "memory": (state.get("memory_by_char", {}) or {}).get(char.get("id"))
-                            or state.get("memory", "")}) or {}
+                            "memory": (state.get("memory_by_char", {}) or {})
+                            .get(char.get("id")) or ""}) or {}
     except Exception:
         out = {}
     subject = (out.get("subject") or "").strip()
@@ -4795,7 +4797,7 @@ def _confront_gen(content, state, persona, secret, frag, next_locked, target, ll
         "channel": "say",
         "context": ctx,
         "history": sp_hist,
-        "memory": (state.get("memory_by_char", {}) or {}).get(char_id) or state.get("memory", ""),
+        "memory": (state.get("memory_by_char", {}) or {}).get(char_id) or "",
         "world_facts": (content.get("story") or {}).get("world_facts") or "",
         "style": (content.get("story") or {}).get("style") or "",  # ✍️ 文风
         "roster": _physical_roster(content, state, persona),
@@ -6077,7 +6079,9 @@ def run_turn_stream(
         # silent cross-character/cross-scene info leak.
         sp_hist = history_for(beat_log, sp_id) if beat_log is not None else (history or [])
         responder_hist[sp_id] = sp_hist
-        sp_mem = (state.get("memory_by_char", {}) or {}).get(sp_id) or state.get("memory", "")
+        # 信息不开天眼: a character remembers THEIR digest only; the global digest is
+        # the player's whole history and never feeds a character's head
+        sp_mem = (state.get("memory_by_char", {}) or {}).get(sp_id) or ""
         prompt = {
             "speaker_name": sp_name,
             "speaker_persona": sp.get("persona_text", ""),

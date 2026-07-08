@@ -62,3 +62,44 @@ def test_rewind_restores_state_and_truncates_beats():
         # …and the run still plays normally after rewinding
         r = c.post(f"/api/v1/runs/{rid}/play", json={"input": "重新来过", "channel": "say"})
         assert r.status_code == 200
+
+
+def test_rewind_takes_the_erased_timelines_creations_with_it():
+    """Yi 2026-07-09: 重说要清记忆 — a character minted by the erased timeline must
+    vanish with it (content_before snapshot rides the mutating turn's first beat)."""
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    with TestClient(app) as c:
+        rid = _boot(c)
+        c.post(f"/api/v1/runs/{rid}/play", json={"input": "你好", "channel": "say"})
+        c.post(f"/api/v1/runs/{rid}/play", json={"input": "去打听", "channel": "say"})
+        beats = c.get(f"/api/v1/runs/{rid}/play").json()
+        p2 = [b for b in beats if b["author"] == "player"][1]["seq"]
+
+        # simulate what a minting turn does: pre-turn content pinned to the turn's
+        # first beat, then the run's story copy grows a character
+        from app.db import SessionLocal
+        from app.models import Beat as BeatModel, Run as RunModel
+        import copy, json
+        db = SessionLocal()
+        r = db.get(RunModel, rid)
+        pristine = copy.deepcopy(r.pinned_content)
+        fb = (db.query(BeatModel).filter(BeatModel.run_id == rid, BeatModel.seq == p2)
+              .first())
+        fb.content_before = pristine
+        pc = json.loads(json.dumps(r.pinned_content))
+        pc["story"]["characters"].append({"id": "gen_x", "name": "时间线私生子",
+                                          "generated": True})
+        r.pinned_content = pc
+        db.commit()
+        db.close()
+
+        assert c.post(f"/api/v1/runs/{rid}/rewind", json={"seq": p2}).status_code == 200
+        run = c.get(f"/api/v1/runs/{rid}").json()
+        db = SessionLocal()
+        names = [ch.get("name") for ch in
+                 (db.get(RunModel, rid).pinned_content.get("story") or {})
+                 .get("characters", [])]
+        db.close()
+        assert "时间线私生子" not in names   # erased with the timeline that made it
+        assert run["id"] == rid
