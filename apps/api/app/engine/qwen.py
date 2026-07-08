@@ -723,6 +723,11 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
 
     if has_map and not is_member and not is_think:
         props["move_invite"] = {"type": "string", "description": "若你这轮提出或答应带玩家去某处，填那个地点名（可以是【可去通路】里的，也可以是对话里自然浮现的新地点；旁白只写到起身相邀为止）；否则填空字符串"}
+        if (prompt.get("cult") or "").strip():
+            props["cult_gain"] = {"type": "string", "description":
+                                  "默认空字符串。仅当这一轮剧情让【玩家本人】获得了实打实的修为进益"
+                                  "（被人传功/服下灵物/顿悟/奇遇灌体，且确实生效）才按分量填：小、中、大。"
+                                  "玩家自己打坐修炼或掷骰吸收的不用你报（引擎自算）；没有就留空。"}
         props["moved_to"] = {"type": "string", "description":
                              "默认空字符串。仅当这一轮旁白已经把【玩家本人】实际带到了另一个地方"
                              "（走进后台、出了大门、上了楼、进了里屋）才填到达的地点名；"
@@ -1250,6 +1255,8 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
         out["time_skip"] = str(d.get("time_skip") or "").strip()
     if "moved_to" in d:
         out["moved_to"] = str(d.get("moved_to") or "").strip()
+    if "cult_gain" in d:
+        out["cult_gain"] = str(d.get("cult_gain") or "").strip()
     if "self_state" in d:
         out["self_state"] = str(d.get("self_state") or "").strip()
     if "self_intent" in d:
@@ -2214,6 +2221,32 @@ class QwenLLM:
         except Exception:
             return {}
 
+    def _gen_progression(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🌱 开局立法: derive THIS worldview's power ladder (每个世界一套符合世界观的
+        升级系统). Strict JSON; degrades to {} (the run simply has no ladder)."""
+        world = (prompt.get("world") or "").strip()
+        title = (prompt.get("title") or "").strip()
+        sys = ("你为一个互动剧情游戏的世界观设计【成长/升级体系】。只输出JSON："
+               '{"name":"这套体系衡量什么(2~6字，如:斗气/魂力/灵能/剑道/声望/军衔)",'
+               '"ranks":["从最低到最高的6~10个阶位名，每个≤6字"]}。'
+               "要求：阶位名必须贴合这个世界观的语感与题材（修仙用境界、军旅用军衔、"
+               "都市异能用等级、朝堂用品级），从弱到强排列，读起来像这个世界原生的东西；"
+               "不要解释，不要重复世界观原文。")
+        u = f"世界观标题：{title}" + chr(10) + f"世界观：{world}"
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model,
+                               "messages": [{"role": "system", "content": sys},
+                                            {"role": "user", "content": u}],
+                               "max_tokens": 220, "temperature": 0.7,
+                               "response_format": {"type": "json_object"}},
+                              timeout=20)
+            import json as _json
+            data = _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
     def _track_scene(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """🎥 场记 (turn-end tracker pass): EXTRACT every present body's state from the
         prose that was just generated — the ledger follows the text instead of hoping
@@ -2382,6 +2415,8 @@ class QwenLLM:
             return self._fate_choice(prompt)
         if prompt.get("track_scene"):
             return self._track_scene(prompt)
+        if prompt.get("gen_progression"):
+            return self._gen_progression(prompt)
         if prompt.get("world_news"):
             return self._world_news(prompt)
         if prompt.get("parting"):

@@ -284,6 +284,12 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
             content["story"]["world_long"] = wv
             content["story"]["world_facts"] = wv[:400]
         runtime.seed_sandbox_cast(content, mature=mature_run)
+        # 🌱 开局立法: no authored ladder → generate one that FITS this worldview
+        # (每个世界都该有自己的升级之路); lands in the run's private pinned copy.
+        try:
+            runtime.ensure_progression(content)
+        except Exception:
+            pass
 
     # validate the chosen role (character mode) against the story's PLAYABLE characters —
     # the story is authored from the protagonist's POV; embodying an antagonist/late-arrival

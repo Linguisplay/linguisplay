@@ -112,3 +112,52 @@ def test_anchor_states_stage_power_and_law():
     st = _st(rank=1, stage=2, prog=100)
     a = runtime.cult_anchor(SB, st)
     assert "斗者" in a and "后期" in a and "战力" in a and "碾压" in a and "突破" in a
+
+
+# ── ⚡ 剧情炼化 / 申报进益 / 开局立法 ─────────────────────────────────────────
+
+def test_absorb_success_feeds_ladder():
+    st = _st(prog=10)
+    txt = runtime.cult_absorb(SB, st, "success")
+    assert "炼入体内" in txt and st["cult"]["prog"] == 20   # +10 × 中平1.0
+    txt2 = runtime.cult_absorb(SB, st, "crit_success")
+    assert st["cult"]["prog"] == 42                         # +22
+    # fail gives nothing; crit_fail bites back
+    assert runtime.cult_absorb(SB, st, "fail") == ""
+    runtime.cult_absorb(SB, st, "crit_fail")
+    assert st["cult"]["prog"] == 34
+
+
+def test_absorb_blocked_at_full_bottleneck():
+    st = _st(prog=100)
+    txt = runtime.cult_absorb(SB, st, "success")
+    assert "先突破" in txt and st["cult"]["prog"] == 100
+
+
+def test_declared_gain_clamped():
+    st = _st(prog=0)
+    txt = runtime.cult_declared_gain(SB, st, "大")
+    assert txt and st["cult"]["prog"] == 18
+    assert runtime.cult_declared_gain(SB, st, "巨") == ""    # unknown grade → nothing
+    assert runtime.cult_declared_gain(PLAIN, st, "大") == "" # no ladder world → nothing
+
+
+def test_ensure_progression_generates_and_validates():
+    class LadderLLM:
+        def generate(self, prompt):
+            assert prompt.get("gen_progression")
+            return {"name": "灵能", "ranks": ["觉醒", "凝识", "破界", "溯源", "登神"]}
+    world = {"story": {"id": "gp", "title": "T", "sandbox": {"enabled": True},
+                       "world_long": "一个灵能觉醒的近未来都市。", "characters": [],
+                       "acts": [{"index": 1}], "locations": []}, "secrets": []}
+    assert runtime.ensure_progression(world, llm=LadderLLM()) is True
+    assert runtime.cult_cfg(world)["name"] == "灵能"
+    # already laddered → untouched; junk output → rejected
+    assert runtime.ensure_progression(SB, llm=LadderLLM()) is False
+
+    class JunkLLM:
+        def generate(self, prompt):
+            return {"name": "", "ranks": ["一"]}
+    world2 = {"story": {**world["story"], "sandbox": {"enabled": True}}, "secrets": []}
+    world2["story"] = dict(world2["story"]); world2["story"]["sandbox"] = {"enabled": True}
+    assert runtime.ensure_progression(world2, llm=JunkLLM()) is False

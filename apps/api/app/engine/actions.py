@@ -43,6 +43,10 @@ _CLASSES: list[tuple[str, tuple[str, ...], str]] = [
               "perform", "put on a show"), "easy"),
     ("豪赌", ("徒手接", "硬接", "硬扛", "以一敌", "单挑", "赤手",
               "bare-handed", "single-handed", "head-on"), "extreme"),
+    # ⚡ absorbing wild energy into your own body: the cultivation-world gamble.
+    # Success feeds the progression ladder (runtime settles the gain off the dice).
+    ("炼化", ("吸收", "炼化", "吞噬", "汲取", "抽取", "纳入体内", "炼入", "吸入体内",
+              "absorb", "devour the", "siphon", "drain the"), "hard"),
 ]
 
 

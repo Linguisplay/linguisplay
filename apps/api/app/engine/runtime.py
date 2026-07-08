@@ -3843,6 +3843,87 @@ def player_breakthrough(content: dict[str, Any], state: dict[str, Any], player_i
     return {"success": False, "roll": roll, "major": major, "prog": c["prog"], "harm": harm}
 
 
+def cult_absorb(content: dict[str, Any], state: dict[str, Any], outcome: str) -> str:
+    """⚡ 剧情炼化结算: the player absorbed/refined something IN THE FICTION and the dice
+    spoke. Success feeds the ladder (aptitude-scaled), a crit doubles, a critical botch
+    backfires into the meridians (进度倒扣). Returns the engine beat text ("" = nothing)."""
+    cfg = cult_cfg(content)
+    if not cfg or not outcome:
+        return ""
+    c = _cult(state)
+    _roll_aptitude(state)
+    _n, mult = _apt_of(c)
+    v0 = cult_view(content, state)
+    if outcome == "crit_fail":
+        loss = 8
+        c["prog"] = max(0, int(c.get("prog") or 0) - loss)
+        _audit(state, "cult.absorb", False, f"-{loss}%", "炼化反噬")
+        return _t(content,
+                  f"（那股力量在你经脉里暴走反噬！{v0['name']}进度倒退{loss}%，你强行压下翻涌的气血。）",
+                  f"(The energy turns on you inside your meridians — {v0['name']} falls back {loss}%.)")
+    if outcome not in ("success", "crit_success"):
+        return ""
+    if int(c.get("prog") or 0) >= 100:
+        return _t(content, "（那股力量涌入体内，却被已然充盈的瓶颈挡在门外：先突破，再谈吞吸。）",
+                  "(The energy pours in but the full bottleneck turns it away — break through first.)")
+    gain = int((22 if outcome == "crit_success" else 10) * mult)
+    c["prog"] = min(100, int(c.get("prog") or 0) + gain)
+    c["streak"] = 0
+    v = cult_view(content, state)
+    _audit(state, "cult.absorb", True, f"+{gain}%→{c['prog']}%")
+    return _t(content,
+              f"（你成功将那股力量炼入体内！{v['name']}进度大涨{gain}%，"
+              f"当前【{v['rank']}·{v['stage']} {c['prog']}%】。"
+              + ("本境瓶颈已满，可尝试突破。）" if c["prog"] >= 100 else "）"),
+              f"(You refine the power into yourself — {v['name']} surges {gain}%, now "
+              f"[{v['rank']} {v['stage']} · {c['prog']}%].)")
+
+
+def cult_declared_gain(content: dict[str, Any], state: dict[str, Any], grade: str) -> str:
+    """⚡ 导演申报的修为进益 (被传功/丹浴/顿悟 — gains no dice roll saw). Clamped small:
+    小/中/大 → +4/+10/+18, aptitude-scaled, capped at the bottleneck."""
+    cfg = cult_cfg(content)
+    g = {"小": 4, "中": 10, "大": 18}.get((grade or "").strip())
+    if not cfg or not g:
+        return ""
+    c = _cult(state)
+    if int(c.get("prog") or 0) >= 100:
+        return ""
+    _roll_aptitude(state)
+    _n, mult = _apt_of(c)
+    gain = max(2, int(g * mult))
+    c["prog"] = min(100, int(c.get("prog") or 0) + gain)
+    v = cult_view(content, state)
+    _audit(state, "cult.gain", True, f"+{gain}%→{c['prog']}%（申报）")
+    return _t(content,
+              f"（一番机缘，你的{v['name']}进度悄然上涨{gain}%，当前【{v['rank']}·{v['stage']} {c['prog']}%】。）",
+              f"(A stroke of fortune — {v['name']} rises {gain}%, now [{v['rank']} {v['stage']} · {c['prog']}%].)")
+
+
+def ensure_progression(content: dict[str, Any], llm=None) -> bool:
+    """🌱 开局立法: a sandbox with NO authored ladder gets one GENERATED to fit its
+    worldview at run creation (每个世界都该有自己的升级之路). Mutates content (caller
+    persists the pinned copy). Returns True when a ladder was added."""
+    if not sandbox_on(content) or cult_cfg(content):
+        return False
+    story = content.get("story") or {}
+    world = (story.get("world_facts") or story.get("world_long") or "").strip()
+    if not world:
+        return False
+    out = (lang_llm(llm or get_llm(), content).generate(
+        {"gen_progression": True, "world": world[:800],
+         "title": story.get("title") or ""}) or {})
+    name = str(out.get("name") or "").strip()[:8]
+    ranks = [str(r).strip()[:8] for r in (out.get("ranks") or []) if str(r).strip()]
+    if not name or not (4 <= len(ranks) <= 12):
+        return False
+    sb = story.get("sandbox")
+    if not isinstance(sb, dict):
+        return False
+    sb["progression"] = {"name": name, "ranks": ranks}
+    return True
+
+
 def cult_offline_gain(content: dict[str, Any], state: dict[str, Any],
                       away_hours: float) -> int:
     """一念逍遥 lesson: the numbers grow a little while you're away (温养), scaled by 资质,
@@ -4731,6 +4812,11 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
         # turn (穿过窄门/出了大门). The engine makes it true so prose and state can never
         # drift apart: known & reachable → move; sandbox & off-map → the place gets
         # generated for real (the prose has committed); otherwise rejected on the audit.
+        _cg = (directed.get("cult_gain") or "").strip() if not observer else ""
+        if _cg:
+            _cg_txt = cult_declared_gain(content, state, _cg)
+            if _cg_txt:
+                yield emit({"type": "description", "speaker_name": None, "text": _cg_txt})
         mv_to = (directed.get("moved_to") or "").strip() if not observer else ""
         if mv_to:
             cur_l = current_location(content, state)
@@ -5504,6 +5590,14 @@ def run_turn_stream(
                    f"{base['cls']}·{final['tier']}(DC{dc})",
                    "；".join(base["mods"] + (["模型调档"] if final["adjusted"] else [])))
             yield ("dice", dice)
+            # ⚡ 剧情炼化: an absorb-class attempt that SUCCEEDS feeds the ladder right
+            # here — 吸收异火/炼化魔核 is cultivation, not just prose. Crit doubles;
+            # a critical botch backfires into the meridians.
+            if base.get("cls") == "炼化" and cult_cfg(content):
+                _ab_txt = cult_absorb(content, state, (dice or {}).get("outcome") or "")
+                if _ab_txt:
+                    yield ("beat", dedash_beat({"type": "description", "speaker_name": None,
+                                                "text": _ab_txt}))
         elif risk < 100:
             if state.get("perk") == "instinct":  # 🌱 NG+ 直觉: fate runs warmer
                 risk = min(95, risk + INSTINCT_BONUS)
