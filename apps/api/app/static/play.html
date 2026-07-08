@@ -130,6 +130,11 @@
   .pmsg.me { align-self: flex-end; align-items: flex-end; } .pmsg.me span { background: #2c4a35; color: #dff1e3; border-bottom-right-radius: 5px; }
   .pmsg.sys { align-self: center; max-width: 92%; } .pmsg.sys span { background: none; color: #7b8296; font-size: 12px; font-style: italic; }
   .pmsg.call span { border: 1px dashed #4a4a66; }
+  /* 对方正在输入…: the three-dot pulse every messenger taught the world to read */
+  .pmsg.ptyping span i { font-style: normal; font-size: 8px; color: #8a93a8; animation: pdot 1.2s infinite; }
+  .pmsg.ptyping span i:nth-child(2) { animation-delay: .2s; }
+  .pmsg.ptyping span i:nth-child(3) { animation-delay: .4s; }
+  @keyframes pdot { 0%,60%,100%{opacity:.25} 30%{opacity:1} }
   .pletter { background: #191926; border: 1px solid #2a2a3a; border-radius: 12px; padding: 12px 14px; margin: 6px 2px; }
   .pletter .lsub { font-weight: 700; font-size: 14px; margin-bottom: 6px; }
   .pletter .lbody { font-size: 13.5px; line-height: 1.8; color: #d5d9e6; white-space: pre-wrap; }
@@ -1341,36 +1346,72 @@ function renderThread(th) {
 function toastUnlocked(th) {
   for (const t of (th.unlocked || [])) pushToast(B(`🔓 TA在${escapeHtml(th.device||"消息")}里松了口：「${escapeHtml(t)}」`, `🔓 They let it slip over the ${escapeHtml(th.device||"phone")}: “${escapeHtml(t)}”`), "t-unlock", 500);
 }
-async function sendPhoneMsg(cid) {
+function pmsgEl(m) {
+  const who = m.from === "me" ? "me" : m.from === "sys" ? "sys" : "them";
+  const d = document.createElement("div"); d.className = `pmsg ${who}${m.call ? " call" : ""}`;
+  d.innerHTML = `<span>${escapeHtml(m.text)}</span><small>${escapeHtml(m.at||"")}</small>`;
+  return d;
+}
+function pTypingEl(callMode) {
+  const d = document.createElement("div"); d.className = "pmsg them ptyping" + (callMode ? " call" : "");
+  d.innerHTML = callMode ? `<span>${B("📞 正在呼叫", "📞 calling")}<i>●</i><i>●</i><i>●</i></span>`
+                         : "<span><i>●</i><i>●</i><i>●</i></span>";
+  return d;
+}
+// 像真的在聊天软件上聊天 (Yi): the bubble lands when you hit send, they "start typing"
+// a beat later, and their replies pop in one at a time — paced by message length.
+async function sendPhoneMsg(cid, callMode) {
   const inp = document.getElementById("pmsgIn");
   const text = (inp && inp.value || "").trim();
-  if (!text) return;
+  if (!text) { if (callMode) pushToast(t("先在输入框里写下你开口要说的话，再按 📞"), "", 2600); return; }
   inp.value = ""; inp.disabled = true;
+  const box = document.getElementById("pmsgs");
+  let mine = null, tip = null;
+  if (box) {
+    const empty = box.querySelector(".jempty"); if (empty) empty.remove();
+    mine = pmsgEl({ from: "me", text: callMode ? `📞 ${text}` : text, at: "", call: !!callMode });
+    mine.querySelector("small").textContent = B("发送中…", "sending…");
+    box.appendChild(mine); box.scrollTop = box.scrollHeight;
+  }
+  const tipTimer = setTimeout(() => {
+    if (!box) return;
+    tip = pTypingEl(callMode); box.appendChild(tip); box.scrollTop = box.scrollHeight;
+  }, callMode ? 150 : 700);
   try {
-    const th = await j(`/runs/${runId}/phone/${cid}`, { method:"POST", body: JSON.stringify({ text }) });
-    renderThread(th);
-    if (!th.replied) pushToast(t("（对方已读，没有回。）"), "", 2400);
+    const url = `/runs/${runId}/phone/${cid}` + (callMode ? "/call" : "");
+    const th = await j(url, { method:"POST", body: JSON.stringify({ text }) });
+    clearTimeout(tipTimer);
+    const msgs = th.msgs || [];
+    let lastMe = -1;
+    msgs.forEach((m, i) => { if (m.from === "me") lastMe = i; });
+    if (mine) mine.querySelector("small").textContent =
+      (lastMe >= 0 && msgs[lastMe].at ? msgs[lastMe].at + " · " : "") + B("已读", "read");
+    // their replies arrive one at a time, each after a "typing" pause sized to its length
+    for (const m of msgs.slice(lastMe + 1)) {
+      if (!box) break;
+      if (!tip) { tip = pTypingEl(false); box.appendChild(tip); box.scrollTop = box.scrollHeight; }
+      await sleep(Math.min(2200, 450 + (m.text || "").length * 45));
+      tip.remove(); tip = null;
+      box.appendChild(pmsgEl(m)); box.scrollTop = box.scrollHeight;
+    }
+    if (tip) { tip.remove(); tip = null; }
+    if (!th.replied && mine)
+      mine.querySelector("small").textContent = B("已读 · 没有回", "read · no reply");
     // 传令落账: agreeing to come / taking a task is LEDGER, not just words
     if (th.coming) pushToast(B(`🚶 ${th.name}答应过来了，TA正在路上`, `🚶 ${th.name} is on the way`), "t-rel", 2800);
     if (th.task) pushToast(B(`📌 ${th.name}应下了：${th.task}`, `📌 ${th.name} took it on: ${th.task}`), "t-act", 2800);
     toastUnlocked(th);
-  } catch (e) { pushToast("⚠️ " + escapeHtml(e.message), "", 3000); if (inp) inp.disabled = false; }
+    if (inp) { inp.disabled = false; inp.focus(); }
+  } catch (e) {
+    clearTimeout(tipTimer); if (tip) tip.remove();
+    if (mine) mine.querySelector("small").textContent = B("发送失败", "failed");
+    pushToast("⚠️ " + escapeHtml(e.message), "", 3000); if (inp) inp.disabled = false;
+  }
 }
 // 📞 通话: same composer text, but spoken live down the line (作息不在 → 无人接听)
-async function sendPhoneCall(cid) {
-  const inp = document.getElementById("pmsgIn");
-  const text = (inp && inp.value || "").trim();
-  if (!text) { pushToast(t("先在输入框里写下你开口要说的话，再按 📞"), "", 2600); return; }
-  inp.value = ""; inp.disabled = true;
-  try {
-    const th = await j(`/runs/${runId}/phone/${cid}/call`, { method:"POST", body: JSON.stringify({ text }) });
-    renderThread(th);
-    if (!th.replied) pushToast(t("📞 电话那头没有回应。"), "", 2400);
-    if (th.coming) pushToast(B(`🚶 ${th.name}答应过来了，TA正在路上`, `🚶 ${th.name} is on the way`), "t-rel", 2800);
-    if (th.task) pushToast(B(`📌 ${th.name}应下了：${th.task}`, `📌 ${th.name} took it on: ${th.task}`), "t-act", 2800);
-    toastUnlocked(th);
-  } catch (e) { pushToast("⚠️ " + escapeHtml(e.message), "", 3000); if (inp) inp.disabled = false; }
-}
+// 📞 通话: same composer, live down the line — rings first, then their voice lands
+// line by line through the same paced channel
+async function sendPhoneCall(cid) { return sendPhoneMsg(cid, true); }
 async function openContacts() {
   // 通讯录是服务端真相：只列你真正【见过】的人（met_ids）——没打过照面的角色
   // 绝不出现在这里（不开天眼）。点一个人直接进对话，捎话/召人/托事都从这儿走。
