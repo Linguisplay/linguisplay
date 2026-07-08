@@ -1400,6 +1400,12 @@ async function sendPhoneMsg(cid, callMode) {
     // 传令落账: agreeing to come / taking a task is LEDGER, not just words
     if (th.coming) pushToast(B(`🚶 ${th.name}答应过来了，TA正在路上`, `🚶 ${th.name} is on the way`), "t-rel", 2800);
     if (th.task) pushToast(B(`📌 ${th.name}应下了：${th.task}`, `📌 ${th.name} took it on: ${th.task}`), "t-act", 2800);
+    if (th.promise) {
+      const p = th.promise;
+      pushToast(B(`${p.romantic ? "💞" : "🤝"} 约定记下了：${p.when}${p.place ? "·" + p.place : ""}·${p.what}`,
+                  `${p.romantic ? "💞" : "🤝"} It's a date: ${p.when}${p.place ? " · " + p.place : ""} · ${p.what}`), "t-rel", 3200);
+      if (th.promises) renderPromises(th.promises);   // the promise bar updates live
+    }
     toastUnlocked(th);
     if (inp) { inp.disabled = false; inp.focus(); }
   } catch (e) {

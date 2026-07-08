@@ -2384,10 +2384,13 @@ class QwenLLM:
         judgeline = ("最后另起一行，写：好感：一个整数-2~2（这几句话让你对TA更近还是更远）；"
                      "心动：一个整数-1~2（仅当TA的话让你心里一动）。")
         if not prompt.get("same_room"):
-            judgeline += ("再各起一行，写：赴约：是 或 否（仅当TA在消息里叫你【过去见TA】、"
+            judgeline += ("再各起一行，写：赴约：是 或 否（仅当TA在消息里叫你【马上过去见TA】、"
                           "且你按此刻的心情和你们的关系确实愿意动身才写 是；犹豫、敷衍、"
                           "改天再说都算 否）；应承：若TA托你办一件【具体的事】且你应下了，"
-                          "用15字内写下这件事本身（如 盯着王九的动静），没应承就写 无。")
+                          "用15字内写下这件事本身（如 盯着王九的动静），没应承就写 无；"
+                          "约定：若这几条消息定下了一个【将来的会面】（约在之后的某个时段见，"
+                          "不是马上动身），按 做什么|几天后|时段|地点 写（几天后填0/1/2，"
+                          "时段填 晨/午/夜，地点没提就留空），如 看画|1|晨|后巷天台；没定就写 无。")
         u = ((f"你们此前的往来：\n{tail}\n\n（电话接通了，TA刚说了最后那句。）你开口说什么？\n"
               if call else
               f"你们的消息记录：\n{tail}\n\n（TA刚发来最后那条。）你现在回什么？\n")
@@ -2406,6 +2409,7 @@ class QwenLLM:
         ambient = ""
         coming = False
         task = ""
+        promise: dict[str, Any] | None = None
         for ln in txt.splitlines():
             s = ln.strip()
             if not s:
@@ -2424,6 +2428,17 @@ class QwenLLM:
                 body = s.split("：", 1)[-1].split(":", 1)[-1].strip()
                 if body and not body.startswith("无"):
                     task = body[:20]
+            elif s.startswith("约定"):
+                body = s.split("：", 1)[-1].split(":", 1)[-1].strip()
+                if body and not body.startswith("无"):
+                    parts = [p.strip() for p in body.split("|")]
+                    try:
+                        promise = {"what": parts[0][:20],
+                                   "day_offset": max(0, min(2, int(parts[1]))) if len(parts) > 1 else 0,
+                                   "slot": parts[2] if len(parts) > 2 else "",
+                                   "place": parts[3] if len(parts) > 3 else ""}
+                    except (ValueError, IndexError):
+                        promise = None
             elif ("已读" in s or "沉默" in s) and len(s) <= 6:
                 msgs = []
                 break
@@ -2434,7 +2449,7 @@ class QwenLLM:
                 if s:
                     msgs.append(s.strip("「」\"'")[:120])
         out: dict[str, Any] = {"msgs": msgs[:3], "closeness": dc, "romance": dr,
-                               "coming": coming, "task": task}
+                               "coming": coming, "task": task, "promise": promise}
         if call:
             out["ambient"] = ambient
         return out

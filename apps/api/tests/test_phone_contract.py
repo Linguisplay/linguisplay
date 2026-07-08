@@ -93,6 +93,19 @@ def test_character_memory_never_falls_back_to_the_players_global_digest():
     assert all(p.get("memory") == "" for p in spy.prompts if "memory" in p)
 
 
+def test_texted_appointment_books_a_real_promise():
+    """短信里约的会走同一本约定账 — 到点没去TA记仇的那本 (Yi: 对对)。"""
+    llm = PhoneSpy(promise={"what": "看画", "day_offset": 1, "slot": "晨",
+                            "place": "后巷"})
+    st = _st(loc="hall")
+    view = runtime.phone_send(STORY, st, {"name": "我"}, "b", "明早去看你画画？", llm=llm)
+    assert view["promise"]["what"] == "看画"
+    booked = st.get("promises") or []
+    assert any(p.get("char_id") == "b" and p.get("what") == "看画"
+               for p in booked)
+    assert view.get("promises") is not None   # the promise bar payload rides the reply
+
+
 def test_same_room_text_is_a_moment_not_a_summon():
     llm = PhoneSpy(coming=True)   # even if the model says coming, presence wins
     st = _st(loc="alley")         # the player walked INTO 乙's alley

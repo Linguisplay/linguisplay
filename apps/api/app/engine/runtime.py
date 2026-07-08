@@ -3195,6 +3195,17 @@ def _apply_phone_judgments(content: dict[str, Any], state: dict[str, Any], c: di
         _sim(state, char_id)["intent"] = task[:40]
         _audit(state, "phone.task", True, f"{c.get('name', '')}:{task[:20]}")
         view["task"] = task[:40]
+    # 🤝 短信里定下的约会走同一本约定账（到点没去，TA 记仇的那本）
+    pm = out.get("promise")
+    if isinstance(pm, dict) and str(pm.get("what") or "").strip():
+        made = make_promise(content, state, c, pm, tuning_for(content))
+        if made:
+            when = promise_when_label(content, made, state)
+            loc_nm = (_location_by_id(content, made.get("location_id")) or {}).get("name") or ""
+            _audit(state, "phone.promise", True, f"{c.get('name', '')}:{made['what']}")
+            view["promise"] = {"what": made["what"], "when": when, "place": loc_nm,
+                               "romantic": bool(made.get("romantic"))}
+            view["promises"] = promises_view(content, state)
 
 
 def phone_call(content: dict[str, Any], state: dict[str, Any], persona: dict[str, Any],
