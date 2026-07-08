@@ -106,6 +106,41 @@ def test_texted_appointment_books_a_real_promise():
     assert view.get("promises") is not None   # the promise bar payload rides the reply
 
 
+def test_phone_rel_movement_is_visible_and_tiers_announce():
+    """隔着屏幕也是经营 (Yi): the delta shows in the thread, a tier-up announces."""
+    llm = PhoneSpy(closeness=2, romance=1)
+    st = _st(loc="hall")
+    view = runtime.phone_send(STORY, st, {"name": "我"}, "b", "谢谢你昨天帮我", llm=llm)
+    assert view["rel"]["closeness"] == 2 and view["rel"]["romance"] == 1
+    assert st["rel"]["b"]["closeness"] >= 2          # the ledger moved for real
+
+
+def test_long_thread_folds_into_the_characters_memory():
+    """电话记忆并账 (Yi: 手机聊天的记忆有问题): overflow beyond the 12-message window
+    digests into memory_by_char — the same memory the scenes read."""
+    st = _st(loc="hall")
+    th = runtime._thread(st, "b")
+    for i in range(30):
+        th["msgs"].append({"from": "me" if i % 2 else "them", "text": f"第{i}句", "at": ""})
+    runtime._digest_phone_overflow(st, "b", MockLLMForDigest())
+    assert "第0句" in (st["memory_by_char"]["b"])     # old talk survives in the digest
+    assert th["digested_upto"] == 30 - 12
+    # capping the thread never desyncs the pointer
+    for i in range(40):
+        th["msgs"].append({"from": "me", "text": f"新{i}", "at": ""})
+    runtime._thread_cap(th)
+    assert len(th["msgs"]) == 60
+    assert th["digested_upto"] == max(0, (30 - 12) - (70 - 60))
+
+
+class MockLLMForDigest:
+    def generate(self, prompt):
+        if prompt.get("summarize"):
+            lines = " ".join(l.get("content", "") for l in (prompt.get("new_lines") or []))
+            return {"memory": ((prompt.get("prior_memory") or "") + " " + lines).strip()[-2000:]}
+        return {}
+
+
 def test_same_room_text_is_a_moment_not_a_summon():
     llm = PhoneSpy(coming=True)   # even if the model says coming, presence wins
     st = _st(loc="alley")         # the player walked INTO 乙's alley

@@ -1431,6 +1431,18 @@ async function sendPhoneMsg(cid, callMode) {
     if (tip) { tip.remove(); tip = null; }
     if (!th.replied && mine)
       mine.querySelector("small").textContent = B("已读 · 没有回", "read · no reply");
+    // 隔着屏幕也是经营: the bond moves over text too — show it right in the thread
+    if (th.rel && box && (th.rel.closeness || th.rel.romance)) {
+      const bits = [];
+      if (th.rel.closeness) bits.push(`${th.rel.closeness > 0 ? "+" : ""}${th.rel.closeness} ${B("好感", "bond")}`);
+      if (th.rel.romance) bits.push(`${th.rel.romance > 0 ? "+" : ""}${th.rel.romance} 💗`);
+      const d = document.createElement("div"); d.className = "pmsg sys";
+      d.innerHTML = `<span>${bits.join(" · ")}</span>`;
+      box.appendChild(d); box.scrollTop = box.scrollHeight;
+    }
+    if (th.rel && th.rel.rel_up)
+      pushToast(B(`💗 隔着屏幕，你们的关系升到了【${th.rel.rel_up}】`,
+                  `💗 Even over the phone: bond tier is now “${th.rel.rel_up}”`), "t-rel", 3200);
     // 传令落账: agreeing to come / taking a task is LEDGER, not just words
     if (th.coming) pushToast(B(`🚶 ${th.name}答应过来了，TA正在路上`, `🚶 ${th.name} is on the way`), "t-rel", 2800);
     if (th.task) pushToast(B(`📌 ${th.name}应下了：${th.task}`, `📌 ${th.name} took it on: ${th.task}`), "t-act", 2800);

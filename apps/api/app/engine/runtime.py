@@ -3037,6 +3037,16 @@ def _thread(state: dict[str, Any], cid: str) -> dict[str, Any]:
     return ph.setdefault("threads", {}).setdefault(cid, {"msgs": [], "unread": 0})
 
 
+def _thread_cap(th: dict[str, Any]) -> None:
+    """Cap a thread at 60 messages WITHOUT breaking the digest pointer (indices shift
+    when the front is dropped — an uncorrected pointer silently loses undigested talk)."""
+    msgs = th.get("msgs") or []
+    if len(msgs) > 60:
+        dropped = len(msgs) - 60
+        th["msgs"] = msgs[-60:]
+        th["digested_upto"] = max(0, int(th.get("digested_upto") or 0) - dropped)
+
+
 def _thread_tail(state: dict[str, Any], cid: str, n: int = 4) -> list[dict[str, Any]]:
     return list((((state.get("phone") or {}).get("threads") or {}).get(cid) or {}).get("msgs") or [])[-n:]
 
@@ -3060,7 +3070,7 @@ def phone_push(content: dict[str, Any], state: dict[str, Any], char: dict[str, A
         if call:
             rec["call"] = True
         th["msgs"].append(rec)
-    th["msgs"] = th["msgs"][-60:]
+    _thread_cap(th)
     th["unread"] = int(th.get("unread", 0)) + len(msgs)
     return {"char_id": char.get("id"), "name": char.get("name") or "",
             "avatar_url": char.get("avatar_url"), "msgs": msgs, "call": bool(call),
@@ -3288,13 +3298,48 @@ def _phone_exchange(content: dict[str, Any], state: dict[str, Any], persona: dic
                         # digest is the PLAYER's whole life and must never leak into a
                         # character who wasn't there for it
                         "memory": (state.get("memory_by_char", {}) or {}).get(char_id) or "",
-                        "thread_tail": _thread_tail(state, char_id, 8),
+                        "thread_tail": _thread_tail(state, char_id, 12),
                         "text": text}) or {}
     dc = int(out.get("closeness", 0) or 0)
     dr = int(out.get("romance", 0) or 0)
     if dc or dr:
-        state.setdefault("rel", {})[char_id] = relationships.apply_deltas(scores, dc, dr, tun)
+        new_scores = relationships.apply_deltas(scores, dc, dr, tun)
+        state.setdefault("rel", {})[char_id] = new_scores
+        # 隔着屏幕也是经营 (Yi: 手机聊天也要影响好感): surface the movement so the
+        # player SEES the bond move — and a tier crossed over text is a moment
+        new_mode = relationships.derive_mode(c, new_scores, tun)
+        out["rel_view"] = {"closeness": dc, "romance": dr,
+                           "mode_name": relationships.name_of(new_mode),
+                           "rel_up": (relationships.name_of(new_mode)
+                                      if new_mode != mode else "")}
     return out
+
+
+def _digest_phone_overflow(state: dict[str, Any], cid: str, llm: LLM) -> None:
+    """📱 电话记忆并账 (Yi: 手机聊天的记忆有问题): the prompt only carries the last 12
+    messages verbatim — anything older folds into THIS character's rolling digest
+    (the same memory the scenes read), so a long thread never evaporates."""
+    th = _thread(state, cid)
+    msgs = th.get("msgs") or []
+    done = int(th.get("digested_upto") or 0)
+    keep = 12
+    if len(msgs) - done <= keep + 6:      # not enough overflow yet
+        return
+    chunk = msgs[done:len(msgs) - keep]
+    if not chunk:
+        return
+    lines = [{"content": f"{'对方' if m.get('from') == 'me' else '你'}：{m.get('text', '')}"}
+             for m in chunk if m.get("from") in ("me", "them")]
+    prior = (state.get("memory_by_char", {}) or {}).get(cid) or ""
+    try:
+        out = llm.generate({"summarize": True, "prior_memory": prior,
+                            "new_lines": lines}) or {}
+    except Exception:
+        return
+    mem = (out.get("memory") or "").strip()
+    if mem:
+        state.setdefault("memory_by_char", {})[cid] = mem
+        th["digested_upto"] = len(msgs) - keep
 
 
 def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str, Any],
@@ -3313,18 +3358,21 @@ def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str
     now_label = (clock_view(content, state) or {}).get("label", "")
     th = _thread(state, char_id)
     th["msgs"].append({"from": "me", "text": text[:200], "at": now_label})
-    th["msgs"] = th["msgs"][-60:]
+    _thread_cap(th)
     newly, cracked = _phone_probe(content, state, char_id, text)
     out = _phone_exchange(content, state, persona, c, text, llm, newly, same_room=here)
     msgs = [dedash(str(m).strip()[:120]) for m in (out.get("msgs") or []) if str(m).strip()][:3]
     if msgs:
         for m in msgs:
             th["msgs"].append({"from": "them", "text": m, "at": now_label})
-        th["msgs"] = th["msgs"][-60:]
+        _thread_cap(th)
     th["unread"] = 0  # the player is looking at this thread right now
+    _digest_phone_overflow(state, char_id, llm)
     view = phone_thread(content, state, char_id)
     view["replied"] = bool(msgs)
     view["unlocked"] = cracked  # 🔓 titles pried open by THIS text (UI toast)
+    if out.get("rel_view"):
+        view["rel"] = out["rel_view"]
     _apply_phone_judgments(content, state, c, out, view, here)
     return view
 
@@ -3381,14 +3429,14 @@ def phone_call(content: dict[str, Any], state: dict[str, Any], persona: dict[str
         th["msgs"].append({"from": "me", "text": f"📞 {text[:120]}", "at": now_label, "call": True})
         th["msgs"].append({"from": "sys", "text": "（无人接听。TA此刻不知在何处。）",
                            "at": now_label, "call": True})
-        th["msgs"] = th["msgs"][-60:]
+        _thread_cap(th)
         th["unread"] = 0
         view = phone_thread(content, state, char_id)
         view["replied"] = False
         view["unlocked"] = []
         return view
     th["msgs"].append({"from": "me", "text": f"📞 {text[:200]}", "at": now_label, "call": True})
-    th["msgs"] = th["msgs"][-60:]
+    _thread_cap(th)
     newly, cracked = _phone_probe(content, state, char_id, text)
     out = _phone_exchange(content, state, persona, c, text, llm, newly, call=True)
     msgs = [dedash(str(m).strip()[:120]) for m in (out.get("msgs") or []) if str(m).strip()][:3]
@@ -3401,11 +3449,14 @@ def phone_call(content: dict[str, Any], state: dict[str, Any], persona: dict[str
     else:
         th["msgs"].append({"from": "sys", "text": "（电话那头沉默了几秒，挂断了。）",
                            "at": now_label, "call": True})
-    th["msgs"] = th["msgs"][-60:]
+    _thread_cap(th)
     th["unread"] = 0
+    _digest_phone_overflow(state, char_id, llm)
     view = phone_thread(content, state, char_id)
     view["replied"] = bool(msgs)
     view["unlocked"] = cracked
+    if out.get("rel_view"):
+        view["rel"] = out["rel_view"]
     _apply_phone_judgments(content, state, c, out, view, here=False)
     return view
 
