@@ -469,6 +469,138 @@ def economy_on(state: dict[str, Any]) -> bool:
     return state.get("money") is not None
 
 
+# ── 🎯 数值账本 (Yi: 要有更具体的数值) ──────────────────────────────────────────
+ATTRS = ("力量", "敏捷", "体质", "心思", "气运")
+
+
+def ensure_player_attrs(content: dict[str, Any], state: dict[str, Any],
+                        persona: dict[str, Any] | None, llm: LLM | None = None) -> dict | None:
+    """玩家五维 (1~10, 5=常人): judged ONCE from who the player is in this world, then
+    it's law — actions.classify folds them into the dice DC (stats with teeth)."""
+    if state.get("attrs") or (state.get("mode") or "character") == "god":
+        return state.get("attrs")
+    llm = lang_llm(llm or get_llm(), content)
+    pcid = state.get("player_character_id")
+    pc = _char_by_id(content, pcid) if pcid else None
+    who = ((pc or {}).get("persona_text") or (pc or {}).get("role")
+           or (persona or {}).get("background") or (persona or {}).get("name") or "")
+    try:
+        out = llm.generate({"gen_attrs": True, "who": str(who)[:300],
+                            "powers": list(state.get("powers") or []),
+                            "language": lang_of(content)}) or {}
+    except Exception:
+        out = {}
+    attrs = out.get("attrs") or {}
+    if not all(k in attrs for k in ATTRS):
+        attrs = {k: 5 for k in ATTRS}
+    state["attrs"] = {k: max(1, min(10, int(attrs[k]))) for k in ATTRS}
+    _audit(state, "attrs.set", True,
+           " ".join(f"{k}{v}" for k, v in state["attrs"].items()))
+    return state["attrs"]
+
+
+def ensure_npc_rank(content: dict[str, Any], state: dict[str, Any], char: dict[str, Any],
+                    llm: LLM) -> dict[str, Any]:
+    """⚡ 我是魂士的话别人是什么 (Yi): every character sits SOMEWHERE on the story's own
+    ladder, judged once and cached in state.npc_cult — and carries money like a real
+    person (sim sheet). The prompt anchors both, so 境界差距 and 买卖 stay consistent."""
+    cid = char.get("id")
+    if not cid:
+        return {}
+    cached = (state.get("npc_cult") or {}).get(cid)
+    if cached is not None:
+        return cached
+    sb = (content.get("story") or {}).get("sandbox") or {}
+    ranks = [str(r) for r in ((sb.get("progression") or {}).get("ranks") or [])]
+    entry: dict[str, Any] = {}
+    if ranks:
+        try:
+            out = llm.generate({"rank_judge": True, "ranks": ranks,
+                                "char": {"name": char.get("name"), "role": char.get("role"),
+                                         "persona_text": char.get("persona_text")},
+                                "currency": currency_of(content),
+                                "base_money": int(sb.get("start_money") or 50),
+                                "language": lang_of(content)}) or {}
+        except Exception:
+            out = {}
+        if out.get("rank_i") is not None:
+            i = max(0, min(len(ranks) - 1, int(out["rank_i"])))
+            entry["rank_i"], entry["rank"] = i, ranks[i]
+        if out.get("money") is not None:
+            _sim(state, cid)["money"] = max(0, int(out["money"]))
+    state.setdefault("npc_cult", {})[cid] = entry
+    if entry.get("rank"):
+        _audit(state, "npc.rank", True, f"{char.get('name', '')}:{entry['rank']}")
+    return entry
+
+
+def _own_rank_line(content: dict[str, Any], state: dict[str, Any], char: dict[str, Any],
+                   llm: LLM) -> str:
+    """Depth-0 anchor for a speaker: their OWN ladder rank vs the player's, plus their
+    pocket money — so power gaps and haggling stay consistent with the ledger."""
+    if not sandbox_on(content):
+        return ""
+    e = ensure_npc_rank(content, state, char, llm)
+    bits = []
+    if e.get("rank"):
+        line = f"你「{char.get('name', '')}」自己的境界是【{e['rank']}】"
+        pv = cult_view(content, state)
+        if pv and pv.get("rank"):
+            line += f"；对面玩家的境界是【{pv['rank']}】。境界差距就是实力差距，言行要贴住这一点"
+        bits.append(line + "。")
+    money = (((state.get("char_sim") or {}).get(char.get("id")) or {}).get("money"))
+    if money is not None:
+        bits.append(f"你身上约有{int(money)}{currency_of(content)}，买卖赊借都从这里出。")
+    return "".join(bits)
+
+
+def market_view(content: dict[str, Any], state: dict[str, Any],
+                llm: LLM | None = None) -> dict[str, Any]:
+    """🛒 今日集市 (Yi: 要有商城): 6 world-true goods, re-stocked each in-story day.
+    Raises player-readable when this story runs no economy."""
+    if not economy_on(state):
+        raise ValueError("这个故事里没有通行的市面")
+    llm = lang_llm(llm or get_llm(), content)
+    day = int(((state.get("clock") or {}).get("day")) or 1)
+    mk = state.get("market")
+    if not (isinstance(mk, dict) and mk.get("day") == day and mk.get("items")):
+        story = content.get("story") or {}
+        try:
+            out = llm.generate({"gen_market": True,
+                                "world": story.get("world_facts") or story.get("world_long") or "",
+                                "currency": currency_of(content),
+                                "base_money": int((story.get("sandbox") or {}).get("start_money") or 50),
+                                "language": lang_of(content)}) or {}
+        except Exception:
+            out = {}
+        items = [dict(it) for it in (out.get("items") or []) if it.get("name")]
+        for i, it in enumerate(items):
+            it["id"] = f"mk{day}_{i}"
+        mk = {"day": day, "items": items}
+        state["market"] = mk
+    return {"day": day, "currency": currency_of(content),
+            "money": int(state.get("money") or 0), "items": list(mk.get("items") or [])}
+
+
+def market_buy(content: dict[str, Any], state: dict[str, Any], item_id: str,
+               llm: LLM | None = None) -> dict[str, Any]:
+    """Buying is a LEDGER op: money down, item into the pocket, one audit line."""
+    view = market_view(content, state, llm)
+    it = next((x for x in view["items"] if x.get("id") == item_id), None)
+    if not it:
+        raise ValueError("这件货已经不在摊上了")
+    price = int(it.get("price") or 0)
+    have = int(state.get("money") or 0)
+    if have < price:
+        raise ValueError(f"钱不够：这要{price}{view['currency']}，你身上只有{have}")
+    state["money"] = have - price
+    _inv_add(state, it.get("name", ""), it.get("detail", ""))
+    _audit(state, "market.buy", True, f"{it.get('name', '')} -{price}")
+    view["money"] = state["money"]
+    view["bought"] = it.get("name")
+    return view
+
+
 def _to_int(s, lo: int = -999999, hi: int = 999999) -> int:
     try:
         digits = "".join(ch for ch in str(s) if ch.isdigit())
@@ -5532,6 +5664,10 @@ def run_turn_stream(
             "text": "（你已经死了。喉咙发不出声，手也穿不过任何东西。你所能做的，只剩下看。）"}))
         channel = "think"
     _ensure_npc_rel(content, state)  # 🕸 authored ties come alive on first touch
+    # 🎯 五维属性: minted lazily on the first sandbox turn (existing runs pick them up)
+    if sandbox_on(content) and not state.get("attrs") \
+            and (state.get("mode") or "character") != "god":
+        ensure_player_attrs(content, state, persona, llm)
     # who stands in the scene as the turn OPENS — the closing diff narrates arrivals/exits
     here_before = {c.get("id") for c in scene_characters(content, state) if c.get("id")}
     emergent_ids: set = set()  # characters born THIS turn (their entrance is already scripted)
@@ -6143,6 +6279,8 @@ def run_turn_stream(
             "drive": drive,                        # ▶ 观剧拍: director advances, player watches
             "track_note": track_note,              # 🎥 ledger-wins correction (one turn)
             "cult": cult_anchor(content, state),   # ⚡ 修为是铁律 (depth-0)
+            # ⚡ 你自己是什么位阶 + 身上有多少钱 (Yi: 别人不能什么也不是)
+            "own_rank": _own_rank_line(content, state, sp, llm),
             # 📈 剧情欠账: 2+ stalled turns → this turn MUST pay the thread off
             "stall": (state.get("stall") if isinstance(state.get("stall"), dict)
                       and int((state.get("stall") or {}).get("n") or 0) >= 2 else None),

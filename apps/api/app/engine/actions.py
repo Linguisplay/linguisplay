@@ -54,6 +54,13 @@ _CLASSES: list[tuple[str, tuple[str, ...], str]] = [
 ]
 
 
+# which of the five attributes governs each action class (气运 is global seasoning)
+_CLASS_ATTR = {"强攻": "力量", "破闯": "力量", "豪赌": "力量",
+               "潜行": "敏捷", "腾跃": "敏捷", "追逃": "敏捷",
+               "欺瞒": "心思", "威慑": "心思", "巧手": "心思", "卖艺": "心思",
+               "炼化": "体质"}
+
+
 def _clamp_tier(tier: str, base: str) -> str:
     """The model may move difficulty ONE tier from the engine's base, never more."""
     ti, bi = _TIER_ORDER.index(tier), _TIER_ORDER.index(base)
@@ -92,6 +99,19 @@ def classify(content: dict[str, Any], state: dict[str, Any], text: str) -> dict[
     label, tier = hit
     dc = TIER_DC[tier]
     mods: list[str] = []
+    # 🎯 五维长牙: the governing attribute moves the DC (±2 max), 气运 rides everything
+    attrs = state.get("attrs") or {}
+    ak = _CLASS_ATTR.get(label)
+    av = int(attrs.get(ak) or 0) if ak else 0
+    if av:
+        d = (av - 5) // 2
+        if d:
+            dc, _ = dc - d, mods.append(f"{ak}{av}{'加成' if d > 0 else '拖累'}{-d:+d}")
+    luck = int(attrs.get("气运") or 0)
+    if luck >= 8:
+        dc, _ = dc - 1, mods.append("气运高照-1")
+    elif 1 <= luck <= 2:
+        dc, _ = dc + 1, mods.append("气运不济+1")
     # deterministic state modifiers — the body you're in and the tools you hold
     hp = state.get("player_hp") or "healthy"
     if hp == "hurt":

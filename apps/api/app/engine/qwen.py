@@ -203,6 +203,9 @@ def _depth_anchor(prompt: dict[str, Any]) -> str:
     _cl = (prompt.get("cult") or "").strip()
     if _cl:
         bits.append(_cl)
+    _orank = (prompt.get("own_rank") or "").strip()
+    if _orank:
+        bits.append(_orank)
     _stall = prompt.get("stall") or None
     if isinstance(_stall, dict) and _stall.get("thread"):
         bits.append((f"[Story debt: '{_stall['thread']}' has hung unresolved for "
@@ -2982,11 +2985,108 @@ class QwenLLM:
                                     "text": text}],
                          "affinity_delta": 0, "advance_act": False, "ending": None})
 
+    def _gen_attrs(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🎯 玩家五维 (力量/敏捷/体质/心思/气运 1~10): judged once from who the player
+        IS in this world. Feeds the dice DC deterministically — stats with teeth."""
+        import re as _re
+        who = str(prompt.get("who") or "")[:300]
+        powers = "、".join(str(p) for p in (prompt.get("powers") or []))[:120]
+        sys = ("你在为一个互动剧情游戏给玩家角色定五维属性，各1~10（5=普通人平均）。"
+               "按TA的出身、体格、经历定，别都给高分；有短板才像人。只输出一行，格式："
+               "力量:N 敏捷:N 体质:N 心思:N 气运:N" + _lang_rule(prompt))
+        u = f"玩家角色：{who or '（普通人）'}" + (f"\n自带能力：{powers}" if powers else "") + "\n输出那一行。"
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model, "messages": [{"role": "system", "content": sys},
+                      {"role": "user", "content": u}], "max_tokens": 60, "temperature": 0.6},
+                              timeout=20, kind="aux")
+            txt = (resp.json()["choices"][0]["message"]["content"] or "")
+        except Exception:
+            return {}
+        out = {}
+        for k in ("力量", "敏捷", "体质", "心思", "气运"):
+            m = _re.search(k + r"\s*[:：]\s*(\d+)", txt)
+            if m:
+                out[k] = max(1, min(10, int(m.group(1))))
+        return {"attrs": out} if len(out) == 5 else {}
+
+    def _rank_judge(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """⚡ NPC 境界+身家: where does THIS character sit on the story's power ladder,
+        and roughly how much money do they carry? Judged once, cached in state."""
+        import re as _re
+        ranks = [str(r) for r in (prompt.get("ranks") or [])]
+        ch = prompt.get("char") or {}
+        cur = str(prompt.get("currency") or "钱")
+        base = int(prompt.get("base_money") or 50)
+        sys = ("你在为互动剧情游戏裁定一个角色的实力位阶与随身财物。"
+               f"位阶阶梯（从低到高）：{'、'.join(ranks)}。"
+               f"按TA的身份年资定位阶（普通市井角色通常在低档，宿老/高手才靠上）；"
+               f"随身的钱按身份定（一个普通人身上约{base}{cur}）。只输出一行，格式："
+               "位阶:<阶梯里的原词> 身家:<整数>" + _lang_rule(prompt))
+        u = f"角色：{ch.get('name','')}（{ch.get('role','')}）{str(ch.get('persona_text') or '')[:160]}\n输出那一行。"
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model, "messages": [{"role": "system", "content": sys},
+                      {"role": "user", "content": u}], "max_tokens": 50, "temperature": 0.5},
+                              timeout=20, kind="aux")
+            txt = (resp.json()["choices"][0]["message"]["content"] or "")
+        except Exception:
+            return {}
+        rank_i = None
+        for i, r in enumerate(ranks):
+            if r and r in txt:
+                rank_i = i
+        m = _re.search(r"身家\s*[:：]\s*(\d+)", txt)
+        money = int(m.group(1)) if m else None
+        out: dict[str, Any] = {}
+        if rank_i is not None:
+            out["rank_i"] = rank_i
+        if money is not None:
+            out["money"] = max(0, min(999999, money))
+        return out
+
+    def _gen_market(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🛒 今日集市: 6 world-true goods with prices scaled to the story's economy."""
+        world = str(prompt.get("world") or "").replace("\n", " ")[:400]
+        cur = str(prompt.get("currency") or "钱")
+        base = int(prompt.get("base_money") or 50)
+        sys = ("你在为互动剧情游戏生成【今日集市】的货单：6件贴合世界观、玩家买得着用得上的"
+               "东西（吃食/工具/药物/消息/小物件，至少一件便宜一件贵）。"
+               f"货币是{cur}，一个普通人身上约有{base}{cur}，定价要合这个身价。"
+               "只输出6行，每行格式：名称|价格整数|一句话（≤20字，它是什么/有什么用）"
+               + _lang_rule(prompt))
+        u = f"世界观：{world or '（市井）'}\n输出6行货单。"
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model, "messages": [{"role": "system", "content": sys},
+                      {"role": "user", "content": u}], "max_tokens": 260, "temperature": 0.9},
+                              timeout=25, kind="aux")
+            txt = (resp.json()["choices"][0]["message"]["content"] or "")
+        except Exception:
+            return {}
+        items = []
+        for ln in txt.splitlines():
+            parts = [p.strip() for p in ln.strip().split("|")]
+            if len(parts) >= 2:
+                try:
+                    price = max(1, int("".join(ch for ch in parts[1] if ch.isdigit())))
+                except ValueError:
+                    continue
+                items.append({"name": parts[0].strip("「」·- 0123456789.")[:16], "price": price,
+                              "detail": (parts[2] if len(parts) > 2 else "")[:30]})
+        return {"items": items[:6]} if items else {}
+
     def generate(self, prompt: dict[str, Any]) -> dict[str, Any]:
         if prompt.get("summarize"):
             return self._summarize(prompt)
         if prompt.get("scout_char"):
             return self._scout(prompt)
+        if prompt.get("gen_attrs"):
+            return self._gen_attrs(prompt)
+        if prompt.get("rank_judge"):
+            return self._rank_judge(prompt)
+        if prompt.get("gen_market"):
+            return self._gen_market(prompt)
         if prompt.get("suggest"):
             return self._suggest(prompt)
         if prompt.get("describe_place"):

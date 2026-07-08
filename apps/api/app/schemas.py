@@ -425,6 +425,7 @@ class RunState(BaseModel):
     phone_unread: int = 0  # 📱 unread incoming messages (badge)
     verdict: Optional[dict[str, Any]] = None  # 🔍 the case-closing panel (None until unlocked)
     cultivation: Optional[dict[str, Any]] = None  # ⚡ {name, rank, prog, ready} story ladder
+    attrs: Optional[dict[str, int]] = None  # 🎯 五维 {力量,敏捷,体质,心思,气运} 1~10
     player_hp: str = "healthy"  # 💀 sandbox: healthy/hurt/dying/dead（dead = 说/做被剥夺）
     money: Optional[int] = None  # 💰 cash balance (None = this run keeps no ledger)
     currency: Optional[str] = None  # 💰 what money is called in this world
@@ -500,6 +501,10 @@ class PlayIn(BaseModel):
     input: str
     channel: Literal["say", "think", "do", "drive"] = "say"  # drive = ▶ 看下去 (director advances)
     target_character_id: Optional[str] = None  # who the player is addressing (optional)
+
+
+class MarketBuyIn(BaseModel):
+    item_id: str
 
 
 class RewindIn(BaseModel):

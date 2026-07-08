@@ -17,8 +17,8 @@ from ..models import Persona as PersonaModel
 from ..models import Run as RunModel
 from ..models import Story as StoryModel
 from ..models import StoryMeta, StorySnapshot, User
-from ..schemas import (Beat, ChooseIn, ConfrontIn, FollowIn, MoveIn, PhoneSendIn, PlayIn,
-                       RewindIn, Run, RunCreate, RunState, RunSummary, VerdictIn)
+from ..schemas import (Beat, ChooseIn, ConfrontIn, FollowIn, MarketBuyIn, MoveIn, PhoneSendIn,
+                       PlayIn, RewindIn, Run, RunCreate, RunState, RunSummary, VerdictIn)
 from .stories import _to_secret, _to_story
 
 router = APIRouter(prefix="/runs", tags=["runs"])
@@ -163,6 +163,7 @@ def _to_run(r: RunModel) -> Run:
             money=st.get("money"),
             currency=(runtime.currency_of(r.pinned_content or {})
                       if st.get("money") is not None else None),
+            attrs=st.get("attrs"),
             quests=list(st.get("quests") or []),
             can_reincarnate=bool(runtime.sandbox_on(r.pinned_content or {})
                                  and st.get("player_hp") == "dead" and not st.get("ended")),
@@ -402,6 +403,37 @@ def get_run(run_id: str, user: User = Depends(current_user), db: Session = Depen
 def delete_run(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     db.delete(_own_run(run_id, user, db))
     db.commit()
+
+
+@router.get("/{run_id}/market")
+def get_market(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """🛒 今日集市: world-true goods, re-stocked each in-story day (generated once/day)."""
+    r = _own_run(run_id, user, db)
+    st = dict(r.state or {})
+    try:
+        view = runtime.market_view(r.pinned_content or {}, st)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    r.state = st
+    flag_modified(r, "state")
+    db.commit()
+    return view
+
+
+@router.post("/{run_id}/market/buy")
+def buy_market(run_id: str, body: MarketBuyIn,
+               user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Buying is a ledger op: money down, item into the run's inventory, audited."""
+    r = _own_run(run_id, user, db)
+    st = dict(r.state or {})
+    try:
+        view = runtime.market_buy(r.pinned_content or {}, st, body.item_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    r.state = st
+    flag_modified(r, "state")
+    db.commit()
+    return view
 
 
 @router.post("/{run_id}/rewind", response_model=Run)

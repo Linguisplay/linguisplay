@@ -81,6 +81,16 @@ class MockLLM:
         if prompt.get("scout_char"):
             return {"fits": True, "who": "打听来的人物", "where": "附近的去处", "persona": ""}
 
+        # 🎯 数值账本 aux calls: deterministic mid-band stubs keep tests reproducible.
+        if prompt.get("gen_attrs"):
+            return {"attrs": {"力量": 5, "敏捷": 5, "体质": 5, "心思": 5, "气运": 5}}
+        if prompt.get("rank_judge"):
+            return {"rank_i": 0, "money": int(prompt.get("base_money") or 50)}
+        if prompt.get("gen_market"):
+            return {"items": [{"name": "热汤面", "price": 3, "detail": "一碗下肚，浑身是劲"},
+                              {"name": "粗布斗篷", "price": 12, "detail": "挡风，也挡眼线"},
+                              {"name": "止血散", "price": 25, "detail": "外伤敷上，好得快"}]}
+
         # emergent location: deterministic stub description (real model writes the prose).
         if prompt.get("describe_place"):
             name = prompt.get("place_name", "")

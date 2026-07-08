@@ -81,7 +81,7 @@ def test_player_death_is_two_stage_and_strips_channels(monkeypatch):
     st = out["state"]
     assert st["player_hp"] == "dying"                        # a killing blow never kills outright
     assert any(m["kind"] == "player_hp" and m["hp"] == "dying" for m in out["moments"])
-    assert llm.prompts[0].get("sandbox") is True             # the scene knows the rules
+    assert next(p for p in llm.prompts if p.get("speaker_name")).get("sandbox") is True             # the scene knows the rules
     out2 = runtime.run_turn(STORY, st, {"name": "我"}, "还想撑住", channel="say",
                             llm=SandLLM(player_harm="致命", next_speakers=[]))
     st = out2["state"]

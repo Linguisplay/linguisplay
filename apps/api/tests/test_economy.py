@@ -63,7 +63,7 @@ def test_money_is_a_hard_ledger(monkeypatch):
     assert st["money"] == 90 and st["money_log"][-1]["delta"] == 40
     assert any(m["kind"] == "money" and m["delta"] == 40 for m in out["moments"])
     # the prompt knows the pocket, so the model can't overspend knowingly…
-    assert (llm.prompts[0].get("player_money") or {}).get("amount") == 50
+    assert (next(p for p in llm.prompts if p.get("speaker_name")).get("player_money") or {}).get("amount") == 50
     # …and even if it tries, the ledger clamps at zero
     out2 = runtime.run_turn(STORY, st, {"name": "我"}, "全给你", channel="say",
                             llm=EcoLLM(money_delta="-500|豪掷", next_speakers=[]))
@@ -134,7 +134,7 @@ def test_declared_powers_reach_the_scene_and_the_judge(monkeypatch):
     st["powers"] = ["状态之眼：看穿他人好感", "每日一次的抽卡"]
     llm = EcoLLM(next_speakers=[])
     runtime.run_turn(STORY, st, {"name": "我"}, "我用状态之眼看她", channel="say", llm=llm)
-    assert llm.prompts[0].get("player_powers") == st["powers"]
+    assert next(p for p in llm.prompts if p.get("speaker_name")).get("player_powers") == st["powers"]
 
     class Judge:
         def __init__(self):
