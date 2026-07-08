@@ -1350,6 +1350,9 @@ async function sendPhoneMsg(cid) {
     const th = await j(`/runs/${runId}/phone/${cid}`, { method:"POST", body: JSON.stringify({ text }) });
     renderThread(th);
     if (!th.replied) pushToast(t("（对方已读，没有回。）"), "", 2400);
+    // 传令落账: agreeing to come / taking a task is LEDGER, not just words
+    if (th.coming) pushToast(B(`🚶 ${th.name}答应过来了，TA正在路上`, `🚶 ${th.name} is on the way`), "t-rel", 2800);
+    if (th.task) pushToast(B(`📌 ${th.name}应下了：${th.task}`, `📌 ${th.name} took it on: ${th.task}`), "t-act", 2800);
     toastUnlocked(th);
   } catch (e) { pushToast("⚠️ " + escapeHtml(e.message), "", 3000); if (inp) inp.disabled = false; }
 }
@@ -1363,28 +1366,27 @@ async function sendPhoneCall(cid) {
     const th = await j(`/runs/${runId}/phone/${cid}/call`, { method:"POST", body: JSON.stringify({ text }) });
     renderThread(th);
     if (!th.replied) pushToast(t("📞 电话那头没有回应。"), "", 2400);
+    if (th.coming) pushToast(B(`🚶 ${th.name}答应过来了，TA正在路上`, `🚶 ${th.name} is on the way`), "t-rel", 2800);
+    if (th.task) pushToast(B(`📌 ${th.name}应下了：${th.task}`, `📌 ${th.name} took it on: ${th.task}`), "t-act", 2800);
     toastUnlocked(th);
   } catch (e) { pushToast("⚠️ " + escapeHtml(e.message), "", 3000); if (inp) inp.disabled = false; }
 }
 async function openContacts() {
-  let story = null;
-  try { story = await j(`/stories/${currentStoryId}`); } catch (e) {}
-  const known = (cast || []).map(c => c.id);
-  const storyChars = ((story && story.characters) || []).filter(c => c.avatar_url || known.includes(c.id));
-  // 涌现角色（沙盒开场人物、路上冒出来的人）只活在这一局里，不在发布剧本的名单上 —
-  // 通讯录必须把他们也算进来，不然沙盒的联络簿永远是空的
-  const extra = (cast || []).filter(c => c.id && !storyChars.some(s => s.id === c.id));
-  const chars = storyChars.concat(extra);
-  const rows = chars.map(c => {
+  // 通讯录是服务端真相：只列你真正【见过】的人（met_ids）——没打过照面的角色
+  // 绝不出现在这里（不开天眼）。点一个人直接进对话，捎话/召人/托事都从这儿走。
+  let inbox = null;
+  try { inbox = await j(`/runs/${runId}/phone`); } catch (e) { return; }
+  const rows = (inbox.contacts || []).map(c => {
     const av = c.avatar_url ? `<img class="pav" src="${c.avatar_url}" onerror="this.style.display='none'">`
                             : `<span class="pav plet" style="background:${avatarColor(c.name)}">${escapeHtml((c.name||"?")[0])}</span>`;
-    return `<div class="pthread" data-cid="${escapeHtml(c.id)}">${av}<div class="pmeta">
-      <div class="pname">${escapeHtml(c.name||"")}</div>
-      <div class="plast">${escapeHtml(c.role||"")}</div></div></div>`;
-  }).join("") || `<div class="jempty">通讯录空空如也。</div>`;
+    return `<div class="pthread" data-cid="${escapeHtml(c.char_id)}">${av}<div class="pmeta">
+      <div class="pname">${c.dead ? "🕯 " : ""}${escapeHtml(c.name||"")}<a class="cinfo" data-info="${escapeHtml(c.char_id)}">ⓘ</a></div>
+      <div class="plast">${escapeHtml(c.role||"")}${c.has_thread ? "" : B("　· 还没聊过", " · no thread yet")}</div></div></div>`;
+  }).join("") || `<div class="jempty">${B("通讯录空空如也。<br>先去见见这个世界里的人。", "No contacts yet.<br>Go meet someone first.")}</div>`;
   const ov = phoneShell(rows, "👥 通讯录", "openPhone()");
-  ov.querySelectorAll(".pthread").forEach(el => {
-    el.onclick = () => { document.getElementById("phoneov").remove(); openCharCard(el.dataset.cid); };
+  ov.querySelectorAll(".pthread").forEach(el => { el.onclick = () => openThread(el.dataset.cid); });
+  ov.querySelectorAll(".cinfo").forEach(el => {
+    el.onclick = (e) => { e.stopPropagation(); document.getElementById("phoneov").remove(); openCharCard(el.dataset.info); };
   });
 }
 // 🎒 背包: what you carry + what you've stashed where (收纳一目了然)

@@ -2348,7 +2348,11 @@ class QwenLLM:
             f"你自己的盘算：{ch.get('agenda','')}" if ch.get("agenda") else "",
             f"你与{pl}的关系：{prompt.get('relation','')}。{prompt.get('relationship_playbook','')}",
             f"你们此前的经历（你的记忆）：{(prompt.get('memory') or '')[:400]}" if prompt.get("memory") else "",
-            (f"TA不在你身边，此刻正通过{device}和你【实时通话】。你听得到TA的呼吸和背景音，"
+            (f"最离谱的是：TA此刻就和你在【同一个地方】，人就在几步开外，却用{device}给你发消息。"
+             "先就着这件事本身回应——按你的性格来：好笑、无语、抬头瞪TA一眼、或干脆凑趣配合。"
+             "一句『我人不就在这儿？』式的吐槽很自然；想当面说的话就叫TA过来说。"
+             if prompt.get("same_room") else
+             f"TA不在你身边，此刻正通过{device}和你【实时通话】。你听得到TA的呼吸和背景音，"
              "TA也听得到你的。你说出来的是口语，一句一句，可以停顿、可以叹气、可以突然沉默。"
              if call else
              f"TA不在你身边，是通过{device}给你捎话。你在忙你自己的事，回不回、回多少、什么语气，"
@@ -2371,11 +2375,17 @@ class QwenLLM:
              "如果你此刻不想回（心情/性格/在气头上），就只输出：【已读】"),
         ]
         sys = "\n".join(l for l in sys_lines if l) + _lang_rule(prompt)
+        judgeline = ("最后另起一行，写：好感：一个整数-2~2（这几句话让你对TA更近还是更远）；"
+                     "心动：一个整数-1~2（仅当TA的话让你心里一动）。")
+        if not prompt.get("same_room"):
+            judgeline += ("再各起一行，写：赴约：是 或 否（仅当TA在消息里叫你【过去见TA】、"
+                          "且你按此刻的心情和你们的关系确实愿意动身才写 是；犹豫、敷衍、"
+                          "改天再说都算 否）；应承：若TA托你办一件【具体的事】且你应下了，"
+                          "用15字内写下这件事本身（如 盯着王九的动静），没应承就写 无。")
         u = ((f"你们此前的往来：\n{tail}\n\n（电话接通了，TA刚说了最后那句。）你开口说什么？\n"
               if call else
               f"你们的消息记录：\n{tail}\n\n（TA刚发来最后那条。）你现在回什么？\n")
-             + "最后另起一行，写：好感：一个整数-2~2（这几句话让你对TA更近还是更远）；"
-             "心动：一个整数-1~2（仅当TA的话让你心里一动）。")
+             + judgeline)
         try:
             resp = _post_chat(self._url, self._key,
                               {"model": self._model, "messages": [{"role": "system", "content": sys},
@@ -2388,6 +2398,8 @@ class QwenLLM:
         dc = dr = 0
         msgs: list[str] = []
         ambient = ""
+        coming = False
+        task = ""
         for ln in txt.splitlines():
             s = ln.strip()
             if not s:
@@ -2400,12 +2412,19 @@ class QwenLLM:
                 dr = max(-1, min(2, int(m.group()))) if m else 0
             elif s.startswith("背景"):
                 ambient = s.split("：", 1)[-1].split(":", 1)[-1].strip().strip("（）()")[:60]
+            elif s.startswith("赴约"):
+                coming = "是" in s.split("：", 1)[-1]
+            elif s.startswith("应承"):
+                body = s.split("：", 1)[-1].split(":", 1)[-1].strip()
+                if body and not body.startswith("无"):
+                    task = body[:20]
             elif ("已读" in s or "沉默" in s) and len(s) <= 6:
                 msgs = []
                 break
             else:
                 msgs.append(s.strip("「」\"'")[:120])
-        out: dict[str, Any] = {"msgs": msgs[:3], "closeness": dc, "romance": dr}
+        out: dict[str, Any] = {"msgs": msgs[:3], "closeness": dc, "romance": dr,
+                               "coming": coming, "task": task}
         if call:
             out["ambient"] = ambient
         return out

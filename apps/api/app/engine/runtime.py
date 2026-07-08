@@ -3019,8 +3019,22 @@ def phone_threads_view(content: dict[str, Any], state: dict[str, Any]) -> dict[s
                      "unread": int(th.get("unread", 0))})
     rows.reverse()
     rows.sort(key=lambda r: -r["unread"])
+    # 👥 通讯录: ONLY people the player has actually met (server-authoritative — the
+    # contact list must never reveal characters the player hasn't encountered yet)
+    pcid = state.get("player_character_id")
+    dead = _dead_ids(state)
+    have = set((((state.get("phone") or {}).get("threads")) or {}))
+    contacts = []
+    for cid in state.get("met_ids") or []:
+        c = _char_by_id(content, cid)
+        if not c or cid == pcid:
+            continue
+        contacts.append({"char_id": cid, "name": c.get("name") or "",
+                         "role": (c.get("role") or "")[:24],
+                         "avatar_url": c.get("avatar_url"),
+                         "dead": cid in dead, "has_thread": cid in have})
     return {"device": phone_device(content), "threads": rows,
-            "unread": sum(r["unread"] for r in rows)}
+            "unread": sum(r["unread"] for r in rows), "contacts": contacts}
 
 
 def phone_thread(content: dict[str, Any], state: dict[str, Any], char_id: str,
@@ -3094,7 +3108,7 @@ def _phone_probe(content: dict[str, Any], state: dict[str, Any], char_id: str,
 
 def _phone_exchange(content: dict[str, Any], state: dict[str, Any], persona: dict[str, Any],
                     c: dict[str, Any], text: str, llm: LLM, newly: list[str],
-                    call: bool = False) -> dict[str, Any]:
+                    call: bool = False, same_room: bool = False) -> dict[str, Any]:
     """One gated text/call exchange with a character: build their view, ask the model,
     apply relationship movement. Returns the raw LLM output dict."""
     char_id = c.get("id")
@@ -3104,7 +3118,7 @@ def _phone_exchange(content: dict[str, Any], state: dict[str, Any], persona: dic
     ctx = gating.build_context(char_id, gating.iter_fragments(content), state, newly_ids=newly)
     pcid = state.get("player_character_id")
     pc = _char_by_id(content, pcid) if pcid else None
-    out = llm.generate({"phone_reply": True, "call": bool(call),
+    out = llm.generate({"phone_reply": True, "call": bool(call), "same_room": bool(same_room),
                         "device": phone_device(content),
                         "char": {"name": c.get("name"), "role": c.get("role") or "",
                                  "persona_text": (c.get("persona_text") or "")[:200],
@@ -3137,12 +3151,15 @@ def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str
     llm = lang_llm(llm or get_llm(), content)
     text = (text or "").strip()
     c = _phone_target(content, state, char_id, text)
+    # 📍 same-room check: texting someone standing right next to you is a MOMENT, not
+    # an error — they get to react to the absurdity in voice（「我人不就在这？」）
+    here = any(ch.get("id") == char_id for ch in scene_characters(content, state))
     now_label = (clock_view(content, state) or {}).get("label", "")
     th = _thread(state, char_id)
     th["msgs"].append({"from": "me", "text": text[:200], "at": now_label})
     th["msgs"] = th["msgs"][-60:]
     newly, cracked = _phone_probe(content, state, char_id, text)
-    out = _phone_exchange(content, state, persona, c, text, llm, newly)
+    out = _phone_exchange(content, state, persona, c, text, llm, newly, same_room=here)
     msgs = [dedash(str(m).strip()[:120]) for m in (out.get("msgs") or []) if str(m).strip()][:3]
     if msgs:
         for m in msgs:
@@ -3152,7 +3169,30 @@ def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str
     view = phone_thread(content, state, char_id)
     view["replied"] = bool(msgs)
     view["unlocked"] = cracked  # 🔓 titles pried open by THIS text (UI toast)
+    _apply_phone_judgments(content, state, c, out, view, here)
     return view
+
+
+def _apply_phone_judgments(content: dict[str, Any], state: dict[str, Any], c: dict[str, Any],
+                           out: dict[str, Any], view: dict[str, Any], here: bool) -> None:
+    """The message的确定性后果 (the Yi contract: 传令要落账，不许只是嘴上应):
+    - 赴约 (coming): the character agreed to come → their whereabouts is PINNED to the
+      player's place; the arrival machinery walks them in. Meaningless if already here.
+    - 应承 (task): they took on an errand → it becomes their standing intent on the sim
+      sheet, the same ledger that constrains their behavior in every scene turn."""
+    char_id = c.get("id")
+    view["coming"] = False
+    if out.get("coming") and not here and state.get("location_id"):
+        pins = dict(state.get("char_pins") or {})
+        pins[char_id] = state.get("location_id")
+        state["char_pins"] = pins
+        _audit(state, "phone.summon", True, c.get("name", ""))
+        view["coming"] = True
+    task = str(out.get("task") or "").strip()
+    if task and task not in ("无", "none"):
+        _sim(state, char_id)["intent"] = task[:40]
+        _audit(state, "phone.task", True, f"{c.get('name', '')}:{task[:20]}")
+        view["task"] = task[:40]
 
 
 def phone_call(content: dict[str, Any], state: dict[str, Any], persona: dict[str, Any],
@@ -3199,6 +3239,7 @@ def phone_call(content: dict[str, Any], state: dict[str, Any], persona: dict[str
     view = phone_thread(content, state, char_id)
     view["replied"] = bool(msgs)
     view["unlocked"] = cracked
+    _apply_phone_judgments(content, state, c, out, view, here=False)
     return view
 
 
