@@ -1881,23 +1881,23 @@ function stopBgm(){ try { bgm.pause(); bgm.removeAttribute("src"); curBgmMood=nu
 // ── send turn (SSE) ───────────────────────────────────
 async function driveTurn() {
   if (!runId || ended) return;
-  const prev = channel.value, prevMsg = msg.value;
-  channel.value = "drive"; msg.value = "";
-  try { await send(); } finally { channel.value = prev; msg.value = prevMsg; }
+  renderBeat({ author:"player", type:"think", text: B("▶（你静静看着，让故事自己往前走）", "▶ (You watch — the story moves on its own)") });
+  await send("drive");
 }
-async function send() {
-  const text = msg.value.trim();
+async function send(chOverride) {
+  const ch = (typeof chOverride === "string" && chOverride) || channel.value;
+  const text = ch === "drive" ? "" : msg.value.trim();
   if (!runId || ended) return;
-  const canEmpty = playMode === "god" || channel.value === "think" || channel.value === "drive";
+  const canEmpty = playMode === "god" || ch === "think" || ch === "drive";
   if (!text && !canEmpty) return;
   msg.value = ""; sendBtn.disabled = true; suggest.innerHTML = "";
   if (text) {
     if (playMode === "god") renderBeat({ author:"player", type:"description", text: B("（旁观指引）", "(Direction) ") + text });
-    else renderBeat({ author:"player", type: channel.value==="think"?"think":"dialogue", text });
+    else renderBeat({ author:"player", type: ch==="think"?"think":"dialogue", text });
   }
   showTyping("");
   await streamTurn(`${API}/runs/${runId}/play`,
-                   { input: text, channel: channel.value, target_character_id: target });
+                   { input: text, channel: ch, target_character_id: target });
 }
 // shared SSE turn pipeline: beats stream in AS the server computes each responder → play
 // them one-by-one (typed) the moment they arrive. Used by normal turns AND confrontations.
