@@ -3648,8 +3648,21 @@ def player_move_emergent(content: dict[str, Any], state: dict[str, Any], player_
 # owns the numbers. Design after 一念逍遥/鬼谷八荒 research: visible progress, breakthrough
 # as a RISKY ritual, diminishing returns on grinding, offline trickle, 境界碾压 as law.
 
-_TRAIN_RE = re.compile(r"修炼|修行|打坐|苦修|练功|冥想|吐纳|炼化|闭关|参悟|温养")
-_BREAK_RE = re.compile(r"突破|冲击(境界|瓶颈|下一)")
+_TRAIN_RE = re.compile(r"修炼|修行|打坐|苦修|练功|冥想|吐纳|炼化|闭关|参悟|温养|服用|吞服|服下")
+_BREAK_RE = re.compile(r"突破|冲击(境界|瓶颈|下一)|渡劫|历劫")
+
+# 小境界: every major realm has these four sub-stages — the frequent small wins between
+# the rare, scary major crossings (深化 mechanics after 鬼谷八荒/一念逍遥).
+_STAGES = ["初期", "中期", "后期", "圆满"]
+# 资质 (aptitude): rolled ONCE at first cultivation — run-to-run identity + speed gate.
+# (d20 threshold, name, training multiplier)
+_APTS = [(20, "天纵之资", 1.8), (18, "上上之资", 1.5), (14, "上乘之资", 1.3),
+         (4, "中平之资", 1.0), (0, "驽钝之资", 0.8)]
+# resources the model may have written into the pocket — consuming one supercharges a
+# training turn (丹药/灵石/异火 economy hooked at last).
+_RESOURCE_RE = re.compile(r"丹|药|灵石|晶石|魔核|精元|异火|灵液|符|玉髓")
+# a place whose fixtures breathe spirit-energy trickles extra (洞天福地).
+_SPIRIT_PLACE_RE = re.compile(r"灵气|福地|聚灵|灵脉|洞天|温养|药园|灵泉")
 
 
 def cult_cfg(content: dict[str, Any]) -> dict[str, Any] | None:
@@ -3663,9 +3676,53 @@ def cult_cfg(content: dict[str, Any]) -> dict[str, Any] | None:
 def _cult(state: dict[str, Any]) -> dict[str, Any]:
     c = state.get("cult")
     if not isinstance(c, dict):
-        c = {"rank": 0, "prog": 0, "streak": 0}
+        c = {"rank": 0, "stage": 0, "prog": 0, "streak": 0, "apt": None}
         state["cult"] = c
+    c.setdefault("stage", 0)
+    c.setdefault("apt", None)
     return c
+
+
+def _apt_of(c: dict[str, Any]) -> tuple[str, float]:
+    a = c.get("apt")
+    for _thr, name, mult in _APTS:
+        if a == name:
+            return name, mult
+    return "中平之资", 1.0
+
+
+def cult_power(content: dict[str, Any], state: dict[str, Any]) -> int:
+    """⚔ 战力: one integer the whole engine can compare. Grows ~exponentially per major
+    realm so 境界碾压 is real — a 斗皇 dwarfs a 斗者 numerically, not just in prose."""
+    cfg = cult_cfg(content)
+    if not cfg:
+        return 0
+    c = _cult(state)
+    ri = min(int(c.get("rank") or 0), len(cfg["ranks"]) - 1)
+    _n, mult = _apt_of(c)
+    base = int((10 * (1.9 ** ri)) * (1 + int(c.get("stage") or 0) * 0.22)
+               + int(c.get("prog") or 0) * 0.1)
+    return max(1, int(base * (0.9 + mult * 0.15)))
+
+
+def cult_tier(state: dict[str, Any]) -> int:
+    """A small ordinal (major*4 + stage) for cheap relative-strength math."""
+    c = _cult(state)
+    return int(c.get("rank") or 0) * 4 + int(c.get("stage") or 0)
+
+
+# classes where raw cultivation actually helps the roll (境界碾压 at the dice); social/
+# fiddly skills don't scale with realm.
+_CULT_PHYS = {"强攻", "腾跃", "追逃", "破闯", "豪赌", "潜行", "威慑"}
+
+
+def cult_action_mod(content: dict[str, Any], state: dict[str, Any], cls: str) -> int:
+    """DC delta from the player's cultivation on a classified physical feat: the higher
+    your realm, the more trivial mortal-scale danger becomes. Capped so it never fully
+    removes the dice; 0 for social/technical classes and non-cultivation worlds."""
+    if not cult_cfg(content) or cls not in _CULT_PHYS:
+        return 0
+    return -min(8, cult_tier(state) // 2)
 
 
 def cult_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
@@ -3675,39 +3732,79 @@ def cult_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] 
     c = _cult(state)
     ranks = cfg["ranks"]
     ri = min(int(c.get("rank") or 0), len(ranks) - 1)
+    stage = int(c.get("stage") or 0)
+    at_summit = ri >= len(ranks) - 1 and stage >= len(_STAGES) - 1
+    apt_name, _m = _apt_of(c)
     return {"name": cfg["name"], "rank": ranks[ri], "rank_index": ri,
-            "prog": int(c.get("prog") or 0), "cap": ri >= len(ranks) - 1,
-            "ready": int(c.get("prog") or 0) >= 100 and ri < len(ranks) - 1}
+            "stage": _STAGES[min(stage, len(_STAGES) - 1)], "stage_index": stage,
+            "prog": int(c.get("prog") or 0), "cap": at_summit,
+            "power": cult_power(content, state),
+            "apt": apt_name if c.get("apt") else None,
+            "ready": int(c.get("prog") or 0) >= 100 and not at_summit}
+
+
+def _roll_aptitude(state: dict[str, Any]) -> str | None:
+    """First cultivation rolls the character's lifelong 资质 — reported once."""
+    c = _cult(state)
+    if c.get("apt"):
+        return None
+    r = random.randint(1, 20)
+    for thr, name, _m in _APTS:
+        if r >= thr:
+            c["apt"] = name
+            _audit(state, "cult.aptitude", True, name)
+            return name
+    return None
 
 
 def player_train(content: dict[str, Any], state: dict[str, Any], player_input: str,
                  channel: str = "do") -> dict[str, Any] | None:
-    """修炼孪生: a plain training action gains progress NOW (d20-flavored), with
-    diminishing returns on back-to-back grinding (streak halves the gain)."""
+    """修炼孪生: gains progress within the current 小境界 NOW. Gain scales with 资质,
+    consumed resources (丹药/灵石), and spirit-rich locations; diminishing returns on
+    back-to-back grinding (streak). Story-agnostic — reads only generic signals."""
     cfg = cult_cfg(content)
     if not cfg or channel not in ("do", "say"):
         return None
     text = (player_input or "").strip()
     if not text or len(text) > 40 or not _TRAIN_RE.search(text):
         return None
-    if any(w in text for w in ("别", "不", "陪", "教", "你去", "他", "她")):
+    if any(w in text for w in ("别", "不", "陪", "教", "你去")):
         return None
     c = _cult(state)
+    apt_new = _roll_aptitude(state)
     if c["prog"] >= 100:
-        return {"full": True}
+        return {"full": True, "apt_new": apt_new}
+    _apt_name, mult = _apt_of(c)
     roll = random.randint(1, 20)
-    gain = max(2, (8 + roll // 2) >> min(int(c.get("streak") or 0), 3))
+    base = (8 + roll // 2)
+    bonus, why = 0, []
+    # 🔴 consume a resource named in the line for a real jolt
+    consumed = None
+    for it in list(state.get("inventory") or []):
+        nm = (it.get("name") or "").strip()
+        if nm and nm in text and _RESOURCE_RE.search(nm):
+            consumed = _inv_remove(state, nm)
+            bonus += 12
+            why.append(f"服{nm}")
+            break
+    if _SPIRIT_PLACE_RE.search((current_location(content, state) or {}).get("detail", "")):
+        bonus += 4
+        why.append("灵气充裕")
+    gain = max(2, (int(base * mult) >> min(int(c.get("streak") or 0), 3)) + bonus)
     c["prog"] = min(100, int(c["prog"]) + gain)
     c["streak"] = int(c.get("streak") or 0) + 1
-    _audit(state, "cult.train", True, f"+{gain}%→{c['prog']}%")
-    return {"gain": gain, "prog": c["prog"], "roll": roll, "full": c["prog"] >= 100}
+    _audit(state, "cult.train", True, f"+{gain}%→{c['prog']}%" + (f"（{'/'.join(why)}）" if why else ""))
+    return {"gain": gain, "prog": c["prog"], "roll": roll, "full": c["prog"] >= 100,
+            "apt_new": apt_new, "consumed": (consumed or {}).get("name") if consumed else None,
+            "why": why}
 
 
 def player_breakthrough(content: dict[str, Any], state: dict[str, Any], player_input: str,
                         channel: str = "do") -> dict[str, Any] | None:
-    """突破孪生: at a full bottleneck, 突破 is a RISKY ritual (鬼谷八荒 style): d20,
-    8+ succeeds (rank up), 18+ is a flawless ascension (head-start progress), fail
-    burns progress. The world sees the new rank via the anchor immediately."""
+    """突破孪生: a full bottleneck breaks. A SUB-stage step (初期→中期…) is the small,
+    forgiving win (d20≥6). Crossing a 圆满 into the next major realm is the 天劫/心魔 —
+    harder (≥12), a bigger fall on failure, but 顿悟 (crit) possible. 境界碾压 numbers
+    update instantly via power."""
     cfg = cult_cfg(content)
     if not cfg or channel not in ("do", "say"):
         return None
@@ -3716,34 +3813,50 @@ def player_breakthrough(content: dict[str, Any], state: dict[str, Any], player_i
         return None
     c = _cult(state)
     ranks = cfg["ranks"]
-    if int(c.get("rank") or 0) >= len(ranks) - 1:
+    ri, stage = int(c.get("rank") or 0), int(c.get("stage") or 0)
+    if ri >= len(ranks) - 1 and stage >= len(_STAGES) - 1:
         return {"capped": True}
     if int(c.get("prog") or 0) < 100:
         return {"not_ready": True, "prog": int(c.get("prog") or 0)}
+    major = stage >= len(_STAGES) - 1          # 圆满 → cross into the next major realm
     roll = random.randint(1, 20)
-    if roll >= 8:
-        c["rank"] = int(c.get("rank") or 0) + 1
-        c["prog"] = 20 if roll >= 18 else 0
+    need = 12 if major else 6                   # the 天劫 is the real gate
+    crit = roll >= (19 if major else 17)
+    if roll >= need:
+        if major:
+            c["rank"], c["stage"] = ri + 1, 0
+        else:
+            c["stage"] = stage + 1
+        c["prog"] = 25 if crit else 0
         c["streak"] = 0
-        _audit(state, "cult.breakthrough", True, ranks[min(c["rank"], len(ranks) - 1)])
-        return {"success": True, "crit": roll >= 18, "roll": roll,
-                "rank_name": ranks[min(c["rank"], len(ranks) - 1)]}
-    c["prog"] = max(50, int(c["prog"]) - 40)
-    _audit(state, "cult.breakthrough", False, f"roll{roll}", "冲击失败，气息受挫")
-    return {"success": False, "roll": roll, "prog": c["prog"]}
+        v = cult_view(content, state)
+        _audit(state, "cult.breakthrough", True,
+               f"{v['rank']}·{v['stage']}" + ("（天劫）" if major else ""))
+        return {"success": True, "crit": crit, "roll": roll, "major": major,
+                "rank_name": v["rank"], "stage_name": v["stage"], "power": v["power"]}
+    # failure: a major 天劫 backlash bites harder than a stalled sub-step
+    c["prog"] = max(40 if major else 60, int(c["prog"]) - (55 if major else 30))
+    harm = major and roll <= 3                  # a botched 天劫 can wound the body
+    if harm and sandbox_on(content):
+        state["player_hp"] = "hurt"
+    _audit(state, "cult.breakthrough", False, f"roll{roll}", "天劫反噬" if major else "冲击受挫")
+    return {"success": False, "roll": roll, "major": major, "prog": c["prog"], "harm": harm}
 
 
 def cult_offline_gain(content: dict[str, Any], state: dict[str, Any],
                       away_hours: float) -> int:
-    """一念逍遥 lesson: the numbers grow a little while you're away (温养), capped and
-    never past the bottleneck — coming back always feels like motion, never like a skip."""
+    """一念逍遥 lesson: the numbers grow a little while you're away (温养), scaled by 资质,
+    capped and never past the bottleneck — returning always feels like motion."""
     cfg = cult_cfg(content)
     if not cfg or away_hours < 3:
         return 0
     c = _cult(state)
-    if c["prog"] >= 100 or int(c.get("rank") or 0) >= len(cfg["ranks"]) - 1:
+    if not c.get("apt") or c["prog"] >= 100:
         return 0
-    gain = min(15, int(away_hours // 2))
+    if int(c.get("rank") or 0) >= len(cfg["ranks"]) - 1 and int(c.get("stage") or 0) >= len(_STAGES) - 1:
+        return 0
+    _n, mult = _apt_of(c)
+    gain = min(18, int((away_hours // 2) * mult))
     if gain <= 0:
         return 0
     c["prog"] = min(100, int(c["prog"]) + gain)
@@ -3753,15 +3866,16 @@ def cult_offline_gain(content: dict[str, Any], state: dict[str, Any],
 
 
 def cult_anchor(content: dict[str, Any], state: dict[str, Any]) -> str:
-    """One depth-0 line: your rank is LAW — the world treats you by it (境界碾压)."""
+    """One depth-0 line: rank + sub-stage + 战力 are LAW — the world treats you by them."""
     v = cult_view(content, state)
     if not v:
         return ""
-    line = f"你的{v['name']}修为：{v['rank']}（瓶颈进度{v['prog']}%）。"
+    line = f"你的{v['name']}修为：{v['rank']}·{v['stage']}（战力{v['power']}，本境瓶颈{v['prog']}%）。"
     if v["ready"]:
-        line += "瓶颈已满：可尝试【突破】，有失败风险。"
-    line += ("境界即铁律：高境界对低境界是碾压性的差距，跨大境界如隔天堑；"
-             "在场者按这个修为对待你，你的表现也不能超出这个修为该有的水平（金手指除外）。")
+        nxt = "跨越大境界（有天劫/心魔之险）" if v["stage_index"] >= len(_STAGES) - 1 else "突破小境界"
+        line += f"瓶颈已满：可尝试{nxt}。"
+    line += ("境界即铁律：战力差一大截就是碾压性的差距，跨大境界如隔天堑；"
+             "在场者按你的境界与战力对待你，你的表现不能超出这个境界该有的水平（金手指除外）。")
     return line
 
 
@@ -5226,35 +5340,55 @@ def run_turn_stream(
                            f"（离开的这段时间里，你的{_v0['name']}在温养中悄然增长了{_og}%。）",
                            f"(While you were away, your {_v0['name']} quietly grew {_og}%.)")
         _tr = player_train(content, state, player_input, channel)
+        if _tr and _tr.get("apt_new"):
+            yield ("beat", dedash_beat({"type": "description", "speaker_name": None,
+                   "text": _t(content, f"（你静心内视，测得自身资质：【{_tr['apt_new']}】。）",
+                              f"(You look inward — your aptitude reveals itself: [{_tr['apt_new']}].)")}))
         if _tr and _tr.get("gain"):
             _v1 = cult_view(content, state)
+            extra = ("，" + "、".join(_tr.get("why") or [])) if _tr.get("why") else ""
             cult_beat = _t(content,
-                           f"（这一番修行让你的{_v1['name']}进度推进了{_tr['gain']}%，"
-                           f"当前【{_v1['rank']}·{_tr['prog']}%】。"
-                           + ("瓶颈已满，可尝试突破。" if _tr.get("full") else "）"),
+                           f"（这一番修行{extra}，{_v1['name']}进度推进了{_tr['gain']}%，"
+                           f"当前【{_v1['rank']}·{_v1['stage']} {_tr['prog']}%】。"
+                           + ("本境瓶颈已满，可尝试突破。）" if _tr.get("full") else "）"),
                            f"(Training pushed your {_v1['name']} up {_tr['gain']}%, now "
-                           f"[{_v1['rank']} · {_tr['prog']}%].)")
+                           f"[{_v1['rank']} {_v1['stage']} · {_tr['prog']}%].)")
         elif _tr and _tr.get("full") and not _tr.get("gain"):
-            cult_beat = _t(content, "（你的瓶颈早已充盈到极限，再修无益：是时候尝试【突破】了。）",
-                           "(Your bottleneck is already full — it is time to attempt a breakthrough.)")
+            cult_beat = _t(content, "（本境瓶颈早已充盈到极限，再修无益：是时候尝试【突破】了。）",
+                           "(This stage's bottleneck is already full — time to attempt a breakthrough.)")
         _bk = player_breakthrough(content, state, player_input, channel)
         if _bk is not None:
-            if _bk.get("success"):
+            if _bk.get("success") and _bk.get("major"):
                 cult_beat = _t(content,
-                               ("（雷鸣般的气息自你体内炸开，一步踏入【" + _bk["rank_name"] + "】！"
-                                + ("这一步走得圆满无瑕，根基愈发深厚。）" if _bk.get("crit") else "）")),
-                               f"(Power erupts within you — you ascend to [{_bk['rank_name']}]!)")
+                               ("（天劫轰然压顶，你在雷光中挺住了！一举踏入【" + _bk["rank_name"] +
+                                "】，战力跃升至" + str(_bk["power"]) +
+                                ("。此劫渡得圆满无瑕，根基远超同辈。）" if _bk.get("crit") else "。）")),
+                               f"(The tribulation crashes down — you endure! You ascend to "
+                               f"[{_bk['rank_name']}], power now {_bk['power']}.)")
+            elif _bk.get("success"):
+                cult_beat = _t(content,
+                               ("（气息水到渠成，你稳稳踏入【" + _bk["rank_name"] + "·" +
+                                _bk["stage_name"] + "】，战力" + str(_bk["power"]) +
+                                ("，更有一丝顿悟入心。）" if _bk.get("crit") else "。）")),
+                               f"(You step cleanly into [{_bk['rank_name']} {_bk['stage_name']}], "
+                               f"power {_bk['power']}.)")
             elif _bk.get("not_ready"):
                 cult_beat = _t(content,
-                               f"（瓶颈尚未充盈（{_bk['prog']}%），强行冲击只会自伤。再积累些吧。）",
+                               f"（本境瓶颈尚未充盈（{_bk['prog']}%），强行冲击只会自伤。再积累些吧。）",
                                f"(The bottleneck is not full yet ({_bk['prog']}%) — forcing it would only hurt.)")
             elif _bk.get("capped"):
                 cult_beat = _t(content, "（你已站在这条路已知的顶点。）",
                                "(You already stand at the known summit of this path.)")
             elif _bk.get("success") is False:
-                cult_beat = _t(content,
-                               f"（气息在关口轰然溃散，冲击失败：进度跌回{_bk['prog']}%，你胸口一闷，脸色发白。）",
-                               f"(The surge collapses at the gate — breakthrough FAILED, progress falls to {_bk['prog']}%.)")
+                if _bk.get("major"):
+                    cult_beat = _t(content,
+                                   f"（天劫反噬，你未能撑住那道雷！进度跌回{_bk['prog']}%"
+                                   + ("，一口鲜血喷出，气息大乱。）" if _bk.get("harm") else "，气息大乱。）"),
+                                   f"(The tribulation overwhelms you — progress falls to {_bk['prog']}%.)")
+                else:
+                    cult_beat = _t(content,
+                                   f"（气息在关口溃散，冲击小境界失败：进度跌回{_bk['prog']}%。）",
+                                   f"(The surge collapses — sub-stage breakthrough failed, progress {_bk['prog']}%.)")
     if cult_beat:
         yield ("beat", dedash_beat({"type": "description", "speaker_name": None,
                                     "text": cult_beat}))
@@ -5356,6 +5490,13 @@ def run_turn_stream(
             # the model's opinion adjusts the engine's tier by AT MOST one step
             final = actions_mod.resolve_dc(base, risk)
             dc = final["dc"]
+            # ⚡ 境界碾压 at the dice: cultivation lowers the DC of physical feats — a
+            # 斗皇 shrugs off what floors a 斗者. This is the mechanical teeth of rank.
+            _cm = cult_action_mod(content, state, base.get("cls", ""))
+            if _cm:
+                dc = max(2, dc + _cm)
+                final.setdefault("mods", base.get("mods") or []).append(
+                    f"{cult_view(content, state)['rank']}·{cult_view(content, state)['stage']}{_cm}")
             if state.get("perk") == "instinct":   # 🌱 NG+ 直觉: fate runs warmer
                 dc = max(2, dc - max(1, INSTINCT_BONUS // 5))
             dice = _roll_dc(dc)

@@ -920,9 +920,12 @@ function renderCult(cv) {
   const el = document.getElementById("cultbar");
   if (!cv) { el.classList.add("hidden"); return; }
   el.classList.toggle("ready", !!cv.ready);
+  const stg = cv.stage ? ("·" + escapeHtml(cv.stage)) : "";
   el.innerHTML = `<div class="fill" style="transform:scaleX(${Math.min(100, cv.prog) / 100})"></div>` +
-    `<span>⚡ <b>${escapeHtml(cv.name)}</b>${B("：", ": ")}${escapeHtml(cv.rank)}` +
+    `<span>⚡ <b>${escapeHtml(cv.name)}</b>${B("：", ": ")}${escapeHtml(cv.rank)}${stg}` +
     (cv.cap ? B("（已至顶点）", " (summit)") : ` · ${cv.prog}%`) +
+    (cv.power ? `　⚔${cv.power}` : "") +
+    (cv.apt ? `　<span style="opacity:.75">${escapeHtml(cv.apt)}</span>` : "") +
     (cv.ready ? B("　🔥 瓶颈已满，输入「突破」一搏", "　🔥 bottleneck full — type Breakthrough") : "") + `</span>`;
   el.classList.remove("hidden");
 }
