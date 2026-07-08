@@ -698,7 +698,7 @@ def _build_system(prompt: dict[str, Any]) -> str:
                 "narration 里要把这个动作的【具体、即时、连锁后果】一步步演出来（碰到什么、什么声响、光线位置变化、"
                 "惊动了谁、谁如何反应），绝不能无视或淡化；做不到或会致命也要如实演出。speech 可留空（只用动作神态回应）。")
             chk = prompt.get("check") or {}
-            if chk:
+            if chk and not chk.get("contest"):
                 verdict = {"crit_success": "大成功——干得超预期地漂亮，甚至带来意外之喜",
                            "success": "成功——如愿做成了",
                            "mixed": "险险成了——事情做成了，但当场付出一个看得见的小代价"
@@ -707,6 +707,22 @@ def _build_system(prompt: dict[str, Any]) -> str:
                            "crit_fail": "大失败——不但没成，还出了岔子、把局面搞得更糟"}.get(chk.get("outcome"), "")
                 lines.append(f"【命运判定已掷出（d20 掷出 {chk.get('roll')}，需要 ≥{chk.get('dc') or '?'}）：{verdict}】"
                              "旁白必须严格按这个结果演出，不许翻案、不许淡化。")
+
+    # 🥊 比试判定 (any channel): the contest was rolled — this beat PLAYS the bout to
+    # its verdict and closes it. No more posturing turns.
+    _chk_c = prompt.get("check") or {}
+    if _chk_c.get("contest"):
+        _cv = {"crit_success": "完胜——你干净利落地赢下这场较量，对方心服口服",
+               "success": "险胜——你技高一筹拿下了，但对方逼出了你几分真本事",
+               "mixed": "五五开中抢得半分——勉强算你赢，但你也付出了看得见的代价（狼狈/受了点伤/暴露了底细）",
+               "fail": "落败——对方实力在你之上，你输得不冤，但保住了体面",
+               "crit_fail": "一败涂地——差距悬殊，你被干脆利落地放倒，场面难堪"}.get(
+                   _chk_c.get("outcome"), "")
+        lines.append("")
+        lines.append(f"【比试判定已掷出（vs {_chk_c.get('contest')}，d20 掷出 {_chk_c.get('roll')}，"
+                     f"需 ≥{_chk_c.get('dc') or '?'}）：{_cv}】这一拍必须把这场较量【实际打完/比完】："
+                     "过招的具体动作、决定性的那一下、胜负落定，全部演出来并就此收束——"
+                     "不许再热身、不许再报数、不许拖到下一拍。")
 
     lines.append("")
     # OUTPUT is delivered via the render_turn TOOL (function calling) — narration & speech go

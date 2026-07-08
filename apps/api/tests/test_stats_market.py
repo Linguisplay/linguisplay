@@ -48,6 +48,49 @@ def test_npc_gets_a_rank_and_pocket_money():
     assert "魂士" in line and "80灵币" in line
 
 
+def test_contest_signal_patterns():
+    assert runtime.contest_signal("开始吧")
+    assert runtime.contest_signal("来吧，放马过来")
+    assert runtime.contest_signal("那就切磋一场")
+    assert not runtime.contest_signal("先别开始，我还没热身")
+    assert not runtime.contest_signal("你好")
+
+
+def test_start_signal_rolls_the_contest_and_briefs_the_director():
+    """竞技合同 (Yi): 约好较量、玩家喊开始 → 骰子当场落地（说的通道也触发），
+    DC 按位阶差压上去，判定必须进导演提示词——不许再摆三拍架势。"""
+
+    class SpyLLM:
+        def __init__(self):
+            self.prompts = []
+
+        def generate(self, prompt):
+            if prompt.get("rank_judge"):
+                return {"rank_i": 2, "money": 10}       # 对手=魂尊(第3档) vs 玩家魂士
+            if prompt.get("gen_attrs"):
+                return {"attrs": {k: 5 for k in runtime.ATTRS}}
+            if prompt.get("summarize"):
+                return {"memory": ""}
+            if prompt.get("suggest"):
+                return {"suggestions": []}
+            if prompt.get("speaker_name"):
+                self.prompts.append(prompt)
+            return {"beats": [{"type": "dialogue", "speaker_name": "甲", "text": "承让。"}],
+                    "affinity_delta": 0, "advance_act": False, "ending": None}
+
+    llm = SpyLLM()
+    st = {**runtime.default_state(), "location_id": "hall"}
+    out = runtime.run_turn(SANDBOX, st, {"name": "我"}, "开始吧", channel="say", llm=llm)
+    d = out["dice"]
+    assert d and d.get("contest") == "甲"
+    assert d["dc"] == 8 + 2 * 2          # 位阶差+2档 → DC 12（五维全5无增减）
+    assert llm.prompts[0].get("check") == d   # the verdict reaches the director
+    # a plain line never rolls a contest
+    out2 = runtime.run_turn(SANDBOX, {**runtime.default_state(), "location_id": "hall"},
+                            {"name": "我"}, "今天天气不错", channel="say", llm=SpyLLM())
+    assert out2["dice"] is None
+
+
 def test_market_buys_are_ledger_ops():
     st = {**runtime.default_state(), "money": 30}
     view = runtime.market_view(SANDBOX, st, llm=MockLLM())

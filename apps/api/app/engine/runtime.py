@@ -554,6 +554,55 @@ def _own_rank_line(content: dict[str, Any], state: dict[str, Any], char: dict[st
     return "".join(bits)
 
 
+# 🥊 竞技合同 (Yi): an agreed contest + the player's start signal = the dice decide NOW
+_CONTEST_RE = re.compile(
+    r"(开始吧|开始了|来吧|放马过来|出招|开打|动手吧|上吧|见真章|分个高下|比试|切磋|较量"
+    r"|一决胜负|开赛|预备.{0,2}开始|^开始$)")
+
+
+def contest_signal(text: str) -> bool:
+    t = (text or "").strip()
+    if not t or len(t) > 40:
+        return False
+    if any(n in t for n in ("别开始", "先别", "不比", "不打", "等等")):
+        return False
+    return bool(_CONTEST_RE.search(t))
+
+
+def _contest_opponent(content: dict[str, Any], state: dict[str, Any],
+                      target_character_id: str | None) -> dict[str, Any] | None:
+    """Who is the player squaring off against: the addressed character if present,
+    else the only other person here, else the present lead. None = no opponent."""
+    pcid = state.get("player_character_id")
+    here = [c for c in scene_characters(content, state) if c.get("id") != pcid]
+    if not here:
+        return None
+    if target_character_id:
+        hit = next((c for c in here if c.get("id") == target_character_id), None)
+        if hit:
+            return hit
+    if len(here) == 1:
+        return here[0]
+    return next((c for c in here if c.get("is_lead")), here[0])
+
+
+def _rank_gap(content: dict[str, Any], state: dict[str, Any], opp: dict[str, Any],
+              llm: LLM) -> int:
+    """Opponent's ladder index minus the player's — the mechanical 碾压 in a contest."""
+    cfg = cult_cfg(content)
+    if not cfg:
+        return 0
+    ranks = [str(r) for r in (cfg.get("ranks") or [])]
+    e = ensure_npc_rank(content, state, opp, llm)
+    try:
+        mine = ranks.index((cult_view(content, state) or {}).get("rank"))
+    except (ValueError, TypeError):
+        return 0
+    if e.get("rank_i") is None:
+        return 0
+    return int(e["rank_i"]) - mine
+
+
 def market_view(content: dict[str, Any], state: dict[str, Any],
                 llm: LLM | None = None) -> dict[str, Any]:
     """🛒 今日集市 (Yi: 要有商城): 6 world-true goods, re-stocked each in-story day.
@@ -5963,7 +6012,25 @@ def run_turn_stream(
     _pw = _power_named(state, player_input) if channel == "do" else ""
     if _pw:
         _audit(state, "power", True, _pw, "金手指动作不掷骰，必然生效")
-    if channel == "do" and tun["dice"] and not moved and not _pw \
+    # 🥊 竞技合同 (Yi): 约好的较量 + 玩家喊「开始」= 骰子当场定胜负，剧情按结果推进
+    # —— 说/做通道都触发，DC 按双方位阶差压上去（大魂师就是压魂士），不许再摆三拍架势
+    if tun["dice"] and not moved and not _pw and channel in ("say", "do") \
+            and (state.get("mode") or "character") != "god" \
+            and contest_signal(player_input):
+        _opp = _contest_opponent(content, state, target_character_id)
+        if _opp is not None:
+            _cdc = 8 + 2 * _rank_gap(content, state, _opp, llm)
+            _cattrs = state.get("attrs") or {}
+            _cav = max(int(_cattrs.get("力量") or 0), int(_cattrs.get("敏捷") or 0))
+            if _cav:
+                _cdc -= (_cav - 5) // 2
+            _cdc = max(2, min(19, _cdc))
+            dice = _roll_dc(_cdc)
+            dice["contest"] = _opp.get("name") or ""
+            _audit(state, "check", True, f"比试·vs{_opp.get('name')}(DC{_cdc})",
+                   "位阶与身手已折算")
+            yield ("dice", dice)
+    if dice is None and channel == "do" and tun["dice"] and not moved and not _pw \
             and (state.get("mode") or "character") != "god":
         # 五层筛 [1]+[3]: the ENGINE classifies the attempt first (verb class → base
         # tier + wound/equipment modifiers). A classified action ALWAYS rolls — the
