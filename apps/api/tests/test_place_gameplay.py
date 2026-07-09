@@ -373,6 +373,41 @@ def test_scout_denial_denies_honestly_and_mints_nothing():
                for p in llm.prompts)
 
 
+def test_vocative_hands_the_floor_same_turn():
+    """点名要有回应 (Yi: 戴沐白问竹清，竹清没法答): a line opening with a present
+    character's (short) name hands them the floor THIS turn."""
+    story = {"story": {"id": "v", "characters": [
+        {"id": "c1", "name": "戴沐白", "is_lead": True, "home_location_id": "hall"},
+        {"id": "c2", "name": "朱竹清", "home_location_id": "hall"}],
+        "acts": [{"index": 1, "title": "一"}],
+        "locations": [{"id": "hall", "name": "食堂", "exits": []}]}, "secrets": []}
+
+    class VocLLM:
+        def generate(self, prompt):
+            if prompt.get("summarize"):
+                return {"memory": ""}
+            if prompt.get("suggest"):
+                return {"suggestions": []}
+            sp = prompt.get("speaker_name")
+            if sp == "戴沐白":
+                return {"beats": [{"type": "dialogue", "speaker_name": sp,
+                                   "text": "竹清，他说的是真的？"}],
+                        "affinity_delta": 0, "advance_act": False, "ending": None,
+                        "next_speakers": []}
+            if sp == "朱竹清":
+                return {"beats": [{"type": "dialogue", "speaker_name": sp,
+                                   "text": "是真的。"}],
+                        "affinity_delta": 0, "advance_act": False, "ending": None}
+            return {"beats": [], "affinity_delta": 0, "advance_act": False, "ending": None}
+
+    st = {**runtime.default_state(), "location_id": "hall"}
+    out = runtime.run_turn(story, st, {"name": "我"}, "沐白哥，你问问她",
+                           channel="say", llm=VocLLM())
+    speakers = [b.get("speaker_name") for b in out["beats"] if b.get("type") == "dialogue"]
+    assert "朱竹清" in speakers            # she got the floor and answered
+    assert any(a.get("e") == "floor.pass" for a in out["audit"])
+
+
 def test_bios_end_like_sentences():
     """简介不许以…结束 (Yi): clips land on sentence boundaries, ellipses stripped."""
     long = "他是城寨里最会看人下菜的掌柜。年轻时跑过船，见过风浪。如今只想守着铺子过安稳日子，可惜树欲静而风不止，总有旧相识找上门来"

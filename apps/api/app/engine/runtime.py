@@ -4473,6 +4473,26 @@ _POV_CORRECTION = ("上一版旁白的人称错了：旁白必须自始至终用
                    "别的角色身上，也不能把旁白写成某个角色的第一人称独白。重写这一轮。")
 
 
+def _addressed_char(content: dict[str, Any], state: dict[str, Any],
+                    d_beats: list[dict[str, Any]], sp_id: str | None,
+                    pcid: str | None) -> dict[str, Any] | None:
+    """Vocative detection: a dialogue line opening with a PRESENT character's name (or
+    2-char short name)＋呼语标点 addresses them — they should get to answer this turn."""
+    here = [c for c in scene_characters(content, state)
+            if c.get("id") not in (sp_id, pcid) and (c.get("name") or "").strip()]
+    for b in d_beats or []:
+        if b.get("type") != "dialogue":
+            continue
+        head = (b.get("text") or "").strip()[:12]
+        for c in here:
+            nm = c["name"].strip()
+            for cand in {nm, nm[-2:] if len(nm) > 2 else nm}:
+                if cand and head.startswith(cand) \
+                        and head[len(cand):len(cand) + 1] in ("，", ",", "：", ":", "、", " ", "！", "!"):
+                    return c
+    return None
+
+
 def _pov_break(directed: dict[str, Any], player_name: str = "") -> bool:
     pn = (player_name or "").strip()
     for b in directed.get("beats", []) or []:
@@ -6626,6 +6646,15 @@ def run_turn_stream(
                         chosen.append(c)
                 chosen = chosen[:3]
             responders.extend(chosen)
+        # 🗣 点名要有回应 (Yi: 戴沐白问竹清，竹清没法答): ANY speaker whose line opens
+        # with a present character's name/short-name hands them the floor this turn —
+        # a spoken question must be answerable. Capped so chains can't run away.
+        if len(responders) < 4:
+            _voc = _addressed_char(content, state, d_beats, sp_id, pcid)
+            if _voc is not None and all(r.get("id") != _voc.get("id") for r in responders):
+                responders.append(_voc)
+                _audit(state, "floor.pass", True,
+                       f"{sp_name}→{_voc.get('name', '')}", "台词点名，话权移交")
 
     # the flag sheet unpacks back into turn locals for the phases below
     affinity_delta = flags["affinity_delta"]
