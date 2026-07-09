@@ -1068,7 +1068,8 @@ def _output_spec(prompt: dict[str, Any], speaker: str, observer: bool,
         else:
             lead = "写成一段自然的第三人称中文小说叙事（2~5句），写出对方这句话此刻激起的神态、动作、气氛。"
             speech_rule = ("你【被直接搭话，必须开口】：把你说出口的每一句话都用「」括进这段叙事里"
-                           "（例：蓝信一歪头，「哎哟，新来的。」他把烟摁灭）；哪怕冷淡、敷衍、拒答，也要有带「」的台词。")
+                           f"（例：{speaker}歪了歪头，「哎哟，新来的。」说着把手里的东西放下）；"
+                           "哪怕冷淡、敷衍、拒答，也要有带「」的台词。")
         L.append(f"【这一轮怎么写】{lead}用第三人称、用「{speaker}」的名字称呼自己，绝不用「我」。{speech_rule}"
                  "【铁律】凡是说出口的话都必须在「」里；「」之外只写动作、神态、环境，绝不放台词。")
     # metadata lines (parsed deterministically by prefix; kept minimal)
@@ -1299,7 +1300,7 @@ def _build_transition_system(prompt: dict[str, Any]) -> str:
     if prompt.get("mature"):
         lines.append("（本剧情为成人向 18+，过场可带相应基调。）")
     if act_events:
-        lines.append(f"【这一幕正在发生(整座城寨的大势,不一定都在玩家眼前)】{act_events}")
+        lines.append(f"【这一幕正在发生(这个世界的大势,不一定都在玩家眼前)】{act_events}")
     place_set = bool(place)
     if cast:
         lines.append(f"【玩家此刻所在地、真正在场的人】只有:{('、'.join(cast))}。")

@@ -7460,7 +7460,7 @@ def run_turn_stream(
         where = "、".join(f"「{n}」" for n in new_places)
         where_en = ", ".join(f"“{n}”" for n in new_places)
         yield emit({"type": "description", "speaker_name": None,
-                    "text": _t(content, f"（你打听到城寨里还有去处：{where}，现在可以过去看看了。）",
+                    "text": _t(content, f"（你打听到还有能去的地方：{where}，现在可以过去看看了。）",
                                f"(You've learned of somewhere new: {where_en}. "
                                "You can head over and take a look.)")})
 
