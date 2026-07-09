@@ -943,6 +943,16 @@ def _sim(state: dict[str, Any], cid: str) -> dict[str, Any]:
     return state.setdefault("char_sim", {}).setdefault(cid, {})
 
 
+def _sim_pos_loc(v: Any) -> str | None:
+    """char_sim[cid]['pos'] is DUAL-WRITTEN: booked location ids (moves, dying pins)
+    AND 场记 pose frames {'text','at',...}. Read as a LOCATION, a frame means "where
+    it was recorded" — its 'at'. Never let the frame dict leak out as a place (it
+    crashed /map with unhashable-dict for a playable char with no home_location_id)."""
+    if isinstance(v, dict):
+        v = v.get("at")
+    return v if isinstance(v, str) and v.strip() else None
+
+
 def char_position(content: dict[str, Any], state: dict[str, Any],
                   c: dict[str, Any]) -> str | None:
     """The character's ACTUAL current location id. Resolution order: following the
@@ -957,8 +967,8 @@ def char_position(content: dict[str, Any], state: dict[str, Any],
     if cid and cid in (state.get("following") or []):
         return state.get("location_id") or (locs[0] or {}).get("id")
     sim0 = (state.get("char_sim") or {}).get(cid) or {}
-    if sim0.get("hp") == "dying" and sim0.get("pos"):
-        return sim0["pos"]  # the dying don't keep their appointments — they lie where they fell
+    if sim0.get("hp") == "dying" and _sim_pos_loc(sim0.get("pos")):
+        return _sim_pos_loc(sim0.get("pos"))  # the dying lie where they fell
     _tc = threat_mod.cfg(content)
     if _tc and cid == _tc["char_id"] and (state.get("threat") or {}).get("pos"):
         return state["threat"]["pos"]  # 🦇 the hunter's feet belong to the threat ledger
@@ -970,7 +980,7 @@ def char_position(content: dict[str, Any], state: dict[str, Any],
     sched = char_home(c, int(state.get("act", 1) or 1), active_slot(content, state))
     if sched:
         return sched  # includes AWAY
-    pos = ((state.get("char_sim") or {}).get(cid) or {}).get("pos")
+    pos = _sim_pos_loc(((state.get("char_sim") or {}).get(cid) or {}).get("pos"))
     if pos:
         return pos
     return (locs[0] or {}).get("id")
