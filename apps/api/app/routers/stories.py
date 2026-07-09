@@ -59,6 +59,8 @@ def _to_story(s: StoryModel) -> Story:
         pressure=s.pressure,
         threat=s.threat,
         dooms=s.dooms,
+        sanity=s.sanity,
+        rules=s.rules,
         clock=s.clock,
         phone=s.phone,
         verdict=s.verdict,
@@ -151,6 +153,8 @@ def create_story(
     data.pop("pressure", None)
     data.pop("threat", None)
     data.pop("dooms", None)
+    data.pop("sanity", None)
+    data.pop("rules", None)
     data.pop("clock", None)
     data.pop("phone", None)
     data.pop("verdict", None)
@@ -164,6 +168,8 @@ def create_story(
         pressure=body.pressure,
         threat=body.threat,
         dooms=body.dooms,
+        sanity=body.sanity,
+        rules=body.rules,
         clock=body.clock,
         phone=body.phone,
         verdict=body.verdict,
@@ -192,6 +198,10 @@ def _public_story_view(out: Story) -> Story:
     out.pressure = None
     out.threat = None  # 🦇 the hunter's rules are the answer key of a horror story
     out.dooms = None   # 🚪 who gets taken, when, and how to stop it — never leaks
+    out.sanity = None  # 🧠 the break threshold is mechanics, not lore
+    # 📜 rules are DIEGETIC (posted on the wall) — the text shows, the teeth don't
+    out.rules = [{"id": r.get("id"), "text": r.get("text")}
+                 for r in (out.rules or [])] or None
     return out
 
 
@@ -262,6 +272,10 @@ def update_story(
         s.threat = data.pop("threat")
     if "dooms" in data:
         s.dooms = data.pop("dooms")
+    if "sanity" in data:
+        s.sanity = data.pop("sanity")
+    if "rules" in data:
+        s.rules = data.pop("rules")
     if "clock" in data:
         s.clock = data.pop("clock")
     if "phone" in data:

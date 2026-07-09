@@ -193,6 +193,7 @@ def _to_run(r: RunModel) -> Run:
             inventory=list(st.get("inventory") or []),
             pressure_name=((runtime.pressure_cfg(r.pinned_content or {}) or {}).get("name")),
             threat=runtime.threat_view_of(r.pinned_content or {}, st),
+            sanity=runtime.sanity_view_of(r.pinned_content or {}, st),
             clock=runtime.clock_view(r.pinned_content or {}, st),
             promises=runtime.promises_view(r.pinned_content or {}, st),
             phone_unread=runtime.phone_total_unread(r.pinned_content or {}, st),
@@ -721,6 +722,8 @@ def play(
                     yield _event({"event": "pressure", "pressure": final["pressure_view"]})
                 if final.get("threat_view"):
                     yield _event({"event": "threat", "threat": final["threat_view"]})
+                if final.get("sanity_view"):
+                    yield _event({"event": "sanity", "sanity": final["sanity_view"]})
                 yield _event({"event": "place", "location": final.get("location")})
                 yield _event({"event": "promises", "promises": final.get("promises", [])})
                 yield _event({"event": "verdict", "verdict": final.get("verdict")})
@@ -1070,6 +1073,8 @@ def confront(run_id: str, body: ConfrontIn, user: User = Depends(current_user),
                     yield _event({"event": "pressure", "pressure": final["pressure_view"]})
                 if final.get("threat_view"):
                     yield _event({"event": "threat", "threat": final["threat_view"]})
+                if final.get("sanity_view"):
+                    yield _event({"event": "sanity", "sanity": final["sanity_view"]})
                 if final.get("pending_choice"):
                     yield _event({"event": "choice", "choice": final["pending_choice"]})
             yield _event({"event": "done"})

@@ -45,6 +45,7 @@ def _ensure_columns() -> None:
                           ("locations", "JSON DEFAULT '[]'"), ("mature", "INTEGER DEFAULT 0"),
                           ("tuning", "JSON DEFAULT '{}'"), ("pressure", "JSON"),
                           ("threat", "JSON"), ("dooms", "JSON"),
+                          ("sanity", "JSON"), ("rules", "JSON"),
                           ("clock", "JSON"), ("phone", "JSON"),
                           ("verdict", "JSON"), ("sandbox", "JSON"),
                           ("language", "TEXT DEFAULT 'zh'")],

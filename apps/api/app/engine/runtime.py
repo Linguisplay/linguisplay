@@ -23,6 +23,7 @@ from . import heat as heat_mod
 from . import intent as intent_mod
 from . import logic
 from . import relationships
+from . import sanity as sanity_mod
 from . import scene as scene_mod
 from . import threat as threat_mod
 from .llm import LLM, get_llm
@@ -2834,6 +2835,32 @@ def pressure_cfg(content: dict[str, Any]) -> dict[str, Any] | None:
     return cfg if (cfg.get("name") or "").strip() else None
 
 
+def sane_delta(content: dict[str, Any], state: dict[str, Any], delta: int,
+               why: str = "") -> dict[str, Any] | None:
+    """🧠 Book a sanity change (clamped 0..start). Returns a moments event when the
+    value slid DOWN into a new band — the UI announces the slide, never the math."""
+    scfg = sanity_mod.cfg(content)
+    if not scfg or not delta:
+        return None
+    old = int(state.get("sanity", scfg["start"]))
+    new = max(0, min(scfg["start"], old + int(delta)))
+    if new == old:
+        return None
+    state["sanity"] = new
+    _audit(state, "sanity", True, f"{'+' if delta > 0 else ''}{delta}", (why or "")[:24])
+    if sanity_mod.band_of(new)[0] < sanity_mod.band_of(old)[0]:
+        return {"kind": "sanity", "value": new,
+                "label": sanity_mod.band_of(new)[1], "name": scfg["name"]}
+    return None
+
+
+def sanity_view_of(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
+    scfg = sanity_mod.cfg(content)
+    if not scfg:
+        return None
+    return sanity_mod.label_view(scfg, int(state.get("sanity", scfg["start"])))
+
+
 def threat_view_of(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
     """🦇 The hunter as the UI feels it: name + distance band + alert. None when the
     story runs no threat (or the run hasn't met it yet)."""
@@ -4914,6 +4941,9 @@ def journal(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
                 for p in (state.get("promises") or [])]
     return {"secrets": secrets, "secrets_untouched": untouched, "endings": endings,
             "promises": promises,  # 🤝 约定史: open + kept + missed
+            # 📜 守则原文 (规则怪谈): shown as authored — contradictions included
+            "rules": [(r.get("text") or "").strip()
+                      for r in (story.get("rules") or []) if (r.get("text") or "").strip()],
             "album": list(reversed(state.get("album") or [])),  # 💞 名场面, newest first
             "choices": dict(state.get("choices") or {}),
             "identity": state.get("identity"),
@@ -6039,6 +6069,11 @@ def run_turn_stream(
     # 📸 moments born BEFORE the moments list exists (breakthrough/crit fire early in
     # the pipeline) — stashed here, merged in when the list is created at P4
     early_moments: list[dict[str, Any]] = []
+    # 🧠 理智账本 init + the turn's opening balance (recovery only on no-net-loss turns)
+    _scfg = sanity_mod.cfg(content)
+    if _scfg:
+        state.setdefault("sanity", _scfg["start"])
+    _san0 = int(state.get("sanity", 0) or 0)
     if cult_cfg(content) and (state.get("mode") or "character") != "god":
         _og = cult_offline_gain(content, state, away_hours if returning else 0)
         if _og:
@@ -6270,6 +6305,9 @@ def run_turn_stream(
                     f"{cult_view(content, state)['rank']}·{cult_view(content, state)['stage']}{_cm}")
             if state.get("perk") == "instinct":   # 🌱 NG+ 直觉: fate runs warmer
                 dc = max(2, dc - max(1, INSTINCT_BONUS // 5))
+            _sm = sanity_mod.dc_mod(int(state.get("sanity", 999)))
+            if _sm and sanity_mod.cfg(content):   # 🧠 shaking hands miss
+                dc = min(19, dc + _sm)
             dice = _roll_dc(dc)
             _audit(state, "check", True,
                    f"{base['cls']}·{final['tier']}(DC{dc})",
@@ -6326,10 +6364,27 @@ def run_turn_stream(
         noise = (0 if channel == "think" else
                  threat_mod.noise_of(player_input, channel, _ncls,
                                      (dice or {}).get("outcome") or "", tcfg["senses"]))
-        # talking TO the hunter is a scene, not a stimulus — no mechanical strike
-        addressed = bool(target_character_id == tcfg["char_id"]
-                         or (_hname and _hname in (player_input or "")))
+        attacking = bool(channel == "do" and _ncls == "强攻" and _hname
+                         and _hname in (player_input or ""))
+        # talking TO the hunter is a scene, not a stimulus — but ATTACKING it is
+        addressed = (not attacking) and bool(target_character_id == tcfg["char_id"]
+                                             or (_hname and _hname in (player_input or "")))
         old_band = th.get("band") or "far"
+        struck_this_turn = False
+        # 🎬 张弛导演: sustained menace forces a backstage breather — 恐怖是波浪不是墙
+        if th.get("away", 0) <= 0 and int(th.get("menace", 0)) >= threat_mod.MENACE_HIGH:
+            th["away"] = 3 + _rng.randint(0, 2)
+            th["menace"] = 0
+            th["alert"] = 0
+            th["pos"] = threat_mod.far_stop(_adj, tcfg, _ploc)
+            _audit(state, "threat.director", True, "backstage", f"{th['away']}回合")
+            yield ("beat", dedash_beat({"type": "description", "speaker_name": None,
+                   "text": _t(content,
+                              "不知是楼里哪儿的动静把TA引开了——那份压在你后颈上的存在感松开，"
+                              "越来越远。楼安静下来。安静得让你明白：这份安静，迟早要还。",
+                              "Something elsewhere draws it away — the presence on the back of "
+                              "your neck lets go, further and further. The building goes quiet. "
+                              "Quiet enough that you know it will have to be paid back.")}))
         if noise >= 2:
             th["alert"] = min(3, int(th["alert"]) + (2 if noise >= 3 else 1))
             _audit(state, "threat.alert", True, f"噪音{noise}", f"警觉{th['alert']}")
@@ -6337,25 +6392,47 @@ def run_turn_stream(
                 state["pressure"] = min(99, int(state.get("pressure", 0)) + 3 * noise)
         elif noise == 0:
             th["alert"] = max(0, int(th["alert"]) - 1)
-        # feet: hunting (alert≥2) walks TOWARD the player, one door per turn;
-        # otherwise the authored beat. Squeeze-spaces stop it at the mouth.
-        if th["alert"] >= 2 and _ploc:
-            th["pos"] = threat_mod.step_toward(_adj, th["pos"], _ploc, tcfg["cannot_enter"])
-        else:
-            th["pos"] = threat_mod.step_patrol(tcfg, th["pos"])
-        band = threat_mod.band_of(_adj, th["pos"], _ploc)
+        if th.get("away", 0) > 0:
+            # backstage: genuinely elsewhere — but a BLATANT noise cuts the break short
+            if noise >= 3:
+                th["away"] = 0
+                th["alert"] = max(int(th["alert"]), 2)
+                _audit(state, "threat.director", True, "recall", "巨响截断了喘息")
+            else:
+                th["away"] = int(th["away"]) - 1
+        band, cue = "far", ""
+        if th.get("away", 0) <= 0:
+            # feet: hunting (alert≥2) walks TOWARD the player, one door per turn;
+            # otherwise the authored beat. Squeeze-spaces stop it at the mouth.
+            if th["alert"] >= 2 and _ploc:
+                th["pos"] = threat_mod.step_toward(_adj, th["pos"], _ploc, tcfg["cannot_enter"])
+            else:
+                th["pos"] = threat_mod.step_patrol(tcfg, th["pos"])
+            band = threat_mod.band_of(_adj, th["pos"], _ploc)
+            cue = threat_mod.cue_line(tcfg, band, th["tick"], _zh)
         th["band"] = band
-        cue = threat_mod.cue_line(tcfg, band, th["tick"], _zh)
         can_touch = band == "here" and _ploc and _ploc not in tcfg["cannot_enter"]
-        if can_touch and not addressed and (th["alert"] >= 2 or noise >= 2):
-            # 遭遇: hide or be caught — the fate roll is real, 敏捷 helps, alert hurts
+        if can_touch and not addressed and (th["alert"] >= 2 or noise >= 2 or attacking):
+            # 遭遇: hide or be caught — 敏捷 helps, alert hurts, a hiding spot it has
+            # LEARNED hurts more, and attacking the unfightable is handing yourself over
             _ag = int((state.get("attrs") or {}).get("敏捷") or 5)
             _hdc = max(2, min(19, 6 + 3 * int(th["alert"]) - (_ag - 5) // 2))
+            _hw = threat_mod.hide_word_of(player_input)
+            _known = int((th.get("hides") or {}).get(_hw, 0)) if _hw else 0
+            if _known >= 2:
+                _hdc = min(19, _hdc + min(4, 2 * (_known - 1)))
+                _audit(state, "threat.learned", True, _hw, f"这一手TA已见过{_known}次")
+            _unf = bool(attacking and tcfg.get("unfightable"))
+            if _unf:
+                _hdc = 19   # and a mixed roll won't save you either (下面降档)
+                _audit(state, "threat.unfightable", True, _hname, "攻击它等于把自己递过去")
+            _hdc = min(19, _hdc + sanity_mod.dc_mod(int(state.get("sanity", 999))))
             hdice = _roll_dc(_hdc)
             hdice["contest"] = _hname
             yield ("dice", hdice)
             _audit(state, "threat.check", True, f"遭遇·{_hname}(DC{_hdc})", "循声而至")
-            if hdice["outcome"] in ("success", "crit_success", "mixed"):
+            if hdice["outcome"] in ("success", "crit_success", "mixed") \
+                    and not (_unf and hdice["outcome"] == "mixed"):
                 _mixed = hdice["outcome"] == "mixed"
                 yield ("beat", dedash_beat({"type": "description", "speaker_name": None,
                        "text": (cue + " " if cue else "") + _t(content,
@@ -6365,17 +6442,29 @@ def run_turn_stream(
                           f"steps away — a long, long moment — then moves off."
                           + (" But this time, it remembers this room." if _mixed else ""))}))
                 th["alert"] = 3 if _mixed else 1
+                if _hw:   # it now knows one more thing about how you hide
+                    th.setdefault("hides", {})
+                    th["hides"][_hw] = int(th["hides"].get(_hw, 0)) + 1
+                _sev = sane_delta(content, state, -4 if _mixed else -3, "擦肩而过")
+                if _sev:
+                    early_moments.append(_sev)
                 if not _mixed:
                     th["pos"] = threat_mod.step_patrol(tcfg, th["pos"])
                     th["band"] = threat_mod.band_of(_adj, th["pos"], _ploc)
                     band = th["band"]  # the view reflects where it ACTUALLY ended up
             else:
+                struck_this_turn = True
                 th["strikes"] = int(th["strikes"]) + 1
                 stage = tcfg["ladder"][min(th["strikes"] - 1, len(tcfg["ladder"]) - 1)]
                 if (state.get("player_hp") or "healthy") == "dying":
                     stage = "dead"   # a dying body has nothing left to pay with
                 threat_caught = True
                 _audit(state, "threat.strike", True, f"{_hname}·第{th['strikes']}次", stage)
+                _sev = sane_delta(content, state,
+                                  {"return": -6, "hurt": -8, "dying": -10}.get(stage, 0),
+                                  f"被{_hname}逮住")
+                if _sev:
+                    early_moments.append(_sev)
                 if stage == "return":
                     _dest = _location_by_id(content, tcfg["return_to"]) or {}
                     state["location_id"] = _dest.get("id") or _ploc
@@ -6416,17 +6505,51 @@ def run_turn_stream(
             # it passes THROUGH the room — 先声后形, no contact (yet); noise draws its eye
             if noise >= 1:
                 th["alert"] = min(3, int(th["alert"]) + 1)
+            _sev = sane_delta(content, state, -2, "TA经过了这个房间")
+            if _sev:
+                early_moments.append(_sev)
             yield ("beat", dedash_beat({"type": "description", "speaker_name": None, "text": cue}))
         elif band == "near" and cue and (th["alert"] >= 1 or old_band != "near"):
+            _sev = sane_delta(content, state, -1, "一门之隔")
+            if _sev:
+                early_moments.append(_sev)
             yield ("beat", dedash_beat({"type": "description", "speaker_name": None, "text": cue}))
-        elif band == "far" and noise >= 2 and th["alert"] >= 2:
+        elif band == "far" and noise >= 2 and th["alert"] >= 2 and th.get("away", 0) <= 0:
             yield ("beat", dedash_beat({"type": "description", "speaker_name": None,
                    "text": _t(content, "远处，什么东西停了一下——然后朝这边来了。",
                               "Somewhere far off, something pauses — then starts this way.")}))
+        # 🎬 menace/calm bookkeeping: a catch IS the release; proximity charges the
+        # gauge; long comfort makes the director send it drifting back your way
+        if struck_this_turn:
+            th["menace"], th["calm"] = 0, 0
+        elif th.get("away", 0) > 0:
+            th["calm"] = 0
+        else:
+            th["menace"] = max(0, int(th.get("menace", 0))
+                               + (3 if band == "here" else 2 if band == "near"
+                                  else 1 if int(th["alert"]) >= 2 else -1))
+            if band == "far" and int(th["alert"]) == 0:
+                th["calm"] = int(th.get("calm", 0)) + 1
+                if th["calm"] >= threat_mod.CALM_LIMIT:
+                    th["calm"] = 0
+                    # the director sends it HUNTING your way — full alert plus a first
+                    # step now, or next turn's quiet-decay eats the restage entirely
+                    th["alert"] = 3
+                    if _ploc:
+                        th["pos"] = threat_mod.step_toward(_adj, th["pos"], _ploc,
+                                                           tcfg["cannot_enter"])
+                    _audit(state, "threat.director", True, "restage", "你安静得太久了")
+            else:
+                th["calm"] = 0
         _alab = (["松弛", "起疑", "循声而来", "紧盯不放"] if _zh
                  else ["idle", "uneasy", "tracking", "locked on"])[int(th["alert"])]
         _tloc = (_location_by_id(content, th["pos"]) or {}).get("name") or th["pos"]
-        if band == "here":
+        if th.get("away", 0) > 0:
+            _where = ("TA此刻被别处的动静绊住，不在这一带——本轮绝不可让TA现身，"
+                      "楼里的安静本身就是戏。" if _zh else
+                      "It is currently drawn elsewhere — it may NOT appear this turn; "
+                      "the building's quiet IS the scene. ")
+        elif band == "here":
             _where = ("TA就在本场，可被看见、可对话。" if _zh
                       else "It IS in this scene and may be seen or addressed. ")
         else:
@@ -6451,6 +6574,44 @@ def run_turn_stream(
                              "'creepy' — let the reader's own neck prickle.]"))
         threat_view = {"name": _hname, "band": band, "alert": int(th["alert"])}
 
+    # ━━━━━━━━━━ 管线 P3.6 · 📜 规则怪谈 (house rules, program-enforced) ━━━━━━━━━━
+    # 规则怪谈's dread = trust in rules gone wrong. Ours have TEETH: the ENGINE, not
+    # the model, decides a rule was broken and collects the price (pressure spike /
+    # sanity loss / the hunter turns). Flavor rules with no violate clause are pure
+    # authored dread — contradictions welcome; the hidden core is the author's craft.
+    if (state.get("mode") or "character") != "god" and not state.get("ended") \
+            and channel in ("say", "do"):
+        _slot_now = active_slot(content, state)
+        for ru in (content.get("story") or {}).get("rules") or []:
+            _vio = ru.get("violate") or {}
+            _kws = [k for k in (_vio.get("keywords") or []) if k]
+            if not _kws or not any(k in (player_input or "") for k in _kws):
+                continue
+            _when = ru.get("when") or {}
+            if _when.get("location_id") and _when["location_id"] != state.get("location_id"):
+                continue
+            if _when.get("slots") and _slot_now and _slot_now not in _when["slots"]:
+                continue
+            if _vio.get("channel") and channel not in _vio["channel"]:
+                continue
+            _cq = ru.get("consequence") or {}
+            _audit(state, "rule.broken", True, ru.get("id") or "", (ru.get("text") or "")[:20])
+            early_moments.append({"kind": "rule", "text": (ru.get("text") or "")[:40]})
+            if int(_cq.get("pressure") or 0) and pressure_cfg(content):
+                state["pressure"] = min(99, int(state.get("pressure", 0))
+                                        + int(_cq["pressure"]))
+            if int(_cq.get("sanity") or 0):
+                _sev = sane_delta(content, state, -abs(int(_cq["sanity"])), "违反守则")
+                if _sev:
+                    early_moments.append(_sev)
+            if _cq.get("threat_aggro") and tcfg and state.get("threat"):
+                state["threat"]["alert"] = 3   # it heard. it is coming.
+                state["threat"]["away"] = 0
+            yield ("beat", dedash_beat({"type": "description", "speaker_name": None,
+                   "text": (_cq.get("text") or "").strip()
+                   or _t(content, "（你违反了守则。这栋楼记下了。）",
+                         "(You broke a rule. The building took note.)")}))
+
     # ━━━━━━━━━━ 管线 P4 · 解锁评估与回归问候 ━━━━━━━━━━
     # 2. gate on the CURRENT state (asks updated; affinity not yet changed this turn).
     #    asks-driven reveals surface THIS turn so the director can voice them; affinity-
@@ -6463,6 +6624,20 @@ def run_turn_stream(
         if fid not in already0 and fid not in newly:
             newly.append(fid)
     state["unlocked_fragment_ids"] = sorted(already0 | set(newly))
+
+    # 🧠 terrible knowledge costs (CoC's oldest law): prying open a dark truth takes
+    # its toll — heavy secrets bite, medium ones nick, light ones are free
+    if _scfg and newly:
+        _newset0 = set(newly)
+        for sec in content.get("secrets", []) or []:
+            _sens = {"heavy": -5, "medium": -2}.get((sec.get("sensitivity") or "").strip(), 0)
+            if not _sens:
+                continue
+            for f in sec.get("fragments", []) or []:
+                if f.get("id") in _newset0:
+                    _sev = sane_delta(content, state, _sens, "窥见了不该知道的")
+                    if _sev:
+                        early_moments.append(_sev)
 
     # judgment candidates for the primary director call (titles/labels only, never bodies)
     probe_cands = _probe_candidates(content, state)
@@ -6789,6 +6964,13 @@ def run_turn_stream(
             "track_note": track_note,              # 🎥 ledger-wins correction (one turn)
             "cult": cult_anchor(content, state),   # ⚡ 修为是铁律 (depth-0)
             "threat": threat_line,                 # 🦇 猎手实态 (depth-0, ledger-owned)
+            # 🧠 理智实态: below the waterline the narration may quietly go wrong
+            "sanity": (sanity_mod.anchor(_scfg, int(state.get("sanity", 0)),
+                                         lang_of(content) != "en") if _scfg else ""),
+            # 📜 守则贴在墙上，人人可引用 — the cast lives under these rules too
+            "house_rules": [(r.get("text") or "").strip()
+                            for r in (content.get("story") or {}).get("rules") or []
+                            if (r.get("text") or "").strip()][:6],
             # ⚡ 你自己是什么位阶 + 身上有多少钱 (Yi: 别人不能什么也不是)
             "own_rank": _own_rank_line(content, state, sp, llm),
             # 📈 剧情欠账: 2+ stalled turns → this turn MUST pay the thread off
@@ -7458,6 +7640,23 @@ def run_turn_stream(
         state["dooms_fired"] = sorted(_fired)
         state["dooms_warned"] = sorted(_warned)
 
+    # 🧠 watching someone go costs; a no-loss turn with the hunter far away lets the
+    # player breathe a little of it back (tension-release lives in the ledger too)
+    if _scfg and not state.get("ended"):
+        _sev_all = []
+        for _m in list(moments):
+            _d = {"death": -5, "dying": -3}.get(_m.get("kind"), 0)
+            if _m.get("kind") == "doom" and _m.get("status") == "taken":
+                _d = -6
+            if _d:
+                _sev = sane_delta(content, state, _d, "目睹")
+                if _sev:
+                    _sev_all.append(_sev)
+        moments.extend(_sev_all)
+        if int(state.get("sanity", 0)) >= _san0 and _scfg["regen"] and not observer \
+                and (threat_view or {}).get("band") in (None, "far"):
+            sane_delta(content, state, _scfg["regen"], "缓过来一点")
+
     # 6. ending check. Authored endings are MILESTONES (true/normal/bad) — reaching one
     #    shows its narration but the open world keeps going, so the player can explore on
     #    and even upgrade to a higher-tier ending later. Only a fatal action (death) is
@@ -7468,6 +7667,15 @@ def run_turn_stream(
         candidate = {"id": authored.get("id") or "pressure",
                      "kind": authored.get("kind", "bad"),
                      "title": authored.get("title") or f"{pcfg.get('name','压力')}到达顶点",
+                     "text": authored.get("text") or "",
+                     "terminal": True}
+    elif _scfg and int(state.get("sanity", 1) or 0) <= 0 and not state.get("ended"):
+        # 🧠 the mind snaps before the body does — a sanity break is terminal
+        authored = _ending_by_id(content, _scfg.get("ending_id")) or {}
+        model_ending = None
+        candidate = {"id": authored.get("id") or "sanity",
+                     "kind": authored.get("kind", "bad"),
+                     "title": authored.get("title") or f"{_scfg['name']}崩断",
                      "text": authored.get("text") or "",
                      "terminal": True}
     elif deadline_blown:
@@ -7633,6 +7841,7 @@ def run_turn_stream(
         "pressure_view": ({"name": pcfg.get("name"), "value": int(state.get("pressure", 0))}
                           if pcfg else None),
         "threat_view": threat_view,  # 🦇 {name,band,alert} the hunter's felt distance (or None)
+        "sanity_view": sanity_view_of(content, state),  # 🧠 {name,value,max,label} (or None)
         "clock_view": clock_view(content, state),  # ⏳ {day,slot,label,deadline?} or None
         "promises": promises_view(content, state),  # 🤝 open appointments, soonest first
         "phone_unread": phone_total_unread(content, state),  # 📱 badge (texts + letters)

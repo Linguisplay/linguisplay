@@ -279,6 +279,11 @@
 #mapov .mexits { font-size:11px; color:#7b8a80; margin-top:3px; }
 #mapov .mhidden { color:#7b8296; font-size:12px; font-style:italic; margin-top:10px; }
 #pressurebar { flex:0 0 auto; margin:6px 16px 0; padding:7px 12px; border-radius:10px; background:#241416cc; border:1px solid #4a2a28; font-size:12.5px; display:flex; align-items:center; gap:10px; color:#e8c9c4; }
+/* 🧠 理智条: watching the number slide IS the dread (CoC's oldest trick) */
+#sanitybar { flex:0 0 auto; margin:6px 16px 0; padding:7px 12px; border-radius:10px; background:#131022cc; border:1px solid #33285a; font-size:12.5px; display:flex; align-items:center; gap:10px; color:#c9c2e8; }
+#sanitybar .strack { flex:1; height:7px; border-radius:5px; background:#00000055; overflow:hidden; }
+#sanitybar .sfill { display:block; height:100%; border-radius:5px; transition:width .6s ease, background .6s ease; }
+#sanitybar.s-low { animation: threatPulse 2s ease-in-out infinite; }
 /* 🦇 猎手指示: the hunter as FELT — a distance whisper, not a minimap */
 #threatbar { flex:0 0 auto; margin:6px 16px 0; padding:7px 12px; border-radius:10px; background:#160f1acc; border:1px solid #3a2a44; font-size:12.5px; display:flex; align-items:center; gap:8px; color:#cbb8d8; }
 #threatbar.t-hot { border-color:#6a3040; color:#f0c9c4; animation: threatPulse 1.6s ease-in-out infinite; }
@@ -459,6 +464,7 @@ body.dread #dread { opacity:1; }
       <div id="hintbar" class="hidden"></div>
       <div id="pressurebar" class="hidden"></div>
       <div id="threatbar" class="hidden"></div>
+      <div id="sanitybar" class="hidden"></div>
       <div id="clues" class="hidden"></div>
     </div>
     <div id="chat"></div>
@@ -974,6 +980,7 @@ async function enterRun(run) {
   renderPressure(run.state && run.state.pressure_name
     ? { name: run.state.pressure_name, value: run.state.pressure || 0 } : null);
   renderThreat(run.state && run.state.threat);
+  renderSanity(run.state && run.state.sanity);
   // resuming an already-finished run: re-show its ending and keep input locked
   if (run.state && run.state.ended) showEnding(run.state.ending);
 }
@@ -1314,6 +1321,7 @@ async function openJournal() {
   ov.innerHTML = `<div class="jcard" onclick="event.stopPropagation()">
     <div class="jbar"><b>${B("📔 档案", "📔 Dossier")}</b><button class="ghost" onclick="document.getElementById('journal').remove()">${B("关闭", "Close")}</button></div>
     ${jd.identity ? `<div class="jh">${B("🎖 当前身份", "🎖 Current identity")}</div><div class="jfrag">${escapeHtml(jd.identity)}</div>` : ""}
+    ${(jd.rules||[]).length ? `<div class="jh">${B("📜 这里的守则", "📜 House rules")}</div>` + jd.rules.map(r=>`<div class="jfrag">${escapeHtml(r)}</div>`).join("") : ""}
     ${(jd.inventory||[]).length ? `<div class="jh">${B("🎒 随身物品", "🎒 Carrying")}</div>` + jd.inventory.map(i=>`<div class="jfrag">${escapeHtml(i.name)}${i.detail?`<span class="jwho"> — ${escapeHtml(i.detail)}</span>`:""}</div>`).join("") : ""}
     ${(jd.stashes||[]).length ? `<div class="jh">${B("📦 存放在各处", "📦 Stashed around")}</div>` + jd.stashes.map(st=>`<div class="jfrag">${escapeHtml(st.location||"")}：${st.items.map(i=>escapeHtml(i.name)).join("、")}</div>`).join("") : ""}
     ${(jd.deaths||[]).length ? `<div class="jh">${B("🕯 逝者", "🕯 The departed")}</div><div class="jfrag">${jd.deaths.map(escapeHtml).join("、")}</div>` : ""}
@@ -1792,6 +1800,19 @@ function setDread(on) {
   dreadOn = on;
   document.body.classList.toggle("dread", on);
   if (on) startHeart(); else stopHeart();
+}
+// 🧠 理智: the fill drains toward violet-red; low bands pulse
+function renderSanity(s) {
+  const el = document.getElementById("sanitybar");
+  if (!s || !s.name) { el.classList.add("hidden"); return; }
+  const v = Math.max(0, Math.min(s.max || 100, s.value || 0));
+  const pct = Math.round((v / (s.max || 100)) * 100);
+  const color = pct >= 70 ? "#7d6fd9" : pct >= 40 ? "#a25fd0" : "#d0506e";
+  el.innerHTML = `<span>🧠 ${escapeHtml(s.name)}</span>` +
+    `<span class="strack"><span class="sfill" style="width:${pct}%;background:${color}"></span></span>` +
+    `<span style="color:${color}">${v}${s.label && pct < 70 ? " · " + escapeHtml(s.label) : ""}</span>`;
+  el.classList.toggle("s-low", pct < 40);
+  el.classList.remove("hidden");
 }
 function renderThreat(t) {
   const el = document.getElementById("threatbar");
@@ -2440,6 +2461,7 @@ async function streamTurn(url, bodyObj) {
         }
         else if (ev.event === "pressure") { renderPressure(ev.pressure); }
         else if (ev.event === "threat") { renderThreat(ev.threat); }
+        else if (ev.event === "sanity") { renderSanity(ev.sanity); }
         else if (ev.event === "move_request") { afterPlay.moveReq = ev.move_request; }
         else if (ev.event === "audit") {
           // 📋 engine event audit — open devtools to see what the engine accepted/rejected
@@ -2605,6 +2627,12 @@ function showMoments(moments, relDeltas) {
       B(m.status === "averted" ? `🕯 ${m.name || "TA"} 躲过了那一夜——因为你` : `🚪 ${m.name || "有人"} 被带走了`,
         m.status === "averted" ? `🕯 ${m.name || "They"} survived the night — because of you` : `🚪 ${m.name || "Someone"} was taken`),
       m.status === "averted" ? "t-rel" : "t-press", i++ * 650);
+    else if (m.kind === "sanity") pushToast(
+      B(`🧠 你的${m.name || "理智"}在流失——${m.label || ""}`,
+        `🧠 Your ${m.name || "sanity"} is fraying — ${m.label || ""}`), "t-press", i++ * 650);
+    else if (m.kind === "rule") pushToast(
+      B(`📜 你违反了守则：「${m.text || ""}」`, `📜 You broke a rule: “${m.text || ""}”`),
+      "t-press", i++ * 650);
   }
   const bits = [];
   for (const cid in relDeltas) {

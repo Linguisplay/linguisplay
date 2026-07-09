@@ -216,6 +216,12 @@ def _depth_anchor(prompt: dict[str, Any]) -> str:
     _thr = (prompt.get("threat") or "").strip()
     if _thr:
         bits.append(_thr)
+    _sn = (prompt.get("sanity") or "").strip()
+    if _sn:
+        bits.append(_sn)
+    _hr = [str(r).strip() for r in (prompt.get("house_rules") or []) if str(r).strip()]
+    if _hr:
+        bits.append("【这里的守则（贴在明处，人人知道，戏内可引用）】" + "；".join(_hr))
     _orank = (prompt.get("own_rank") or "").strip()
     if _orank:
         bits.append(_orank)

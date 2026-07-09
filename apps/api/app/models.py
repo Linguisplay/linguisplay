@@ -133,6 +133,10 @@ class Story(Base):
     pressure: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # 🦇 hunter config {char_id,patrol,senses,cannot_enter,return_to,ladder,cues}; None = off
     threat: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 🧠 sanity ledger config {enabled,name,start,regen,ending_id}; None = off
+    sanity: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 📜 house rules (规则怪谈) [{id,text,when,violate,consequence}]; None = off
+    rules: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # 🚪 authored dooms [{id,day,char_id,to,text,warn_text,prevented_text,prevent}]; None = off
     dooms: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # ⏳ clock config {deadline_day, deadline_text, deadline_ending_id}; None = no deadline

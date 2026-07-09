@@ -30,6 +30,12 @@ from typing import Any
 
 DEFAULT_LADDER = ["return", "hurt", "dying"]
 
+# 🎬 张弛导演 (the pacing director, Alien-Isolation style): sustained menace deflates
+# fear, so pressure comes in WAVES — too long in the player's face → forced backstage
+# breather; too long comfortable → sent back their way. Numbers are turns.
+MENACE_HIGH = 12     # accumulated proximity that forces a backstage break
+CALM_LIMIT = 6       # comfortable turns before the director sends it back
+
 
 def cfg(content: dict[str, Any]) -> dict[str, Any] | None:
     """The story's authored threat, or None. Requires a real char_id + a patrol of
@@ -51,12 +57,14 @@ def cfg(content: dict[str, Any]) -> dict[str, Any] | None:
         "return_to": (t.get("return_to") or "").strip() or patrol[0],
         "ladder": [s for s in (t.get("ladder") or DEFAULT_LADDER)
                    if s in ("return", "hurt", "dying", "dead")] or DEFAULT_LADDER,
+        "unfightable": bool(t.get("unfightable")),   # 🚫 attacking it = handing yourself over
         "cues": t.get("cues") or {},
     }
 
 
 def default_state(tcfg: dict[str, Any]) -> dict[str, Any]:
-    return {"pos": tcfg["patrol"][0], "alert": 0, "strikes": 0, "band": "far"}
+    return {"pos": tcfg["patrol"][0], "alert": 0, "strikes": 0, "band": "far",
+            "menace": 0, "away": 0, "calm": 0, "hides": {}}
 
 
 # ── 噪音分贝 (deterministic loudness of the player's turn) ─────────────────────────
@@ -149,6 +157,38 @@ def step_patrol(tcfg: dict[str, Any], pos: str) -> str:
     if pos in patrol:
         return patrol[(patrol.index(pos) + 1) % len(patrol)]
     return patrol[0]
+
+
+def far_stop(adj: dict[str, set], tcfg: dict[str, Any], player_pos: str | None) -> str:
+    """The patrol stop FURTHEST from the player (BFS hops) — where the director
+    parks the hunter for a backstage breather. No player position → first stop."""
+    patrol = tcfg["patrol"]
+    if not player_pos:
+        return patrol[0]
+    dist = {player_pos: 0}
+    frontier = [player_pos]
+    while frontier:
+        nxt = []
+        for node in frontier:
+            for nb in adj.get(node, set()):
+                if nb not in dist:
+                    dist[nb] = dist[node] + 1
+                    nxt.append(nb)
+        frontier = nxt
+    return max(patrol, key=lambda p: dist.get(p, 99))
+
+
+# words that mark WHERE the player hid — reused spots get learned (Alien-style)
+HIDE_WORDS = ("柜", "床底", "床下", "桌下", "桌底", "通风", "风管", "帘", "角落", "暗处",
+              "locker", "under the bed", "vent", "corner")
+
+
+def hide_word_of(text: str) -> str:
+    low = (text or "").lower()
+    for w in HIDE_WORDS:
+        if w in text or w in low:
+            return w
+    return ""
 
 
 def band_of(adj: dict[str, set], threat_pos: str, player_pos: str | None) -> str:
