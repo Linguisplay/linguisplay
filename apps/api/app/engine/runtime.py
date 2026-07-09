@@ -24,6 +24,7 @@ from . import intent as intent_mod
 from . import logic
 from . import relationships
 from . import scene as scene_mod
+from . import threat as threat_mod
 from .llm import LLM, get_llm
 
 # Split on whitespace + CJK/ASCII punctuation into keyword phrases. Crucially this
@@ -958,6 +959,11 @@ def char_position(content: dict[str, Any], state: dict[str, Any],
     sim0 = (state.get("char_sim") or {}).get(cid) or {}
     if sim0.get("hp") == "dying" and sim0.get("pos"):
         return sim0["pos"]  # the dying don't keep their appointments — they lie where they fell
+    _tc = threat_mod.cfg(content)
+    if _tc and cid == _tc["char_id"] and (state.get("threat") or {}).get("pos"):
+        return state["threat"]["pos"]  # 🦇 the hunter's feet belong to the threat ledger
+    if cid in (state.get("taken") or {}):
+        return (state.get("taken") or {})[cid]  # 🚪 预定命运: they were carried off
     pin = (state.get("char_pins") or {}).get(cid)
     if pin:
         return pin  # 🔎 the engine told the player "TA在那儿" — so they ARE there, waiting
@@ -2806,6 +2812,18 @@ def pressure_cfg(content: dict[str, Any]) -> dict[str, Any] | None:
     doesn't run one. Shape: {name, hint, ending_id, levels: [{at, note}]}"""
     cfg = (content.get("story") or {}).get("pressure") or {}
     return cfg if (cfg.get("name") or "").strip() else None
+
+
+def threat_view_of(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
+    """🦇 The hunter as the UI feels it: name + distance band + alert. None when the
+    story runs no threat (or the run hasn't met it yet)."""
+    tcfg = threat_mod.cfg(content)
+    th = state.get("threat") or {}
+    if not tcfg or not th:
+        return None
+    ch = next((c for c in _characters(content) if c.get("id") == tcfg["char_id"]), {})
+    return {"name": ch.get("name") or "", "band": th.get("band") or "far",
+            "alert": int(th.get("alert") or 0)}
 
 
 def _ending_by_id(content: dict[str, Any], eid: str | None) -> dict[str, Any] | None:
@@ -6208,6 +6226,149 @@ def run_turn_stream(
                   rarity=2)
         early_moments.append({"kind": "crit"})
 
+    # ━━━━━━━━━━ 管线 P3.5 · 🦇 猎手 (循声而猎，账本执行) ━━━━━━━━━━
+    # The story's declared stalker HEARS the noise this turn made (deterministic
+    # loudness), patrols or stalks on the ledger, and a catch costs for real:
+    # the authored ladder (请回→打伤→濒死→死) is program-enforced. The director
+    # only ever narrates AROUND the ledger (threat_line depth-anchor) — a monster
+    # that lives only in prose is toothless one turn and omniscient the next.
+    threat_line = ""
+    threat_view = None
+    threat_caught = False
+    tcfg = threat_mod.cfg(content)
+    _hunter = _char_by_id(content, tcfg["char_id"]) if tcfg else None
+    if (tcfg and _hunter and (state.get("mode") or "character") != "god"
+            and not state.get("ended") and tcfg["char_id"] not in _dead_ids(state)
+            and (state.get("player_hp") or "healthy") != "dead"):
+        th = state.setdefault("threat", threat_mod.default_state(tcfg))
+        for _k, _v in threat_mod.default_state(tcfg).items():
+            th.setdefault(_k, _v)
+        th["tick"] = int(th.get("tick", 0)) + 1
+        _adj = threat_mod.neighbors(content)
+        _ploc = state.get("location_id")
+        _hname = _hunter.get("name") or ""
+        _zh = lang_of(content) != "en"
+        _ncls = ((actions_mod.classify(content, state, player_input) or {}).get("cls", "")
+                 if channel == "do" else "")
+        noise = (0 if channel == "think" else
+                 threat_mod.noise_of(player_input, channel, _ncls,
+                                     (dice or {}).get("outcome") or "", tcfg["senses"]))
+        # talking TO the hunter is a scene, not a stimulus — no mechanical strike
+        addressed = bool(target_character_id == tcfg["char_id"]
+                         or (_hname and _hname in (player_input or "")))
+        old_band = th.get("band") or "far"
+        if noise >= 2:
+            th["alert"] = min(3, int(th["alert"]) + (2 if noise >= 3 else 1))
+            _audit(state, "threat.alert", True, f"噪音{noise}", f"警觉{th['alert']}")
+            if pressure_cfg(content):   # sloppiness feeds the story's pressure meter
+                state["pressure"] = min(99, int(state.get("pressure", 0)) + 3 * noise)
+        elif noise == 0:
+            th["alert"] = max(0, int(th["alert"]) - 1)
+        # feet: hunting (alert≥2) walks TOWARD the player, one door per turn;
+        # otherwise the authored beat. Squeeze-spaces stop it at the mouth.
+        if th["alert"] >= 2 and _ploc:
+            th["pos"] = threat_mod.step_toward(_adj, th["pos"], _ploc, tcfg["cannot_enter"])
+        else:
+            th["pos"] = threat_mod.step_patrol(tcfg, th["pos"])
+        band = threat_mod.band_of(_adj, th["pos"], _ploc)
+        th["band"] = band
+        cue = threat_mod.cue_line(tcfg, band, th["tick"], _zh)
+        can_touch = band == "here" and _ploc and _ploc not in tcfg["cannot_enter"]
+        if can_touch and not addressed and (th["alert"] >= 2 or noise >= 2):
+            # 遭遇: hide or be caught — the fate roll is real, 敏捷 helps, alert hurts
+            _ag = int((state.get("attrs") or {}).get("敏捷") or 5)
+            _hdc = max(2, min(19, 6 + 3 * int(th["alert"]) - (_ag - 5) // 2))
+            hdice = _roll_dc(_hdc)
+            hdice["contest"] = _hname
+            yield ("dice", hdice)
+            _audit(state, "threat.check", True, f"遭遇·{_hname}(DC{_hdc})", "循声而至")
+            if hdice["outcome"] in ("success", "crit_success", "mixed"):
+                _mixed = hdice["outcome"] == "mixed"
+                yield ("beat", dedash_beat({"type": "description", "speaker_name": None,
+                       "text": (cue + " " if cue else "") + _t(content,
+                          f"你贴进暗处，屏住呼吸。{_hname}在几步之外停住——很久，很久——脚步声终于移开了。"
+                          + ("但这一次，TA记住了这里的动静。" if _mixed else ""),
+                          f"You press into the dark and hold your breath. {_hname} stops a few "
+                          f"steps away — a long, long moment — then moves off."
+                          + (" But this time, it remembers this room." if _mixed else ""))}))
+                th["alert"] = 3 if _mixed else 1
+                if not _mixed:
+                    th["pos"] = threat_mod.step_patrol(tcfg, th["pos"])
+                    th["band"] = threat_mod.band_of(_adj, th["pos"], _ploc)
+                    band = th["band"]  # the view reflects where it ACTUALLY ended up
+            else:
+                th["strikes"] = int(th["strikes"]) + 1
+                stage = tcfg["ladder"][min(th["strikes"] - 1, len(tcfg["ladder"]) - 1)]
+                if (state.get("player_hp") or "healthy") == "dying":
+                    stage = "dead"   # a dying body has nothing left to pay with
+                threat_caught = True
+                _audit(state, "threat.strike", True, f"{_hname}·第{th['strikes']}次", stage)
+                if stage == "return":
+                    _dest = _location_by_id(content, tcfg["return_to"]) or {}
+                    state["location_id"] = _dest.get("id") or _ploc
+                    th["alert"] = 0
+                    yield ("beat", dedash_beat({"type": "description", "speaker_name": None,
+                           "text": (cue + " " if cue else "") + _t(content,
+                              f"一只手落在你肩上，力道大得不容商量。{_hname}几乎没有出声，"
+                              f"把你半提半推地带走——回过神时，你已经在【{_dest.get('name') or '原处'}】。"
+                              f"这一次，TA只是把你「请」了回来。你很清楚，不会有第二次「请」。",
+                              f"A hand lands on your shoulder, far too strong to argue with. "
+                              f"{_hname} says almost nothing and walks you away — when your head "
+                              f"clears you are back in [{_dest.get('name') or ''}]. This time you "
+                              f"were 'escorted'. There will not be a second escort.")}))
+                elif stage in ("hurt", "dying"):
+                    state["player_hp"] = stage
+                    early_moments.append({"kind": "player_hp", "hp": stage})
+                    th["alert"] = 1
+                    yield ("beat", dedash_beat({"type": "description", "speaker_name": None,
+                           "text": (cue + " " if cue else "") + _t(content,
+                              f"{_hname}没有给你反应的时间。冷硬的一下砸在你身上，世界斜了斜——"
+                              + ("你挣开时带着伤，每一步都扯着疼。" if stage == "hurt"
+                                 else "你倒下去，血的温度贴着地面漫开。你还有一口气，只有一口。"),
+                              f"{_hname} gives you no time to react. Something cold and hard "
+                              f"lands on you and the world tilts — "
+                              + ("you tear free, hurt, every step pulling at the wound."
+                                 if stage == "hurt" else
+                                 "you go down; warmth spreads along the floor. One breath left."))}))
+                else:  # dead — the building keeps its quiet
+                    state["player_hp"] = "dead"
+                    early_moments.append({"kind": "player_hp", "hp": "dead"})
+                    yield ("beat", dedash_beat({"type": "description", "speaker_name": None,
+                           "text": (cue + " " if cue else "") + _t(content,
+                              f"{_hname}到得比你的反应快。没有争执，没有声音——这一次，"
+                              f"连你自己的声音也没有了。",
+                              f"{_hname} arrives faster than your reflexes. No struggle, no "
+                              f"sound — this time, not even your own.")}))
+        elif can_touch and cue and not addressed:
+            # it passes THROUGH the room — 先声后形, no contact (yet); noise draws its eye
+            if noise >= 1:
+                th["alert"] = min(3, int(th["alert"]) + 1)
+            yield ("beat", dedash_beat({"type": "description", "speaker_name": None, "text": cue}))
+        elif band == "near" and cue and (th["alert"] >= 1 or old_band != "near"):
+            yield ("beat", dedash_beat({"type": "description", "speaker_name": None, "text": cue}))
+        elif band == "far" and noise >= 2 and th["alert"] >= 2:
+            yield ("beat", dedash_beat({"type": "description", "speaker_name": None,
+                   "text": _t(content, "远处，什么东西停了一下——然后朝这边来了。",
+                              "Somewhere far off, something pauses — then starts this way.")}))
+        _alab = (["松弛", "起疑", "循声而来", "紧盯不放"] if _zh
+                 else ["idle", "uneasy", "tracking", "locked on"])[int(th["alert"])]
+        _tloc = (_location_by_id(content, th["pos"]) or {}).get("name") or th["pos"]
+        if band == "here":
+            _where = ("TA就在本场，可被看见、可对话。" if _zh
+                      else "It IS in this scene and may be seen or addressed. ")
+        else:
+            _where = ((f"TA不在本场（{'一门之隔' if band == 'near' else '在别处'}）——"
+                       "本轮旁白与台词绝不可让TA现身、发声或被看见，至多写远处的声息。")
+                      if _zh else
+                      "It is NOT in this scene — it may not appear, speak or be seen this "
+                      "turn; at most distant sounds. ")
+        threat_line = ((f"【猎手实态·铁律】{_hname}此刻在【{_tloc}】，警觉：{_alab}。{_where}"
+                        f"TA的每次现身必须先声后形：先写声音/气味/影子，最后才见形。")
+                       if _zh else
+                       f"[Hunter ledger — law] {_hname} is at [{_tloc}], alert: {_alab}. "
+                       f"{_where}Its every appearance is heard before it is seen.")
+        threat_view = {"name": _hname, "band": band, "alert": int(th["alert"])}
+
     # ━━━━━━━━━━ 管线 P4 · 解锁评估与回归问候 ━━━━━━━━━━
     # 2. gate on the CURRENT state (asks updated; affinity not yet changed this turn).
     #    asks-driven reveals surface THIS turn so the director can voice them; affinity-
@@ -6351,8 +6512,9 @@ def run_turn_stream(
         primary = pick_responder(content, state, player_input, target_character_id, probed_char_ids, all_chars)
         primary_id = primary.get("id") if primary else None
         broadcast = bool(primary) and channel != "think" and not target_character_id and len(all_chars) > 1
-        if primary is None or channel == "think":
-            # think = observe/examine (handled separately below), no NPC responds
+        if primary is None or channel == "think" or threat_caught:
+            # think = observe/examine (handled separately below), no NPC responds;
+            # 🦇 a hunter's strike interrupts the scene — the engine beats ARE the turn
             responders = []
         else:
             responders = [primary]
@@ -6394,7 +6556,8 @@ def run_turn_stream(
     is_think = channel == "think" and not observer
     # the player spoke/acted but NOBODY is in this scene to answer (e.g. they walked into an
     # empty place) → narrate the place + their action instead of emitting silence.
-    narrate_only = (not observer) and (channel != "think") and (not responders)
+    narrate_only = (not observer) and (channel != "think") and (not responders) \
+        and not threat_caught
 
     # hard-gate guidance: is this act still locked, and what key info is still missing?
     # (unlocks for THIS turn already applied above, so this reflects the current truth.)
@@ -6543,6 +6706,7 @@ def run_turn_stream(
             "drive": drive,                        # ▶ 观剧拍: director advances, player watches
             "track_note": track_note,              # 🎥 ledger-wins correction (one turn)
             "cult": cult_anchor(content, state),   # ⚡ 修为是铁律 (depth-0)
+            "threat": threat_line,                 # 🦇 猎手实态 (depth-0, ledger-owned)
             # ⚡ 你自己是什么位阶 + 身上有多少钱 (Yi: 别人不能什么也不是)
             "own_rank": _own_rank_line(content, state, sp, llm),
             # 📈 剧情欠账: 2+ stalled turns → this turn MUST pay the thread off
@@ -7117,14 +7281,17 @@ def run_turn_stream(
     here_now = scene_characters(content, state)
     here_after = {c.get("id") for c in here_now if c.get("id")}
     dead_now = _dead_ids(state)
+    # 🦇 the hunter's comings and goings are narrated by its authored cues (先声后形) —
+    # a generic entrance/farewell beat on top would announce it like a house guest
+    _tid = (threat_mod.cfg(content) or {}).get("char_id")
     for c in here_now:
         if c.get("id") in (here_after - here_before) and c.get("id") != pcid \
-                and c.get("id") not in emergent_ids:
+                and c.get("id") != _tid and c.get("id") not in emergent_ids:
             yield emit(entrance_beat(content, state, c))
     farewell_budget = 2  # spoken goodbyes per turn; any further departures narrate only
     for cg in _characters(content):
         if cg.get("id") in (here_before - here_after) and cg.get("id") != pcid \
-                and cg.get("id") not in dead_now:
+                and cg.get("id") != _tid and cg.get("id") not in dead_now:
             if farewell_budget > 0:
                 farewell_budget -= 1
                 for b in farewell_beats(content, state, cg, llm):
@@ -7138,6 +7305,76 @@ def run_turn_stream(
         for ev in phone_deliveries(content, state, here_after, llm):
             yield ("phone", ev)
             moments.append({"kind": "phone", "name": ev["name"], "device": ev["device"]})
+
+    # 5f. 🚪 预定命运 (authored dooms): on the appointed night someone is CARRIED OFF —
+    #     unless the player earned the prevention (knowledge + trust), or is standing
+    #     with them that night (the building waits; it doesn't take witnesses). The
+    #     taken are NOT dead — they are somewhere, and can be found. Story-agnostic:
+    #     story.dooms = [{id, day, char_id, to, text, warn_text, prevented_text,
+    #                     prevent:{fragment_ids, closeness_min, flags}}].
+    if not observer and not state.get("ended"):
+        _clkd = dict(state.get("clock") or {})
+        _dday = int(_clkd.get("day", 1) or 1)
+        _dslot = int(_clkd.get("slot", 0) or 0)
+        _fired = set(state.get("dooms_fired") or [])
+        _warned = set(state.get("dooms_warned") or [])
+        _here_ids_now = {c.get("id") for c in scene_characters(content, state)}
+        for dm in (content.get("story") or {}).get("dooms") or []:
+            did = (dm.get("id") or f"doom_{dm.get('char_id')}").strip()
+            dch = _char_by_id(content, dm.get("char_id"))
+            d_day = int(dm.get("day") or 0)
+            if not dch or d_day <= 0 or did in _fired or dch.get("id") in _dead_ids(state):
+                continue
+            due = _dday > d_day or (_dday == d_day and _dslot >= len(SLOTS) - 1)
+            if not due:
+                # the appointed day dawns — the dread gets a date, said out loud once
+                if _dday == d_day and did not in _warned:
+                    _warned.add(did)
+                    yield emit({"type": "description", "speaker_name": None,
+                                "text": (dm.get("warn_text") or "").strip()
+                                or _t(content, "（说不清为什么，你觉得就是今夜。）",
+                                      "(You can't say why — but you know it's tonight.)")})
+                    moments.append({"kind": "deadline",
+                                    "text": _t(content, f"{dch.get('name')}的那一夜",
+                                               f"{dch.get('name')}'s night")})
+                continue
+            if dch.get("id") in _here_ids_now:
+                continue  # you are WITH them tonight — it does not take witnesses
+            pv = dm.get("prevent") or {}
+            _fl = state.get("flags")
+            _fl_have = set(_fl.keys()) if isinstance(_fl, dict) else set(_fl or [])
+            prevented = bool(pv) and (
+                set(pv.get("fragment_ids") or [])
+                <= set(state.get("unlocked_fragment_ids") or [])
+            ) and (
+                int(((state.get("rel") or {}).get(dch["id"]) or {}).get("closeness") or 0)
+                >= int(pv.get("closeness_min") or 0)
+            ) and (set(pv.get("flags") or []) <= _fl_have)
+            _fired.add(did)
+            if prevented:
+                yield emit({"type": "description", "speaker_name": None,
+                            "text": (dm.get("prevented_text") or "").strip()
+                            or _t(content, f"（那一夜过去了。{dch.get('name')}还在——因为你。）",
+                                  f"(The night passes. {dch.get('name')} is still here — "
+                                  "because of you.)")})
+                moments.append({"kind": "doom", "status": "averted", "name": dch.get("name")})
+                rel_log(state, dch["id"], old_act, "doom",
+                        _t(content, "那一夜没有轮到TA——因为你。",
+                           "That night did not take them — because of you."))
+                _audit(state, "doom", True, did, "averted")
+            else:
+                if (dm.get("to") or "").strip():
+                    state.setdefault("taken", {})[dch["id"]] = dm["to"].strip()
+                yield emit({"type": "description", "speaker_name": None,
+                            "text": (dm.get("text") or "").strip()
+                            or _t(content, f"（{dch.get('name')}不见了。没有人提起这件事。）",
+                                  f"({dch.get('name')} is gone. No one speaks of it.)")})
+                moments.append({"kind": "doom", "status": "taken", "name": dch.get("name")})
+                rel_log(state, dch["id"], old_act, "doom",
+                        _t(content, "TA在那一夜被带走了。", "That night, they were taken."))
+                _audit(state, "doom", True, did, "taken")
+        state["dooms_fired"] = sorted(_fired)
+        state["dooms_warned"] = sorted(_warned)
 
     # 6. ending check. Authored endings are MILESTONES (true/normal/bad) — reaching one
     #    shows its narration but the open world keeps going, so the player can explore on
@@ -7313,6 +7550,7 @@ def run_turn_stream(
         "content_mutated": content_mutated,  # 👋 run grew a new character → persist pinned copy
         "pressure_view": ({"name": pcfg.get("name"), "value": int(state.get("pressure", 0))}
                           if pcfg else None),
+        "threat_view": threat_view,  # 🦇 {name,band,alert} the hunter's felt distance (or None)
         "clock_view": clock_view(content, state),  # ⏳ {day,slot,label,deadline?} or None
         "promises": promises_view(content, state),  # 🤝 open appointments, soonest first
         "phone_unread": phone_total_unread(content, state),  # 📱 badge (texts + letters)

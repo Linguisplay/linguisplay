@@ -291,6 +291,8 @@ class StoryInput(BaseModel):
     locations: Optional[list[Location]] = None
     tuning: Optional[dict] = None  # pacing/balance knob overrides (docs/tuning.md)
     pressure: Optional[dict] = None  # ⚠️ pressure meter {name,hint,ending_id,levels:[{at,note}]}
+    threat: Optional[dict] = None  # 🦇 hunter {char_id,patrol,senses,cannot_enter,return_to,ladder,cues}
+    dooms: Optional[list] = None  # 🚪 [{id,day,char_id,to,text,warn_text,prevented_text,prevent}]
     clock: Optional[dict] = None  # ⏳ {deadline_day, deadline_text, deadline_ending_id}
     phone: Optional[dict] = None  # 📱 {enabled, device: "手机"|"传呼机"|"口信"…}
     verdict: Optional[dict] = None  # 🔍 {prompt, options, attempts, act_min, fail_ending_id}
@@ -319,6 +321,8 @@ class Story(BaseModel):
     locations: list[Location] = []
     tuning: dict = {}
     pressure: Optional[dict] = None
+    threat: Optional[dict] = None
+    dooms: Optional[list] = None
     clock: Optional[dict] = None
     phone: Optional[dict] = None
     verdict: Optional[dict] = None
@@ -420,6 +424,7 @@ class RunState(BaseModel):
     identity: Optional[str] = None       # 🎖 the player's current 身份 (None = as authored)
     inventory: list[dict[str, Any]] = [] # 🎒 pocket items [{name, detail?}]
     pressure_name: Optional[str] = None  # the meter's authored name (None = story runs none)
+    threat: Optional[dict[str, Any]] = None  # 🦇 {name,band,alert} the hunter as felt (or None)
     clock: Optional[dict[str, Any]] = None  # ⏳ {day,slot,label,deadline?} (None = no clock)
     promises: list[dict[str, Any]] = []  # 🤝 open appointments [{name,what,when,place,romantic}]
     phone_unread: int = 0  # 📱 unread incoming messages (badge)

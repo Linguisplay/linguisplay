@@ -343,6 +343,42 @@ def lint_story(content: dict[str, Any]) -> list[Issue]:
         if not gated:
             warn("verdict_ungated", "verdict",
                  "没有任何结局以 verdict_solved 为条件——指认对了也换不来更好的结局。")
+
+    # — 🦇 threat (a broken hunter config silently no-ops; say so at author time) —
+    loc_ids_l = {l.get("id") for l in locs if l.get("id")}
+    thr = _story(content).get("threat") or {}
+    if thr:
+        if thr.get("char_id") not in char_ids_l:
+            err("threat_bad_char", "threat", f"threat.char_id={thr.get('char_id')} 不是已知角色。")
+        bad_patrol = [p for p in (thr.get("patrol") or []) if p not in loc_ids_l]
+        if bad_patrol or not (thr.get("patrol") or []):
+            err("threat_bad_patrol", "threat",
+                f"threat.patrol 为空或含未知地点：{bad_patrol}——猎手系统将整体失效。")
+        for fld in ("cannot_enter",):
+            bad = [p for p in (thr.get(fld) or []) if p not in loc_ids_l]
+            if bad:
+                warn("threat_bad_loc", "threat", f"threat.{fld} 含未知地点：{bad}（会被忽略）。")
+        rt = (thr.get("return_to") or "").strip()
+        if rt and rt not in loc_ids_l:
+            warn("threat_bad_return", "threat",
+                 f"threat.return_to={rt} 不是已知地点——将回退到 patrol 首站。")
+
+    # — 🚪 dooms (a dangling doom either never fires or strands its victim) —
+    frag_ids_l = {f.get("id") for f in gating.iter_fragments(content) if f.get("id")}
+    for dm in _story(content).get("dooms") or []:
+        where = f"doom:{dm.get('id') or dm.get('char_id')}"
+        if dm.get("char_id") not in char_ids_l:
+            err("doom_bad_char", where, f"char_id={dm.get('char_id')} 不是已知角色。")
+        if int(dm.get("day") or 0) <= 0:
+            err("doom_bad_day", where, "day 必须是正整数（第几天的夜里）。")
+        to = (dm.get("to") or "").strip()
+        if to and to not in loc_ids_l:
+            err("doom_bad_to", where, f"to={to} 不是已知地点——被带走的人将无处可寻。")
+        bad_fr = [f for f in ((dm.get("prevent") or {}).get("fragment_ids") or [])
+                  if f not in frag_ids_l]
+        if bad_fr:
+            err("doom_bad_prevent", where,
+                f"prevent.fragment_ids 含未知碎片：{bad_fr}——命运将永远无法被阻止。")
     return issues
 
 

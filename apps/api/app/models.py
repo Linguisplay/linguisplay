@@ -131,6 +131,10 @@ class Story(Base):
     tuning: Mapped[dict] = mapped_column(JSON, default=dict)
     # ⚠️ pressure meter config {name,hint,ending_id,levels:[{at,note}]}; None = off
     pressure: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 🦇 hunter config {char_id,patrol,senses,cannot_enter,return_to,ladder,cues}; None = off
+    threat: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 🚪 authored dooms [{id,day,char_id,to,text,warn_text,prevented_text,prevent}]; None = off
+    dooms: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # ⏳ clock config {deadline_day, deadline_text, deadline_ending_id}; None = no deadline
     # (the clock itself runs off tuning.turns_per_slot)
     clock: Mapped[dict | None] = mapped_column(JSON, nullable=True)

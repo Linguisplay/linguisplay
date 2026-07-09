@@ -213,6 +213,9 @@ def _depth_anchor(prompt: dict[str, Any]) -> str:
     _cl = (prompt.get("cult") or "").strip()
     if _cl:
         bits.append(_cl)
+    _thr = (prompt.get("threat") or "").strip()
+    if _thr:
+        bits.append(_thr)
     _orank = (prompt.get("own_rank") or "").strip()
     if _orank:
         bits.append(_orank)

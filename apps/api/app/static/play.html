@@ -277,6 +277,13 @@
 #mapov .mexits { font-size:11px; color:#7b8a80; margin-top:3px; }
 #mapov .mhidden { color:#7b8296; font-size:12px; font-style:italic; margin-top:10px; }
 #pressurebar { flex:0 0 auto; margin:6px 16px 0; padding:7px 12px; border-radius:10px; background:#241416cc; border:1px solid #4a2a28; font-size:12.5px; display:flex; align-items:center; gap:10px; color:#e8c9c4; }
+/* 🦇 猎手指示: the hunter as FELT — a distance whisper, not a minimap */
+#threatbar { flex:0 0 auto; margin:6px 16px 0; padding:7px 12px; border-radius:10px; background:#160f1acc; border:1px solid #3a2a44; font-size:12.5px; display:flex; align-items:center; gap:8px; color:#cbb8d8; }
+#threatbar.t-hot { border-color:#6a3040; color:#f0c9c4; animation: threatPulse 1.6s ease-in-out infinite; }
+@keyframes threatPulse { 0%,100% { box-shadow: 0 0 0 rgba(224,87,79,0); } 50% { box-shadow: 0 0 14px rgba(224,87,79,.35); } }
+/* dread mode: the room darkens at the edges while it is close */
+#dread { position:fixed; inset:0; z-index:40; pointer-events:none; opacity:0; transition:opacity 1.8s ease; background: radial-gradient(ellipse at center, transparent 46%, rgba(4,2,8,.72) 100%); }
+body.dread #dread { opacity:1; }
 #pressurebar .ptrack { flex:1; height:7px; border-radius:5px; background:#00000055; overflow:hidden; }
 #pressurebar .pfill { display:block; height:100%; border-radius:5px; transition:width .6s ease, background .6s ease; }
 .dice { align-self:center; font-size:13px; color:#d8cfae; background:#1e1b12ee; border:1px solid #4a4224; border-radius:12px; padding:7px 16px; }
@@ -356,6 +363,7 @@
 </head>
 <body>
 <div id="bg"></div>
+<div id="dread"></div>
 <audio id="bgm" loop></audio>
 <audio id="sfx"></audio>
 <div id="app">
@@ -439,6 +447,7 @@
       <div id="goalbar" class="hidden"></div>
       <div id="hintbar" class="hidden"></div>
       <div id="pressurebar" class="hidden"></div>
+      <div id="threatbar" class="hidden"></div>
       <div id="clues" class="hidden"></div>
     </div>
     <div id="chat"></div>
@@ -923,6 +932,7 @@ async function enterRun(run) {
   renderChoiceAsk(run.state && run.state.pending_choice);
   renderPressure(run.state && run.state.pressure_name
     ? { name: run.state.pressure_name, value: run.state.pressure || 0 } : null);
+  renderThreat(run.state && run.state.threat);
   // resuming an already-finished run: re-show its ending and keep input locked
   if (run.state && run.state.ended) showEnding(run.state.ending);
 }
@@ -1690,6 +1700,52 @@ function renderPressure(p) {
     `<span style="color:${color}">${v}</span>`;
   el.classList.remove("hidden");
 }
+// 🦇 猎手指示 + dread mode: the hunter as FELT — distance whisper, edge-darkness,
+// a low heartbeat while it is close. All driven by the engine's threat ledger.
+let dreadOn = false, heartTimer = null, audioCtx = null;
+function _thump(when, gainPeak) {
+  try {
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = "sine"; o.frequency.setValueAtTime(52, when);
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.exponentialRampToValueAtTime(gainPeak, when + 0.035);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + 0.30);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(when); o.stop(when + 0.35);
+  } catch (e) {}
+}
+function startHeart() {
+  if (heartTimer) return;
+  try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; }
+  heartTimer = setInterval(() => {
+    if (!soundOn || !dreadOn || document.hidden) return;
+    if (audioCtx.state === "suspended") { audioCtx.resume().catch(()=>{}); return; }
+    const t = audioCtx.currentTime + 0.02;
+    _thump(t, 0.09); _thump(t + 0.26, 0.055);           // lub… dub
+  }, 1150);
+}
+function stopHeart() { if (heartTimer) { clearInterval(heartTimer); heartTimer = null; } }
+function setDread(on) {
+  if (on === dreadOn) return;
+  dreadOn = on;
+  document.body.classList.toggle("dread", on);
+  if (on) startHeart(); else stopHeart();
+}
+function renderThreat(t) {
+  const el = document.getElementById("threatbar");
+  if (!t || !t.name) { el.classList.add("hidden"); setDread(false); return; }
+  const band = t.band || "far", alert = t.alert || 0;
+  const hot = band === "here" || (band === "near" && alert >= 2);
+  setDread(hot);
+  if (band === "far" && alert < 2) { el.classList.add("hidden"); return; }
+  const bandLab = { here: B("就在这里", "in the room"), near: B("很近", "very close"),
+                    far: B("在别处", "elsewhere") }[band] || "";
+  const aDots = "●".repeat(alert) + "○".repeat(Math.max(0, 3 - alert));
+  el.innerHTML = `<span>👂</span><span>${escapeHtml(t.name)} · ${bandLab}</span>` +
+    `<span style="margin-left:auto;letter-spacing:2px;color:${alert >= 2 ? "#e0574f" : "#6a5a78"}">${aDots}</span>`;
+  el.classList.toggle("t-hot", hot);
+  el.classList.remove("hidden");
+}
 // pinned info bars fold to one line on small screens; tapping unfolds/refolds
 for (const id of ["placebar", "goalbar", "hintbar", "clues"]) {
   const el = document.getElementById(id);
@@ -2089,7 +2145,8 @@ function cycleSpeed() {
 async function typeInto(el, text, ms=22) {
   el.textContent = "";
   if (skipType) { el.textContent = text || ""; chat.scrollTop = chat.scrollHeight; return; }
-  const f = SPEEDS[spdIdx].f;
+  // 🦇 dread mode: while it is close, the words come slower — anticipation IS the horror
+  const f = SPEEDS[spdIdx].f / (dreadOn ? 1.5 : 1);
   for (const ch of (text||"")) {
     if (skipType) { el.textContent = text; break; }
     el.textContent += ch;
@@ -2313,6 +2370,7 @@ async function streamTurn(url, bodyObj) {
           playSfx && playSfx(m.call ? "ringtone" : "knock");
         }
         else if (ev.event === "pressure") { renderPressure(ev.pressure); }
+        else if (ev.event === "threat") { renderThreat(ev.threat); }
         else if (ev.event === "move_request") { afterPlay.moveReq = ev.move_request; }
         else if (ev.event === "audit") {
           // 📋 engine event audit — open devtools to see what the engine accepted/rejected
@@ -2474,6 +2532,10 @@ function showMoments(moments, relDeltas) {
     else if (m.kind === "crit") pushToast(B("🎲 天命一掷·20！这一刻已存入回忆册", "🎲 A natural 20! This moment is saved to Memories"), "t-end", i++ * 650);
     else if (m.kind === "secret_full") pushToast(B(`🧩 真相拼全：「${m.title || ""}」已存入回忆册`, `🧩 The whole truth of “${m.title || ""}” — saved to Memories`), "t-end", i++ * 650);
     else if (m.kind === "mail") pushToast(B(`📮 ${m.name || "有人"} 给你写了一封信（去信箱看看）`, `📮 ${m.name || "Someone"} wrote you a letter (check the mailbox)`), "t-rel", i++ * 650);
+    else if (m.kind === "doom") pushToast(
+      B(m.status === "averted" ? `🕯 ${m.name || "TA"} 躲过了那一夜——因为你` : `🚪 ${m.name || "有人"} 被带走了`,
+        m.status === "averted" ? `🕯 ${m.name || "They"} survived the night — because of you` : `🚪 ${m.name || "Someone"} was taken`),
+      m.status === "averted" ? "t-rel" : "t-press", i++ * 650);
   }
   const bits = [];
   for (const cid in relDeltas) {

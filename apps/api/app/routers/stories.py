@@ -57,6 +57,8 @@ def _to_story(s: StoryModel) -> Story:
         locations=s.locations or [],
         tuning=s.tuning or {},
         pressure=s.pressure,
+        threat=s.threat,
+        dooms=s.dooms,
         clock=s.clock,
         phone=s.phone,
         verdict=s.verdict,
@@ -147,6 +149,8 @@ def create_story(
     data.pop("locations", None)
     data.pop("tuning", None)
     data.pop("pressure", None)
+    data.pop("threat", None)
+    data.pop("dooms", None)
     data.pop("clock", None)
     data.pop("phone", None)
     data.pop("verdict", None)
@@ -158,6 +162,8 @@ def create_story(
         locations=[l.model_dump() for l in (body.locations or [])],
         tuning=body.tuning or {},
         pressure=body.pressure,
+        threat=body.threat,
+        dooms=body.dooms,
         clock=body.clock,
         phone=body.phone,
         verdict=body.verdict,
@@ -184,6 +190,8 @@ def _public_story_view(out: Story) -> Story:
     out.characters = [type(c)(**{k: getattr(c, k) for k in _PUBLIC_CHAR_KEYS})
                       for c in (out.characters or [])]
     out.pressure = None
+    out.threat = None  # 🦇 the hunter's rules are the answer key of a horror story
+    out.dooms = None   # 🚪 who gets taken, when, and how to stop it — never leaks
     return out
 
 
@@ -250,6 +258,10 @@ def update_story(
         s.tuning = data.pop("tuning") or {}
     if "pressure" in data:
         s.pressure = data.pop("pressure")
+    if "threat" in data:
+        s.threat = data.pop("threat")
+    if "dooms" in data:
+        s.dooms = data.pop("dooms")
     if "clock" in data:
         s.clock = data.pop("clock")
     if "phone" in data:
