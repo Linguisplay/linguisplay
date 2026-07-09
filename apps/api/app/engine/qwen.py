@@ -1136,6 +1136,14 @@ def _build_observe_system(prompt: dict[str, Any]) -> str:
     place = (prompt.get("place") or "").strip()
     if place:
         lines.append("【当前所在·空间锚点】（描述四周时必须扣住这个具体地点的真实陈设，写得具体可感）：\n" + place)
+    # 🚷 在场铁律: an absent character answering from another room broke the ledger —
+    # the cast list is the LAW here, not a suggestion
+    _cast_names = [str(c).strip() for c in (prompt.get("cast") or []) if str(c).strip()]
+    lines.append("【在场铁律】此地此刻在场的具名角色只有："
+                 + ("、".join(_cast_names) if _cast_names else "没有任何人（只有玩家自己）")
+                 + "。名单之外的具名角色一律【不在场】：TA们绝不能出现、说话、行动或递出任何东西，"
+                   "至多作为玩家的回忆或念头被想起。玩家在观察中提出的疑问，只能用眼前可见的"
+                   "线索、痕迹与环境来回应——绝不允许凭空召来一个人替你作答。")
     kn = _knowledge_block(prompt)
     if kn:
         lines.append(kn)

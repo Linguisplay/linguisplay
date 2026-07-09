@@ -7301,6 +7301,31 @@ def run_turn_stream(
             retry = llm.generate({**_obs_prompt, "logic_correction": _POV_CORRECTION})
             if retry.get("beats"):
                 directed = retry
+
+        # 🚷 absent-cast hijack (Yi field case: 陆九秋 answered a look-around from another
+        # room, key in hand): an observation that names an ABSENT character while carrying
+        # spoken dialogue has summoned someone the ledger says isn't here → one stern retry
+        def _absent_summon(d: dict) -> str:
+            txt = " ".join((b.get("text") or "") for b in (d.get("beats") or []))
+            if not re.search(r"「[^」]{6,}」", txt):
+                return ""   # no real dialogue → mentions are just thoughts, allowed
+            _here = {c.get("name") for c in all_chars if c.get("name")}
+            for c in _characters(content):
+                nm = c.get("name")
+                if nm and nm not in _here and c.get("id") != pcid and nm in txt \
+                        and c.get("id") not in _dead_ids(state):
+                    return nm
+            return ""
+        _ab = _absent_summon(directed)
+        if _ab:
+            _audit(state, "obs.absent", True, _ab, "观察召来了不在场的人，已重写")
+            retry = llm.generate({**_obs_prompt, "logic_correction":
+                                  f"你上一版旁白让不在场的「{_ab}」出现并开口——TA根本不在这里，"
+                                  f"这是硬错误。重写这段观察：只写眼前可见的环境、痕迹与在场的人；"
+                                  f"名单之外的人绝不能出现、说话或递东西；玩家的疑问只能靠眼前的"
+                                  f"线索回应。"})
+            if retry.get("beats") and not _absent_summon(retry):
+                directed = retry
         obs = [b for b in directed.get("beats", []) if b.get("type") == "description"]
         if not obs:
             obs = [{"type": "description", "speaker_name": None,
