@@ -30,6 +30,7 @@ router = APIRouter(prefix="/runs", tags=["runs"])
 # skips what's already on disk, dedupes, and retries a transient failure once.
 _BG_DIR = __import__("pathlib").Path(__file__).resolve().parents[1] / "static" / "scene" / "bg"
 _AV_DIR = __import__("pathlib").Path(__file__).resolve().parents[1] / "static" / "scene" / "avatar"
+_SNAP_DIR = __import__("pathlib").Path(__file__).resolve().parents[1] / "static" / "scene" / "snap"
 
 import queue as _imgqueue  # noqa: E402
 import threading as _imgthreading  # noqa: E402
@@ -97,16 +98,31 @@ def _spawn_location_bg(content: dict, loc: dict | None) -> None:
     _enqueue_image(_bg_prompt(content, loc), path, "1280*720")
 
 
+def _queue_snap(payload: dict | None) -> None:
+    """📷 Pop an engine-minted snap off a phone payload and queue its render — the
+    message arrives instantly, the photo develops in the background (the client
+    keeps retrying the img until the file lands)."""
+    sn = (payload or {}).pop("snap", None)
+    if sn and sn.get("url") and sn.get("prompt"):
+        _enqueue_image(sn["prompt"], _SNAP_DIR / sn["url"].rsplit("/", 1)[-1], "768*768")
+
+
 def _ensure_char_avatars(content: dict) -> bool:
-    """Point every generated character at /scene/avatar/{id}.jpg and queue any missing
-    portrait. Returns True when an avatar_url was newly written (caller persists)."""
+    """Point every faceless character at /scene/avatar/{id}.jpg and queue any missing
+    portrait. Generated cast always follows the convention; an AUTHORED character
+    keeps whatever art its author set — only empty faces are filled (寂声 shipped an
+    all-authored cast and played faceless for a day). Returns True when an avatar_url
+    was newly written (caller persists)."""
     story = content.get("story") or {}
     world = ((story.get("world_long") or "").strip().replace("\n", " "))[:120]
     changed = False
     for c in story.get("characters") or []:
         cid, name = c.get("id"), c.get("name")
-        if not cid or not name or not c.get("generated"):
+        if not cid or not name:
             continue
+        if not c.get("generated") and (c.get("avatar_url") or "").strip() \
+                and c.get("avatar_url") != f"/scene/avatar/{cid}.jpg":
+            continue  # the author chose this face — never repaint it
         url = f"/scene/avatar/{cid}.jpg"
         if c.get("avatar_url") != url:
             c["avatar_url"] = url
@@ -637,6 +653,7 @@ def play(
                     yield _event({"event": "clock", "clock": payload})
                     continue
                 if kind == "phone":
+                    _queue_snap(payload)  # 📷 render the attached photo off-path
                     yield _event({"event": "phone", "message": payload})
                     continue
                 if kind == "token":
@@ -923,6 +940,7 @@ def send_phone(run_id: str, char_id: str, body: PhoneSendIn,
                                   char_id, body.text)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    _queue_snap(view)  # 📷 the reply may carry a photo — render it off-path
     r.state = st
     flag_modified(r, "state")
     db.commit()

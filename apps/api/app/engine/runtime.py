@@ -209,6 +209,7 @@ DEFAULT_TUNING = {
     "promise_break_cost": 4,    # 🤝 closeness lost for standing someone up
     "golden_chance": 4,         # ✨ 稀有奇遇: % chance per eligible turn (0 = off)
     "golden_cooldown": 10,      # ✨ turns between two golden moments, minimum
+    "snap_chance": 12,          # 📷 随手拍: % chance a character's text carries a photo (0 = off)
     "letter_away_hours": 48,    # 📮 away at least this long → the warmest heart writes a LETTER
 }
 
@@ -3170,20 +3171,62 @@ def sms_tail_line(state: dict[str, Any], cid: str) -> str:
                      for m in tail)
 
 
+_SNAP_GAP = 5   # 📷 at least this many exchanges between two photos in one thread
+
+
+def maybe_snap(content: dict[str, Any], state: dict[str, Any], char: dict[str, Any],
+               gist: str) -> dict[str, Any] | None:
+    """📷 随手拍: occasionally a character's message carries a PHOTO — a selfie, or a
+    shot of whatever is in front of them right now (恋与深空-style proactive warmth;
+    in a horror world the same mechanic delivers dread). The ENGINE rolls the dice,
+    owns the cooldown ledger and writes the prompt; the ROUTER queues the actual
+    render (it owns the serialized image worker). Returns {"url", "prompt"} or None."""
+    _cfg = get_settings()
+    if _cfg.llm_provider == "mock" or not (_cfg.dashscope_api_key or "").strip():
+        return None   # no image backend (or deterministic test mode) → never mint a URL
+    chance = int(tuning_for(content).get("snap_chance", 0) or 0)
+    if chance <= 0 or not char.get("id"):
+        return None
+    th = _thread(state, char["id"])
+    since = int(th.get("snap_since", _SNAP_GAP))
+    th["snap_since"] = since + 1
+    if since < _SNAP_GAP or _rng.randint(1, 100) > chance:
+        return None
+    th["snap_since"] = 0
+    import uuid as _uuid_s
+    url = f"/scene/snap/snap_{_uuid_s.uuid4().hex[:10]}.jpg"
+    loc = _location_by_id(content, char_position(content, state, char) or "") or {}
+    look = ((char.get("persona_text") or "").strip().replace("\n", " "))[:100]
+    if _rng.randint(1, 100) <= 45 and look:
+        prompt = (f"{char.get('name')}用手机拍的一张自拍：{look}。"
+                  f"所在环境：{loc.get('name', '')}，{(loc.get('detail') or '')[:80]}。"
+                  "写实手机自拍质感，轻微俯仰角，浅景深，生活抓拍感，无文字水印")
+    else:
+        prompt = (f"一张随手拍的手机照片，拍下此刻眼前的景象：{loc.get('name', '')}，"
+                  f"{(loc.get('detail') or '')[:140]}。与这句话有关：{(gist or '')[:60]}。"
+                  "手机摄影质感，自然光影，轻微晃动与噪点，写实，画面里没有文字或水印")
+    return {"url": url, "prompt": prompt}
+
+
 def phone_push(content: dict[str, Any], state: dict[str, Any], char: dict[str, Any],
                msgs: list[str], now_label: str, call: bool = False) -> dict[str, Any]:
     """Deliver incoming message bubbles from a character. Returns the UI event payload.
-    call=True marks the lines as spoken down the line (📞 来电) — the UI rings."""
+    call=True marks the lines as spoken down the line (📞 来电) — the UI rings.
+    A text delivery may carry a 📷 随手拍 on the last bubble (never on a call)."""
     th = _thread(state, char.get("id"))
-    for m in msgs:
+    snap = None if call else maybe_snap(content, state, char, (msgs or [""])[-1])
+    for i, m in enumerate(msgs):
         rec = {"from": "them", "text": m[:120], "at": now_label}
         if call:
             rec["call"] = True
+        if snap and i == len(msgs) - 1:
+            rec["img"] = snap["url"]
         th["msgs"].append(rec)
     _thread_cap(th)
     th["unread"] = int(th.get("unread", 0)) + len(msgs)
     return {"char_id": char.get("id"), "name": char.get("name") or "",
             "avatar_url": char.get("avatar_url"), "msgs": msgs, "call": bool(call),
+            "snap": snap,  # router: queue the render, then strip before the wire
             "device": phone_device(content)}
 
 
@@ -3472,13 +3515,19 @@ def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str
     newly, cracked = _phone_probe(content, state, char_id, text)
     out = _phone_exchange(content, state, persona, c, text, llm, newly, same_room=here)
     msgs = [dedash(str(m).strip()[:120]) for m in (out.get("msgs") or []) if str(m).strip()][:3]
+    snap = None
     if msgs:
+        # 📷 a reply may come with a photo — what TA sees right now, or a selfie
+        snap = maybe_snap(content, state, c, msgs[-1])
         for m in msgs:
             th["msgs"].append({"from": "them", "text": m, "at": now_label})
+        if snap:
+            th["msgs"][-1]["img"] = snap["url"]
         _thread_cap(th)
     th["unread"] = 0  # the player is looking at this thread right now
     _digest_phone_overflow(state, char_id, llm)
     view = phone_thread(content, state, char_id)
+    view["snap"] = snap  # router: queue the render, then strip before the wire
     view["replied"] = bool(msgs)
     view["unlocked"] = cracked  # 🔓 titles pried open by THIS text (UI toast)
     if out.get("rel_view"):

@@ -127,6 +127,7 @@
   .pmsg { max-width: 78%; display: flex; flex-direction: column; }
   .pmsg span { padding: 8px 12px; border-radius: 14px; font-size: 13.5px; line-height: 1.55; }
   .pmsg small { color: #565d72; font-size: 10px; margin-top: 2px; }
+  .pmsg .pimg { max-width: 100%; border-radius: 10px; margin-top: 4px; cursor: zoom-in; border: 1px solid #2a2a3a; }
   .pmsg.them { align-self: flex-start; } .pmsg.them span { background: #23232f; color: #e2e5ee; border-bottom-left-radius: 5px; }
   .pmsg.me { align-self: flex-end; align-items: flex-end; } .pmsg.me span { background: #2c4a35; color: #dff1e3; border-bottom-right-radius: 5px; }
   .pmsg.sys { align-self: center; max-width: 92%; } .pmsg.sys span { background: none; color: #7b8296; font-size: 12px; font-style: italic; }
@@ -1478,10 +1479,20 @@ async function openThread(cid) {
   try { th = await j(`/runs/${runId}/phone/${cid}`); } catch (e) { return; }
   renderThread(th);
 }
+// 📷 随手拍: the photo may still be developing server-side — retry until it lands
+function snapHtml(u) {
+  return `<img class="pimg" src="${escapeHtml(u)}" data-n="0" onclick="window.open(this.src)" onerror="pimgRetry(this)">`;
+}
+function pimgRetry(im) {
+  const n = +im.dataset.n || 0;
+  if (n >= 12) { im.style.display = "none"; return; }
+  im.dataset.n = n + 1; im.style.display = "none";
+  setTimeout(() => { im.style.display = ""; im.src = im.src.split("?")[0] + "?v=" + Date.now(); }, 12000);
+}
 function renderThread(th) {
   const bubbles = (th.msgs || []).map(m => {
     const who = m.from === "me" ? "me" : m.from === "sys" ? "sys" : "them";
-    return `<div class="pmsg ${who}${m.call ? " call" : ""}"><span>${escapeHtml(m.text)}</span><small>${escapeHtml(m.at||"")}</small></div>`;
+    return `<div class="pmsg ${who}${m.call ? " call" : ""}"><span>${escapeHtml(m.text)}</span>${m.img ? snapHtml(m.img) : ""}<small>${escapeHtml(m.at||"")}</small></div>`;
   }).join("") || `<div class="jempty">还没说过话，发一条试试。</div>`;
   const dead = th.dead;
   const composer = dead
