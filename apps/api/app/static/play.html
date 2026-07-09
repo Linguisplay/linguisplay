@@ -54,6 +54,7 @@
   footer input { margin: 0; }
   #goalbar { flex: 0 0 auto; margin: 8px 16px 0; padding: 8px 12px; border-radius: 10px; background: #1a2030cc; border: 1px solid #2a3350; color: #d8e0ff; font-size: 13px; line-height: 1.5; }
   #goalbar b { color: #ffd479; }
+  #goalbar .qline { margin-top: 4px; padding-top: 4px; border-top: 1px dashed #2a3350; color: #b9c3e2; font-size: 12.5px; }
   #hintbar { flex: 0 0 auto; margin: 6px 16px 0; padding: 7px 12px; border-radius: 10px; background: #2a2410cc; border: 1px solid #4a3d18; color: #ecd9a6; font-size: 12.5px; line-height: 1.5; }
   #hintbar b { color: #ffd479; }
   #moveask { flex: 0 0 auto; margin: 6px 16px; padding: 9px 12px; border-radius: 10px; background: #14241fdd; border: 1px solid #2f5a45; color: #cfe6d4; font-size: 13px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -1902,7 +1903,7 @@ function renderState(st) {
   if (st.player_hp !== undefined) renderPlayerHp(st.player_hp);
   renderRebirth(!!st.can_reincarnate);
   if (st.money != null) { curMoney = st.money; curCurrency = st.currency || ""; }
-  if (st.quests !== undefined) curQuests = st.quests || [];
+  if (st.quests !== undefined) { curQuests = st.quests || []; renderGoal(lastGoal); }
   const hpBit = (uiLang === "en"
     ? { hurt: " · 🩹 hurt", dying: " · 🆘 <b style='color:#ff9d9d'>dying</b>",
         dead: " · 💀 <b style='color:#ff9d9d'>dead</b>" }
@@ -2095,11 +2096,18 @@ function renderGoal(goal) {
   queueMicrotask(refreshStrip);
   lastGoal = goal || "";
   const el = document.getElementById("goalbar");
-  if (goal) {
+  // 📋 short-term tasks ride under the pursuit bar — a lead someone gave you in
+  // dialogue is a TRACKED objective now, not something to keep in your head
+  const open = (curQuests || []).filter(q => q.status === "open");
+  const qrows = open.map(q =>
+    `<div class="qline">${q.reward ? "📋" : "🧭"} ${escapeHtml(q.title||"")}` +
+    `${q.reward ? B(`（酬 ${q.reward}${escapeHtml(curCurrency)}）`, ` (pay ${q.reward}${escapeHtml(curCurrency)})`) : ""}` +
+    `${q.deadline_day ? B(` · 限第${q.deadline_day}天内`, ` · by day ${q.deadline_day}`) : ""}</div>`).join("");
+  if (goal || qrows) {
     // 追求条: an authored story anchors the goal to its act (第2幕 ▸ …) — the player
     // always knows which chapter of the climb they're on
     const pre = (!isSandbox && curActNum) ? B(`第${curActNum}幕 ▸ `, `Act ${curActNum} ▸ `) : "";
-    el.innerHTML = `🎯 <b>${B("当前目标", "Current goal")}</b>${B("：", ": ")}${pre}${escapeHtml(goal)}`;
+    el.innerHTML = (goal ? `🎯 <b>${B("当前目标", "Current goal")}</b>${B("：", ": ")}${pre}${escapeHtml(goal)}` : "") + qrows;
     el.classList.remove("hidden");
   }
   else el.classList.add("hidden");
@@ -2524,12 +2532,12 @@ function showMoments(moments, relDeltas) {
         `${m.delta > 0 ? "💰 +" : "💸 "}${m.delta}${m.why ? ` (${m.why})` : ""} · balance ${m.balance}`),
       m.delta > 0 ? "t-unlock" : "t-press", i++ * 650);
     else if (m.kind === "quest") pushToast(
-      B(m.status === "open" ? `📋 接下差事：${m.title}${m.reward ? `（酬 ${m.reward}）` : ""}${m.days ? ` · 限${m.days}天` : ""}` :
-        m.status === "done" ? `✅ 差事办成：${m.title}${m.reward ? `（+${m.reward}）` : ""}` :
-        `⌛ 差事黄了：${m.title}`,
-        m.status === "open" ? `📋 Job taken: ${m.title}${m.reward ? ` (pay ${m.reward})` : ""}${m.days ? ` · ${m.days} day(s)` : ""}` :
-        m.status === "done" ? `✅ Job done: ${m.title}${m.reward ? ` (+${m.reward})` : ""}` :
-        `⌛ Job expired: ${m.title}`),
+      B(m.status === "open" ? (m.reward ? `📋 接下差事：${m.title}（酬 ${m.reward}）${m.days ? ` · 限${m.days}天` : ""}` : `🧭 记下目标：${m.title}${m.days ? ` · 限${m.days}天` : ""}`) :
+        m.status === "done" ? (m.reward ? `✅ 差事办成：${m.title}（+${m.reward}）` : `✅ 目标达成：${m.title}`) :
+        `⌛ 这事黄了：${m.title}`,
+        m.status === "open" ? (m.reward ? `📋 Job taken: ${m.title} (pay ${m.reward})${m.days ? ` · ${m.days} day(s)` : ""}` : `🧭 Objective noted: ${m.title}${m.days ? ` · ${m.days} day(s)` : ""}`) :
+        m.status === "done" ? (m.reward ? `✅ Job done: ${m.title} (+${m.reward})` : `✅ Objective complete: ${m.title}`) :
+        `⌛ Expired: ${m.title}`),
       m.status === "failed" ? "t-press" : "t-unlock", i++ * 650);
     else if (m.kind === "player_hp") pushToast(
       B(m.hp === "dead" ? "💀 你死了。「说」与「做」已被剥夺，你只能旁观" :

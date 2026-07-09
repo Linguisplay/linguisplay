@@ -5720,14 +5720,16 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
                 quests = list(state.get("quests") or [])
                 quests.append({"id": f"q_{_uuid_q.uuid4().hex[:6]}", "title": q_title,
                                "reward": q_reward, "giver": sp_name, "status": "open",
+                               "kind": "job" if q_reward else "lead",  # 🧭 无酬=线索任务
                                "deadline_day": (day_now_q + q_days) if q_days else None})
                 state["quests"] = quests[-8:]
                 moments.append({"kind": "quest", "status": "open", "title": q_title,
                                 "reward": q_reward, "days": q_days})
                 yield emit({"type": "description", "speaker_name": None,
-                            "text": f"（你应下了这桩事：{q_title}。"
-                                    + (f"讲好的酬劳是{q_reward}{currency_of(content)}。"
-                                       if q_reward else "")
+                            "text": (f"（你应下了这桩事：{q_title}。"
+                                     f"讲好的酬劳是{q_reward}{currency_of(content)}。"
+                                     if q_reward else
+                                     f"（你把这个目标记在了心里：{q_title}。")
                                     + (f"限{q_days}天之内。" if q_days else "") + "）"})
         # 📋 QUEST delivered: the errand is done for real — the reward pays out
         qd = (directed.get("quest_done") or "").strip()
