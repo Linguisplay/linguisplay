@@ -85,7 +85,8 @@ class MockLLM:
         if prompt.get("gen_attrs"):
             return {"attrs": {"力量": 5, "敏捷": 5, "体质": 5, "心思": 5, "气运": 5}}
         if prompt.get("rank_judge"):
-            return {"rank_i": 0, "money": int(prompt.get("base_money") or 50)}
+            return {"rank_i": 0, "money": int(prompt.get("base_money") or 50),
+                    "secret": "对某人的旧怨——当年的账还没算清"}
         if prompt.get("gen_market"):
             return {"items": [{"name": "热汤面", "price": 3, "detail": "一碗下肚，浑身是劲"},
                               {"name": "粗布斗篷", "price": 12, "detail": "挡风，也挡眼线"},

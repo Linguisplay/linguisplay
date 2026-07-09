@@ -514,10 +514,17 @@ def ensure_npc_rank(content: dict[str, Any], state: dict[str, Any], char: dict[s
     ranks = [str(r) for r in ((sb.get("progression") or {}).get("ranks") or [])]
     entry: dict[str, Any] = {}
     if ranks:
+        pcid = state.get("player_character_id")
+        known = [c.get("name") for c in _characters(content)
+                 if c.get("name") and c.get("id") not in (cid, pcid)][:8]
+        pname = _char_name(content, pcid) if pcid else None
+        if pname:
+            known.append(pname)
         try:
             out = llm.generate({"rank_judge": True, "ranks": ranks,
                                 "char": {"name": char.get("name"), "role": char.get("role"),
                                          "persona_text": char.get("persona_text")},
+                                "known_names": known,
                                 "currency": currency_of(content),
                                 "base_money": int(sb.get("start_money") or 50),
                                 "language": lang_of(content)}) or {}
@@ -528,6 +535,11 @@ def ensure_npc_rank(content: dict[str, Any], state: dict[str, Any], char: dict[s
             entry["rank_i"], entry["rank"] = i, ranks[i]
         if out.get("money") is not None:
             _sim(state, cid)["money"] = max(0, int(out["money"]))
+        # 🕶 暗线 (Yi: 表层关系之下才是重要的): a secret stance nobody knows — stored
+        # per character, fed ONLY into their own prompt (不开天眼 by construction),
+        # coloring behavior until the story pries it open.
+        if out.get("secret"):
+            entry["secret"] = str(out["secret"])[:60]
     state.setdefault("npc_cult", {})[cid] = entry
     if entry.get("rank"):
         _audit(state, "npc.rank", True, f"{char.get('name', '')}:{entry['rank']}")
@@ -551,6 +563,10 @@ def _own_rank_line(content: dict[str, Any], state: dict[str, Any], char: dict[st
     money = (((state.get("char_sim") or {}).get(char.get("id")) or {}).get("money"))
     if money is not None:
         bits.append(f"你身上约有{int(money)}{currency_of(content)}，买卖赊借都从这里出。")
+    if e.get("secret"):
+        bits.append(f"你心里还藏着一桩【没人知道】的事：{e['secret']}。"
+                    "它一直影响你的眼神、分寸与选择，但你绝不轻易说破——"
+                    "除非剧情把你逼到那一步。")
     return "".join(bits)
 
 
@@ -2084,9 +2100,12 @@ def _smart_suggestions(llm, all_beats, player_input, primary, content, state, lo
     if observer or not primary:
         return []
     primary_name = primary.get("name") or "对方"
-    # the primary's spoken line THIS turn (for grounding)
-    reply = next((b.get("text", "") for b in reversed(all_beats)
-                  if b.get("type") == "dialogue" and b.get("speaker_name") == primary_name), "")
+    # 顺着当下的戏剧钩子 (Yi: 建议又乱): ground the chips in the TURN'S CLOSING beats —
+    # the last thing said (often a cliffhanger like 宁荣荣's「等等」) is what chip 1
+    # must answer, not the primary's line from three beats ago.
+    tail = [b for b in all_beats if (b.get("text") or "").strip()][-3:]
+    reply = "；".join(
+        f"{b.get('speaker_name') or '旁白'}：{(b.get('text') or '')[:60]}" for b in tail)
     pcid = state.get("player_character_id")
     present = [c.get("name") for c in scene_characters(content, state)
                if c.get("name") and c.get("id") != pcid and c.get("id") != primary.get("id")]
@@ -2105,7 +2124,7 @@ def _smart_suggestions(llm, all_beats, player_input, primary, content, state, lo
                                    for cid in pins) if n)[:30]
     try:
         out = llm.generate({"suggest": True, "sugg": {
-            "speaker": primary_name, "player_input": player_input, "reply": reply[:120],
+            "speaker": primary_name, "player_input": player_input, "reply": reply[:220],
             "present": present, "exits": exits, "topics": needed_topics, "relation": rel_name,
             "player_name": player_name, "player_desc": player_desc,
             "place": (location or {}).get("name") or "",

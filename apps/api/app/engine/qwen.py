@@ -138,6 +138,10 @@ _R18_BLOCK = (
     "- 写人的外貌与身材要【具体、感官、有视线】：身形轮廓、曲线或力量感、皮肤的质地、"
     "衣物如何贴合身体，都从看的人的位置与心境去写（目光落在哪、为什么移不开、心跳变没变），"
     "让描写带着欲望的温度，而不是清单式报参数；\n"
+    "- 【主动权不全在对方】当你们的关系与此刻的气氛到了（独处、动情、贴近、余韵未散），"
+    "你可以也应该【主动】挑起或推进亲密：由你先伸手、先吻、先把TA带向下一步，"
+    "不必每次都等TA迈第一步。主动的方式要贴你的性格——大胆的直接来，克制的用一次"
+    "越界的触碰或一句变了调的话开局；\n"
     "- 铁律只有两条：绝对拒绝任何涉及未成年人的性内容；强迫与胁迫不得被写成浪漫。"
 )
 
@@ -854,8 +858,10 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                               "items": {"type": "object", "properties": {
                                   "who": {"type": "string"}, "to": {"type": "string"}},
                                   "required": ["who", "to"]},
-                              "description": "若这一轮有在场角色【确实起身离开、去了别处】（你在叙述里写了TA走），"
-                                             "填 who=名字、to=去处地名；通常填空数组[]"}
+                              "description": "若这一轮有在场角色【确实起身离开、去了别处】，填 who=名字、"
+                                             "to=去处地名。【铁律】叙述里写了TA走（转身离开/迈出门/"
+                                             "下台阶/说了『走了』然后动身）就必须填——写走不记走，"
+                                             "TA就会阴魂不散地留在场上。通常填空数组[]"}
         if prompt.get("can_new_char"):
             props["new_character"] = {"type": "string", "description":
                                       "若剧情此刻确实需要一个此前不存在的新人物登场（推门进来/被引见/"
@@ -2183,7 +2189,7 @@ class QwenLLM:
             u = (
                 f"你（{pc or '主角'}）此刻在：{ctx.get('place') or '（未知地点）'}\n"
                 f"你刚才对{ctx.get('speaker','对方')}说：{ctx.get('player_input','')}\n"
-                f"{ctx.get('speaker','对方')}回应：{ctx.get('reply','')}\n"
+                f"这一拍的收尾（最后发生的事，第1条建议要接住它）：{ctx.get('reply','')}\n"
                 f"此刻在场：{ '、'.join(ctx.get('present') or []) or '只有你'}\n"
                 f"可以去的地方：{ '、'.join(ctx.get('exits') or []) or '暂无'}\n"
                 f"这一章你还想弄清：{ '、'.join(ctx.get('topics') or []) or '随你探索'}\n"
@@ -3078,12 +3084,18 @@ class QwenLLM:
         ch = prompt.get("char") or {}
         cur = str(prompt.get("currency") or "钱")
         base = int(prompt.get("base_money") or 50)
-        sys = ("你在为互动剧情游戏裁定一个角色的实力位阶与随身财物。"
+        known = "、".join(str(n) for n in (prompt.get("known_names") or []) if n)[:80]
+        sys = ("你在为互动剧情游戏裁定一个角色的实力位阶、随身财物，和一桩藏在心里的暗线。"
                f"位阶阶梯（从低到高）：{'、'.join(ranks)}。"
                f"按TA的身份年资定位阶（普通市井角色通常在低档，宿老/高手才靠上）；"
-               f"随身的钱按身份定（一个普通人身上约{base}{cur}）。只输出一行，格式："
-               "位阶:<阶梯里的原词> 身家:<整数>" + _lang_rule(prompt))
-        u = f"角色：{ch.get('name','')}（{ch.get('role','')}）{str(ch.get('persona_text') or '')[:160]}\n输出那一行。"
+               f"随身的钱按身份定（一个普通人身上约{base}{cur}）。"
+               "暗线：TA心里对某个人藏着一桩没人知道的事（暗恋/旧怨/亏欠/嫉妒/握着把柄/旧情），"
+               + (f"对象从这些人里选：{known}；" if known else "对象可以是玩家；")
+               + "选最贴TA人设的那种，一句话写透缘由。只输出两行，格式：\n"
+               "位阶:<阶梯里的原词> 身家:<整数>\n"
+               "暗线:对<名字>的<暗恋|旧怨|亏欠|嫉妒|把柄|旧情>——<一句话缘由，25字内>"
+               + _lang_rule(prompt))
+        u = f"角色：{ch.get('name','')}（{ch.get('role','')}）{str(ch.get('persona_text') or '')[:160]}\n输出那两行。"
         try:
             resp = _post_chat(self._url, self._key,
                               {"model": self._model, "messages": [{"role": "system", "content": sys},
@@ -3103,6 +3115,9 @@ class QwenLLM:
             out["rank_i"] = rank_i
         if money is not None:
             out["money"] = max(0, min(999999, money))
+        ms = _re.search(r"暗线\s*[:：]\s*(.{4,60})", txt)
+        if ms:
+            out["secret"] = ms.group(1).strip()[:60]
         return out
 
     def _gen_market(self, prompt: dict[str, Any]) -> dict[str, Any]:
