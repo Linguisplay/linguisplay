@@ -227,6 +227,8 @@ class Run(Base):
     story_version: Mapped[int] = mapped_column(Integer, default=0)
 
     pinned_content: Mapped[dict] = mapped_column(JSON, default=dict)
+    # 🙈 隐藏而非删除: an archived run leaves the continue list but keeps everything
+    archived: Mapped[bool] = mapped_column(Integer, default=0)
 
     # Run state. Sticky unlocked set; asks counted per secret_id.
     # {act, affinity, flags:{}, unlocked_fragment_ids:[], asks:{secret_id:n}, triggered_event_ids:[]}

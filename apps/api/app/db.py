@@ -49,6 +49,7 @@ def _ensure_columns() -> None:
                           ("language", "TEXT DEFAULT 'zh'")],
               "beats": [("present_ids", "JSON"), ("mood", "TEXT"),
                         ("state_before", "JSON"), ("content_before", "JSON")],
+              "runs": [("archived", "INTEGER DEFAULT 0")],
               "story_meta": [("cards", "JSON DEFAULT '[]'")],
               "fragments": [("cover", "TEXT")]}
     insp = inspect(engine)

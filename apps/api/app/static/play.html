@@ -641,9 +641,38 @@ async function afterAuth() {
           if (!confirm(B(`删除《${r.story_title}》的这段进度？关系和已揭开的真相都会丢失。`, `Delete this run of “${r.story_title}”? Relationships and uncovered truths will be lost.`))) return;
           await j(`/runs/${r.id}`, { method:"DELETE" }); div.remove(); };
         div.prepend(del);
+        // 🙈 隐藏而非删除: leaves this list, keeps everything; recover via 已隐藏的局
+        const hid = document.createElement("a");
+        hid.textContent = "🙈"; hid.title = B("隐藏这段进度（不删除，可在下方「已隐藏的局」里找回）", "Hide this run (kept — recover under Hidden runs)");
+        hid.style.cssText = "float:right; color:#7b8296; padding:0 4px";
+        hid.onclick = async (e) => { e.stopPropagation();
+          await j(`/runs/${r.id}/archive?archived=true`, { method:"POST" }); div.remove(); };
+        div.prepend(hid);
         div.onclick = () => resumeRun(r.id);
         stories.appendChild(div);
       });
+      const shelf = document.createElement("p");
+      shelf.className = "muted"; shelf.style.cssText = "margin:6px 0; font-size:12px; cursor:pointer";
+      shelf.textContent = B("🙈 查看已隐藏的局…", "🙈 Hidden runs…");
+      shelf.onclick = async () => {
+        shelf.remove();
+        try {
+          const hidden = await j("/runs?archived=true");
+          if (!hidden.length) { pushToast(B("没有隐藏的局", "No hidden runs"), "", 1800); return; }
+          hidden.forEach(r => {
+            const d = document.createElement("div");
+            d.className = "card runcard"; d.style.cssText = "margin:8px 0; opacity:.75";
+            d.innerHTML = `<b>${escapeHtml(r.story_title)}</b> <span class="muted">${B(`第${r.act}幕 · 已隐藏`, `Act ${r.act} · hidden`)}</span>`;
+            const un = document.createElement("a");
+            un.textContent = B("恢复", "Restore"); un.style.cssText = "float:right; color:#8fdcb4; padding:0 4px; font-size:12px";
+            un.onclick = async (e) => { e.stopPropagation();
+              await j(`/runs/${r.id}/archive?archived=false`, { method:"POST" }); afterAuth(); };
+            d.prepend(un);
+            stories.insertBefore(d, h2);
+          });
+        } catch (e) {}
+      };
+      stories.appendChild(shelf);
       const h2 = document.createElement("p");
       h2.className = "muted"; h2.style.margin = "14px 0 4px"; h2.textContent = t("开一段新的");
       stories.appendChild(h2);

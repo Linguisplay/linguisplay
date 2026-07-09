@@ -223,10 +223,13 @@ def _own_run(run_id: str, user: User, db: Session) -> RunModel:
 
 # ── CRUD ──────────────────────────────────────────────────
 @router.get("", response_model=list[RunSummary])
-def list_runs(user: User = Depends(current_user), db: Session = Depends(get_db)):
+def list_runs(archived: bool = False,
+              user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Default = the continue list (hidden runs excluded); ?archived=1 = the hidden shelf."""
     rows = (
         db.query(RunModel)
-        .filter(RunModel.owner_id == user.id)
+        .filter(RunModel.owner_id == user.id,
+                RunModel.archived == (1 if archived else 0))
         .order_by(RunModel.updated_at.desc())
         .all()
     )
@@ -434,6 +437,16 @@ def buy_market(run_id: str, body: MarketBuyIn,
     flag_modified(r, "state")
     db.commit()
     return view
+
+
+@router.post("/{run_id}/archive")
+def archive_run(run_id: str, archived: bool = True,
+                user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """🙈 隐藏而非删除: leave the continue list, keep every beat. ?archived=0 restores."""
+    r = _own_run(run_id, user, db)
+    r.archived = 1 if archived else 0
+    db.commit()
+    return {"id": r.id, "archived": bool(r.archived)}
 
 
 @router.post("/{run_id}/rewind", response_model=Run)
