@@ -143,10 +143,30 @@
   .pletter { background: #191926; border: 1px solid #2a2a3a; border-radius: 12px; padding: 12px 14px; margin: 6px 2px; }
   .pletter .lsub { font-weight: 700; font-size: 14px; margin-bottom: 6px; }
   .pletter .lbody { font-size: 13.5px; line-height: 1.8; color: #d5d9e6; white-space: pre-wrap; }
-  .albumcard { background: #191926; border: 1px solid #2a2a3a; border-left: 3px solid #b9975b; border-radius: 10px; padding: 10px 12px; margin: 6px 2px; }
-  .albumcard .atitle { font-weight: 700; font-size: 13.5px; }
-  .albumcard .atext { font-size: 12.5px; color: #b7bdcd; line-height: 1.7; margin-top: 4px; }
-  .albumcard .ameta { font-size: 11px; color: #565d72; margin-top: 5px; }
+  /* 📸 时刻卡回忆册: double-sided keepsake cards — front wears the place's art + the
+     key line, back holds the excerpt/date/rarity; tap to flip. Empty slots tease. */
+  .mgrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; padding: 4px 2px 10px; }
+  .mcard { perspective: 900px; aspect-ratio: 3/4; cursor: pointer; }
+  .mflip { position: relative; width: 100%; height: 100%; transition: transform .5s; transform-style: preserve-3d; }
+  .mcard.flipped .mflip { transform: rotateY(180deg); }
+  .mface { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; border-radius: 12px; border: 1px solid #34344a; overflow: hidden; }
+  .mfront { background-color: #141420; background-image: linear-gradient(160deg,#232336,#141420); background-size: cover; background-position: center; display: flex; flex-direction: column; justify-content: flex-end; }
+  .mfront .mshade { background: linear-gradient(transparent, rgba(8,8,14,.9) 72%); padding: 26px 9px 8px; }
+  .mfront .mtitle { font-weight: 700; font-size: 13px; text-shadow: 0 1px 3px rgba(0,0,0,.85); }
+  .mfront .mline { font-size: 11px; color: #cfd4e2; line-height: 1.5; margin-top: 3px; max-height: 3em; overflow: hidden; text-shadow: 0 1px 3px rgba(0,0,0,.85); }
+  .mtop { position: absolute; top: 6px; left: 8px; right: 8px; display: flex; justify-content: space-between; font-size: 13px; text-shadow: 0 1px 3px rgba(0,0,0,.9); }
+  .mstars { color: #ffd76a; letter-spacing: 1px; font-size: 11px; }
+  .mcard.r2 .mface { border-color: #6b5b8f; }
+  .mcard.r3 .mface { border-color: #b9975b; box-shadow: 0 0 12px rgba(255,215,106,.22); }
+  .mback { background: #191926; transform: rotateY(180deg); display: flex; flex-direction: column; padding: 9px; }
+  .mback .btitle { font-weight: 700; font-size: 12.5px; }
+  .mback .btext { flex: 1; overflow-y: auto; font-size: 11.5px; color: #b7bdcd; line-height: 1.65; margin-top: 5px; }
+  .mback .bmeta { font-size: 10.5px; color: #565d72; margin: 5px 0 6px; }
+  .mback button { font-size: 11px; background: #232336; color: #9fb0ff; border: 1px solid #34344a; border-radius: 8px; padding: 5px 0; cursor: pointer; width: 100%; }
+  .mslot { aspect-ratio: 3/4; border: 1.5px dashed #2a2a3a; border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: #3d3d52; }
+  .mslot .q { font-size: 26px; }
+  .mslot small { font-size: 10.5px; }
+  .mhint { font-size: 11px; color: #565d72; padding: 2px 2px 8px; }
   .pcompose { display: flex; gap: 8px; padding-top: 10px; }
   .pcompose input { flex: 1; background: #191924; border: 1px solid #2c2c3c; border-radius: 18px; color: #e6e9f2; padding: 9px 14px; font-size: 13.5px; }
   .pcompose button { border-radius: 18px; padding: 0 16px; background: #2c4a35; border: 1px solid #3c6a4a; color: #dff1e3; cursor: pointer; }
@@ -496,7 +516,7 @@ const EN = {
   "先在输入框里写下你开口要说的话，再按 📞": "Type what you'll say first, then hit 📞",
   "💬 信息": "💬 Messages", "📮 信箱": "📮 Mail", "👥 通讯录": "👥 Contacts",
   "💞 回忆": "💞 Memories", "🎒 背包": "🎒 Bag", "🗓 日历": "🗓 Calendar",
-  "信息": "Messages", "信箱": "Mail", "通讯录": "Contacts", "回忆": "Memories",
+  "信息": "Messages", "信箱": "Mail", "通讯录": "Contacts", "回忆册": "Memories",
   "背包": "Bag", "日历": "Calendar", "备忘录": "Dossier", "合上": "Close", "‹ 返回": "‹ Back",
   "📱 小手机": "📱 Phone",
   "还没有人给你捎过话。": "No one has reached out yet.",
@@ -1297,7 +1317,7 @@ async function openPhone() {
     <div class="papp" onclick="openMailbox()">📮${mailBadge}<small>信箱</small></div>
     <div class="papp" onclick="openContacts()">👥<small>通讯录</small></div>
     ${curMoney != null ? `<div class="papp" onclick="openMarket()">🛒<small>集市</small></div>` : ""}
-    <div class="papp" onclick="openAlbum()">💞<small>回忆</small></div>
+    <div class="papp" onclick="openAlbum()">📸<small>回忆册</small></div>
     <div class="papp" onclick="openBag()">🎒<small>背包</small></div>
     <div class="papp" onclick="openCalendar()">🗓<small>日历</small></div>
     <div class="papp" onclick="document.getElementById('phoneov').remove(); openJournal()">📔<small>备忘录</small></div>
@@ -1328,17 +1348,53 @@ async function openLetter(mid) {
     <div class="ameta" style="margin-top:8px;color:#565d72;font-size:11px">${escapeHtml(m.name||"")}${m.at ? " · " + escapeHtml(m.at) : ""}</div></div>`,
     "📮 信箱", "openMailbox()");
 }
-// 💞 回忆: the run's album — golden moments, tier-ups, honored dates, endings
+// 📸 回忆册: the run's keepsake gallery as 时刻卡 — double-sided cards born from real
+// played moments (golden / tier-up / date / secret assembled / crit roll / breakthrough
+// / ending). Front: the place's backdrop + key line. Back: excerpt + date + rarity +
+// "set as chat backdrop" (the 星野-verified high-frequency use).
+const ALBUM_ICON = { golden: "✨", rel_up: "💗", date: "💞", promise: "🤝", ending: "🏁",
+                     breakthrough: "⚡", crit: "🎲", secret: "🧩" };
+function chatBgKey() { return "lp_chatbg_" + runId; }
+function setChatBg(stem) {
+  if (!stem || localStorage.getItem(chatBgKey()) === stem) localStorage.removeItem(chatBgKey());
+  else localStorage.setItem(chatBgKey(), stem);
+  paintBackground();
+  openAlbum();  // refresh the pin captions
+}
 async function openAlbum() {
   let jd = null;
   try { jd = await j(`/runs/${runId}/journal`); } catch (e) { return; }
-  const icon = { golden: "✨", rel_up: "💗", date: "💞", promise: "🤝", ending: "🏁" };
-  const rows = (jd.album || []).map(a =>
-    `<div class="albumcard"><div class="atitle">${icon[a.kind] || "💫"} ${escapeHtml(a.title||"")}${a.name ? `<span class="jwho"> · ${escapeHtml(a.name)}</span>` : ""}</div>
-      <div class="atext">${escapeHtml(a.text||"")}</div>
-      <div class="ameta">${B(`第${a.act||1}幕`, `Act ${a.act||1}`)}${a.at ? " · " + escapeHtml(a.at) : ""}</div></div>`
-  ).join("") || `<div class="jempty">还没有值得裱起来的瞬间。<br>它们会在你意想不到的时候降临。</div>`;
-  phoneShell(rows, "💞 回忆", "openPhone()");
+  const pinned = localStorage.getItem(chatBgKey()) || "";
+  const album = jd.album || [];
+  const cards = album.map((a, idx) => {
+    const r = Math.max(1, Math.min(3, a.rarity || 1));
+    const bgUrl = a.bg ? `/scene/bg/${encodeURIComponent(a.bg)}.jpg` : "";
+    const fr = bgUrl ? ` style="background-image:linear-gradient(rgba(10,10,18,.15),rgba(10,10,18,.42)),url('${bgUrl}')"` : "";
+    const isPin = pinned && a.bg === pinned;
+    return `<div class="mcard r${r}" data-i="${idx}"><div class="mflip">
+      <div class="mface mfront"${fr}>
+        <div class="mtop"><span>${ALBUM_ICON[a.kind] || "💫"}</span><span class="mstars">${"★".repeat(r)}</span></div>
+        <div class="mshade"><div class="mtitle">${escapeHtml(a.title || "")}</div>
+        <div class="mline">${escapeHtml((a.text || "").slice(0, 42))}</div></div>
+      </div>
+      <div class="mface mback">
+        <div class="btitle">${ALBUM_ICON[a.kind] || "💫"} ${escapeHtml(a.title || "")}${a.name ? ` · ${escapeHtml(a.name)}` : ""}</div>
+        <div class="btext">${escapeHtml(a.text || "")}</div>
+        <div class="bmeta">${"★".repeat(r)} · ${B(`第${a.act||1}幕`, `Act ${a.act||1}`)}${a.at ? " · " + escapeHtml(a.at) : ""}</div>
+        ${a.bg ? `<button data-bg="${escapeHtml(a.bg)}">${isPin ? B("✓ 聊天背景 · 点击恢复", "✓ Chat backdrop · tap to unpin") : B("设为聊天背景", "Set as chat backdrop")}</button>` : ""}
+      </div></div></div>`;
+  }).join("");
+  // empty slots keep the shelf hungry — the moments not yet lived
+  const slots = Array(Math.max(2, 6 - album.length)).fill(
+    `<div class="mslot"><div class="q">？</div><small>${B("待你亲历", "Yet to be lived")}</small></div>`).join("");
+  const head = album.length
+    ? `<div class="mhint">${B("轻点翻面。稀有的时刻，会自己找上门。", "Tap a card to flip it. The rare moments find you.")}</div>`
+    : `<div class="jempty">还没有值得裱起来的瞬间。<br>它们会在你意想不到的时候降临。</div>`;
+  const ov = phoneShell(`${head}<div class="mgrid">${cards}${slots}</div>`, B("📸 回忆册", "📸 Memories"), "openPhone()");
+  ov.querySelectorAll(".mcard").forEach(el => { el.onclick = () => el.classList.toggle("flipped"); });
+  ov.querySelectorAll(".mback button").forEach(b => {
+    b.onclick = (e) => { e.stopPropagation(); setChatBg(b.dataset.bg); };
+  });
 }
 async function openInbox() {
   let inbox;
@@ -2128,6 +2184,16 @@ function paintBackground() {
   bg.style.backgroundSize = "cover";
   bg.style.backgroundPosition = "center";
   bg.style.backgroundRepeat = "no-repeat";
+  // 📸 a pinned 时刻卡 backdrop wins over the live scene until unpinned (回忆册)
+  const pin = runId ? localStorage.getItem("lp_chatbg_" + runId) : "";
+  if (pin) {
+    const purl = `/scene/bg/${encodeURIComponent(pin)}.jpg`;
+    const pim = new Image();
+    pim.onload = () => { bg.style.backgroundImage = `url(${purl})`; };
+    pim.onerror = () => { localStorage.removeItem("lp_chatbg_" + runId); paintBackground(); };
+    pim.src = purl;
+    return;
+  }
   if (curLocId) {
     // a redraw bumps bgVer so the browser can't serve the stale cached image
     const locUrl = `/scene/bg/${curLocId}.jpg` + (bgVer[curLocId] ? `?v=${bgVer[curLocId]}` : "");
@@ -2403,7 +2469,10 @@ function showMoments(moments, relDeltas) {
         m.status === "kept" ? `${m.romantic ? "💞 A date, kept" : "🤝 You showed up"}: ${m.what || ""}` :
         `💔 You stood ${m.name || "them"} up (${m.what || ""})`),
       m.status === "missed" ? "t-press" : "t-rel", i++ * 650);
-    else if (m.kind === "golden") pushToast(B(`✨ 金色瞬间：「${m.title || ""}」已存入回忆`, `✨ A golden moment: “${m.title || ""}” saved to Memories`), "t-end", i++ * 650);
+    else if (m.kind === "golden") pushToast(B(`✨ 金色瞬间：「${m.title || ""}」已存入回忆册`, `✨ A golden moment: “${m.title || ""}” saved to Memories`), "t-end", i++ * 650);
+    else if (m.kind === "breakthrough") pushToast(B(`⚡ 突破：踏入「${m.title || ""}」— 已存入回忆册`, `⚡ Breakthrough: [${m.title || ""}] — saved to Memories`), "t-end", i++ * 650);
+    else if (m.kind === "crit") pushToast(B("🎲 天命一掷·20！这一刻已存入回忆册", "🎲 A natural 20! This moment is saved to Memories"), "t-end", i++ * 650);
+    else if (m.kind === "secret_full") pushToast(B(`🧩 真相拼全：「${m.title || ""}」已存入回忆册`, `🧩 The whole truth of “${m.title || ""}” — saved to Memories`), "t-end", i++ * 650);
     else if (m.kind === "mail") pushToast(B(`📮 ${m.name || "有人"} 给你写了一封信（去信箱看看）`, `📮 ${m.name || "Someone"} wrote you a letter (check the mailbox)`), "t-rel", i++ * 650);
   }
   const bits = [];

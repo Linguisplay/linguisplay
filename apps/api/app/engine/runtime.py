@@ -3688,13 +3688,22 @@ def rel_log(state: dict[str, Any], char_id: str | None, act: int, kind: str, tex
 # ── 💞 名场面收藏 (the album) ─────────────────────────────────────────────────────
 # The run's keepsake gallery: golden moments, tier-ups, honored dates, endings — the
 # scenes worth reliving, collected as they happen and browsable from the 小手机.
+# Each entry is a 时刻卡: front = the place's backdrop + the key line, back = the
+# excerpt/date/rarity. `bg` pins WHERE it happened so the card wears that place's art.
+_ALBUM_RARITY = {"golden": 3, "breakthrough": 3, "ending": 2, "rel_up": 2, "date": 2,
+                 "secret": 2, "crit": 2, "promise": 1}
+
+
 def album_add(content: dict[str, Any], state: dict[str, Any], kind: str, title: str,
-              text: str, char: dict[str, Any] | None = None) -> dict[str, Any]:
+              text: str, char: dict[str, Any] | None = None,
+              rarity: int | None = None) -> dict[str, Any]:
     entry = {"kind": kind, "title": (title or "").strip()[:24],
              "text": dedash((text or "").strip())[:200],
              "char_id": (char or {}).get("id"), "name": (char or {}).get("name") or "",
              "at": (clock_view(content, state) or {}).get("label", ""),
-             "act": int(state.get("act", 1) or 1)}
+             "act": int(state.get("act", 1) or 1),
+             "bg": state.get("location_id"),
+             "rarity": max(1, min(3, int(rarity or _ALBUM_RARITY.get(kind, 1))))}
     album = list(state.get("album") or [])
     album.append(entry)
     state["album"] = album[-40:]
@@ -5288,7 +5297,8 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
                       _t(content, f"成为{mn}", f"Becoming {mn}"),
                       _last_line_of(said_this_turn, sp_name)
                       or _t(content, f"你和{sp_name}成了「{mn}」。",
-                            f"You and {sp_name} became “{mn}”."), sp)
+                            f"You and {sp_name} became “{mn}”."), sp,
+                      rarity=3 if mode_after == "lover" else 2)
             yield emit({"type": "description", "speaker_name": None,
                         "text": _t(content,
                                    f"💗（你感觉到，和{sp_name}的关系又近了一层。现在你们是"
@@ -5935,6 +5945,9 @@ def run_turn_stream(
     track_note = str(state.pop("track_note", "") or "")
     # ⚡ 修为: offline trickle (温养), then the training / breakthrough twins
     cult_beat = None
+    # 📸 moments born BEFORE the moments list exists (breakthrough/crit fire early in
+    # the pipeline) — stashed here, merged in when the list is created at P4
+    early_moments: list[dict[str, Any]] = []
     if cult_cfg(content) and (state.get("mode") or "character") != "god":
         _og = cult_offline_gain(content, state, away_hours if returning else 0)
         if _og:
@@ -5961,6 +5974,20 @@ def run_turn_stream(
                            "(This stage's bottleneck is already full — time to attempt a breakthrough.)")
         _bk = player_breakthrough(content, state, player_input, channel)
         if _bk is not None:
+            # 📸 a breakthrough is a keepsake: every major ascension, or a 顿悟-crit
+            # sub-stage — routine sub-steps stay off the shelf so the cards feel earned
+            if _bk.get("success") and (_bk.get("major") or _bk.get("crit")):
+                _bt = (_bk["rank_name"] + ("" if _bk.get("major")
+                                           else "·" + _bk.get("stage_name", "")))
+                album_add(content, state, "breakthrough",
+                          _t(content, f"踏入{_bt}", f"Ascending to {_bt}"),
+                          _t(content,
+                             (f"天劫压顶，你在雷光中挺住，一举踏入【{_bt}】。"
+                              if _bk.get("major") else
+                              f"一丝顿悟入心，你稳稳踏入【{_bt}】。") + f"战力{_bk['power']}。",
+                             f"You broke through into [{_bt}] — power {_bk['power']}."),
+                          rarity=3 if _bk.get("major") else 2)
+                early_moments.append({"kind": "breakthrough", "title": _bt})
             if _bk.get("success") and _bk.get("major"):
                 cult_beat = _t(content,
                                ("（天劫轰然压顶，你在雷光中挺住了！一举踏入【" + _bk["rank_name"] +
@@ -6171,6 +6198,16 @@ def run_turn_stream(
             dice = _roll_check(risk)
             yield ("dice", dice)
 
+    # 📸 a natural 20 is a story you'll retell — the attempt itself goes on the shelf
+    if dice and dice.get("outcome") == "crit_success":
+        _cw = (f"对{dice['contest']}" if dice.get("contest") else "")
+        album_add(content, state, "crit",
+                  _t(content, "命运一掷·20", "A fated roll · 20"),
+                  _t(content, f"骰面落定，正是二十。你{_cw}放手一搏：{player_input}",
+                     f"The die lands on twenty. You went all in: {player_input}"),
+                  rarity=2)
+        early_moments.append({"kind": "crit"})
+
     # ━━━━━━━━━━ 管线 P4 · 解锁评估与回归问候 ━━━━━━━━━━
     # 2. gate on the CURRENT state (asks updated; affinity not yet changed this turn).
     #    asks-driven reveals surface THIS turn so the director can voice them; affinity-
@@ -6190,7 +6227,7 @@ def run_turn_stream(
 
     # THRESHOLD MOMENTS (阈值时刻演出): structured events the UI celebrates — a truth
     # clicking into place, a relationship tier-up, a new act, an ending milestone.
-    moments: list[dict[str, Any]] = []
+    moments: list[dict[str, Any]] = list(early_moments)
     rel_deltas: dict[str, dict[str, int]] = {}   # per-char ♥ movement this turn (UI float)
     pressure_blown = False                       # ⚠️ meter hit 100 → forced terminal ending
     for t in _titles_for_fragments(content, newly):
@@ -6198,12 +6235,26 @@ def run_turn_stream(
     if newly:
         newset = set(newly)
         logged = set()
+        unlocked_now = set(state.get("unlocked_fragment_ids") or [])
         for sec in content.get("secrets", []) or []:
             scid = sec.get("character_id")
             title = (sec.get("title") or "").strip()
             if scid and title and sec.get("id") not in logged                     and any(f.get("id") in newset for f in sec.get("fragments", []) or []):
                 logged.add(sec.get("id"))
                 rel_log(state, scid, old_act, "reveal", f"关于「{title}」的真相，揭开了一层。")
+            # 📸 秘密拼全: the LAST piece of a layered secret just clicked in — that's
+            # a keepsake. Single-fragment secrets don't count (nothing was "assembled").
+            sfids = [f.get("id") for f in sec.get("fragments", []) or [] if f.get("id")]
+            if (title and len(sfids) >= 2 and set(sfids) <= unlocked_now
+                    and any(fid in newset for fid in sfids)):
+                sch = next((c for c in _characters(content) if c.get("id") == scid), None)
+                last_txt = next((f.get("content") or "" for f in reversed(sec.get("fragments") or [])
+                                 if f.get("id") in newset), "")
+                album_add(content, state, "secret", title,
+                          last_txt or _t(content, f"「{title}」的全部真相，拼上了。",
+                                         f"The whole truth of “{title}” came together."),
+                          sch, rarity=2)
+                moments.append({"kind": "secret_full", "title": title})
 
     # 💌 你不在的时候: this turn is a COMEBACK → the absent hearts that missed the
     # player reach out first thing (texts; a long absence earns a letter). The present
@@ -7141,7 +7192,8 @@ def run_turn_stream(
             moments.append({"kind": "ending", "ending_kind": kind, "title": title,
                             "terminal": terminal})
             album_add(content, state, "ending", title or head,
-                      (candidate.get("text") or "").strip() or f"{head} {title}".strip())
+                      (candidate.get("text") or "").strip() or f"{head} {title}".strip(),
+                      rarity=3 if kind == "true" else 1 if kind in ("bad", "death") else 2)
             yield emit({"type": "description", "speaker_name": None,
                         "text": f"{head}  {title}".strip()})
             if candidate.get("text"):
