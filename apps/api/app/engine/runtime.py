@@ -4492,6 +4492,37 @@ _POV_CORRECTION = ("上一版旁白的人称错了：旁白必须自始至终用
                    "别的角色身上，也不能把旁白写成某个角色的第一人称独白。重写这一轮。")
 
 
+# 写走必记走的架构版 (Yi: 这个铁律是走的架构吗): departure prose per present name
+_EXIT_TAIL_RE = (r"[^。！？\n]{0,12}?(?:离开|走了出去|走出了|迈出|迈下台阶|退了出去|出了门"
+                 r"|拂袖而去|大步离去|走远|转身走了|头也不回地走|离场而去)")
+
+
+def _settle_prose_exits(content: dict[str, Any], state: dict[str, Any],
+                        d_beats: list[dict[str, Any]], pcid: str | None) -> list[str]:
+    """Deterministic backstop for npc_moves: narration that walks a PRESENT character
+    out books the exit in the ledger even when the model forgot to file it — prose and
+    ledger may never part ways. Exit destination unknown → pinned AWAY (unreachable
+    until their schedule or a summon brings them back). Returns exited names."""
+    txts = [b.get("text") or "" for b in d_beats or [] if b.get("type") != "dialogue"]
+    if not txts:
+        return []
+    blob = "\n".join(txts)
+    outed: list[str] = []
+    for c in list(scene_characters(content, state)):
+        cid, nm = c.get("id"), (c.get("name") or "").strip()
+        if not cid or not nm or cid == pcid:
+            continue
+        if re.search(re.escape(nm) + _EXIT_TAIL_RE, blob):
+            pins = dict(state.get("char_pins") or {})
+            pins[cid] = AWAY
+            state["char_pins"] = pins
+            if cid in (state.get("following") or []):
+                state["following"] = [f for f in state["following"] if f != cid]
+            _audit(state, "npc.exit", True, nm, "散文离场，账本跟走")
+            outed.append(nm)
+    return outed
+
+
 def _addressed_char(content: dict[str, Any], state: dict[str, Any],
                     d_beats: list[dict[str, Any]], sp_id: str | None,
                     pcid: str | None) -> dict[str, Any] | None:
@@ -6665,6 +6696,9 @@ def run_turn_stream(
                         chosen.append(c)
                 chosen = chosen[:3]
             responders.extend(chosen)
+        # 🚪 写走必记走（架构层）: narration walked someone out → the ledger walks them
+        # out too, even when the npc_moves judgment forgot to file it
+        _settle_prose_exits(content, state, d_beats, pcid)
         # 🗣 点名要有回应 (Yi: 戴沐白问竹清，竹清没法答): ANY speaker whose line opens
         # with a present character's name/short-name hands them the floor this turn —
         # a spoken question must be answerable. Capped so chains can't run away.

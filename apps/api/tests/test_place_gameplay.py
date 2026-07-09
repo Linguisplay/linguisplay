@@ -373,6 +373,37 @@ def test_scout_denial_denies_honestly_and_mints_nothing():
                for p in llm.prompts)
 
 
+def test_prose_exit_books_the_ledger():
+    """写走必记走·架构版 (Yi: 是架构还是prompt): narration walks 戴沐白 out but the
+    model files no npc_moves — the deterministic backstop books the exit anyway."""
+    story = {"story": {"id": "x", "characters": [
+        {"id": "c1", "name": "朱竹清", "is_lead": True, "home_location_id": "hall"},
+        {"id": "c2", "name": "戴沐白", "home_location_id": "hall"}],
+        "acts": [{"index": 1, "title": "一"}],
+        "locations": [{"id": "hall", "name": "宿舍", "exits": []}]}, "secrets": []}
+
+    class ExitLLM:
+        def generate(self, prompt):
+            if prompt.get("summarize"):
+                return {"memory": ""}
+            if prompt.get("suggest"):
+                return {"suggestions": []}
+            if prompt.get("speaker_name") == "朱竹清":
+                return {"beats": [
+                    {"type": "description", "speaker_name": None,
+                     "text": "戴沐白摆了摆手，一步迈下台阶，头也不回地走远了。"},
+                    {"type": "dialogue", "speaker_name": "朱竹清", "text": "他走了。"}],
+                    "affinity_delta": 0, "advance_act": False, "ending": None,
+                    "next_speakers": []}
+            return {"beats": [], "affinity_delta": 0, "advance_act": False, "ending": None}
+
+    st = {**runtime.default_state(), "location_id": "hall"}
+    out = runtime.run_turn(story, st, {"name": "我"}, "你们聊", channel="say", llm=ExitLLM())
+    here = [c.get("name") for c in runtime.scene_characters(story, out["state"])]
+    assert "戴沐白" not in here                       # the ledger walked him out
+    assert any(a.get("e") == "npc.exit" for a in out["audit"])
+
+
 def test_vocative_hands_the_floor_same_turn():
     """点名要有回应 (Yi: 戴沐白问竹清，竹清没法答): a line opening with a present
     character's (short) name hands them the floor THIS turn."""
