@@ -5,7 +5,7 @@ Before the director runs, the ENGINE reads the player's raw line and decomposes 
 verified referents — who/where/what it mentions, each checked against live state — plus
 a coarse verb classification. The result rides the prompt at depth-0 as a one-line
 digest, so the model never has to guess whether 「短刃」 is in the player's pocket or
-whether 「穆宁雪」 is even in the room.
+whether the person being addressed is even in the room.
 
 Design rule: the digest only states what the engine can VERIFY (entity + its live
 status + surface verb class). It never guesses intent or tone — a wrong guess would
