@@ -84,13 +84,17 @@ def _bg_prompt(content: dict, loc: dict) -> str:
     story = content.get("story") or {}
     era = ((story.get("world_long") or story.get("world_facts") or "")
            .strip().replace("\n", " "))[:140]
+    art = runtime.art_style_of(content)  # 🎨 the story's own art direction rides every render
     return (f"{era} 场景：{loc.get('name', '')}。{(loc.get('detail') or '')[:200]} "
             "电影感写实场景概念图，强烈氛围与光影，景深，电影级调色，横构图宽幅；"
-            "空镜，画面里没有任何人物，没有文字、字幕或水印。")
+            "空镜，画面里没有任何人物，没有文字、字幕或水印。"
+            + (f"画面基调：{art}。" if art else ""))
 
 
 def _spawn_location_bg(content: dict, loc: dict | None) -> None:
-    if not loc or not loc.get("id") or not loc.get("generated"):
+    # authored places deserve art too — the generated-only gate left whole authored
+    # stories playing on gradient fallbacks (file-exists check prevents rework)
+    if not loc or not loc.get("id"):
         return
     path = _BG_DIR / f"{loc['id']}.jpg"
     if path.exists():
@@ -132,9 +136,10 @@ def _ensure_char_avatars(content: dict) -> bool:
             continue
         bits = "，".join(b for b in (name, c.get("role") or "",
                                      (c.get("persona_text") or "")[:160]) if b)
+        art = runtime.art_style_of(content)
         prompt = (f"{bits}。世界背景：{world}。电影质感人物肖像，胸像特写，正面微侧，"
                   "目光看向镜头外，写实风格，柔和的侧光，背景虚化，情绪克制内敛，"
-                  "高细节，胶片颗粒感")
+                  "高细节，胶片颗粒感" + (f"。画面基调：{art}" if art else ""))
         _enqueue_image(prompt, path, "768*768")
     return changed
 

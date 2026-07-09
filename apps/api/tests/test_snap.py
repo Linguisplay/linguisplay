@@ -49,3 +49,15 @@ def test_calls_never_carry_photos(monkeypatch):
     st = runtime.default_state()
     ev = runtime.phone_push(SB, st, SB["story"]["characters"][0], ["喂"], "夜", call=True)
     assert ev.get("snap") is None
+
+
+def test_art_style_rides_the_snap_prompt(monkeypatch):
+    _on(monkeypatch, roll=50)   # >45 → 随手拍 flavor, still passes 12-chance? 50>12 fails…
+    monkeypatch.setattr(runtime._rng, "randint", lambda a, b: 10)  # pass chance, 拍景 flavor? 10<=45 selfie
+    styled = {"story": {**SB["story"],
+                        "tuning": {"art_style": "阴郁冷调恐怖片美术"}}, "secrets": []}
+    assert runtime.art_style_of(styled) == "阴郁冷调恐怖片美术"
+    assert runtime.art_style_of(SB) == ""
+    sn = runtime.maybe_snap(styled, runtime.default_state(),
+                            SB["story"]["characters"][0], "看")
+    assert sn and "阴郁冷调恐怖片美术" in sn["prompt"]

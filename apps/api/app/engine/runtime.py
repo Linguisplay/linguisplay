@@ -239,6 +239,15 @@ def _slot_narr(content: dict[str, Any], slot: str, day) -> str:
     return table[slot].format(day=day)
 
 
+def art_style_of(content: dict[str, Any]) -> str:
+    """🎨 每剧本自带画风 (story.tuning.art_style, free text — tuning_for only carries
+    numeric knobs): appended to EVERY image prompt this story mints (scene bg /
+    portrait / 随手拍), so a horror world looks like one and a campus romance doesn't.
+    Same doctrine as the prose style field: tone lives in the 剧本, not the engine."""
+    return str(((content.get("story") or {}).get("tuning") or {})
+               .get("art_style") or "").strip()[:200]
+
+
 def tuning_for(content: dict[str, Any]) -> dict[str, int]:
     """The effective knob set for this story: engine defaults overlaid with the story's
     authored `tuning` overrides (unknown keys and non-numeric values are ignored)."""
@@ -3205,6 +3214,9 @@ def maybe_snap(content: dict[str, Any], state: dict[str, Any], char: dict[str, A
         prompt = (f"一张随手拍的手机照片，拍下此刻眼前的景象：{loc.get('name', '')}，"
                   f"{(loc.get('detail') or '')[:140]}。与这句话有关：{(gist or '')[:60]}。"
                   "手机摄影质感，自然光影，轻微晃动与噪点，写实，画面里没有文字或水印")
+    _art = art_style_of(content)
+    if _art:
+        prompt += f"。画面基调：{_art}"
     return {"url": url, "prompt": prompt}
 
 
@@ -6428,6 +6440,15 @@ def run_turn_stream(
                        if _zh else
                        f"[Hunter ledger — law] {_hname} is at [{_tloc}], alert: {_alab}. "
                        f"{_where}Its every appearance is heard before it is seen.")
+        # 😨 dread turns tighten the pen: when it is close, the prose itself must hold
+        # its breath — anticipation is the horror, and labels break the spell
+        if band == "here" or (band == "near" and int(th["alert"]) >= 2):
+            threat_line += (("【本轮文笔收紧】短句。听觉与触觉先行。日常物写出错位感。"
+                             "不解释，不点破，不用「恐怖、诡异、可怕」这类标签词——"
+                             "让读者自己后颈发凉。") if _zh else
+                            (" [Tighten the prose this turn: short sentences; sound and "
+                             "touch before sight; no explaining, no mood labels like "
+                             "'creepy' — let the reader's own neck prickle.]"))
         threat_view = {"name": _hname, "band": band, "alert": int(th["alert"])}
 
     # ━━━━━━━━━━ 管线 P4 · 解锁评估与回归问候 ━━━━━━━━━━
