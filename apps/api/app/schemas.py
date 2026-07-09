@@ -428,6 +428,7 @@ class RunState(BaseModel):
     clock: Optional[dict[str, Any]] = None  # ⏳ {day,slot,label,deadline?} (None = no clock)
     promises: list[dict[str, Any]] = []  # 🤝 open appointments [{name,what,when,place,romantic}]
     phone_unread: int = 0  # 📱 unread incoming messages (badge)
+    phone_on: bool = True  # 📵 false = this story has no signal (texting/calls/mail dead)
     verdict: Optional[dict[str, Any]] = None  # 🔍 the case-closing panel (None until unlocked)
     cultivation: Optional[dict[str, Any]] = None  # ⚡ {name, rank, prog, ready} story ladder
     attrs: Optional[dict[str, int]] = None  # 🎯 五维 {力量,敏捷,体质,心思,气运} 1~10

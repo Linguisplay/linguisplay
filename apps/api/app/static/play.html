@@ -284,6 +284,15 @@
 /* dread mode: the room darkens at the edges while it is close */
 #dread { position:fixed; inset:0; z-index:40; pointer-events:none; opacity:0; transition:opacity 1.8s ease; background: radial-gradient(ellipse at center, transparent 46%, rgba(4,2,8,.72) 100%); }
 body.dread #dread { opacity:1; }
+/* ⏳ world-forging overlay: entering a story costs real seconds of LLM work — say so,
+   or impatient fingers mint duplicate runs (prod exhibit: 6 runs in 11 seconds) */
+#loadov { position: fixed; inset: 0; z-index: 90; background: rgba(6,6,12,.84); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; }
+#loadov .lspin { width: 34px; height: 34px; border-radius: 50%; border: 3px solid #34344a; border-top-color: #8ea2ff; animation: lspin .9s linear infinite; }
+@keyframes lspin { to { transform: rotate(360deg); } }
+#loadov .ltitle { font-size: 15px; font-weight: 700; }
+#loadov .lsub { font-size: 12.5px; color: #8b93a7; text-align: center; line-height: 1.7; padding: 0 30px; }
+/* 📵 a story with no signal keeps its phone apps visible but dead */
+.papp.poff { opacity: .38; filter: grayscale(1); }
 #pressurebar .ptrack { flex:1; height:7px; border-radius:5px; background:#00000055; overflow:hidden; }
 #pressurebar .pfill { display:block; height:100%; border-radius:5px; transition:width .6s ease, background .6s ease; }
 .dice { align-self:center; font-size:13px; color:#d8cfae; background:#1e1b12ee; border:1px solid #4a4224; border-radius:12px; padding:7px 16px; }
@@ -810,22 +819,51 @@ function backToStories() { hide("role"); show("pick"); }
 function editCurrentStory() { if (currentStoryId) location.href = `/studio?story=${currentStoryId}`; }
 
 // ── run lifecycle ─────────────────────────────────────
+// ⏳ forging a world takes real seconds (the opening is being written) — block the
+// UI and SAY so, or impatient fingers mint duplicate runs (prod: 6 runs in 11s)
+let startingRun = false;
+function showLoading(title, sub) {
+  let ov = document.getElementById("loadov");
+  if (!ov) { ov = document.createElement("div"); ov.id = "loadov"; document.body.appendChild(ov); }
+  ov.innerHTML = `<div class="lspin"></div><div class="ltitle">${title}</div><div class="lsub">${sub || ""}</div>`;
+}
+function hideLoading() { const ov = document.getElementById("loadov"); if (ov) ov.remove(); }
 async function startRun(storyId, mode="character", playerCharacterId=null, playerCharacterName=null) {
-  const run = await j("/runs", { method:"POST", body: JSON.stringify({
-    story_id: storyId, persona_id: personaId, mode, player_character_id: playerCharacterId,
-    perk: chosenPerk, carry_card_id: chosenCarry,
-    worldview: ((document.getElementById("wvInput") || {}).value || "").trim(),
-    powers: ((document.getElementById("wvPowers") || {}).value || "").trim(),
-    mature: !!(document.getElementById("wvMature") || {}).checked }) });
-  if ((document.getElementById("wvMature") || {}).checked) pushToast(B("🔞 本局已开启成人模式", "🔞 Mature mode is on for this run"), "t-act", 400);
-  if (chosenPerk) pushToast(B(`🌱 二周目优势生效：${chosenPerk === "veteran" ? "故人" : "直觉"}`, `🌱 NG+ perk active: ${chosenPerk === "veteran" ? "Old Friend" : "Instinct"}`), "t-act", 400);
-  await enterRun(run);
+  if (startingRun) return;
+  startingRun = true;
+  showLoading(B("正在为你生成这个世界…", "Forging this world for you…"),
+              B("开场正在落笔，人物正在各就各位。<br>大约需要十几秒，不用重复点击。",
+                "The opening is being written; the cast is taking their places.<br>About 10–20 seconds — no need to click again."));
+  try {
+    const run = await j("/runs", { method:"POST", body: JSON.stringify({
+      story_id: storyId, persona_id: personaId, mode, player_character_id: playerCharacterId,
+      perk: chosenPerk, carry_card_id: chosenCarry,
+      worldview: ((document.getElementById("wvInput") || {}).value || "").trim(),
+      powers: ((document.getElementById("wvPowers") || {}).value || "").trim(),
+      mature: !!(document.getElementById("wvMature") || {}).checked }) });
+    if ((document.getElementById("wvMature") || {}).checked) pushToast(B("🔞 本局已开启成人模式", "🔞 Mature mode is on for this run"), "t-act", 400);
+    if (chosenPerk) pushToast(B(`🌱 二周目优势生效：${chosenPerk === "veteran" ? "故人" : "直觉"}`, `🌱 NG+ perk active: ${chosenPerk === "veteran" ? "Old Friend" : "Instinct"}`), "t-act", 400);
+    await enterRun(run);
+  } catch (e) {
+    pushToast("⚠️ " + escapeHtml(e.message || B("开局失败，请重试", "Failed to start — try again")), "t-press", 0);
+  } finally {
+    hideLoading(); startingRun = false;
+  }
 }
 // resume a previous run — pick up exactly where the story left off (the parting
 // cliffhanger is the last thing on screen; the cast greets you back on your next line)
 async function resumeRun(id) {
-  const run = await j(`/runs/${id}`);
-  await enterRun(run);
+  if (startingRun) return;
+  startingRun = true;
+  showLoading(B("正在回到你的故事…", "Returning to your story…"), "");
+  try {
+    const run = await j(`/runs/${id}`);
+    await enterRun(run);
+  } catch (e) {
+    pushToast("⚠️ " + escapeHtml(e.message || ""), "t-press", 0);
+  } finally {
+    hideLoading(); startingRun = false;
+  }
 }
 function fillTutorial() {
   const T = (sel, html) => { const el = document.querySelector(sel); if (el) el.innerHTML = html; };
@@ -895,6 +933,7 @@ async function enterRun(run) {
   let st0 = null;
   try { st0 = await j(`/stories/${run.story_id}`); mergeAvatars(st0.characters); } catch (e) {}
   isSandbox = !!(st0 && st0.sandbox && st0.sandbox.enabled);
+  phoneOn = !(run.state && run.state.phone_on === false);   // 📵 no-signal stories
   playMode = (run.state && run.state.mode) || "character";
   myName = (playMode === "character" && run.state && run.state.player_character_name) || B("我", "Me");
   runId = run.id;
@@ -1289,7 +1328,7 @@ async function openJournal() {
   translateNode(ov);
 }
 // ── 📱 小手机: messages / calendar / contacts / notes in one shell ──────────────
-let phoneUnread = 0, phoneDevice = "手机";
+let phoneUnread = 0, phoneDevice = "手机", phoneOn = true;
 function setPhoneBadge(n) {
   phoneUnread = Math.max(0, n | 0);
   const b = document.getElementById("phoneBadge");
@@ -1312,20 +1351,31 @@ function phoneShell(inner, title, backTo) {
   translateNode(ov);
   return ov;
 }
+function noSignal() {
+  pushToast(B("📵 没有信号。这个世界里，电波传不出去。", "📵 No signal — nothing gets out of this world."), "t-press", 0);
+}
 async function openPhone() {
   if (!runId) return;
   let inbox = { threads: [], unread: 0, device: phoneDevice };
   let mailbox = { mail: [], unread: 0 };
-  try { inbox = await j(`/runs/${runId}/phone`); } catch (e) {}
-  try { mailbox = await j(`/runs/${runId}/mail`); } catch (e) {}
+  if (phoneOn) {
+    try { inbox = await j(`/runs/${runId}/phone`); } catch (e) {}
+    try { mailbox = await j(`/runs/${runId}/mail`); } catch (e) {}
+  }
   phoneDevice = inbox.device || "手机";
   setPhoneBadge((inbox.unread || 0) + (mailbox.unread || 0));
   const msgBadge = inbox.unread ? `<span class="appdot">${inbox.unread > 9 ? "9+" : inbox.unread}</span>` : "";
   const mailBadge = mailbox.unread ? `<span class="appdot">${mailbox.unread > 9 ? "9+" : mailbox.unread}</span>` : "";
-  const inner = `<div class="papps">
-    <div class="papp" onclick="openInbox()">💬${msgBadge}<small>信息</small></div>
-    <div class="papp" onclick="openMailbox()">📮${mailBadge}<small>信箱</small></div>
-    <div class="papp" onclick="openContacts()">👥<small>通讯录</small></div>
+  // 📵 a no-signal story keeps its comm apps visible but DEAD — the silence is diegetic
+  const comm = phoneOn
+    ? `<div class="papp" onclick="openInbox()">💬${msgBadge}<small>信息</small></div>
+       <div class="papp" onclick="openMailbox()">📮${mailBadge}<small>信箱</small></div>
+       <div class="papp" onclick="openContacts()">👥<small>通讯录</small></div>`
+    : `<div class="papp poff" onclick="noSignal()">💬<small>信息</small></div>
+       <div class="papp poff" onclick="noSignal()">📮<small>信箱</small></div>
+       <div class="papp poff" onclick="noSignal()">👥<small>通讯录</small></div>`;
+  const inner = `${phoneOn ? "" : `<div class="mhint">📵 ${B("没有信号", "No signal")}</div>`}<div class="papps">
+    ${comm}
     ${curMoney != null ? `<div class="papp" onclick="openMarket()">🛒<small>集市</small></div>` : ""}
     <div class="papp" onclick="openAlbum()">📸<small>回忆册</small></div>
     <div class="papp" onclick="openBag()">🎒<small>背包</small></div>

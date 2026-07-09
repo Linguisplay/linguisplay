@@ -175,6 +175,7 @@ def _to_run(r: RunModel) -> Run:
             clock=runtime.clock_view(r.pinned_content or {}, st),
             promises=runtime.promises_view(r.pinned_content or {}, st),
             phone_unread=runtime.phone_total_unread(r.pinned_content or {}, st),
+            phone_on=runtime.phone_enabled(r.pinned_content or {}),
             verdict=runtime.verdict_view(r.pinned_content or {}, st),
             cultivation=runtime.cult_view(r.pinned_content or {}, st),
         ),
