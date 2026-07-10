@@ -713,6 +713,14 @@ async function afterAuth() {
   if (uiLang === "en" && myName === "我") myName = "Me";
   const page = await j("/stories");
   stories.innerHTML = "";
+  // 🎀 galgame 书架入口: 自制可玩本子的统一门面 (/gal)
+  const galCard = document.createElement("div");
+  galCard.className = "card runcard";
+  galCard.style.cssText = "margin:8px 0; cursor:pointer";
+  galCard.innerHTML = `<b>🎀 Galgame 书架</b> <span class="muted">` +
+    `${B("自己做的可玩本子都在这里 →", "Your playable galgames →")}</span>`;
+  galCard.onclick = () => location.href = "/gal";
+  stories.appendChild(galCard);
   // 继续你的故事: existing runs come FIRST — the relationships you built are the game
   try {
     const runs = await j("/runs");

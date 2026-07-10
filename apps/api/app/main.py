@@ -70,6 +70,12 @@ def studio_page():
     return FileResponse(os.path.join(_STATIC, "studio.html"), headers=_NO_CACHE)
 
 
+@app.get("/gal", include_in_schema=False)
+def gal_shelf_page():
+    """🎀 galgame 书架: 所有本子一屏见封面 — 玩/建/进度的统一入口."""
+    return FileResponse(os.path.join(_STATIC, "galshelf.html"), headers=_NO_CACHE)
+
+
 @app.get("/maker", include_in_schema=False)
 def maker_page():
     """🎀 galgame 生成器: 贴故事 → 建造 → 游玩 (docs/galgame-maker.md)."""

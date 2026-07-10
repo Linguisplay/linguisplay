@@ -95,6 +95,11 @@ def my_works(user: User = Depends(current_user), db: Session = Depends(get_db)):
     return [{"id": s.id, "title": s.title,
              "status": (s.gal or {}).get("status"),
              "progress": (s.gal or {}).get("progress", ""),
+             "chapters": len((((s.gal or {}).get("script") or {})
+                              .get((s.gal or {}).get("protagonist_id")) or {})
+                             .get("chapters") or []),
+             "endings": len((s.gal or {}).get("endings") or []),
+             "cgs": len((((s.gal or {}).get("manifest") or {}).get("cgs")) or []),
              "cover": f"/scene/gal/{s.id}/cover.jpg"
              if ((s.gal or {}).get("manifest") or {}).get("cover") else None}
             for s in rows]

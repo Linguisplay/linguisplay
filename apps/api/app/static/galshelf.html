@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>🎀 我的 Galgame 书架 · LinguisPlay</title>
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body { background: #0b0b12; color: #e7eaf3;
+         font: 15px/1.7 system-ui, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 26px 16px 60px; }
+  h1 { font-size: 20px; }
+  .muted { color: #8b93a7; font-size: 13px; }
+  .top { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
+  .top a { color: #8ea2ff; text-decoration: none; font-size: 14px; }
+  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+  .book { background: #14141f; border: 1px solid #2a2a3a; border-radius: 14px;
+          overflow: hidden; cursor: pointer; transition: border-color .15s; }
+  .book:hover { border-color: #8ea2ff; }
+  .book .cov { width: 100%; aspect-ratio: 9/16; object-fit: cover; display: block;
+               background: linear-gradient(160deg, #1a1a2c, #0e0e16); }
+  .book .nocov { width: 100%; aspect-ratio: 9/16; display: flex; align-items: center;
+                 justify-content: center; font-size: 34px;
+                 background: linear-gradient(160deg, #1a1a2c, #0e0e16); }
+  .book .info { padding: 10px 12px 12px; }
+  .book b { font-size: 14px; display: block; margin-bottom: 4px; }
+  .st { font-size: 11px; padding: 1px 8px; border-radius: 7px; background: #232336; }
+  .st.ready { color: #7ddf9a; } .st.failed { color: #ff9d9d; } .st.building { color: #ffd479; }
+  .new { display: flex; align-items: center; justify-content: center; flex-direction: column;
+         gap: 8px; border: 1px dashed #3a3a52; border-radius: 14px; min-height: 260px;
+         color: #8b93a7; cursor: pointer; }
+  .new:hover { border-color: #8ea2ff; color: #8ea2ff; }
+  .new span { font-size: 30px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>🎀 我的 Galgame 书架</h1>
+    <a href="/maker">＋ 造一本新的</a>
+    <a href="/play">← 回主站</a>
+  </div>
+  <div id="grid" class="muted">加载中…</div>
+</div>
+<script>
+const API = "/api/v1";
+async function j(path, opt = {}) {
+  const r = await fetch(API + path, { headers: { "Content-Type": "application/json" }, ...opt });
+  if (!r.ok) { let d = {}; try { d = await r.json(); } catch (e) {} throw new Error(d.detail || r.status); }
+  return r.json();
+}
+const got = (key, id) => { try { return JSON.parse(localStorage.getItem(key + id) || "[]").length; } catch (e) { return 0; } };
+async function load() {
+  const grid = document.getElementById("grid");
+  let rows;
+  try { rows = await j("/gal/mine"); }
+  catch (e) {
+    grid.innerHTML = e.message === "401"
+      ? `请先去 <a href="/play" style="color:#8ea2ff">/play</a> 登录，再回到书架`
+      : "加载失败，刷新试试";
+    return;
+  }
+  grid.classList.remove("muted");
+  grid.innerHTML = "";
+  rows.forEach(w => {
+    const b = document.createElement("div");
+    b.className = "book";
+    const cls = w.status === "ready" ? "ready" : w.status === "failed" ? "failed" : "building";
+    const lab = { ready: "可游玩", failed: "建造失败" }[w.status] || "建造中…";
+    // 进度账本: 结局解锁 + CG 收集，都记在本地既读账本里
+    let prog = "";
+    if (w.status === "ready") {
+      const bits = [`${w.chapters} 章`];
+      if (w.endings) bits.push(`结局 ${got("gal_end_", w.id)}/${w.endings}`);
+      if (w.cgs) bits.push(`CG ${got("gal_cg_", w.id)}/${w.cgs}`);
+      prog = bits.join(" · ");
+    } else prog = w.progress || "";
+    b.innerHTML = (w.cover ? `<img class="cov" src="${w.cover}" loading="lazy">`
+                           : `<div class="nocov">🎀</div>`) +
+      `<div class="info"><b>${w.title}</b>` +
+      `<span class="st ${cls}">${lab}</span>` +
+      `<div class="muted" style="margin-top:6px">${prog}</div></div>`;
+    b.onclick = () => {
+      if (w.status === "ready") location.href = `/galplay?work=${w.id}`;
+      else if (w.status === "failed") {
+        j(`/gal/${w.id}/rebuild`, { method: "POST" }).then(load).catch(e => alert("⚠️ " + e.message));
+      } else location.href = "/maker";
+    };
+    grid.appendChild(b);
+  });
+  const add = document.createElement("div");
+  add.className = "new";
+  add.innerHTML = "<span>＋</span>造一本新的";
+  add.onclick = () => location.href = "/maker";
+  grid.appendChild(add);
+}
+load();
+</script>
+</body>
+</html>
