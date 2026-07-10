@@ -18,6 +18,10 @@ node_modules/
 dist/
 *.local
 
+# runtime artifacts
+apps/api/app/static/scene/avatar/
+apps/api/metrics.jsonl
+
 # os / editor
 .DS_Store
 .idea/
