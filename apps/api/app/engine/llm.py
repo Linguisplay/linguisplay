@@ -92,16 +92,17 @@ class MockLLM:
                      {"who": other, "text": "「有件事想问你。」", "expr": "常态", "scene": s1},
                      {"who": None, "text": "夜色沉下来。", "scene": s1, "cg": True},
                      {"who": other, "text": "「明天，还会来吗？」", "expr": "哀", "scene": s1},
-                     # 选择点: options move the ledger, branches rejoin in-scene
-                     {"options": [
-                         {"text": "「明天见。」", "fx": {other: 2},
-                          "beats": [{"who": other, "text": "「一言为定。」", "expr": "喜",
-                                     "scene": s1},
-                                    {"who": None, "text": "他笑了。", "scene": s1}]},
-                         {"text": "转身离开", "fx": {other: -1},
-                          "beats": [{"who": None, "text": "你没有回头。", "scene": s1}]}]},
                      {"who": None, "text": "你没有回答。", "scene": s1}]
-            return {"beats": beats, "summary": "天台上的一问，没有答案。"}
+            # production contract shape: choices ride a separate top-level array
+            # with an insertion anchor; the engine splices them into the stream
+            choices = [{"after": 7, "options": [
+                {"text": "「明天见。」", "fx": {other: 2},
+                 "beats": [{"who": other, "text": "「一言为定。」", "expr": "喜", "scene": s1},
+                           {"who": None, "text": "他笑了。", "scene": s1}]},
+                {"text": "转身离开", "fx": {other: -1},
+                 "beats": [{"who": None, "text": "你没有回头。", "scene": s1}]}]}]
+            return {"beats": beats, "choices": choices,
+                    "summary": "天台上的一问，没有答案。"}
         if prompt.get("gal_endings"):
             s1 = ((prompt.get("scenes") or [{}])[0]).get("id", "s1")
             t = (prompt.get("target") or {}).get("id") or ""

@@ -185,37 +185,71 @@ def compile_chapter(llm, gal: dict[str, Any], ch_index: int,
     choice-agnostic — one compile serves every player."""
     chapter = gal["chapters"][ch_index - 1]
     total = len(gal["chapters"])
-    out = llm.generate({
-        "gal_compile": True,
-        "source": (gal.get("source_text") or "")[:MAX_SOURCE_CHARS],
-        "chapter": chapter, "chapter_count": total,
-        "characters": gal["characters"], "scenes": gal["scenes"],
-        "protagonist_id": gal["protagonist_id"],
-        "prior_summary": prior_summary[:600],       # 编译记忆
-        "mature": mature,                            # 🔞 rides into the craft block
-        "target_beats": TARGET_BEATS_PER_CHAPTER,
-    }) or {}
     char_ids = {c["id"] for c in gal["characters"]}
     scene_ids = {s["id"] for s in gal["scenes"]}
     targets = _fx_targets(gal)
-    last_scene = gal["scenes"][0]["id"]
     beats: list[dict] = []
+    out: dict = {}
     n_beat = n_choice = 0
-    for raw in out.get("beats") or []:
-        if not isinstance(raw, dict):
-            continue
-        if raw.get("options"):
+    # one measured retry: field-tested (HP build, DeepSeek) — the model can return a
+    # clean chapter with ZERO choices despite the contract; a sharpened re-ask fixes it
+    for attempt in (0, 1):
+        out = llm.generate({
+            "gal_compile": True,
+            "source": (gal.get("source_text") or "")[:MAX_SOURCE_CHARS],
+            "chapter": chapter, "chapter_count": total,
+            "chapters_all": gal["chapters"],   # 全书章节表: each chapter knows its slice
+            "characters": gal["characters"], "scenes": gal["scenes"],
+            "protagonist_id": gal["protagonist_id"],
+            "prior_summary": prior_summary[:600],       # 编译记忆
+            "mature": mature,                            # 🔞 rides into the craft block
+            "choice_retry": attempt > 0,                 # 上一把忘了选择点 → 点名重打
+            "target_beats": TARGET_BEATS_PER_CHAPTER,
+        }) or {}
+        last_scene = gal["scenes"][0]["id"]
+        beats, n_beat, n_choice = [], 0, 0
+        for raw in out.get("beats") or []:
+            if not isinstance(raw, dict):
+                continue
+            if raw.get("options"):       # inline choice shape — tolerated (belt)
+                nc = _norm_choice(raw, ch_index, n_choice + 1, char_ids, scene_ids,
+                                  last_scene, targets)
+                if nc:
+                    n_choice += 1
+                    beats.append(nc)
+                continue
+            nb = _norm_beat(raw, ch_index, n_beat + 1, char_ids, scene_ids, last_scene)
+            if nb:
+                n_beat += 1
+                last_scene = nb["scene"]
+                beats.append(nb)
+        # production contract shape: top-level "choices" with an insertion point —
+        # uniform beats + a separate required array is what models actually honor
+        for raw in (out.get("choices") or [])[:2]:
+            if not isinstance(raw, dict):
+                continue
+            try:
+                pos = int(raw.get("after"))
+            except (TypeError, ValueError):
+                pos = 0
+            if pos < 1 or pos > n_beat:
+                pos = max(1, round(n_beat * 0.6))   # bad anchor → 60% into the chapter
+            cnt, idx, scn = 0, len(beats), gal["scenes"][0]["id"]
+            for i, e in enumerate(beats):
+                if e.get("type") == "choice":
+                    continue
+                cnt += 1
+                scn = e["scene"]
+                if cnt == pos:
+                    idx = i + 1
+                    break
             nc = _norm_choice(raw, ch_index, n_choice + 1, char_ids, scene_ids,
-                              last_scene, targets)
+                              scn, targets)
             if nc:
                 n_choice += 1
-                beats.append(nc)
-            continue
-        nb = _norm_beat(raw, ch_index, n_beat + 1, char_ids, scene_ids, last_scene)
-        if nb:
-            n_beat += 1
-            last_scene = nb["scene"]
-            beats.append(nb)
+                beats.insert(idx, nc)
+        if n_beat >= 8 and (n_choice > 0 or ch_index >= total):
+            break
     if n_beat < 8:
         raise ValueError(f"第{ch_index}章编译失败：只产出 {n_beat} 拍")
     if n_choice == 0 and ch_index < total:

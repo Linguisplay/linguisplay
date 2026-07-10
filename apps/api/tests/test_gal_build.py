@@ -47,12 +47,13 @@ def test_compile_obeys_contract_shape():
                for b in gal._walk_beats(beats) if b["who"] == "c1")
 
 
-def test_compile_normalizes_choices():
+def test_compile_normalizes_and_splices_choices():
     beats, _ = gal.compile_chapter(MockLLM(), _parsed(), 1)
     choices = [b for b in beats if b.get("type") == "choice"]
     assert len(choices) == 1
     c = choices[0]
     assert c["id"] == "c1q1"
+    assert beats[7] is c                     # spliced right after the 7th normal beat
     assert len(c["options"]) == 2
     o1, o2 = c["options"]
     assert o1["fx"] == {"c2": 2} and o2["fx"] == {"c2": -1}   # ledger moves, clamped
@@ -60,15 +61,43 @@ def test_compile_normalizes_choices():
     assert o2["beats"][0]["id"] == "c1q1o2b01"
 
 
+def test_inline_choice_shape_still_tolerated():
+    class InlineLLM(MockLLM):
+        def generate(self, prompt):
+            out = super().generate(prompt)
+            if prompt.get("gal_compile"):
+                ch = out.pop("choices")[0]
+                out["beats"].insert(7, {"options": ch["options"]})
+            return out
+    beats, _ = gal.compile_chapter(InlineLLM(), _parsed(), 1)
+    assert sum(1 for b in beats if b.get("type") == "choice") == 1
+
+
+def test_missing_choices_retried_once():
+    # field case (HP build, DeepSeek): a clean chapter with zero choices — the
+    # compiler re-asks once with the sharpened reminder before failing
+    class ForgetOnceLLM(MockLLM):
+        calls = 0
+        def generate(self, prompt):
+            out = super().generate(prompt)
+            if prompt.get("gal_compile"):
+                ForgetOnceLLM.calls += 1
+                if not prompt.get("choice_retry"):
+                    out.pop("choices")
+            return out
+    beats, _ = gal.compile_chapter(ForgetOnceLLM(), _parsed(), 1)
+    assert ForgetOnceLLM.calls == 2
+    assert any(b.get("type") == "choice" for b in beats)
+
+
 def test_choice_fx_backfilled_when_model_forgets():
     class ForgetfulLLM(MockLLM):
         def generate(self, prompt):
             out = super().generate(prompt)
             if prompt.get("gal_compile"):
-                for e in out["beats"]:
-                    if e.get("options"):
-                        for o in e["options"]:
-                            o["fx"] = {}
+                for ch in out["choices"]:
+                    for o in ch["options"]:
+                        o["fx"] = {}
             return out
     beats, _ = gal.compile_chapter(ForgetfulLLM(), _parsed(), 1)
     c = next(b for b in beats if b.get("type") == "choice")
@@ -81,7 +110,7 @@ def test_nonfinal_chapter_without_choice_fails_loud():
         def generate(self, prompt):
             out = super().generate(prompt)
             if prompt.get("gal_compile"):
-                out["beats"] = [b for b in out["beats"] if not b.get("options")]
+                out.pop("choices", None)
             return out
     g = _parsed()
     with pytest.raises(ValueError):
