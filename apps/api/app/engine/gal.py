@@ -357,8 +357,63 @@ def sheet_prompt(char: dict, world: str, art: str) -> str:
             "画面里没有任何文字、编号或分隔线" + (f"。画面基调：{art}" if art else ""))
 
 
-def crop_sheet(img_bytes: bytes) -> list[bytes]:
-    """Split a 2×2 expression sheet into 4 PNGs (order: 常态/喜/怒/哀 = TL/TR/BL/BR)."""
+def _find_figures(im, min_area_frac: float = 0.02) -> list[tuple] | None:
+    """Locate the four figures on a matted (RGBA) expression sheet by connected
+    alpha components — grid-agnostic, so an offset or overflowing figure keeps
+    its head and a neighbor's sliver never rides along (实弹伤: fixed quadrant
+    cuts sliced 赫敏's skull and dragged 马尔福's twin's scalp in). Returns four
+    padded full-res bboxes ordered TL/TR/BL/BR, or None when the figures don't
+    separate cleanly (caller falls back to fixed quadrants)."""
+    from collections import deque
+    W, H = im.size
+    scale = max(1, min(W, H) // 180)
+    small = im.split()[-1].resize((max(1, W // scale), max(1, H // scale)))
+    w, h = small.size
+    px = list(small.getdata())
+    seen = bytearray(w * h)
+    comps = []
+    for start in range(w * h):
+        if seen[start] or px[start] <= 16:
+            seen[start] = 1
+            continue
+        q = deque([start])
+        seen[start] = 1
+        area = sx = sy = 0
+        x0 = y0 = 10 ** 9
+        x1 = y1 = -1
+        while q:
+            i = q.popleft()
+            x, y = i % w, i // w
+            area += 1
+            sx += x
+            sy += y
+            x0, x1 = min(x0, x), max(x1, x)
+            y0, y1 = min(y0, y), max(y1, y)
+            for j, ok in ((i - 1, x > 0), (i + 1, x < w - 1),
+                          (i - w, y > 0), (i + w, y < h - 1)):
+                if ok and not seen[j] and px[j] > 16:
+                    seen[j] = 1
+                    q.append(j)
+        if area >= min_area_frac * w * h:
+            comps.append((area, sx / area, sy / area, x0, y0, x1, y1))
+    comps.sort(reverse=True)
+    comps = comps[:4]
+    if len(comps) < 4:
+        return None
+    for _, _, _, x0, y0, x1, y1 in comps:
+        if (x1 - x0) > 0.62 * w or (y1 - y0) > 0.62 * h:
+            return None      # two figures touching merged into one blob → bail
+    comps.sort(key=lambda c: c[2])                       # by centroid y
+    ordered = (sorted(comps[:2], key=lambda c: c[1])     # top row: TL, TR
+               + sorted(comps[2:], key=lambda c: c[1]))  # bottom row: BL, BR
+    pad_x, pad_y = W // 50, H // 50
+    return [(max(0, x0 * scale - pad_x), max(0, y0 * scale - pad_y),
+             min(W, (x1 + 1) * scale + pad_x), min(H, (y1 + 1) * scale + pad_y))
+            for _, _, _, x0, y0, x1, y1 in ordered]
+
+
+def _quad_crop(img_bytes: bytes) -> list[bytes]:
+    """The naive fixed-quadrant split (fallback when figures don't separate)."""
     from PIL import Image
     im = Image.open(io.BytesIO(img_bytes)).convert("RGB")
     w, h = im.size
@@ -370,6 +425,27 @@ def crop_sheet(img_bytes: bytes) -> list[bytes]:
         im.crop(box).save(buf, format="PNG")
         out.append(buf.getvalue())
     return out
+
+
+def crop_sheet(img_bytes: bytes) -> list[bytes]:
+    """Expression sheet → 4 transparent PNGs (order: 常态/喜/怒/哀 = TL/TR/BL/BR).
+    v2 (格间越界根治): rembg the WHOLE sheet first, then cut each figure along
+    its own silhouette bbox. Degrades to fixed quadrants + per-piece rembg."""
+    try:
+        from PIL import Image
+        from rembg import remove
+        full = Image.open(io.BytesIO(remove(img_bytes))).convert("RGBA")
+        boxes = _find_figures(full)
+        if boxes:
+            out = []
+            for box in boxes:
+                buf = io.BytesIO()
+                full.crop(box).save(buf, format="PNG")
+                out.append(buf.getvalue())
+            return out
+    except Exception:
+        pass
+    return [debg(p) for p in _quad_crop(img_bytes)]
 
 
 def debg(png_bytes: bytes) -> bytes:
@@ -486,9 +562,9 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
                     man["missing"].append(f"sprite:{c['id']}")
                     continue
                 try:
-                    pieces = crop_sheet(img)
+                    pieces = crop_sheet(img)   # crop_sheet owns the matting now
                     for expr, piece in zip(EXPRESSIONS, pieces):
-                        (wdir / f"{c['id']}_{expr}.png").write_bytes(debg(piece))
+                        (wdir / f"{c['id']}_{expr}.png").write_bytes(piece)
                     man["sprites"][c["id"]] = list(EXPRESSIONS)
                 except Exception:
                     man["missing"].append(f"sprite:{c['id']}")
