@@ -28,7 +28,11 @@
                filter: brightness(.45) drop-shadow(0 6px 22px rgba(0,0,0,.55)); }
   .sp.front.dim { filter: brightness(.72) drop-shadow(0 6px 22px rgba(0,0,0,.55)); }
   .off { opacity: 0 !important; }
+  /* 📸 CG 全屏插画: covers the stage above sprites, below text & controls */
+  #gcg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+         z-index: 4; transition: opacity .5s ease; }
   #gbox { position: absolute; left: 3%; right: 3%; bottom: 2.6%; min-height: 26%;
+          z-index: 5;
           background: rgba(8,8,16,.82); border: 1px solid #3a3a52; border-radius: 14px;
           padding: 26px 16px 18px; backdrop-filter: blur(4px); }
   #gname { position: absolute; top: -13px; left: 12px; background: #232346;
@@ -76,6 +80,20 @@
   #glog .l { margin-bottom: 10px; font-size: 14px; }
   #glog .l b { color: #ffd479; margin-right: 6px; }
   #glog .l.pick { color: #ffd479; }
+  /* 📖 图鉴: CG 回忆册 + 结局图鉴 overlays */
+  .book { position: absolute; inset: 0; z-index: 11; display: none; overflow-y: auto;
+          background: rgba(5,5,10,.96); padding: 20px 14px; }
+  .book h3 { font-size: 16px; letter-spacing: 3px; margin: 4px 0 14px; color: #ffd479; }
+  #ggrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  #ggrid img, #ggrid .lock { width: 100%; aspect-ratio: 9/16; object-fit: cover;
+          border-radius: 8px; border: 1px solid #3a3a52; cursor: pointer; }
+  #ggrid .lock { display: flex; align-items: center; justify-content: center;
+          background: #10101c; color: #4a4a66; font-size: 24px; cursor: default; }
+  #gedb .e { padding: 12px 8px; border-bottom: 1px dashed #2a2a3a; font-size: 15px; }
+  #gedb .e.got { color: #ffd479; }
+  #gview { position: absolute; inset: 0; z-index: 12; display: none;
+           background: #000; cursor: pointer; }
+  #gview img { width: 100%; height: 100%; object-fit: contain; }
 </style>
 </head>
 <body>
@@ -83,12 +101,24 @@
   <img id="gbg" alt="">
   <img id="gsp0" class="sp off" alt="">
   <img id="gsp1" class="sp off" alt="">
+  <img id="gcg" class="off" alt="">
   <div id="gctl">
     <span id="btnAuto" onclick="event.stopPropagation();toggleAuto()">▶ 自动</span>
+    <span id="btnSkip" onclick="event.stopPropagation();toggleSkip()">⏩ 跳过</span>
+    <span id="btnBgm" onclick="event.stopPropagation();bgmToggle()">🔊</span>
     <span onclick="event.stopPropagation();toggleLog()">📖</span>
     <span onclick="event.stopPropagation();location.href='/maker'">✕</span>
   </div>
   <div id="glog" onclick="event.stopPropagation();toggleLog()"></div>
+  <div id="ggal" class="book" onclick="event.stopPropagation()">
+    <h3>📸 CG 回忆册 <span style="float:right;cursor:pointer" onclick="closeBooks()">✕</span></h3>
+    <div id="ggrid"></div>
+  </div>
+  <div id="gedb" class="book" onclick="event.stopPropagation()">
+    <h3>🏁 结局图鉴 <span style="float:right;cursor:pointer" onclick="closeBooks()">✕</span></h3>
+    <div id="gends"></div>
+  </div>
+  <div id="gview" onclick="event.stopPropagation();this.style.display='none'"><img alt=""></div>
   <div id="gchoice"></div>
   <div id="gbox">
     <div id="gname" style="display:none"></div>
@@ -102,6 +132,8 @@
     <div class="muted" id="gtEnds"></div>
     <button onclick="event.stopPropagation();startGame(false)">开 始</button>
     <button id="btnCont" style="display:none" onclick="event.stopPropagation();startGame(true)">继 续</button>
+    <button id="btnGal" style="display:none" onclick="event.stopPropagation();openGallery()">📸 CG 回忆册</button>
+    <button id="btnEdb" style="display:none" onclick="event.stopPropagation();openEndbook()">🏁 结局图鉴</button>
   </div>
 </div>
 <script>
@@ -111,7 +143,68 @@ let W = null, sav = null, typing = false, autoOn = false, autoT = null, choosing
 const $ = id => document.getElementById(id);
 const SKEY = () => "gal_sav_" + workId;
 const EKEY = () => "gal_end_" + workId;
+const CGKEY = () => "gal_cg_" + workId;
+const RKEY = () => "gal_read_" + workId;
 const chapters = () => ((W.script[W.protagonist_id] || {}).chapters) || [];
+
+// 🎵 BGM: 情绪标签 → 主站曲库; 渐入渐出, 音量压低 (突然炸响是大忌)
+const BGM_MAP = { "平静": "daily", "温馨": "warm", "紧张": "tense",
+                  "悲伤": "sad", "激昂": "battle" };
+const BGM_VOL = 0.22;
+let bgm = null, bgmTrack = "", bgmOn = localStorage.getItem("gal_bgm") !== "off", fadeT = null;
+function bgmToggle() {
+  bgmOn = !bgmOn;
+  localStorage.setItem("gal_bgm", bgmOn ? "on" : "off");
+  $("btnBgm").classList.toggle("on", bgmOn);
+  if (!bgmOn && bgm) bgm.pause();
+  else if (bgm && bgmTrack) bgm.play().catch(() => {});
+}
+function setBgm(mood) {
+  const t = BGM_MAP[mood];
+  if (!t || t === bgmTrack) return;
+  bgmTrack = t;
+  if (!bgmOn) return;
+  if (!bgm) { bgm = new Audio(); bgm.loop = true; }
+  clearInterval(fadeT);
+  const start = () => {
+    bgm.src = `/scene/bgm/${t}.mp3`; bgm.volume = 0;
+    bgm.play().catch(() => {});
+    fadeT = setInterval(() => {
+      bgm.volume = Math.min(BGM_VOL, bgm.volume + 0.02);
+      if (bgm.volume >= BGM_VOL) clearInterval(fadeT);
+    }, 80);
+  };
+  if (bgm.src && !bgm.paused) {
+    fadeT = setInterval(() => {           // crossfade: out the old, in the new
+      bgm.volume = Math.max(0, bgm.volume - 0.03);
+      if (bgm.volume <= 0) { clearInterval(fadeT); start(); }
+    }, 60);
+  } else start();
+}
+
+// 📸 CG 解锁册 + 📖 既读账本
+function cgGot() { try { return JSON.parse(localStorage.getItem(CGKEY()) || "[]"); } catch (e) { return []; } }
+let readSet = new Set(), skipOn = false;
+try { readSet = new Set(JSON.parse(localStorage.getItem(RKEY()) || "[]")); } catch (e) {}
+function markRead(id) {
+  if (!id || readSet.has(id)) return;
+  readSet.add(id);
+  localStorage.setItem(RKEY(), JSON.stringify([...readSet]));
+}
+function toggleSkip() {
+  skipOn = !skipOn;
+  $("btnSkip").classList.toggle("on", skipOn);
+  if (skipOn && !typing && !choosing) next();
+}
+function setCg(b) {
+  const el = $("gcg");
+  if (!(b.cg && ((W.manifest || {}).cgs || []).includes(b.id))) { el.classList.add("off"); return; }
+  el.onerror = () => el.classList.add("off");
+  el.src = `/scene/gal/${workId}/cg_${b.id}.jpg`;
+  el.classList.remove("off");
+  const got = cgGot();
+  if (!got.includes(b.id)) { got.push(b.id); localStorage.setItem(CGKEY(), JSON.stringify(got)); }
+}
 
 async function boot() {
   if (!workId) { location.href = "/maker"; return; }
@@ -125,6 +218,46 @@ async function boot() {
   const n = (W.endings || []).length;
   if (n) $("gtEnds").textContent = `已解锁 ${unlocked().length}/${n} 个结局`;
   if (localStorage.getItem(SKEY()) !== null) $("btnCont").style.display = "";
+  if (((W.manifest || {}).cgs || []).length) $("btnGal").style.display = "";
+  if (n) $("btnEdb").style.display = "";
+}
+// 📸🏁 图鉴
+function openGallery() {
+  const got = cgGot();
+  $("ggrid").innerHTML = (W.manifest.cgs || []).map(id =>
+    got.includes(id)
+      ? `<img src="/scene/gal/${workId}/cg_${id}.jpg" onclick="viewCg('${id}')">`
+      : `<div class="lock">？</div>`).join("");
+  $("ggal").style.display = "block";
+}
+function openEndbook() {
+  const got = unlocked();
+  $("gends").innerHTML = (W.endings || []).map(e =>
+    got.includes(e.id) ? `<div class="e got">✦ ${e.title}</div>`
+                       : `<div class="e">？？？</div>`).join("")
+    + `<div class="muted" style="margin-top:12px">${endingHint(got)}</div>`;
+  $("gedb").style.display = "block";
+}
+function closeBooks() { $("ggal").style.display = "none"; $("gedb").style.display = "none"; }
+function viewCg(id) {
+  const v = $("gview");
+  v.querySelector("img").src = `/scene/gal/${workId}/cg_${id}.jpg`;
+  v.style.display = "block";
+}
+// 🧭 结局回收导航: which chapters' choices move the route ledger
+function endingHint(got) {
+  const n = (W.endings || []).length;
+  if (!n || got.length >= n) return "";
+  const tgt = ((W.endings.find(e => (e.cond || {}).char) || {}).cond || {}).char;
+  if (!tgt) return "";
+  const chs = [];
+  chapters().forEach((list, k) => {
+    if (list.some(e => e.type === "choice" &&
+        (e.options || []).some(o => (o.fx || {})[tgt] !== undefined))) chs.push(k + 1);
+  });
+  return chs.length
+    ? `分岔藏在第 ${chs.join("、")} 章的选择里，开 ⏩ 已读跳过快速重走`
+    : "";
 }
 function unlocked() {
   try { return JSON.parse(localStorage.getItem(EKEY()) || "[]"); } catch (e) { return []; }
@@ -185,6 +318,7 @@ let stageSlots = [null, null], stageSpeaker = -1;
 function clearCast() {
   stageSlots = [null, null]; stageSpeaker = -1;
   spEls().forEach(el => el.classList.add("off"));
+  $("gcg").classList.add("off");
 }
 function setSrc(el, cid, expr) {
   const want = `/scene/gal/${workId}/${cid}_${expr || "常态"}.png`;
@@ -241,14 +375,26 @@ async function typeText(el, text) {
 async function showBeat(b) {
   setBg(b.scene);
   setStage(b);
+  setCg(b);
+  if (b.bgm) setBgm(b.bgm);
+  // ⏩ 既读跳过: synthetic cards (no id) count as read so skip flows through them
+  const seen = b.id ? readSet.has(b.id) : true;
+  markRead(b.id);
   const nm = $("gname"), tx = $("gtext");
   if (b.who) { nm.textContent = b.who === W.protagonist_id ? "你" : nameOf(b.who); nm.style.display = ""; tx.className = ""; }
   else { nm.style.display = "none"; tx.className = "narr"; }
   $("gnext").style.visibility = "hidden";
-  await typeText(tx, b.text);
+  if (skipOn && seen) { typing = false; tx.textContent = b.text || ""; }
+  else {
+    if (skipOn) { skipOn = false; $("btnSkip").classList.remove("on"); }  // 未读处停跳
+    await typeText(tx, b.text);
+  }
   if (!choosing) $("gnext").style.visibility = "visible";
   logAdd(b);
-  if (autoOn && !choosing) { clearTimeout(autoT); autoT = setTimeout(next, 1100 + (b.text || "").length * 60); }
+  clearTimeout(autoT);
+  if (choosing) return;
+  if (skipOn && seen) autoT = setTimeout(next, 130);
+  else if (autoOn) autoT = setTimeout(next, 1100 + (b.text || "").length * 60);
 }
 
 function next() {
@@ -324,8 +470,9 @@ function finish() {
   localStorage.removeItem(SKEY()); $("btnCont").style.display = "none";
   const n = (W.endings || []).length;
   $("gendT").textContent = e ? `结局 · ${e.title}` : "全剧终";
+  const hint = endingHint(got);
   $("gendS").textContent = n ? `已解锁 ${got.length}/${n} 个结局` +
-    (got.length < n ? "，另一个藏在不同的选择里" : "") : "";
+    (hint ? "；" + hint : "") : "";
   $("gend").style.display = "flex";
 }
 function finishSimple(t) {

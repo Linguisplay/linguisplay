@@ -384,6 +384,40 @@ def char_seed(work_id: str, cid: str) -> int:
     return int.from_bytes(h[:4], "big") % (2 ** 31 - 1)
 
 
+def cg_prompt(gal: dict[str, Any], beat: dict, art: str) -> str:
+    """CG 全屏插画 (blueprint §11🔴: the reward currency is the CG, not the
+    sprite). 单人/空镜 doctrine: multi-person consistency is poor, so the CG
+    frames the beat's speaker alone — or an atmosphere shot when the beat
+    belongs to the narrator or the faceless protagonist."""
+    scene = next((s for s in gal.get("scenes") or [] if s["id"] == beat.get("scene")), {})
+    ch = next((c for c in gal.get("characters") or []
+               if c["id"] == beat.get("who") and c["id"] != gal.get("protagonist_id")), None)
+    subject = (f"画面主体：{ch['name']}，{(ch.get('looks') or '')[:100]}"
+               if ch else "空镜或氛围构图，不出现清晰人脸")
+    lead = (art or "电影质感写实，真人照片般的质感")
+    return (f"{lead}。视觉小说全屏CG插画，竖构图，把这一刻的情绪拉满：{beat.get('text', '')[:80]}。"
+            f"场景：{scene.get('name', '')}，{(scene.get('visual') or '')[:100]}。{subject}。"
+            "电影感构图，强烈氛围光影，高细节，画面里没有任何文字或水印")
+
+
+def cg_beats(gal: dict[str, Any]) -> list[dict]:
+    """The CG ledger: FIRST cg-flagged main-line beat per chapter + per ending
+    (每章≤1 is generation-side law — an over-tagging model costs nothing)."""
+    pov = gal.get("protagonist_id")
+    out: list[dict] = []
+    for ch in ((gal.get("script") or {}).get(pov) or {}).get("chapters") or []:
+        for b in ch:
+            if b.get("type") != "choice" and b.get("cg"):
+                out.append(b)
+                break
+    for e in gal.get("endings") or []:
+        for b in e.get("beats") or []:
+            if b.get("cg"):
+                out.append(b)
+                break
+    return out
+
+
 def debg(png_bytes: bytes) -> bytes:
     """rembg 抠底 → transparent PNG. Degrades to the original on any failure —
     a sprite with a dark backdrop still masks acceptably client-side."""
@@ -527,6 +561,22 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
                 if img:
                     cp.write_bytes(img)
             man["cover"] = cp.exists()
+            # 4. CG 全屏插画 (奖励货币): first cg beat per chapter + per ending
+            man["cgs"] = []
+            todo = cg_beats(gal)
+            for bi, b in enumerate(todo):
+                p = wdir / f"cg_{b['id']}.jpg"
+                if not p.exists():
+                    gal["progress"] = f"正在绘制CG插画 {bi + 1}/{len(todo)}…"
+                    _save(s)
+                    img = generate_image(cg_prompt(gal, b, art), size="720*1280",
+                                         negative=portrait_negative(art))
+                    if img:
+                        p.write_bytes(img)
+                if p.exists():
+                    man["cgs"].append(b["id"])
+                else:
+                    man["missing"].append(f"cg:{b['id']}")
         gal["status"] = "ready"
         gal["progress"] = ("建造完成" if not (gal.get("manifest") or {}).get("missing")
                            else "建造完成（部分美术缺失，可重跑补齐）")

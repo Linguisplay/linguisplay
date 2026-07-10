@@ -183,6 +183,30 @@ def test_portrait_prompts_share_everything_but_the_expression():
                prompts["常态"].replace(gal._EXPR_FACE["常态"], "")
 
 
+def test_cg_ledger_first_per_chapter_only():
+    g = _parsed()
+    b1, _ = gal.compile_chapter(MockLLM(), g, 1)
+    b2, _ = gal.compile_chapter(MockLLM(), g, 2)
+    # over-tag a second beat in ch1 — generation-side law keeps only the FIRST
+    extras = [b for b in b1 if b.get("type") != "choice" and not b["cg"]]
+    extras[-1]["cg"] = True
+    g["script"] = {g["protagonist_id"]: {"chapters": [b1, b2]}}
+    g["values"] = gal.values_meta([b1, b2], g["characters"], g["protagonist_id"])
+    g["endings"] = gal.compile_endings(MockLLM(), g)
+    ids = [b["id"] for b in gal.cg_beats(g)]
+    assert ids == ["c1b006", "c2b006"]        # one per chapter, the first one
+    assert len(ids) == len(set(ids))
+
+
+def test_cg_prompt_faceless_protagonist():
+    g = _parsed()
+    beat_other = {"who": "c2", "text": "他笑了。", "scene": "s1"}
+    beat_pro = {"who": "c1", "text": "你转过身。", "scene": "s1"}
+    assert "沈刻" in gal.cg_prompt(g, beat_other, "")
+    # the protagonist has no face — their CG is an atmosphere shot
+    assert "空镜" in gal.cg_prompt(g, beat_pro, "")
+
+
 def test_char_seed_stable_per_character():
     a = gal.char_seed("work1", "c2")
     assert a == gal.char_seed("work1", "c2")               # stable across calls
