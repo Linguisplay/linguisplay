@@ -220,6 +220,25 @@ async function boot() {
   if (localStorage.getItem(SKEY()) !== null) $("btnCont").style.display = "";
   if (((W.manifest || {}).cgs || []).length) $("btnGal").style.display = "";
   if (n) $("btnEdb").style.display = "";
+  preloadAssets();
+}
+// 🚚 后台预载: 开场就把整本书的图拖回本地缓存 (跨洋链路一次换场 3MB 的解药),
+// 两条并发慢慢拉, 不跟正在看的图抢带宽
+function preloadAssets() {
+  const urls = [];
+  ((W.scenes) || []).forEach(s => urls.push(`/scene/gal/${workId}/bg_${s.id}.jpg`));
+  const spr = (W.manifest || {}).sprites || {};
+  Object.keys(spr).forEach(cid =>
+    (spr[cid] || []).forEach(e => urls.push(`/scene/gal/${workId}/${cid}_${e}.webp`)));
+  ((W.manifest || {}).cgs || []).forEach(id => urls.push(`/scene/gal/${workId}/cg_${id}.jpg`));
+  let i = 0;
+  const pump = () => {
+    if (i >= urls.length) return;
+    const im = new Image();
+    im.onload = im.onerror = () => setTimeout(pump, 80);
+    im.src = urls[i++];
+  };
+  pump(); pump();
 }
 // 📸🏁 图鉴
 function openGallery() {
@@ -321,8 +340,8 @@ function clearCast() {
   $("gcg").classList.add("off");
 }
 function setSrc(el, cid, expr) {
-  const want = `/scene/gal/${workId}/${cid}_${expr || "常态"}.png`;
-  const fallback = `/scene/gal/${workId}/${cid}_常态.png`;
+  const want = `/scene/gal/${workId}/${cid}_${expr || "常态"}.webp`;
+  const fallback = `/scene/gal/${workId}/${cid}_常态.webp`;
   el.onerror = () => {   // a missing expression falls back to 常态, then hides
     if (want !== fallback && el.getAttribute("src") !== location.origin + fallback) {
       el.onerror = () => el.classList.add("off");

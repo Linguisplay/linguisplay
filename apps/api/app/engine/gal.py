@@ -428,6 +428,36 @@ def debg(png_bytes: bytes) -> bytes:
         return png_bytes
 
 
+# 图片必须瘦身 (实弹: 万相原图 0.9~1.7MB/张, 一本书 29MB, 跨洋一次换场 3MB+):
+def shrink_jpg(data: bytes, quality: int = 82) -> bytes:
+    """Recompress a generated image to web weight; keeps the original if smaller."""
+    import io as _io
+
+    from PIL import Image
+    try:
+        im = Image.open(_io.BytesIO(data)).convert("RGB")
+        buf = _io.BytesIO()
+        im.save(buf, format="JPEG", quality=quality, optimize=True)
+        out = buf.getvalue()
+        return out if len(out) < len(data) else data
+    except Exception:
+        return data
+
+
+def to_webp(png: bytes, quality: int = 88) -> bytes:
+    """Transparent sprite → WebP (photo-content PNG alpha ~1.6MB → ~0.2MB)."""
+    import io as _io
+
+    from PIL import Image
+    try:
+        im = Image.open(_io.BytesIO(png)).convert("RGBA")
+        buf = _io.BytesIO()
+        im.save(buf, format="WEBP", quality=quality, method=4)
+        return buf.getvalue()
+    except Exception:
+        return png
+
+
 def bg_prompt(scene: dict, world: str, art: str) -> str:
     return (f"{world[:100]} 场景：{scene.get('name')}。{(scene.get('visual') or '')[:180]} "
             "手机竖屏视觉小说背景图，竖构图，电影感写实场景，强烈氛围与光影，景深；"
@@ -525,7 +555,7 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
                 seed = char_seed(story_id, c["id"])
                 got: list[str] = []
                 for expr in EXPRESSIONS:
-                    p = wdir / f"{c['id']}_{expr}.png"
+                    p = wdir / f"{c['id']}_{expr}.webp"
                     if p.exists():
                         got.append(expr)
                         continue
@@ -536,7 +566,7 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
                                          size="720*1280", seed=seed,
                                          negative=portrait_negative(art))
                     if img:
-                        p.write_bytes(debg(img))
+                        p.write_bytes(to_webp(debg(img)))
                         got.append(expr)
                     else:
                         man["missing"].append(f"sprite:{c['id']}:{expr}")
@@ -550,7 +580,7 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
                     continue
                 img = generate_image(bg_prompt(sc, world, art), size="720*1280")
                 if img:
-                    p.write_bytes(img)
+                    p.write_bytes(shrink_jpg(img))
                     man["bgs"].append(sc["id"])
                 else:
                     man["missing"].append(f"bg:{sc['id']}")
@@ -559,7 +589,7 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
                 img = generate_image(cover_prompt(gal, s.title or "", world, art),
                                      size="720*1280")
                 if img:
-                    cp.write_bytes(img)
+                    cp.write_bytes(shrink_jpg(img))
             man["cover"] = cp.exists()
             # 4. CG 全屏插画 (奖励货币): first cg beat per chapter + per ending
             man["cgs"] = []
@@ -572,7 +602,7 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
                     img = generate_image(cg_prompt(gal, b, art), size="720*1280",
                                          negative=portrait_negative(art))
                     if img:
-                        p.write_bytes(img)
+                        p.write_bytes(shrink_jpg(img))
                 if p.exists():
                     man["cgs"].append(b["id"])
                 else:

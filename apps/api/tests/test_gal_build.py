@@ -207,6 +207,25 @@ def test_cg_prompt_faceless_protagonist():
     assert "空镜" in gal.cg_prompt(g, beat_pro, "")
 
 
+def test_image_diet():
+    import io as _io
+
+    from PIL import Image
+    im = Image.new("RGBA", (720, 1280), (0, 0, 0, 0))       # transparent backdrop
+    for x in range(200, 500):
+        for y in range(300, 900):
+            im.putpixel((x, y), (200, 100, 50, 255))         # the "figure"
+    buf = _io.BytesIO()
+    im.save(buf, format="PNG")
+    w = gal.to_webp(buf.getvalue())
+    out = Image.open(_io.BytesIO(w))
+    assert out.format == "WEBP"
+    assert "A" in out.mode or "transparency" in out.info      # alpha survives
+    big = _io.BytesIO()
+    Image.new("RGB", (720, 1280), (10, 20, 30)).save(big, format="JPEG", quality=100)
+    assert len(gal.shrink_jpg(big.getvalue())) <= len(big.getvalue())
+
+
 def test_char_seed_stable_per_character():
     a = gal.char_seed("work1", "c2")
     assert a == gal.char_seed("work1", "c2")               # stable across calls
