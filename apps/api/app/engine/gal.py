@@ -356,12 +356,24 @@ _EXPR_FACE = {"常态": "平静自然的神情", "喜": "开心微笑的神情",
 
 
 def portrait_prompt(char: dict, world: str, art: str, expr: str) -> str:
-    return (f"单人半身立绘：{char.get('name')}，{(char.get('looks') or '')[:160]}。"
+    # style anchor rides FIRST — with seed held fixed, a trailing style hint was
+    # weak enough that single portraits flipped photoreal↔anime between a
+    # character's own expressions (实弹: 卢娜三张三个画风)
+    lead = (art or "电影质感写实，真人照片般的质感")
+    return (f"{lead}。单人半身立绘：{char.get('name')}，"
+            f"{(char.get('looks') or '')[:160]}。"
             f"{_EXPR_FACE.get(expr, _EXPR_FACE['常态'])}。"
             "正面半身像，人物居中且完整（从头顶到腰部都在画面内，头顶上方留出空间），"
             f"画面里只有这一个人。世界背景：{world[:80]}。"
-            "纯色极深背景（近黑），柔和主光，电影质感写实，高细节，"
-            "画面里没有任何文字或水印" + (f"。画面基调：{art}" if art else ""))
+            "纯色极深背景（近黑），柔和主光，高细节，画面里没有任何文字或水印")
+
+
+def portrait_negative(art: str) -> str:
+    """Anti-style-flip: unless the work's art style asks for anime, forbid the
+    styles the model kept drifting into mid-set."""
+    if any(k in (art or "") for k in ("日漫", "动漫", "卡通", "二次元")):
+        return "写实照片,真人实拍"
+    return "动漫风格,卡通,二次元,3D渲染,手办,塑料质感"
 
 
 def char_seed(work_id: str, cid: str) -> int:
@@ -487,7 +499,8 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
                                        f" · {expr}…")
                     _save(s)
                     img = generate_image(portrait_prompt(c, world, art, expr),
-                                         size="720*1280", seed=seed)
+                                         size="720*1280", seed=seed,
+                                         negative=portrait_negative(art))
                     if img:
                         p.write_bytes(debg(img))
                         got.append(expr)
