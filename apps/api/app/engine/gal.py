@@ -475,12 +475,15 @@ def portrait_prompt(char: dict, world: str, art: str, expr: str) -> str:
             "纯色极深背景（近黑），柔和主光，高细节，画面里没有任何文字或水印")
 
 
+_QUALITY_NEG = "低质量,崩坏,变形,畸形,肢体错误,多余的手指,面部扭曲,画面模糊"
+
+
 def portrait_negative(art: str) -> str:
-    """Anti-style-flip: unless the work's art style asks for anime, forbid the
-    styles the model kept drifting into mid-set."""
+    """Anti-style-flip + anti-崩坏: forbid the opposite style AND the classic
+    generation failures (Yi 报障: 角色突然崩)."""
     if any(k in (art or "") for k in ("日漫", "动漫", "卡通", "二次元")):
-        return "写实照片,真人实拍"
-    return "动漫风格,卡通,二次元,3D渲染,手办,塑料质感"
+        return "写实照片,真人实拍," + _QUALITY_NEG
+    return "动漫风格,卡通,二次元,3D渲染,手办,塑料质感," + _QUALITY_NEG
 
 
 def char_seed(work_id: str, cid: str) -> int:
@@ -566,19 +569,22 @@ def to_webp(png: bytes, quality: int = 88) -> bytes:
 
 
 def bg_prompt(scene: dict, world: str, art: str) -> str:
-    return (f"{world[:100]} 场景：{scene.get('name')}。{(scene.get('visual') or '')[:180]} "
-            "手机竖屏视觉小说背景图，竖构图，电影感写实场景，强烈氛围与光影，景深；"
-            "空镜，画面里没有任何人物，没有文字、字幕或水印。"
-            + (f"画面基调：{art}。" if art else ""))
+    # 画风统一实锤病根 (Yi 报障): 这里曾写死「电影感写实场景」而画风只在句尾——
+    # 日漫立绘配写实背景一眼割裂。全部四类图统一: 画风引子第一句 + 反向提示词。
+    lead = (art or "电影质感写实，强烈氛围与光影")
+    return (f"{lead}。视觉小说场景背景图，手机竖屏竖构图：{scene.get('name')}。"
+            f"{(scene.get('visual') or '')[:180]} 世界背景：{world[:80]}。"
+            "空镜，画面里没有任何人物，没有文字、字幕或水印，景深，氛围光。")
 
 
 def cover_prompt(gal: dict, title: str, world: str, art: str) -> str:
     pro = next((c for c in gal["characters"] if c["id"] == gal["protagonist_id"]),
                gal["characters"][0])
-    return (f"视觉小说封面插画，竖构图：{pro.get('name')}（{(pro.get('looks') or '')[:120]}）"
-            f"的半身像立于画面中心偏下，上方留出标题空间。世界背景：{world[:80]}。"
-            "电影质感，情绪张力，高细节，画面里没有任何文字"
-            + (f"。画面基调：{art}" if art else ""))
+    lead = (art or "电影质感，情绪张力")
+    return (f"{lead}。视觉小说封面插画，竖构图：{pro.get('name')}"
+            f"（{(pro.get('looks') or '')[:120]}）的半身像立于画面中心偏下，"
+            f"上方留出标题空间。世界背景：{world[:80]}。"
+            "高细节，画面里没有任何文字")
 
 
 # ── build orchestration (runs on a background thread; commits progress per step) ──
@@ -689,6 +695,7 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
                     _save(s)
                     img = generate_image(portrait_prompt(c, world, art, expr),
                                          size="720*1280", seed=seed,
+                                         model="wanx2.1-t2i-plus",   # 人物用高质量档
                                          negative=portrait_negative(art))
                     if img:
                         p.write_bytes(to_webp(debg(img)))
@@ -703,7 +710,8 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
                 if p.exists():
                     man["bgs"].append(sc["id"])
                     continue
-                img = generate_image(bg_prompt(sc, world, art), size="720*1280")
+                img = generate_image(bg_prompt(sc, world, art), size="720*1280",
+                                     negative=portrait_negative(art))
                 if img:
                     p.write_bytes(shrink_jpg(img))
                     man["bgs"].append(sc["id"])
@@ -712,7 +720,8 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
             cp = wdir / "cover.jpg"
             if not cp.exists():
                 img = generate_image(cover_prompt(gal, s.title or "", world, art),
-                                     size="720*1280")
+                                     size="720*1280", model="wanx2.1-t2i-plus",
+                                     negative=portrait_negative(art))
                 if img:
                     cp.write_bytes(shrink_jpg(img))
             man["cover"] = cp.exists()
@@ -725,6 +734,7 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
                     gal["progress"] = f"正在绘制CG插画 {bi + 1}/{len(todo)}…"
                     _save(s)
                     img = generate_image(cg_prompt(gal, b, art), size="720*1280",
+                                         model="wanx2.1-t2i-plus",
                                          negative=portrait_negative(art))
                     if img:
                         p.write_bytes(shrink_jpg(img))

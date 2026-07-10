@@ -157,8 +157,9 @@ const RKEY = () => "gal_read_" + workId;
 const chapters = () => ((W.script[W.protagonist_id] || {}).chapters) || [];
 
 // 🎵 BGM: 情绪标签 → 主站曲库; 渐入渐出, 音量压低 (突然炸响是大忌)
-const BGM_MAP = { "平静": "daily", "温馨": "warm", "紧张": "tense",
-                  "悲伤": "sad", "激昂": "battle" };
+const BGM_MAP = { "平静": "daily", "温馨": "warm", "浪漫": "romantic",
+                  "紧张": "tense", "悲伤": "sad", "寂寞": "lonely",
+                  "悬疑": "mystery", "激昂": "battle" };
 const BGM_VOL = 0.22;
 let bgm = null, bgmTrack = "", bgmOn = localStorage.getItem("gal_bgm") !== "off", fadeT = null;
 function bgmToggle() {
