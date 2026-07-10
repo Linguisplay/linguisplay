@@ -111,6 +111,9 @@ class MockLLM:
             return {"beats": beats, "choices": choices,
                     "summary": "天台上的一问，没有答案。",
                     "title": f"第{ch_i}夜", "lead": "风还没停。"}
+        if prompt.get("gal_translate"):
+            # identity twin: mock sources are already Chinese
+            return {"text": prompt.get("text") or ""}
         if prompt.get("gal_endings"):
             s1 = ((prompt.get("scenes") or [{}])[0]).get("id", "s1")
             t = (prompt.get("target") or {}).get("id") or ""

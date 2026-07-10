@@ -102,6 +102,34 @@ def parse_story(llm, source: str, title: str) -> dict[str, Any]:
             "protagonist_id": protagonist, "chapters": chapters}
 
 
+def needs_translation(text: str) -> bool:
+    """外语底本检测: kana-heavy source must be normalized to Chinese BEFORE the
+    pipeline (实弹《野菊之墓》: prompt rules + named retries couldn't stop the
+    compiler from mirroring a Japanese slice — normalize at the boundary)."""
+    kana = sum(1 for ch in text or "" if "぀" <= ch <= "ヿ")
+    return kana > max(100, len(text or "") * 0.03)
+
+
+def translate_source(llm, text: str) -> str:
+    """转写拍: whole-book translation in paragraph-aligned chunks. A failed chunk
+    falls back to its original text — the compile-side language guard will
+    catch it loudly rather than silently shipping a mixed book."""
+    chunks: list[str] = []
+    buf = ""
+    for para in (text or "").split("\n"):
+        if len(buf) + len(para) > 3500 and buf:
+            chunks.append(buf)
+            buf = ""
+        buf += para + "\n"
+    if buf.strip():
+        chunks.append(buf)
+    out = []
+    for c in chunks:
+        r = llm.generate({"gal_translate": True, "text": c}) or {}
+        out.append(str(r.get("text") or c))
+    return "\n".join(s.strip("\n") for s in out)
+
+
 def slice_source(source: str, chapters: list[dict]) -> list[str]:
     """物理切片: cut the source at the parse's from-quotes so the compiler can
     only SEE its own chapter's material — the definitive cure for greedy
@@ -582,6 +610,14 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
             # every step below is idempotent: a rebuild re-enters here and only the
             # missing pieces run (parse → chapters from where they stopped → endings)
             if not gal.get("protagonist_id"):
+                # 0. 转写: foreign source → Chinese, once, before anything reads it
+                if (needs_translation(gal.get("source_text") or "")
+                        and not gal.get("source_original")):
+                    gal["status"], gal["progress"] = "parsing", "正在把原文转写成中文…"
+                    _save(s)
+                    gal["source_original"] = gal["source_text"]
+                    gal["source_text"] = translate_source(llm, gal["source_text"])
+                    _save(s)
                 # 1. 识别
                 gal["status"], gal["progress"] = "parsing", "正在识别角色与场景…"
                 _save(s)

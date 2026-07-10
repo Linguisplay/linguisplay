@@ -2192,6 +2192,26 @@ class QwenLLM:
         except Exception:
             return {"memory": prior}
 
+    def _gal_translate(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🎀 转写拍: one chunk of a foreign-language source → faithful modern
+        Chinese. Plain text out (no JSON); failure falls back to the original
+        chunk — the compile-side language guard fails loudly downstream."""
+        sys = ("你是文学翻译。把用户给的外语文学文本忠实转写成流畅的简体中文："
+               "保留段落划分、叙述人称与语气，人名地名用通行的汉字写法，"
+               "不加任何注释、标题或说明，只输出译文本身。")
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model,
+                               "messages": [{"role": "system", "content": sys},
+                                            {"role": "user",
+                                             "content": (prompt.get("text") or "")[:6000]}],
+                               "max_tokens": 6000, "temperature": 0.3},
+                              timeout=180, kind="gal_translate")
+            out = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+            return {"text": out or (prompt.get("text") or "")}
+        except Exception:
+            return {"text": prompt.get("text") or ""}
+
     def _gal_endings(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """🎀 结局编剧: the one true fork. The ENGINE decides which ending plays
         (affinity threshold, computed from the compiled choices); the model only
@@ -3426,6 +3446,8 @@ class QwenLLM:
             return self._gal_compile(prompt)
         if prompt.get("gal_endings"):
             return self._gal_endings(prompt)
+        if prompt.get("gal_translate"):
+            return self._gal_translate(prompt)
         speaker = prompt.get("speaker_name") or "角色"
         channel = prompt.get("channel") or "say"
         observe = bool(prompt.get("observe"))

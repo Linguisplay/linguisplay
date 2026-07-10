@@ -149,6 +149,22 @@ def test_opening_echo_persistent_fails_loud():
                             prior_openings=["风从天台的边缘掀过来。"])
 
 
+def test_translate_source_chunks_and_joins():
+    class TransLLM(MockLLM):
+        calls = 0
+        def generate(self, prompt):
+            if prompt.get("gal_translate"):
+                TransLLM.calls += 1
+                return {"text": f"译文{TransLLM.calls}。"}
+            return super().generate(prompt)
+    jp = ("日本語のテキストです。" * 40 + "\n") * 20     # kana-heavy, multi-chunk
+    assert gal.needs_translation(jp)
+    assert not gal.needs_translation("这是一段中文文本。" * 60)
+    out = gal.translate_source(TransLLM(), jp)
+    assert TransLLM.calls >= 2                          # chunked, not one giant call
+    assert out.count("译文") == TransLLM.calls          # all chunks joined
+
+
 def test_foreign_language_beats_retried_then_fail_loud():
     # 实弹《野菊之墓》: Japanese source → the compiler mirrored the language
     JP = "後の月という時分になると、どうしても思い出さずにはいられない。"
