@@ -33,6 +33,14 @@
   #gctl span { background: rgba(20,20,36,.8); border: 1px solid #45456a; border-radius: 9px;
                padding: 4px 10px; font-size: 12px; color: #9fb0ff; cursor: pointer; }
   #gctl span.on { color: #ffd479; border-color: #ffd479; }
+  /* 🎯 选择点: the player's hand on the wheel */
+  #gchoice { position: absolute; left: 7%; right: 7%; bottom: 31%; z-index: 6;
+             display: none; flex-direction: column; gap: 10px; }
+  #gchoice button { background: rgba(12,12,26,.93); border: 1px solid #5a5a8a;
+                    color: #e7eaf3; border-radius: 12px; padding: 12px 14px;
+                    font: inherit; font-size: 14.5px; cursor: pointer;
+                    text-align: center; backdrop-filter: blur(3px); }
+  #gchoice button:hover { border-color: #ffd479; color: #ffd479; }
   /* 标题画面 */
   #gtitle { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column;
             align-items: center; justify-content: flex-end; padding-bottom: 12%;
@@ -41,6 +49,7 @@
                     background: linear-gradient(transparent 40%, rgba(3,3,8,.9)); }
   #gtitle h1 { position: relative; font-size: 26px; letter-spacing: 4px;
                text-shadow: 0 2px 12px rgba(0,0,0,.9); margin-bottom: 24px; }
+  #gtitle .muted { position: relative; }
   #gtitle button { position: relative; width: 200px; margin-top: 12px; padding: 12px;
                    background: rgba(20,20,36,.88); border: 1px solid #45456a; color: #e7eaf3;
                    border-radius: 11px; font: inherit; font-size: 15px; cursor: pointer; }
@@ -49,10 +58,14 @@
           align-items: center; justify-content: center; background: rgba(3,3,8,.92); }
   #gend h2 { font-size: 22px; letter-spacing: 6px; margin-bottom: 18px; }
   #gend .muted, .muted { color: #8b93a7; font-size: 13px; }
+  #gend button { margin-top: 22px; width: 180px; padding: 11px;
+                 background: rgba(20,20,36,.88); border: 1px solid #45456a; color: #e7eaf3;
+                 border-radius: 11px; font: inherit; cursor: pointer; }
   #glog { position: absolute; inset: 0; z-index: 8; display: none; overflow-y: auto;
           background: rgba(5,5,10,.96); padding: 46px 16px 20px; }
   #glog .l { margin-bottom: 10px; font-size: 14px; }
   #glog .l b { color: #ffd479; margin-right: 6px; }
+  #glog .l.pick { color: #ffd479; }
 </style>
 </head>
 <body>
@@ -65,16 +78,17 @@
     <span onclick="event.stopPropagation();location.href='/maker'">✕</span>
   </div>
   <div id="glog" onclick="event.stopPropagation();toggleLog()"></div>
+  <div id="gchoice"></div>
   <div id="gbox">
     <div id="gname" style="display:none"></div>
     <div id="gtext"></div>
     <div id="gnext">▼</div>
   </div>
-  <div id="gend"><h2>第一章 完</h2><div class="muted">后续章节与选择，敬请期待</div>
-    <button style="margin-top:22px;width:180px;padding:11px;background:rgba(20,20,36,.88);border:1px solid #45456a;color:#e7eaf3;border-radius:11px;font:inherit;cursor:pointer"
-            onclick="event.stopPropagation();restart()">从头再看</button></div>
+  <div id="gend"><h2 id="gendT"></h2><div class="muted" id="gendS"></div>
+    <button onclick="event.stopPropagation();restart()">从头再看</button></div>
   <div id="gtitle">
     <h1 id="gt"></h1>
+    <div class="muted" id="gtEnds"></div>
     <button onclick="event.stopPropagation();startGame(false)">开 始</button>
     <button id="btnCont" style="display:none" onclick="event.stopPropagation();startGame(true)">继 续</button>
   </div>
@@ -82,9 +96,11 @@
 <script>
 const API = "/api/v1";
 const workId = new URLSearchParams(location.search).get("work");
-let W = null, beats = [], cur = -1, typing = false, autoOn = false, autoT = null;
+let W = null, sav = null, typing = false, autoOn = false, autoT = null, choosing = false;
 const $ = id => document.getElementById(id);
-const key = () => "gal_cur_" + workId;
+const SKEY = () => "gal_sav_" + workId;
+const EKEY = () => "gal_end_" + workId;
+const chapters = () => ((W.script[W.protagonist_id] || {}).chapters) || [];
 
 async function boot() {
   if (!workId) { location.href = "/maker"; return; }
@@ -92,19 +108,53 @@ async function boot() {
   if (r.status === 401) { location.href = "/play"; return; }
   if (!r.ok) { $("gt").textContent = "作品还没准备好"; return; }
   W = await r.json();
-  beats = ((W.script[W.protagonist_id] || {}).chapters || [[]])[0] || [];
   $("gt").textContent = W.title || "";
   $("gtitle").style.backgroundImage =
     W.manifest && W.manifest.cover ? `url(/scene/gal/${workId}/cover.jpg)` : "";
-  if (localStorage.getItem(key()) !== null) $("btnCont").style.display = "";
+  const n = (W.endings || []).length;
+  if (n) $("gtEnds").textContent = `已解锁 ${unlocked().length}/${n} 个结局`;
+  if (localStorage.getItem(SKEY()) !== null) $("btnCont").style.display = "";
 }
+function unlocked() {
+  try { return JSON.parse(localStorage.getItem(EKEY()) || "[]"); } catch (e) { return []; }
+}
+function fresh() { return { ch: 0, i: -1, br: null, end: null, vals: {}, picks: {} }; }
+function save() { localStorage.setItem(SKEY(), JSON.stringify(sav)); }
+function nameOf(cid) { const c = (W.characters || []).find(x => x.id === cid); return c ? c.name : ""; }
+function curChoice(qid) {
+  return (chapters()[sav.ch] || []).find(e => e.type === "choice" && e.id === qid);
+}
+function endingById(id) { return (W.endings || []).find(e => e.id === id); }
+function listNow() {
+  if (sav.end) { const e = endingById(sav.end); return e ? e.beats : []; }
+  return chapters()[sav.ch] || [];
+}
+
 function startGame(cont) {
   $("gtitle").style.display = "none";
-  cur = cont ? Math.max(-1, +localStorage.getItem(key()) - 1) : -1;
-  next();
+  $("gend").style.display = "none";
+  let saved = null;
+  if (cont) { try { saved = JSON.parse(localStorage.getItem(SKEY()) || "null"); } catch (e) {} }
+  sav = (saved && typeof saved === "object" && "ch" in saved) ? saved : fresh();
+  choosing = false;
+  showCurrent();
 }
-function nameOf(cid) { const c = (W.characters || []).find(x => x.id === cid); return c ? c.name : ""; }
+// continue lands back ON the beat that was last shown, not one past it
+function showCurrent() {
+  if (sav.br) {
+    const c = curChoice(sav.br.q), opt = c && c.options[sav.br.o];
+    if (opt && opt.beats[sav.br.j]) { showBeat(opt.beats[sav.br.j]); return; }
+    sav.br = null;
+  }
+  const list = listNow();
+  if (sav.i < 0 || sav.i >= list.length) { next(); return; }
+  const b = list[sav.i];
+  if (b.type === "choice") { showChoice(b); return; }
+  showBeat(b);
+}
+
 function setBg(sid) {
+  if (!sid) return;                       // synthetic cards keep the current bg
   const el = $("gbg");
   const want = `/scene/gal/${workId}/bg_${sid}.jpg`;
   if (el.dataset.sid === sid) return;
@@ -139,24 +189,109 @@ async function showBeat(b) {
   else { nm.style.display = "none"; tx.className = "narr"; }
   $("gnext").style.visibility = "hidden";
   await typeText(tx, b.text);
-  $("gnext").style.visibility = "visible";
+  if (!choosing) $("gnext").style.visibility = "visible";
   logAdd(b);
-  if (autoOn) { clearTimeout(autoT); autoT = setTimeout(next, 1100 + (b.text || "").length * 60); }
+  if (autoOn && !choosing) { clearTimeout(autoT); autoT = setTimeout(next, 1100 + (b.text || "").length * 60); }
 }
+
 function next() {
-  if (typing) { typing = false; return; }   // first tap completes the line
-  cur++;
-  if (cur >= beats.length) { $("gend").style.display = "flex"; localStorage.removeItem(key()); return; }
-  localStorage.setItem(key(), cur);
-  showBeat(beats[cur]);
+  if (typing) { typing = false; return; }
+  if (choosing) return;                    // options are the only way forward
+  if (sav.br) {                            // inside a choice branch
+    const c = curChoice(sav.br.q), opt = c && c.options[sav.br.o];
+    if (opt) {
+      sav.br.j++;
+      if (sav.br.j < opt.beats.length) { save(); showBeat(opt.beats[sav.br.j]); return; }
+    }
+    sav.br = null;                         // branch exhausted → rejoin the main line
+  }
+  sav.i++;
+  const list = listNow();
+  if (sav.i >= list.length) {
+    if (sav.end) { finish(); return; }
+    if (sav.ch + 1 >= chapters().length) { startEnding(); return; }
+    sav.ch++; sav.i = -1; save();
+    showBeat(chapterCard(`· 第 ${sav.ch + 1} 章 ·`)); return;
+  }
+  const b = list[sav.i];
+  if (b.type === "choice") { save(); showChoice(b); return; }
+  save(); showBeat(b);
 }
-function tap() { if ($("gtitle").style.display !== "none" || $("gend").style.display === "flex") return; next(); }
-function restart() { $("gend").style.display = "none"; cur = -1; next(); }
-function toggleAuto() { autoOn = !autoOn; $("btnAuto").classList.toggle("on", autoOn); if (autoOn && !typing) next(); }
+function chapterCard(text) {
+  const b0 = listNow().find(x => x.type !== "choice") || {};
+  return { who: null, text, scene: b0.scene };
+}
+
+// 🎯 选择点: apply fx to the affinity ledger, play the branch, rejoin
+function showChoice(c) {
+  choosing = true; clearTimeout(autoT);
+  $("gnext").style.visibility = "hidden";
+  const box = $("gchoice"); box.innerHTML = "";
+  c.options.forEach((o, k) => {
+    const btn = document.createElement("button");
+    btn.textContent = o.text;
+    btn.onclick = ev => { ev.stopPropagation(); pick(c, k); };
+    box.appendChild(btn);
+  });
+  box.style.display = "flex";
+}
+function pick(c, k) {
+  const o = c.options[k];
+  choosing = false; $("gchoice").style.display = "none";
+  sav.picks[c.id] = k;
+  const fx = o.fx || {};
+  for (const cid in fx) sav.vals[cid] = (sav.vals[cid] || 0) + fx[cid];
+  logPick(o.text);
+  if (o.beats && o.beats.length) { sav.br = { q: c.id, o: k, j: 0 }; save(); showBeat(o.beats[0]); }
+  else { sav.br = null; save(); next(); }
+}
+
+// 🏁 结局: the engine's threshold decides; the fork the whole ledger was for
+function startEnding() {
+  if (!W.endings || !W.endings.length) { finishSimple("全剧终"); return; }
+  const e = pickEnding();
+  sav.end = e.id; sav.i = -1; save();
+  showBeat({ who: null, text: "· 终章 ·", scene: (e.beats[0] || {}).scene });
+}
+function pickEnding() {
+  for (const e of W.endings) {
+    const c = e.cond || {};
+    if (c.char && (sav.vals[c.char] || 0) >= c.gte) return e;
+  }
+  return W.endings.find(e => (e.cond || {}).default) || W.endings[W.endings.length - 1];
+}
+function finish() {
+  const e = endingById(sav.end);
+  const got = unlocked();
+  if (e && !got.includes(e.id)) { got.push(e.id); localStorage.setItem(EKEY(), JSON.stringify(got)); }
+  localStorage.removeItem(SKEY()); $("btnCont").style.display = "none";
+  const n = (W.endings || []).length;
+  $("gendT").textContent = e ? `结局 · ${e.title}` : "全剧终";
+  $("gendS").textContent = n ? `已解锁 ${got.length}/${n} 个结局` +
+    (got.length < n ? "，另一个藏在不同的选择里" : "") : "";
+  $("gend").style.display = "flex";
+}
+function finishSimple(t) {
+  localStorage.removeItem(SKEY()); $("btnCont").style.display = "none";
+  $("gendT").textContent = t; $("gendS").textContent = "";
+  $("gend").style.display = "flex";
+}
+
+function tap() {
+  if ($("gtitle").style.display !== "none" || $("gend").style.display === "flex") return;
+  next();
+}
+function restart() { $("gend").style.display = "none"; sav = fresh(); choosing = false; next(); }
+function toggleAuto() { autoOn = !autoOn; $("btnAuto").classList.toggle("on", autoOn); if (autoOn && !typing && !choosing) next(); }
 function logAdd(b) {
   const d = document.createElement("div"); d.className = "l";
   d.innerHTML = (b.who ? `<b>${b.who === W.protagonist_id ? "你" : nameOf(b.who)}</b>` : "") +
                 (b.text || "").replace(/</g, "&lt;");
+  $("glog").appendChild(d);
+}
+function logPick(text) {
+  const d = document.createElement("div"); d.className = "l pick";
+  d.textContent = "▸ 你的选择：" + text;
   $("glog").appendChild(d);
 }
 function toggleLog() { const l = $("glog"); l.style.display = l.style.display === "block" ? "none" : "block"; l.scrollTop = l.scrollHeight; }

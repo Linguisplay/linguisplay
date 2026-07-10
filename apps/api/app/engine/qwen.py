@@ -146,6 +146,25 @@ _R18_BLOCK = (
 )
 
 
+def _gal_mature_rider(prompt: dict[str, Any]) -> str:
+    """🎀🔞 compile-time twin of _R18_BLOCK: the galgame builder writes WHOLE chapters
+    in one call, so the craft rules ride the compiler contract instead of a turn
+    prompt. Un-mature works get the explicit prohibition (belt) — the engine also
+    strips adult flags after normalization (suspenders)."""
+    if not prompt.get("mature"):
+        return "本作品未开启成人模式：不写任何露骨性内容，adult 恒为 false。"
+    return (
+        "【成人内容许可·18禁编译】这部作品开启了成人模式（平台已做年龄门控）："
+        "剧情自然走到亲密处时正面、具体、不回避地写，不黑幕跳切、不打哑谜、不加道德说教；"
+        "写身体与性用直白的常用称呼直呼其名，不用医学术语或诗化代称；"
+        "感官落在具体处（这一下落在哪里、什么温度什么力道、声音呼吸怎么变），"
+        "同一个词（颤抖、呻吟这类）一场戏最多出现一次，词穷就换感官通道；"
+        "亲密戏要占足拍数慢慢写（衣物一件一件、触碰一寸一寸），"
+        "这些拍全部标 adult:true——成人拍播放时立绘退场、只剩背景与文字框，"
+        "文字要独自扛起全部画面。铁律两条：绝对拒绝任何涉及未成年人的性内容；"
+        "强迫与胁迫不得被写成浪漫。")
+
+
 def _knowledge_block(prompt: dict[str, Any]) -> str:
     """智能增强: a character's auto-generated background lore, offered as reference."""
     kn = (prompt.get("knowledge") or "").strip()
@@ -2147,17 +2166,57 @@ class QwenLLM:
         except Exception:
             return {"memory": prior}
 
+    def _gal_endings(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🎀 结局编剧: the one true fork. The ENGINE decides which ending plays
+        (affinity threshold, computed from the compiled choices); the model only
+        writes two closures — the target route's good ending and the plain one."""
+        chars = prompt.get("characters") or []
+        scenes = prompt.get("scenes") or []
+        t = prompt.get("target") or {}
+        tname = t.get("name") or "感情线角色"
+        clist = "\n".join(f"- {c['id']}={c['name']}（{c.get('personality','')}）" for c in chars)
+        slist = "\n".join(f"- {s['id']}={s['name']}" for s in scenes)
+        sys = (
+            "你是视觉小说（galgame）的结局编剧。为整个故事写两个结局，只输出严格JSON："
+            '{"endings":[{"char":"结局归属的角色id（普通结局留空字符串）","title":"≤10字结局名",'
+            '"beats":[{"who":"说话角色id，旁白留空","text":"≤60字",'
+            '"expr":"常态|喜|怒|哀","scene":"场景id",'
+            '"bgm":"平静|温馨|紧张|悲伤|激昂 之一","cg":false,"adult":false}]}]}。'
+            f"结局一：与{tname}（{t.get('id') or '?'}）感情圆满的【好结局】，8~14拍，"
+            "有一拍情绪最高点标 cg:true；"
+            "结局二：感情未满时的【普通结局】，怅然或平静地收束主线，6~12拍。"
+            f"两个结局都必须真正收束故事（回应主线的悬念，别开新钩子）；"
+            f"主角旁白人称永远是「你」；只用给定的角色id和场景id。")
+        sys += _gal_mature_rider(prompt)
+        u = (f"角色表：\n{clist}\n场景表：\n{slist}\n"
+             f"全书前情：{prompt.get('summary') or ''}\n"
+             f"故事原文（收束依据）：\n{(prompt.get('source') or '')[:6000]}")
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model,
+                               "messages": [{"role": "system", "content": sys},
+                                            {"role": "user", "content": u}],
+                               "max_tokens": 4000, "temperature": 0.7,
+                               "response_format": {"type": "json_object"}},
+                              timeout=180, kind="gal_endings")
+            import json as _json
+            return _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
+        except Exception:
+            return {}
+
     def _gal_parse(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """🎀 识别拍: story text → characters (with LOOKS for consistent art) / scenes /
         protagonist / chapter skeleton. One structured call; engine normalizes ids."""
         sys = (
             "你是视觉小说（galgame）制作器的识别器。读完用户给的故事文本，只输出严格JSON："
             '{"characters":[{"name":"","looks":"外貌描述：性别年龄/发型发色/眼睛/服装/体态，'
-            '要具体到能让画师画出同一个人（≤80字）","personality":"≤40字","weight":1到5的戏份}],'
+            '要具体到能让画师画出同一个人（≤80字）","personality":"≤40字","weight":1到5的戏份,'
+            '"route":true或false（可攻略角色：玩家能与之发展感情线的对象；主角自己恒为false）}],'
             '"scenes":[{"name":"≤8字地点名","visual":"画面描述：空间/光线/陈设/氛围（≤80字）"}],'
             '"protagonist":"主角名（视角人物，玩家将扮演TA）",'
             '"chapters":["第1章一句话概要","第2章…（3~5章，覆盖全文的起承转合）"]}。'
             "要求：角色≤6个只留有戏份的；场景≤8个；looks 必须具体（画师依赖它）；"
+            "至少标 1 个 route:true 的可攻略角色（与主角情感戏份最重的那个）；"
             "chapters 必须覆盖到故事结尾。")
         u = f"标题：{prompt.get('title') or '（无）'}\n故事文本：\n{prompt.get('source') or ''}"
         try:
@@ -2181,18 +2240,27 @@ class QwenLLM:
         scenes = prompt.get("scenes") or []
         pro = prompt.get("protagonist_id") or ""
         lo, hi = prompt.get("target_beats") or (40, 60)
-        clist = "\n".join(f"- {c['id']}={c['name']}（{c.get('personality','')}）" for c in chars)
+        clist = "\n".join(f"- {c['id']}={c['name']}（{c.get('personality','')}）"
+                          + ("〔可攻略〕" if c.get("route") else "") for c in chars)
         slist = "\n".join(f"- {s['id']}={s['name']}" for s in scenes)
         sys = (
             "你是视觉小说（galgame）的编剧编译器。把指定章节改编成拍序列，只输出严格JSON："
-            '{"beats":[{"who":"说话角色id，旁白则留空","text":"这一拍的文字",'
+            '{"beats":[普通拍 {"who":"说话角色id，旁白则留空","text":"这一拍的文字",'
             '"expr":"常态|喜|怒|哀（说话角色此刻表情）","scene":"场景id",'
-            '"bgm":"平静|温馨|紧张|悲伤|激昂 之一","cg":false,"adult":false}],'
+            '"bgm":"平静|温馨|紧张|悲伤|激昂 之一","cg":false,"adult":false}'
+            '，或选择点 {"options":[{"text":"≤20字，主角「你」此刻会说的话或会做的事",'
+            '"fx":{"可攻略角色id":好感变化（-2到3的整数）},'
+            '"beats":[该选项的即时反应，2~6个与普通拍同构的分支拍]}]}],'
             '"summary":"本章≤100字收尾摘要（给下一章编译用）"}。'
-            f"【节奏合同】产出 {lo}~{hi} 拍；每拍≤60字、只装一个信息点；"
+            f"【节奏合同】产出 {lo}~{hi} 个普通拍；每拍≤60字、只装一个信息点；"
             "对白为主、旁白为骨（旁白连续不超过3拍）；场景切换要换 scene id；"
             f"主角（{pro}）是视角人物：旁白里永远称TA为「你」，主角自己的台词 who 填 {pro}；"
-            "关键的情绪画面拍（每章至多1拍）标 cg:true；成人内容的拍标 adult:true。"
+            "关键的情绪画面拍（每章至多1拍）标 cg:true。"
+            "【选择合同】本章必须有 1~2 个选择点，插在情感升温或抉择的节点上"
+            "（两个选择点之间至少隔12个普通拍）；每个选择 2~3 个选项，是真正不同的态度或做法，"
+            "不是同义改写；fx 按选项的情感倾向给可攻略角色加减好感，至少一个选项给正分；"
+            "分支拍演完这个选项的即时反应后必须能无缝接回选择点之后的主线"
+            "（就地收敛：分支里不换场景、不开新事件、不再嵌套选择点）。"
             "只用给定的角色id和场景id，不得发明新的。")
         u = (f"角色表：\n{clist}\n场景表：\n{slist}\n"
              f"前情摘要：{prompt.get('prior_summary') or '（这是第一章）'}\n"
@@ -2201,6 +2269,7 @@ class QwenLLM:
         _st = (prompt.get("style") or "").strip()
         if _st:
             sys += f"【文风·必须贴住】{_st}"
+        sys += _gal_mature_rider(prompt)
         try:
             resp = _post_chat(self._url, self._key,
                               {"model": self._model,
@@ -3292,6 +3361,8 @@ class QwenLLM:
             return self._gal_parse(prompt)
         if prompt.get("gal_compile"):
             return self._gal_compile(prompt)
+        if prompt.get("gal_endings"):
+            return self._gal_endings(prompt)
         speaker = prompt.get("speaker_name") or "角色"
         channel = prompt.get("channel") or "say"
         observe = bool(prompt.get("observe"))

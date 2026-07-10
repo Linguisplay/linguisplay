@@ -46,6 +46,9 @@
       <option value="中国古风工笔画意，水墨氤氲，绢本设色，古典服饰与建筑，含蓄留白">古风水墨</option>
       <option value="赛博朋克霓虹夜色，雨湿街道反光，冷紫与青色光源，未来都市质感">赛博霓虹</option>
     </select>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+      <input type="checkbox" id="mature" style="width:auto"> 🔞 含成人内容（18+；成人片段以背景+文字呈现，不出立绘）
+    </label>
     <button id="go" onclick="build()">开始建造</button>
     <div id="prog" class="muted" style="display:none"></div>
   </div>
@@ -70,14 +73,25 @@ async function build() {
     const w = await j("/gal", { method: "POST", body: JSON.stringify({
       title: document.getElementById("title").value.trim(),
       source_text: document.getElementById("src").value,
-      art_style: document.getElementById("style").value }) });
+      art_style: document.getElementById("style").value,
+      mature: document.getElementById("mature").checked }) });
     poll(w.id);
   } catch (e) { alert("⚠️ " + e.message); go.disabled = false; }
+}
+// 建造进度页: the stage checklist — 识别 → 编剧 → 美术, live step under the active one
+const STAGES = [["parsing", "识别角色与场景"], ["compiling", "编写章节与结局"], ["art", "绘制立绘与背景"]];
+function stagesHTML(status, progress) {
+  const order = { queued: -1, parsing: 0, compiling: 1, art: 2 };
+  const cur = (status in order) ? order[status] : -1;
+  return STAGES.map(([k, label], i) =>
+    `<div>${i < cur ? "✅" : i === cur ? "⏳" : "○"} ${label}` +
+    (i === cur ? `<div class="muted" style="margin-left:22px">${progress || ""}</div>` : "") +
+    `</div>`).join("") + `<div class="bar"><span></span></div>`;
 }
 function poll(id) {
   const prog = document.getElementById("prog");
   prog.style.display = "block";
-  prog.innerHTML = `建造中…<div class="bar"><span></span></div>`;
+  prog.innerHTML = stagesHTML("queued", "排队中…");
   clearInterval(pollTimer);
   pollTimer = setInterval(async () => {
     try {
@@ -94,7 +108,7 @@ function poll(id) {
         document.getElementById("go").disabled = false;
         loadMine();
       } else {
-        prog.innerHTML = `⏳ ${st.progress || "建造中…"}<div class="bar"><span></span></div>`;
+        prog.innerHTML = stagesHTML(st.status, st.progress);
       }
     } catch (e) {}
   }, 3000);

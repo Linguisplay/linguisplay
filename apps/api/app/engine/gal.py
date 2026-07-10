@@ -14,17 +14,24 @@ comes back later as a migration):
     "status": "queued"|"parsing"|"compiling"|"art"|"ready"|"failed",
     "progress": str,                 # human-readable current step
     "source_text": str,
+    "mature": bool,                  # 🔞 creator's adult toggle (P1)
     "protagonist_id": str,
-    "characters": [{id,name,looks,personality,weight,voice}],
+    "characters": [{id,name,looks,personality,weight,route,voice}],
     "scenes": [{id,name,visual}],
     "chapters": [{i,summary}],
-    "script": {pov_char_id: {"chapters": [[beat,...], ...]}},   # 多视角分层
+    "ch_summaries": [str,...],       # 编译记忆 chain: chapter N reads 1..N-1
+    "script": {pov_char_id: {"chapters": [[beat|choice,...], ...]}},  # 多视角分层
+    "values": {"routes":[cid], "max":{cid:n}, "threshold":{cid:n}, "target":cid},
+    "endings": [{"id":"e1","title":str,"cond":{"char":cid,"gte":n}|{"default":True},
+                 "beats":[beat,...]}],   # 真分歧只在结局 (伪分支 doctrine)
     "manifest": {"sprites": {cid:[expr,...]}, "bgs": [sid,...], "cover": bool,
                  "missing": [...]},  # failed renders — re-runnable (backfill doctrine)
   }
   beat = {"id":"c1b007", "who":cid|None, "text":str, "expr":"常态|喜|怒|哀",
           "scene":sid, "bgm":mood, "enter":[cid], "exit":[cid],
           "cg":False, "adult":False, "fx":"", "voice":None}
+  choice = {"id":"c1q1", "type":"choice", "options":[
+          {"text":str, "fx":{cid:±n}, "beats":[beat,...]}]}   # branch rejoins in-scene
 """
 from __future__ import annotations
 
@@ -51,6 +58,7 @@ def _norm_characters(raw: list, cap: int = 6) -> list[dict[str, Any]]:
                     "looks": str(c.get("looks") or "").strip()[:200],
                     "personality": str(c.get("personality") or "").strip()[:100],
                     "weight": max(1, min(5, int(c.get("weight") or 3))),
+                    "route": bool(c.get("route")),   # 💘 可攻略 → the affinity ledger
                     "voice": None})   # 🔊 音色: reserved for the TTS build stage
     return out
 
@@ -108,38 +116,199 @@ def _norm_beat(b: dict, ch: int, idx: int, char_ids: set, scene_ids: set,
             "voice": None}              # 🔊 filled by the TTS build stage later
 
 
+def _walk_beats(entries: list[dict]):
+    """Every displayable beat, main line and branch alike (choice entries expand)."""
+    for e in entries:
+        if e.get("type") == "choice":
+            for o in e["options"]:
+                yield from o["beats"]
+        else:
+            yield e
+
+
+def _fx_targets(gal: dict[str, Any]) -> list[str]:
+    """Who may receive affinity points: 可攻略 characters; when the parse marked
+    none, the heaviest non-protagonist characters stand in (the ledger must have
+    someone to move for, or the ending fork is unreachable)."""
+    pro = gal.get("protagonist_id")
+    chars = [c for c in gal.get("characters") or [] if c["id"] != pro]
+    routed = [c["id"] for c in chars if c.get("route")]
+    if routed:
+        return routed
+    return [c["id"] for c in sorted(chars, key=lambda c: -c.get("weight", 3))][:3]
+
+
+def _norm_choice(raw: dict, ch: int, q: int, char_ids: set, scene_ids: set,
+                 last_scene: str, fx_targets: list[str]) -> dict[str, Any] | None:
+    """选择点归一化: the engine owns ids, option count, fx bounds and the rejoin
+    shape; the model owns the words. Unusable → None (the choice is dropped)."""
+    opts: list[dict] = []
+    for j, o in enumerate((raw.get("options") or [])[:3]):
+        if not isinstance(o, dict):
+            continue
+        text = str(o.get("text") or "").strip()[:20]
+        if not text:
+            continue
+        fx: dict[str, int] = {}
+        raw_fx = o.get("fx") if isinstance(o.get("fx"), dict) else {}
+        for cid, d in raw_fx.items():
+            if cid not in fx_targets:
+                continue                # only ledgered characters take points
+            try:
+                fx[cid] = max(-2, min(3, int(d)))
+            except (TypeError, ValueError):
+                continue
+        beats: list[dict] = []
+        for i, rb in enumerate((o.get("beats") or [])[:6]):
+            nb = _norm_beat(rb if isinstance(rb, dict) else {}, ch, 0, char_ids,
+                            scene_ids, last_scene)
+            if nb:
+                nb["id"] = f"c{ch}q{q}o{len(opts) + 1}b{i + 1:02d}"
+                beats.append(nb)
+        opts.append({"text": text, "fx": fx, "beats": beats})
+    if len(opts) < 2:
+        return None
+    # 数值必须动: a choice where no option gains anyone would make every ending
+    # threshold unreachable — the engine backfills a deterministic +1.
+    if fx_targets and not any(v > 0 for o in opts for v in o["fx"].values()):
+        for j, o in enumerate(opts):
+            o["fx"] = {fx_targets[j % len(fx_targets)]: 1}
+    return {"id": f"c{ch}q{q}", "type": "choice", "options": opts}
+
+
 def compile_chapter(llm, gal: dict[str, Any], ch_index: int,
-                    prior_summary: str = "", choices: list | None = None) -> list[dict]:
-    """编剧拍: one chapter → a beat sequence. 编译记忆 rides in (prior summary +
-    choice history) so chapter N can never吃书 chapter N-1."""
+                    prior_summary: str = "",
+                    mature: bool = False) -> tuple[list[dict], str]:
+    """编剧拍: one chapter → beats + choice points + a summary that feeds the NEXT
+    chapter's 编译记忆 (so chapter N can never吃书 chapter N-1). 伪分支 doctrine:
+    options move the affinity ledger, branch beats rejoin in-scene, the spine stays
+    choice-agnostic — one compile serves every player."""
     chapter = gal["chapters"][ch_index - 1]
+    total = len(gal["chapters"])
     out = llm.generate({
         "gal_compile": True,
         "source": (gal.get("source_text") or "")[:MAX_SOURCE_CHARS],
-        "chapter": chapter, "chapter_count": len(gal["chapters"]),
+        "chapter": chapter, "chapter_count": total,
         "characters": gal["characters"], "scenes": gal["scenes"],
         "protagonist_id": gal["protagonist_id"],
         "prior_summary": prior_summary[:600],       # 编译记忆
-        "choices": choices or [],                    # 选择史 (P1)
+        "mature": mature,                            # 🔞 rides into the craft block
         "target_beats": TARGET_BEATS_PER_CHAPTER,
     }) or {}
     char_ids = {c["id"] for c in gal["characters"]}
     scene_ids = {s["id"] for s in gal["scenes"]}
+    targets = _fx_targets(gal)
     last_scene = gal["scenes"][0]["id"]
     beats: list[dict] = []
+    n_beat = n_choice = 0
     for raw in out.get("beats") or []:
-        nb = _norm_beat(raw if isinstance(raw, dict) else {}, ch_index,
-                        len(beats) + 1, char_ids, scene_ids, last_scene)
+        if not isinstance(raw, dict):
+            continue
+        if raw.get("options"):
+            nc = _norm_choice(raw, ch_index, n_choice + 1, char_ids, scene_ids,
+                              last_scene, targets)
+            if nc:
+                n_choice += 1
+                beats.append(nc)
+            continue
+        nb = _norm_beat(raw, ch_index, n_beat + 1, char_ids, scene_ids, last_scene)
         if nb:
+            n_beat += 1
             last_scene = nb["scene"]
             beats.append(nb)
-    if len(beats) < 8:
-        raise ValueError(f"第{ch_index}章编译失败：只产出 {len(beats)} 拍")
-    # 🎬 protagonist POV never shows the player's own sprite — the "你" has no face
-    for b in beats:
+    if n_beat < 8:
+        raise ValueError(f"第{ch_index}章编译失败：只产出 {n_beat} 拍")
+    if n_choice == 0 and ch_index < total:
+        # the final chapter may run straight into the endings fork; every other
+        # chapter must offer the player a real hand on the wheel
+        raise ValueError(f"第{ch_index}章编译失败：缺少选择点")
+    for b in _walk_beats(beats):
+        if not mature:      # 🔞防线在引擎不在模型: un-mature works carry no adult beat
+            b["adult"] = False
+        # 🎬 protagonist POV never shows the player's own sprite — the "你" has no face
         if b["who"] == gal["protagonist_id"]:
             b["who_face"] = None
-    return beats
+    summary = (str(out.get("summary") or "").strip()[:200]
+               or str(chapter.get("summary") or "")[:200])
+    return beats, summary
+
+
+def values_meta(chapters: list[list[dict]], characters: list[dict],
+                protagonist: str) -> dict[str, Any]:
+    """数值账本元数据: per-character max attainable affinity across every choice,
+    and the ending threshold at 60% of it — 真分歧只在结局, the threshold IS the
+    fork. Recomputed from the compiled script, so it is always consistent."""
+    mx: dict[str, int] = {}
+    for ch in chapters:
+        for e in ch:
+            if e.get("type") != "choice":
+                continue
+            best: dict[str, int] = {}
+            for o in e["options"]:
+                for cid, d in (o.get("fx") or {}).items():
+                    if d > 0:
+                        best[cid] = max(best.get(cid, 0), d)
+            for cid, d in best.items():
+                mx[cid] = mx.get(cid, 0) + d
+    weight = {c["id"]: c.get("weight", 3) for c in characters}
+    routed = [c["id"] for c in characters
+              if c.get("route") and c["id"] != protagonist and mx.get(c["id"], 0) > 0]
+    cands = routed or [cid for cid in mx if cid != protagonist and mx[cid] > 0]
+    cands.sort(key=lambda cid: (-mx.get(cid, 0), -weight.get(cid, 3)))
+    return {"routes": cands, "max": {c: mx[c] for c in cands},
+            "threshold": {c: max(1, round(mx[c] * 0.6)) for c in cands},
+            "target": cands[0] if cands else None}
+
+
+def compile_endings(llm, gal: dict[str, Any], full_summary: str = "",
+                    mature: bool = False) -> list[dict]:
+    """结局编译: the ONLY true fork (blueprint §3). The engine owns the structure —
+    ending #1 belongs to the target route character behind their affinity
+    threshold, ending #2 is the unconditional fallback; the model only writes."""
+    vm = gal.get("values") or {}
+    target = vm.get("target")
+    tchar = next((c for c in gal["characters"] if c["id"] == target), None)
+    out = llm.generate({
+        "gal_endings": True,
+        "source": (gal.get("source_text") or "")[:MAX_SOURCE_CHARS],
+        "characters": gal["characters"], "scenes": gal["scenes"],
+        "protagonist_id": gal["protagonist_id"],
+        "target": ({"id": tchar["id"], "name": tchar["name"]} if tchar else None),
+        "summary": full_summary[:600],
+        "mature": mature,
+    }) or {}
+    char_ids = {c["id"] for c in gal["characters"]}
+    scene_ids = {s["id"] for s in gal["scenes"]}
+    endings: list[dict] = []
+    for k, raw in enumerate((out.get("endings") or [])[:3]):
+        if not isinstance(raw, dict):
+            continue
+        last_scene = gal["scenes"][0]["id"]
+        beats: list[dict] = []
+        for rb in (raw.get("beats") or [])[:20]:
+            nb = _norm_beat(rb if isinstance(rb, dict) else {}, 0, 0, char_ids,
+                            scene_ids, last_scene)
+            if nb:
+                nb["id"] = f"e{len(endings) + 1}b{len(beats) + 1:03d}"
+                if not mature:
+                    nb["adult"] = False
+                if nb["who"] == gal["protagonist_id"]:
+                    nb["who_face"] = None
+                last_scene = nb["scene"]
+                beats.append(nb)
+        if len(beats) >= 6:
+            endings.append({"id": f"e{len(endings) + 1}",
+                            "title": (str(raw.get("title") or "").strip()[:12]
+                                      or f"结局{len(endings) + 1}"),
+                            "beats": beats})
+    if len(endings) < 2:
+        raise ValueError(f"结局编译失败：只产出 {len(endings)} 个可用结局")
+    thr = (vm.get("threshold") or {}).get(target)
+    endings[0]["cond"] = ({"char": target, "gte": thr} if target and thr
+                          else {"default": True})
+    for e in endings[1:]:
+        e["cond"] = {"default": True}
+    return endings
 
 
 # ── 美术: 一图四格差分表 → 裁切 → rembg 抠底 ─────────────────────────────────────
@@ -148,7 +317,9 @@ def sheet_prompt(char: dict, world: str, art: str) -> str:
             f"【平静、微笑、愤怒、悲伤】四种表情，其余完全一致（同一张脸、同一发型、"
             f"同一服装、同一姿势的半身像）。人物：{char.get('name')}，"
             f"{(char.get('looks') or '')[:160]}。世界背景：{world[:80]}。"
-            "每格人物完整不裁切，纯色极深背景（近黑），柔和主光，电影质感写实，高细节，"
+            "每格人物完整地居中在自己的四分之一格内、四周留出明显空隙，"
+            "任何一格的人物都绝不越过格子边界、绝不与相邻格的人物重叠，"
+            "纯色极深背景（近黑），柔和主光，电影质感写实，高细节，"
             "画面里没有任何文字、编号或分隔线" + (f"。画面基调：{art}" if art else ""))
 
 
@@ -219,17 +390,39 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
         art = ((s.tuning or {}).get("art_style") or "").strip()
         world = (gal.get("source_text") or "")[:200]
         try:
-            if not (gal.get("script") or {}):
+            # every step below is idempotent: a rebuild re-enters here and only the
+            # missing pieces run (parse → chapters from where they stopped → endings)
+            if not gal.get("protagonist_id"):
                 # 1. 识别
                 gal["status"], gal["progress"] = "parsing", "正在识别角色与场景…"
                 _save(s)
                 gal.update(parse_story(llm, gal.get("source_text") or "", s.title or ""))
-                # 2. 编译 (P0: 第一章; later chapters compile after choices land)
-                gal["status"], gal["progress"] = "compiling", "正在编写第一章…"
+            mature = bool(gal.get("mature"))
+            pov = gal["protagonist_id"]
+            # 2. 编译: all chapters, 编译记忆 chained through per-chapter summaries
+            script = gal.get("script") or {pov: {"chapters": []}}
+            chapters_done = script.get(pov, {}).get("chapters") or []
+            summaries = list(gal.get("ch_summaries") or [])[:len(chapters_done)]
+            total = len(gal["chapters"])
+            for i in range(len(chapters_done) + 1, total + 1):
+                gal["status"], gal["progress"] = "compiling", f"正在编写第 {i}/{total} 章…"
                 _save(s)
-                beats = compile_chapter(llm, gal, 1)
-                gal["script"] = {gal["protagonist_id"]: {"chapters": [beats]}}
-                gal["manifest"] = {"sprites": {}, "bgs": [], "cover": False, "missing": []}
+                beats, summ = compile_chapter(llm, gal, i,
+                                              prior_summary="；".join(summaries)[-600:],
+                                              mature=mature)
+                chapters_done.append(beats)
+                summaries.append(summ)
+                script[pov] = {"chapters": chapters_done}
+                gal["script"], gal["ch_summaries"] = script, summaries
+                _save(s)   # per-chapter persist: a crash resumes, never restarts
+            # 3. 数值账本 + 结局 (真分歧只在结局)
+            gal["values"] = values_meta(chapters_done, gal["characters"], pov)
+            if not gal.get("endings"):
+                gal["status"], gal["progress"] = "compiling", "正在编写结局…"
+                _save(s)
+                gal["endings"] = compile_endings(llm, gal,
+                                                 full_summary="；".join(summaries)[-600:],
+                                                 mature=mature)
             # rebuild lands here directly: script kept, only missing art re-renders
             gal["manifest"] = gal.get("manifest") or {"sprites": {}, "bgs": [],
                                                       "cover": False, "missing": []}

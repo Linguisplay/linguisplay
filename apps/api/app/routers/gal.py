@@ -30,6 +30,7 @@ class GalCreate(BaseModel):
     title: str = ""
     source_text: str
     art_style: str = ""   # 画风预设文案 (P0: free text; preset menu later)
+    mature: bool = False  # 🔞 成人拍编译许可 (adult beats render as bg+textbox)
 
 
 def _spawn_build(work_id: str) -> bool:
@@ -70,6 +71,7 @@ def create_work(body: GalCreate, user: User = Depends(current_user),
         status="draft",
         tuning=({"art_style": body.art_style.strip()[:200]} if body.art_style.strip() else {}),
         gal={"status": "queued", "progress": "排队中…",
+             "mature": bool(body.mature),
              "source_text": text[:gal_mod.MAX_SOURCE_CHARS]},
     )
     db.add(s)
@@ -123,6 +125,9 @@ def work_script(work_id: str, user: User = Depends(current_user),
                        for x in g.get("scenes") or []],
             "chapters": g.get("chapters") or [],
             "script": g.get("script") or {},
+            "endings": g.get("endings") or [],
+            "values": g.get("values") or {},
+            "mature": bool(g.get("mature")),
             "manifest": g.get("manifest") or {}}
 
 
@@ -137,6 +142,9 @@ def rebuild(work_id: str, user: User = Depends(current_user),
     # thread is an orphan (service restarted mid-build) and must be resumable
     if not (g.get("script") or {}):
         g["status"], g["progress"] = "queued", "重新排队…"   # hard failure → full re-run
+    elif (len((g.get("script") or {}).get(g.get("protagonist_id"), {}).get("chapters") or [])
+          < len(g.get("chapters") or []) or not g.get("endings")):
+        g["status"], g["progress"] = "compiling", "从断点续写章节…"   # text resume
     else:
         g["status"], g["progress"] = "art", "补齐缺失的美术…"
     s.gal = g

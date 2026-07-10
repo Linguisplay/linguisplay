@@ -72,8 +72,10 @@ class MockLLM:
         # 🎀 galgame maker twins: deterministic parse + compile so build tests never call out
         if prompt.get("gal_parse"):
             return {"characters": [
-                        {"name": "林晚", "looks": "短发少女，深色大衣", "personality": "冷静", "weight": 5},
-                        {"name": "沈刻", "looks": "高瘦青年，金丝眼镜", "personality": "温和", "weight": 4}],
+                        {"name": "林晚", "looks": "短发少女，深色大衣", "personality": "冷静",
+                         "weight": 5, "route": False},
+                        {"name": "沈刻", "looks": "高瘦青年，金丝眼镜", "personality": "温和",
+                         "weight": 4, "route": True}],
                     "scenes": [{"name": "天台", "visual": "夜里的天台，风很大"},
                                {"name": "教室", "visual": "放学后的空教室"}],
                     "protagonist": "林晚",
@@ -90,8 +92,28 @@ class MockLLM:
                      {"who": other, "text": "「有件事想问你。」", "expr": "常态", "scene": s1},
                      {"who": None, "text": "夜色沉下来。", "scene": s1, "cg": True},
                      {"who": other, "text": "「明天，还会来吗？」", "expr": "哀", "scene": s1},
+                     # 选择点: options move the ledger, branches rejoin in-scene
+                     {"options": [
+                         {"text": "「明天见。」", "fx": {other: 2},
+                          "beats": [{"who": other, "text": "「一言为定。」", "expr": "喜",
+                                     "scene": s1},
+                                    {"who": None, "text": "他笑了。", "scene": s1}]},
+                         {"text": "转身离开", "fx": {other: -1},
+                          "beats": [{"who": None, "text": "你没有回头。", "scene": s1}]}]},
                      {"who": None, "text": "你没有回答。", "scene": s1}]
             return {"beats": beats, "summary": "天台上的一问，没有答案。"}
+        if prompt.get("gal_endings"):
+            s1 = ((prompt.get("scenes") or [{}])[0]).get("id", "s1")
+            t = (prompt.get("target") or {}).get("id") or ""
+            def _nar(texts):
+                return [{"who": None, "text": x, "scene": s1} for x in texts]
+            return {"endings": [
+                {"char": t, "title": "并肩", "beats": _nar(
+                    ["风停了。", "他站在老地方。", "你走过去。",
+                     "「我等你很久了。」", "你们并肩看向远处。", "天亮了。"])},
+                {"char": "", "title": "独行", "beats": _nar(
+                    ["天台空着。", "你独自站了一会儿。", "风很大。",
+                     "你把外套裹紧。", "转身下楼。", "故事在这里停笔。"])}]}
         # rolling memory digest: deterministic concat (bounded) so tests stay reproducible.
         if prompt.get("summarize"):
             prior = prompt.get("prior_memory") or ""
