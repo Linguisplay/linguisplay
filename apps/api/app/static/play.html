@@ -540,6 +540,21 @@ body.dread #dread { opacity:1; }
 
 <script>
 const API = "/api/v1";
+// 🩺 field telemetry: browser-side crashes surface in the server journal — beta
+// players can't open devtools for us. Throttled, fire-and-forget.
+let _errSent = 0;
+function reportClientError(msg, src) {
+  if (_errSent >= 5) return;
+  _errSent++;
+  try {
+    fetch(API + "/client-log", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ msg: String(msg).slice(0, 480), src: String(src || "").slice(0, 100) }) });
+  } catch (e) {}
+}
+window.addEventListener("error", (e) => reportClientError(
+  (e.message || "") + " @" + (e.filename || "").split("/").pop() + ":" + (e.lineno || 0), "onerror"));
+window.addEventListener("unhandledrejection", (e) => reportClientError(
+  (e.reason && (e.reason.stack || e.reason.message)) || String(e.reason), "promise"));
 // ── 🌐 UI language ────────────────────────────────────────────────────────────
 // "zh" (default) | "en". Explicit choice sticks in localStorage; playing an en story
 // auto-switches for the session (one-way zh→en; the toggle reloads to go back).
@@ -1004,7 +1019,10 @@ async function enterRun(run) {
   applyScene(run.state && run.state.scene);
   const beats = await j(`/runs/${runId}/play`);
   beats.forEach(renderBeat);
-  if (vnMode) await vnBootstrap(beats, run.state);   // 🎀 the window plays, not the log
+  if (vnMode) {   // 🎀 the window plays, not the log; a VN-layer crash degrades to chat
+    try { await vnBootstrap(beats, run.state); }
+    catch (e) { reportClientError(e.stack || e.message, "vnBootstrap"); vnShow(false); vnMode = false; }
+  }
   // ✨ a brand-new run: make the promise perceivable — this world is LOCKED, go earn it
   if (!beats.some(b => b.author === "player")) {
     try {
@@ -1113,7 +1131,10 @@ async function reloadChat() {
   chat.innerHTML = ""; suggest.innerHTML = "";
   const beats = await j(`/runs/${runId}/play`);
   beats.forEach(renderBeat);
-  if (vnMode) await vnBootstrap(beats, run.state);   // 🎀 rewind lands back in the window
+  if (vnMode) {   // 🎀 rewind lands back in the window; crashes degrade to chat
+    try { await vnBootstrap(beats, run.state); }
+    catch (e) { reportClientError(e.stack || e.message, "vnBootstrap"); vnShow(false); vnMode = false; }
+  }
   applyRunUpdate(run);
   renderState(run.state);
   curClock = (run.state && run.state.clock) || null;
@@ -2385,7 +2406,10 @@ async function playBeatVN(b, skipLog) {
 }
 // play one engine beat with a "typing…" pause then a typewriter reveal
 async function playBeat(b) {
-  if (vnMode) return playBeatVN(b);
+  if (vnMode) {
+    try { return await playBeatVN(b); }
+    catch (e) { reportClientError(e.stack || e.message, "playBeatVN"); vnShow(false); vnMode = false; }
+  }
   if (b.author === "player") { renderBeat(b); return; }
   if (pendingSfx) { const n = pendingSfx; pendingSfx = null; playSfx(n); }
   if (b.type === "description") {

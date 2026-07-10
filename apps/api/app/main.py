@@ -1,7 +1,7 @@
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Body, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -77,3 +77,17 @@ app.mount("/scene", StaticFiles(directory=_SCENE), name="scene")
 @app.get(f"{API}/health", tags=["health"])
 def health():
     return {"status": "ok"}
+
+
+@app.post(f"{API}/client-log", include_in_schema=False)
+def client_log(body: dict = Body(default={})):
+    """🩺 Field telemetry: the play page reports browser-side JS crashes here — beta
+    players can't open devtools for us. Truncated hard; never errors out."""
+    import logging
+    try:
+        msg = str(body.get("msg") or "")[:500]
+        src = str(body.get("src") or "")[:120]
+        logging.getLogger("uvicorn.error").warning("CLIENT-JS [%s] %s", src, msg)
+    except Exception:
+        pass
+    return {"ok": True}
