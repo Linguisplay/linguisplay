@@ -1004,6 +1004,7 @@ async function enterRun(run) {
   applyScene(run.state && run.state.scene);
   const beats = await j(`/runs/${runId}/play`);
   beats.forEach(renderBeat);
+  if (vnMode) await vnBootstrap(beats, run.state);   // 🎀 the window plays, not the log
   // ✨ a brand-new run: make the promise perceivable — this world is LOCKED, go earn it
   if (!beats.some(b => b.author === "player")) {
     try {
@@ -1112,6 +1113,7 @@ async function reloadChat() {
   chat.innerHTML = ""; suggest.innerHTML = "";
   const beats = await j(`/runs/${runId}/play`);
   beats.forEach(renderBeat);
+  if (vnMode) await vnBootstrap(beats, run.state);   // 🎀 rewind lands back in the window
   applyRunUpdate(run);
   renderState(run.state);
   curClock = (run.state && run.state.clock) || null;
@@ -2219,6 +2221,8 @@ function renderSuggest(items) {
     free.onclick = () => { box.classList.add("hidden"); document.body.classList.add("vnfree"); msg.focus(); };
     box.appendChild(free);
     box.classList.remove("hidden");
+    // no generated choices → open the composer outright so there is ALWAYS a way forward
+    if (!(items || []).length) { document.body.classList.add("vnfree"); }
     return;
   }
   suggest.innerHTML = "";
@@ -2352,8 +2356,16 @@ function vnSprite(name) {
   }
   img.classList.remove("hidden");
 }
-async function playBeatVN(b) {
-  renderBeat(b);   // the hidden chat doubles as the 回想 backlog
+// 🎀 entering a VN run: the hidden chat holds the history, but the WINDOW must play —
+// a fresh run replays its opening beat-by-beat; a resumed run surfaces the last beat.
+async function vnBootstrap(beats, st) {
+  const fresh = !(beats || []).some(b => b.author === "player");
+  const list = fresh ? (beats || []) : (beats || []).slice(-1);
+  for (const b of list) await playBeatVN(b, true);
+  renderSuggest((st && st.suggestions) || []);
+}
+async function playBeatVN(b, skipLog) {
+  if (!skipLog) renderBeat(b);   // the hidden chat doubles as the 回想 backlog
   const box = document.getElementById("vntext");
   const nameEl = document.getElementById("vnname");
   if (b.author === "player") {
