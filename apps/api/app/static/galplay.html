@@ -68,6 +68,13 @@
                    background: rgba(20,20,36,.88); border: 1px solid #45456a; color: #e7eaf3;
                    border-radius: 11px; font: inherit; font-size: 15px; cursor: pointer; }
   #gtitle button:hover { border-color: #8ea2ff; }
+  /* 🎬 章节过场卡: 黑场 + 章号/章题/引言, 淡入停顿淡出 */
+  #gchap { position: absolute; inset: 0; z-index: 9; display: none; flex-direction: column;
+           align-items: center; justify-content: center; background: #000;
+           text-align: center; opacity: 0; transition: opacity .5s ease; padding: 0 10%; }
+  #gchap .num { font-size: 14px; letter-spacing: 10px; color: #8b93a7; margin-bottom: 16px; }
+  #gchap h2 { font-size: 24px; letter-spacing: 6px; margin-bottom: 20px; min-height: 1em; }
+  #gchap .lead { color: #8b93a7; font-size: 14px; letter-spacing: 2px; }
   #gend { position: absolute; inset: 0; z-index: 9; display: none; flex-direction: column;
           align-items: center; justify-content: center; background: rgba(3,3,8,.92); }
   #gend h2 { font-size: 22px; letter-spacing: 6px; margin-bottom: 18px; }
@@ -125,6 +132,8 @@
     <div id="gtext"></div>
     <div id="gnext">▼</div>
   </div>
+  <div id="gchap"><div class="num" id="gchapNum"></div><h2 id="gchapT"></h2>
+    <div class="lead" id="gchapL"></div></div>
   <div id="gend"><h2 id="gendT"></h2><div class="muted" id="gendS"></div>
     <button onclick="event.stopPropagation();restart()">从头再看</button></div>
   <div id="gtitle">
@@ -298,10 +307,12 @@ function startGame(cont) {
   $("gend").style.display = "none";
   let saved = null;
   if (cont) { try { saved = JSON.parse(localStorage.getItem(SKEY()) || "null"); } catch (e) {} }
-  sav = (saved && typeof saved === "object" && "ch" in saved) ? saved : fresh();
+  const resumed = saved && typeof saved === "object" && "ch" in saved;
+  sav = resumed ? saved : fresh();
   choosing = false;
   clearCast();
-  showCurrent();
+  if (resumed) showCurrent();
+  else showChapCard(0, false);   // 开卷也有过场: 第一章的章节卡
 }
 // continue lands back ON the beat that was last shown, not one past it
 function showCurrent() {
@@ -417,6 +428,7 @@ async function showBeat(b) {
 }
 
 function next() {
+  if (chapCardOn) return;                  // the chapter card owns this pause
   if (typing) { typing = false; return; }
   if (choosing) return;                    // options are the only way forward
   if (sav.br) {                            // inside a choice branch
@@ -433,15 +445,35 @@ function next() {
     if (sav.end) { finish(); return; }
     if (sav.ch + 1 >= chapters().length) { startEnding(); return; }
     sav.ch++; sav.i = -1; save();
-    showBeat(chapterCard(`· 第 ${sav.ch + 1} 章 ·`)); return;
+    showChapCard(sav.ch, false); return;
   }
   const b = list[sav.i];
   if (b.type === "choice") { save(); showChoice(b); return; }
   save(); showBeat(b);
 }
-function chapterCard(text) {
-  const b0 = listNow().find(x => x.type !== "choice") || {};
-  return { who: null, text, scene: b0.scene };
+// 🎬 章节过场卡: 黑场淡入「第 X 章 · 章题 · 引言」, 停一拍再淡出进章
+let chapCardOn = false;
+const CN = "一二三四五六七八九十";
+function showChapCard(k, isFinal) {
+  const c = (W.chapters || [])[k] || {};
+  $("gchapNum").textContent = isFinal ? "终 章" : `第 ${CN[k] || k + 1} 章`;
+  $("gchapT").textContent = isFinal ? "" : (c.title || "");
+  $("gchapL").textContent = isFinal ? "" : (c.lead || "");
+  const el = $("gchap");
+  el.style.display = "flex";
+  requestAnimationFrame(() => { el.style.opacity = 1; });
+  chapCardOn = true;
+  clearTimeout(autoT);
+  autoT = setTimeout(hideChapCard, skipOn ? 700 : 2600);
+}
+function hideChapCard() {
+  if (!chapCardOn) return;
+  chapCardOn = false;
+  clearTimeout(autoT);
+  const el = $("gchap");
+  el.style.opacity = 0;
+  setTimeout(() => { el.style.display = "none"; }, 520);
+  next();
 }
 
 // 🎯 选择点: apply fx to the affinity ledger, play the branch, rejoin
@@ -473,7 +505,7 @@ function startEnding() {
   if (!W.endings || !W.endings.length) { finishSimple("全剧终"); return; }
   const e = pickEnding();
   sav.end = e.id; sav.i = -1; save();
-  showBeat({ who: null, text: "· 终章 ·", scene: (e.beats[0] || {}).scene });
+  showChapCard(-1, true);
 }
 function pickEnding() {
   for (const e of W.endings) {
@@ -502,9 +534,10 @@ function finishSimple(t) {
 
 function tap() {
   if ($("gtitle").style.display !== "none" || $("gend").style.display === "flex") return;
+  if (chapCardOn) { hideChapCard(); return; }     // 过场卡: 点一下提前进章
   next();
 }
-function restart() { $("gend").style.display = "none"; sav = fresh(); choosing = false; clearCast(); next(); }
+function restart() { $("gend").style.display = "none"; sav = fresh(); choosing = false; clearCast(); showChapCard(0, false); }
 function toggleAuto() { autoOn = !autoOn; $("btnAuto").classList.toggle("on", autoOn); if (autoOn && !typing && !choosing) next(); }
 function logAdd(b) {
   const d = document.createElement("div"); d.className = "l";

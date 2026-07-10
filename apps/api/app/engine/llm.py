@@ -109,7 +109,8 @@ class MockLLM:
                 {"text": "转身离开", "fx": {other: -1},
                  "beats": [{"who": None, "text": "你没有回头。", "scene": s1}]}]}]
             return {"beats": beats, "choices": choices,
-                    "summary": "天台上的一问，没有答案。"}
+                    "summary": "天台上的一问，没有答案。",
+                    "title": f"第{ch_i}夜", "lead": "风还没停。"}
         if prompt.get("gal_endings"):
             s1 = ((prompt.get("scenes") or [{}])[0]).get("id", "s1")
             t = (prompt.get("target") or {}).get("id") or ""

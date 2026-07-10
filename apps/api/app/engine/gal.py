@@ -43,7 +43,8 @@ EXPRESSIONS = ("常态", "喜", "怒", "哀")
 GAL_DIR = Path(__file__).resolve().parents[1] / "static" / "scene" / "gal"
 
 # P0 规格 (blueprint §1): keeps build cost and play length predictable
-MAX_SOURCE_CHARS = 20000
+# (40k: 中篇经典整本可入 — 野菊の墓 34k; per-chapter slices keep compile prompts small)
+MAX_SOURCE_CHARS = 40000
 TARGET_BEATS_PER_CHAPTER = (40, 60)
 
 
@@ -328,6 +329,10 @@ def compile_chapter(llm, gal: dict[str, Any], ch_index: int,
             b["who_face"] = None
     summary = (str(out.get("summary") or "").strip()[:200]
                or str(chapter.get("summary") or "")[:200])
+    # 章题+过场引言 land on the chapter skeleton (the player's chapter card
+    # reads them from there; build_work persists gal per chapter)
+    chapter["title"] = str(out.get("title") or "").strip()[:12]
+    chapter["lead"] = str(out.get("lead") or "").strip()[:40]
     return beats, summary
 
 
