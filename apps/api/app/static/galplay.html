@@ -14,9 +14,19 @@
            overflow: hidden; background: #05050a; user-select: none; cursor: pointer; }
   #gbg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
          transition: opacity .6s ease; }
-  #gsprite { position: absolute; left: 50%; bottom: 24%; transform: translateX(-50%);
-             height: 62%; max-width: 92%; object-fit: contain; object-position: bottom;
-             transition: opacity .35s ease; filter: drop-shadow(0 6px 22px rgba(0,0,0,.55)); }
+  /* 🎭 双立绘位: 竖屏不平分左右（脸会小），前后景深错位 + Auto Highlight
+     （说话者前景点亮，另一位缩小压暗置后；位置一旦分定不再交换，防跳动） */
+  .sp { position: absolute; bottom: 24%; transform: translateX(-50%);
+        max-width: 92%; object-fit: contain; object-position: bottom;
+        transition: opacity .35s ease, left .3s ease, height .3s ease, filter .3s ease; }
+  .sp.center { left: 50%; }
+  .sp.left   { left: 32%; }
+  .sp.right  { left: 68%; }
+  .sp.front  { height: 60%; z-index: 3;
+               filter: brightness(1) drop-shadow(0 6px 22px rgba(0,0,0,.55)); }
+  .sp.back   { height: 51%; z-index: 2;
+               filter: brightness(.45) drop-shadow(0 6px 22px rgba(0,0,0,.55)); }
+  .sp.front.dim { filter: brightness(.72) drop-shadow(0 6px 22px rgba(0,0,0,.55)); }
   .off { opacity: 0 !important; }
   #gbox { position: absolute; left: 3%; right: 3%; bottom: 2.6%; min-height: 26%;
           background: rgba(8,8,16,.82); border: 1px solid #3a3a52; border-radius: 14px;
@@ -71,7 +81,8 @@
 <body>
 <div id="stage" onclick="tap()">
   <img id="gbg" alt="">
-  <img id="gsprite" class="off" alt="">
+  <img id="gsp0" class="sp off" alt="">
+  <img id="gsp1" class="sp off" alt="">
   <div id="gctl">
     <span id="btnAuto" onclick="event.stopPropagation();toggleAuto()">▶ 自动</span>
     <span onclick="event.stopPropagation();toggleLog()">📖</span>
@@ -137,6 +148,7 @@ function startGame(cont) {
   if (cont) { try { saved = JSON.parse(localStorage.getItem(SKEY()) || "null"); } catch (e) {} }
   sav = (saved && typeof saved === "object" && "ch" in saved) ? saved : fresh();
   choosing = false;
+  clearCast();
   showCurrent();
 }
 // continue lands back ON the beat that was last shown, not one past it
@@ -158,15 +170,23 @@ function setBg(sid) {
   const el = $("gbg");
   const want = `/scene/gal/${workId}/bg_${sid}.jpg`;
   if (el.dataset.sid === sid) return;
+  clearCast();                            // 换场清台：人随新场景重新登场
   el.dataset.sid = sid;
   el.style.opacity = 0;
   setTimeout(() => { el.onerror = () => { el.removeAttribute("src"); el.style.opacity = 1; };
                      el.src = want; el.onload = () => el.style.opacity = 1; }, 320);
 }
-function setSprite(cid, expr, adult) {
-  const el = $("gsprite");
-  // 🔞 成人拍：只有背景+文字框（Yi 拍板）；主角与旁白也不上立绘
-  if (!cid || adult || cid === W.protagonist_id) { el.classList.add("off"); return; }
+// 🎭 舞台账本: 最近两个开口的非主角占左右槽（播放器侧从 who 序列推导——
+// 结构性要求不押在编译模型的自觉上）。槽位一经分定不再交换；第三人开口顶掉
+// 此刻没在说话的那位；换场清台。
+const spEls = () => [$("gsp0"), $("gsp1")];
+let stageSlots = [null, null], stageSpeaker = -1;
+
+function clearCast() {
+  stageSlots = [null, null]; stageSpeaker = -1;
+  spEls().forEach(el => el.classList.add("off"));
+}
+function setSrc(el, cid, expr) {
   const want = `/scene/gal/${workId}/${cid}_${expr || "常态"}.png`;
   const fallback = `/scene/gal/${workId}/${cid}_常态.png`;
   el.onerror = () => {   // a missing expression falls back to 常态, then hides
@@ -176,7 +196,38 @@ function setSprite(cid, expr, adult) {
     } else el.classList.add("off");
   };
   if (el.getAttribute("src") !== location.origin + want) el.src = want;
-  el.classList.remove("off");
+}
+function layoutCast() {
+  const n = stageSlots.filter(Boolean).length;
+  stageSlots.forEach((s, i) => {
+    const el = spEls()[i];
+    if (!s) { el.classList.add("off"); return; }
+    setSrc(el, s.cid, s.expr);
+    el.classList.remove("off", "left", "right", "center", "front", "back", "dim");
+    if (n === 1) { el.classList.add("center", "front"); return; }
+    el.classList.add(i === 0 ? "left" : "right",
+                     i === stageSpeaker ? "front" : "back");
+  });
+}
+function setStage(b) {
+  // 🔞 成人拍：只有背景+文字框（Yi 拍板）；主角与旁白也不上立绘
+  if (b.adult) { spEls().forEach(el => el.classList.add("off")); return; }
+  const who = b.who;
+  if (!who || who === W.protagonist_id) {
+    // 旁白/主角开口：在场者保持站位，整体轻压一档（都在听）
+    spEls().forEach(el => { if (!el.classList.contains("off")) el.classList.add("dim"); });
+    return;
+  }
+  let i = stageSlots.findIndex(s => s && s.cid === who);
+  if (i < 0) {
+    i = stageSlots.findIndex(s => !s);              // free slot first
+    if (i < 0) i = stageSpeaker === 0 ? 1 : 0;      // else evict the listener
+    stageSlots[i] = { cid: who, expr: b.expr };
+  } else if (b.expr) {
+    stageSlots[i].expr = b.expr;
+  }
+  stageSpeaker = i;
+  layoutCast();
 }
 async function typeText(el, text) {
   typing = true; el.textContent = "";
@@ -189,7 +240,7 @@ async function typeText(el, text) {
 }
 async function showBeat(b) {
   setBg(b.scene);
-  setSprite(b.who, b.expr, b.adult);
+  setStage(b);
   const nm = $("gname"), tx = $("gtext");
   if (b.who) { nm.textContent = b.who === W.protagonist_id ? "你" : nameOf(b.who); nm.style.display = ""; tx.className = ""; }
   else { nm.style.display = "none"; tx.className = "narr"; }
@@ -287,7 +338,7 @@ function tap() {
   if ($("gtitle").style.display !== "none" || $("gend").style.display === "flex") return;
   next();
 }
-function restart() { $("gend").style.display = "none"; sav = fresh(); choosing = false; next(); }
+function restart() { $("gend").style.display = "none"; sav = fresh(); choosing = false; clearCast(); next(); }
 function toggleAuto() { autoOn = !autoOn; $("btnAuto").classList.toggle("on", autoOn); if (autoOn && !typing && !choosing) next(); }
 function logAdd(b) {
   const d = document.createElement("div"); d.className = "l";
