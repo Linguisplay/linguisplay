@@ -1,10 +1,8 @@
 # -*- coding: utf-8 -*-
 """🎀 galgame 生成器 P0+P1: parse → normalize → chapter compile obeys the pacing
 contract; choices move the affinity ledger (伪分支); the ending fork is engine
-law (真分歧只在结局); 🔞 stripping is an engine defense; the expression sheet
-crops clean; reserved fields (voice/cg/adult/fx) ride every beat."""
-import io
-
+law (真分歧只在结局); 🔞 stripping is an engine defense; expression portraits
+ride one seed per character; reserved fields (voice/cg/adult/fx) ride every beat."""
 import pytest
 
 from app.engine import gal
@@ -170,43 +168,24 @@ def test_bad_parse_fails_loud():
         pass
 
 
-def test_sheet_quad_crop_fallback():
-    from PIL import Image
-    im = Image.new("RGB", (720, 1280), (10, 20, 30))
-    buf = io.BytesIO()
-    im.save(buf, format="JPEG")
-    pieces = gal._quad_crop(buf.getvalue())
-    assert len(pieces) == 4
-    for p in pieces:
-        q = Image.open(io.BytesIO(p))
-        assert q.size == (360, 640)
+def test_portrait_prompts_share_everything_but_the_expression():
+    # 差分表已废: per-expression portraits ride the SAME seed and prompts that
+    # differ only in the expression phrase — that's what keeps the face
+    char = {"id": "c2", "name": "沈刻", "looks": "高瘦青年，金丝眼镜"}
+    prompts = {e: gal.portrait_prompt(char, "天台的故事", "日漫", e)
+               for e in gal.EXPRESSIONS}
+    assert len(set(prompts.values())) == 4                 # expressions differ
+    for e, p in prompts.items():
+        assert "沈刻" in p and "只有这一个人" in p
+        assert gal._EXPR_FACE[e] in p
+        # everything except the expression phrase is byte-identical
+        assert p.replace(gal._EXPR_FACE[e], "") == \
+               prompts["常态"].replace(gal._EXPR_FACE["常态"], "")
 
 
-def test_find_figures_is_grid_agnostic():
-    # four blobs deliberately OFF the quadrant grid (the 实弹 failure: figures
-    # drift across cell lines, fixed quadrant cuts slice heads) — the finder
-    # must cut along silhouettes, ordered TL/TR/BL/BR
-    from PIL import Image, ImageDraw
-    im = Image.new("RGBA", (720, 1280), (0, 0, 0, 0))
-    d = ImageDraw.Draw(im)
-    blobs = {"TL": (40, 100, 300, 620), "TR": (400, 60, 660, 580),
-             "BL": (60, 700, 320, 1240), "BR": (380, 660, 640, 1200)}
-    for box in blobs.values():
-        d.ellipse(box, fill=(200, 180, 160, 255))
-    boxes = gal._find_figures(im)
-    assert boxes and len(boxes) == 4
-    for got, want in zip(boxes, blobs.values()):
-        # each figure's bbox hugs its own blob (small padding), never a neighbor
-        assert abs(got[0] - want[0]) < 40 and abs(got[1] - want[1]) < 40
-        assert abs(got[2] - want[2]) < 40 and abs(got[3] - want[3]) < 40
-
-
-def test_find_figures_bails_when_figures_merge():
-    # two figures touching → one blob → must return None (fallback to quadrants)
-    from PIL import Image, ImageDraw
-    im = Image.new("RGBA", (720, 1280), (0, 0, 0, 0))
-    d = ImageDraw.Draw(im)
-    d.rectangle((40, 100, 680, 620), fill=(200, 180, 160, 255))   # merged top pair
-    d.ellipse((60, 700, 320, 1240), fill=(200, 180, 160, 255))
-    d.ellipse((380, 660, 640, 1200), fill=(200, 180, 160, 255))
-    assert gal._find_figures(im) is None
+def test_char_seed_stable_per_character():
+    a = gal.char_seed("work1", "c2")
+    assert a == gal.char_seed("work1", "c2")               # stable across calls
+    assert a != gal.char_seed("work1", "c3")               # differs per character
+    assert a != gal.char_seed("work2", "c2")               # and per work
+    assert 0 <= a < 2 ** 31 - 1

@@ -1994,7 +1994,8 @@ DASHSCOPE_TASK_URL = "https://dashscope.aliyuncs.com/api/v1/tasks/"
 
 
 def generate_image(prompt: str, size: str = "1280*720",
-                   model: str = "wanx2.1-t2i-turbo", timeout_s: int = 120) -> bytes | None:
+                   model: str = "wanx2.1-t2i-turbo", timeout_s: int = 120,
+                   seed: int | None = None) -> bytes | None:
     """Text-to-image via DashScope 通义万相 (async): submit a task, poll until it finishes,
     then download the image bytes. Returns None on any failure. Runs OFFLINE (background
     enrichment), never in the play request path — generation takes ~10-30s per image."""
@@ -2009,7 +2010,11 @@ def generate_image(prompt: str, size: str = "1280*720",
             DASHSCOPE_T2I_URL,
             headers={**auth, "Content-Type": "application/json", "X-DashScope-Async": "enable"},
             json={"model": model, "input": {"prompt": prompt[:780]},
-                  "parameters": {"size": size, "n": 1}},
+                  # a FIXED seed + near-identical prompts = the same face across a
+                  # character's four expression portraits (差分表已废: one-image-4-cells
+                  # was a bet the image model kept losing — collage heads, fog busts)
+                  "parameters": {"size": size, "n": 1,
+                                 **({"seed": seed} if seed is not None else {})}},
             timeout=30,
         )
         sub.raise_for_status()

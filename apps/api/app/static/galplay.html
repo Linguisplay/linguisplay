@@ -168,7 +168,13 @@ function setSprite(cid, expr, adult) {
   // 🔞 成人拍：只有背景+文字框（Yi 拍板）；主角与旁白也不上立绘
   if (!cid || adult || cid === W.protagonist_id) { el.classList.add("off"); return; }
   const want = `/scene/gal/${workId}/${cid}_${expr || "常态"}.png`;
-  el.onerror = () => el.classList.add("off");
+  const fallback = `/scene/gal/${workId}/${cid}_常态.png`;
+  el.onerror = () => {   // a missing expression falls back to 常态, then hides
+    if (want !== fallback && el.getAttribute("src") !== location.origin + fallback) {
+      el.onerror = () => el.classList.add("off");
+      el.src = fallback;
+    } else el.classList.add("off");
+  };
   if (el.getAttribute("src") !== location.origin + want) el.src = want;
   el.classList.remove("off");
 }

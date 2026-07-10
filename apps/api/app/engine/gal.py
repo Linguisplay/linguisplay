@@ -3,9 +3,10 @@
 
 编译式播放: everything expensive happens HERE at build time; the player only turns
 pages. This module owns build orchestration: 识别拍 (parse) → 编剧拍 (per-chapter
-script compile, pacing contract lives in the qwen builder) → 美术拍 (四格差分表 →
-crop → rembg 抠底, portrait scene backdrops, cover). LLM contracts ride
-llm.generate({"gal_parse"|"gal_compile"}); MockLLM has deterministic twins.
+script compile, pacing contract lives in the qwen builder) → 美术拍 (每表情单张
+肖像, 同角色固定 seed 保同脸, rembg 抠底; portrait scene backdrops, cover). LLM
+contracts ride llm.generate({"gal_parse"|"gal_compile"|"gal_endings"}); MockLLM
+has deterministic twins.
 
 Schema (fields reserved NOW per blueprint §11 — voice/cg/fx/adult/pov — so nothing
 comes back later as a migration):
@@ -35,7 +36,6 @@ comes back later as a migration):
 """
 from __future__ import annotations
 
-import io
 from pathlib import Path
 from typing import Any
 
@@ -345,107 +345,31 @@ def compile_endings(llm, gal: dict[str, Any], full_summary: str = "",
     return endings
 
 
-# ── 美术: 一图四格差分表 → 裁切 → rembg 抠底 ─────────────────────────────────────
-def sheet_prompt(char: dict, world: str, art: str) -> str:
-    return (f"角色表情差分表：同一个人物在一张图里画四次，2x2 网格排列，四格分别是"
-            f"【平静、微笑、愤怒、悲伤】四种表情，其余完全一致（同一张脸、同一发型、"
-            f"同一服装、同一姿势的半身像）。人物：{char.get('name')}，"
-            f"{(char.get('looks') or '')[:160]}。世界背景：{world[:80]}。"
-            "每格人物完整地居中在自己的四分之一格内、四周留出明显空隙，"
-            "任何一格的人物都绝不越过格子边界、绝不与相邻格的人物重叠，"
+# ── 美术: 每表情单张肖像 (同角色固定 seed 保同脸) → rembg 抠底 ────────────────────
+# 差分表已废: one-image-4-cells was a bet the image model kept losing — 海格 came
+# back as a collage of overlapping heads, c3 as a bust dissolving into fog, and no
+# cropping algorithm can fix a bad sheet. One portrait per expression, all four
+# riding the SAME seed with a prompt that differs only in the expression phrase,
+# keeps the face while making expression and framing per-image reliable.
+_EXPR_FACE = {"常态": "平静自然的神情", "喜": "开心微笑的神情",
+              "怒": "愤怒皱眉的神情", "哀": "悲伤低落的神情"}
+
+
+def portrait_prompt(char: dict, world: str, art: str, expr: str) -> str:
+    return (f"单人半身立绘：{char.get('name')}，{(char.get('looks') or '')[:160]}。"
+            f"{_EXPR_FACE.get(expr, _EXPR_FACE['常态'])}。"
+            "正面半身像，人物居中且完整（从头顶到腰部都在画面内，头顶上方留出空间），"
+            f"画面里只有这一个人。世界背景：{world[:80]}。"
             "纯色极深背景（近黑），柔和主光，电影质感写实，高细节，"
-            "画面里没有任何文字、编号或分隔线" + (f"。画面基调：{art}" if art else ""))
+            "画面里没有任何文字或水印" + (f"。画面基调：{art}" if art else ""))
 
 
-def _find_figures(im, min_area_frac: float = 0.02) -> list[tuple] | None:
-    """Locate the four figures on a matted (RGBA) expression sheet by connected
-    alpha components — grid-agnostic, so an offset or overflowing figure keeps
-    its head and a neighbor's sliver never rides along (实弹伤: fixed quadrant
-    cuts sliced 赫敏's skull and dragged 马尔福's twin's scalp in). Returns four
-    padded full-res bboxes ordered TL/TR/BL/BR, or None when the figures don't
-    separate cleanly (caller falls back to fixed quadrants)."""
-    from collections import deque
-    W, H = im.size
-    scale = max(1, min(W, H) // 180)
-    small = im.split()[-1].resize((max(1, W // scale), max(1, H // scale)))
-    w, h = small.size
-    px = list(small.getdata())
-    seen = bytearray(w * h)
-    comps = []
-    for start in range(w * h):
-        if seen[start] or px[start] <= 16:
-            seen[start] = 1
-            continue
-        q = deque([start])
-        seen[start] = 1
-        area = sx = sy = 0
-        x0 = y0 = 10 ** 9
-        x1 = y1 = -1
-        while q:
-            i = q.popleft()
-            x, y = i % w, i // w
-            area += 1
-            sx += x
-            sy += y
-            x0, x1 = min(x0, x), max(x1, x)
-            y0, y1 = min(y0, y), max(y1, y)
-            for j, ok in ((i - 1, x > 0), (i + 1, x < w - 1),
-                          (i - w, y > 0), (i + w, y < h - 1)):
-                if ok and not seen[j] and px[j] > 16:
-                    seen[j] = 1
-                    q.append(j)
-        if area >= min_area_frac * w * h:
-            comps.append((area, sx / area, sy / area, x0, y0, x1, y1))
-    comps.sort(reverse=True)
-    comps = comps[:4]
-    if len(comps) < 4:
-        return None
-    for _, _, _, x0, y0, x1, y1 in comps:
-        if (x1 - x0) > 0.62 * w or (y1 - y0) > 0.62 * h:
-            return None      # two figures touching merged into one blob → bail
-    comps.sort(key=lambda c: c[2])                       # by centroid y
-    ordered = (sorted(comps[:2], key=lambda c: c[1])     # top row: TL, TR
-               + sorted(comps[2:], key=lambda c: c[1]))  # bottom row: BL, BR
-    pad_x, pad_y = W // 50, H // 50
-    return [(max(0, x0 * scale - pad_x), max(0, y0 * scale - pad_y),
-             min(W, (x1 + 1) * scale + pad_x), min(H, (y1 + 1) * scale + pad_y))
-            for _, _, _, x0, y0, x1, y1 in ordered]
-
-
-def _quad_crop(img_bytes: bytes) -> list[bytes]:
-    """The naive fixed-quadrant split (fallback when figures don't separate)."""
-    from PIL import Image
-    im = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-    w, h = im.size
-    boxes = [(0, 0, w // 2, h // 2), (w // 2, 0, w, h // 2),
-             (0, h // 2, w // 2, h), (w // 2, h // 2, w, h)]
-    out = []
-    for box in boxes:
-        buf = io.BytesIO()
-        im.crop(box).save(buf, format="PNG")
-        out.append(buf.getvalue())
-    return out
-
-
-def crop_sheet(img_bytes: bytes) -> list[bytes]:
-    """Expression sheet → 4 transparent PNGs (order: 常态/喜/怒/哀 = TL/TR/BL/BR).
-    v2 (格间越界根治): rembg the WHOLE sheet first, then cut each figure along
-    its own silhouette bbox. Degrades to fixed quadrants + per-piece rembg."""
-    try:
-        from PIL import Image
-        from rembg import remove
-        full = Image.open(io.BytesIO(remove(img_bytes))).convert("RGBA")
-        boxes = _find_figures(full)
-        if boxes:
-            out = []
-            for box in boxes:
-                buf = io.BytesIO()
-                full.crop(box).save(buf, format="PNG")
-                out.append(buf.getvalue())
-            return out
-    except Exception:
-        pass
-    return [debg(p) for p in _quad_crop(img_bytes)]
+def char_seed(work_id: str, cid: str) -> int:
+    """Stable per-character seed: same face across the four expression calls,
+    different faces across characters and works."""
+    import hashlib
+    h = hashlib.md5(f"{work_id}:{cid}".encode()).digest()
+    return int.from_bytes(h[:4], "big") % (2 ** 31 - 1)
 
 
 def debg(png_bytes: bytes) -> bytes:
@@ -552,22 +476,24 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
             for ci, c in enumerate(gal["characters"]):
                 if c["id"] == gal["protagonist_id"]:
                     continue   # 主角无立绘 — the "你" has no face on screen
-                gal["progress"] = f"正在绘制立绘 {ci + 1}/{len(gal['characters'])}…"
-                _save(s)
-                if all((wdir / f"{c['id']}_{e}.png").exists() for e in EXPRESSIONS):
-                    man["sprites"][c["id"]] = list(EXPRESSIONS)
-                    continue
-                img = generate_image(sheet_prompt(c, world, art), size="720*1280")
-                if not img:
-                    man["missing"].append(f"sprite:{c['id']}")
-                    continue
-                try:
-                    pieces = crop_sheet(img)   # crop_sheet owns the matting now
-                    for expr, piece in zip(EXPRESSIONS, pieces):
-                        (wdir / f"{c['id']}_{expr}.png").write_bytes(piece)
-                    man["sprites"][c["id"]] = list(EXPRESSIONS)
-                except Exception:
-                    man["missing"].append(f"sprite:{c['id']}")
+                seed = char_seed(story_id, c["id"])
+                got: list[str] = []
+                for expr in EXPRESSIONS:
+                    p = wdir / f"{c['id']}_{expr}.png"
+                    if p.exists():
+                        got.append(expr)
+                        continue
+                    gal["progress"] = (f"正在绘制立绘 {ci + 1}/{len(gal['characters'])}"
+                                       f" · {expr}…")
+                    _save(s)
+                    img = generate_image(portrait_prompt(c, world, art, expr),
+                                         size="720*1280", seed=seed)
+                    if img:
+                        p.write_bytes(debg(img))
+                        got.append(expr)
+                    else:
+                        man["missing"].append(f"sprite:{c['id']}:{expr}")
+                man["sprites"][c["id"]] = got
             for si, sc in enumerate(gal["scenes"]):
                 gal["progress"] = f"正在绘制场景 {si + 1}/{len(gal['scenes'])}…"
                 _save(s)
