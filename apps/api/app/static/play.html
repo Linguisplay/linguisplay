@@ -279,6 +279,28 @@
 #mapov .mexits { font-size:11px; color:#7b8a80; margin-top:3px; }
 #mapov .mhidden { color:#7b8296; font-size:12px; font-style:italic; margin-top:10px; }
 #pressurebar { flex:0 0 auto; margin:6px 16px 0; padding:7px 12px; border-radius:10px; background:#241416cc; border:1px solid #4a2a28; font-size:12.5px; display:flex; align-items:center; gap:10px; color:#e8c9c4; }
+/* 🎀 VN window (galgame 演出) */
+#vnui { position: fixed; inset: 0; z-index: 45; pointer-events: none; }
+#vnsprite { position: absolute; right: 2vw; bottom: 0; height: 82vh; max-width: 46vw; object-fit: contain; object-position: bottom; -webkit-mask-image: linear-gradient(to top, transparent 0, #000 12%); mask-image: linear-gradient(to top, transparent 0, #000 12%); filter: drop-shadow(0 0 26px rgba(0,0,0,.65)); animation: vnbreathe 4.5s ease-in-out infinite; }
+@keyframes vnbreathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.008) translateY(-2px); } }
+#vnbox { position: absolute; left: 50%; transform: translateX(-50%); bottom: 12px; width: min(860px, 94vw); min-height: 116px; background: rgba(10,10,20,.87); border: 1px solid #34344a; border-radius: 14px; padding: 26px 18px 16px; pointer-events: auto; cursor: pointer; }
+#vnname { position: absolute; top: -14px; left: 14px; background: #232346; border: 1px solid #45456a; color: #ffd479; border-radius: 9px; padding: 3px 12px; font-size: 13px; font-weight: 700; }
+#vntext { font-size: 15px; line-height: 1.9; color: #e7eaf3; min-height: 3.4em; }
+#vntext.narr { color: #b7bdcd; }
+#vnnext { position: absolute; right: 14px; bottom: 6px; color: #8ea2ff; animation: vnblink 1.1s steps(2) infinite; visibility: hidden; }
+@keyframes vnblink { 50% { opacity: 0; } }
+#vnctl { position: absolute; top: -14px; right: 12px; display: flex; gap: 8px; }
+#vnctl span { background: #232346; border: 1px solid #45456a; border-radius: 9px; padding: 3px 9px; font-size: 12px; cursor: pointer; color: #9fb0ff; }
+#vnctl span.on { color: #ffd479; border-color: #ffd479; }
+#vnchoices { position: absolute; left: 50%; transform: translateX(-50%); bottom: 158px; width: min(620px, 90vw); display: flex; flex-direction: column; gap: 9px; pointer-events: auto; }
+#vnchoices button { background: rgba(20,20,36,.93); border: 1px solid #45456a; color: #e7eaf3; border-radius: 10px; padding: 11px 14px; font-size: 14px; cursor: pointer; text-align: center; }
+#vnchoices button:hover { border-color: #8ea2ff; background: rgba(30,30,56,.96); }
+#vnchoices button.prime { border-color: #ffd479; }
+body.vn #chat { visibility: hidden; }
+body.vn.vnlog #chat { visibility: visible; position: fixed; inset: 56px 0 0 0; z-index: 60; background: rgba(8,8,14,.97); padding: 12px 16px; overflow-y: auto; }
+body.vn #suggest { display: none; }
+body.vn footer { display: none; }
+body.vn.vnfree footer { display: flex; position: relative; z-index: 46; }
 /* 🧠 理智条: watching the number slide IS the dread (CoC's oldest trick) */
 #sanitybar { flex:0 0 auto; margin:6px 16px 0; padding:7px 12px; border-radius:10px; background:#131022cc; border:1px solid #33285a; font-size:12.5px; display:flex; align-items:center; gap:10px; color:#c9c2e8; }
 #sanitybar .strack { flex:1; height:7px; border-radius:5px; background:#00000055; overflow:hidden; }
@@ -380,6 +402,17 @@ body.dread #dread { opacity:1; }
 <body>
 <div id="bg"></div>
 <div id="dread"></div>
+<!-- 🎀 VN window (galgame 演出): sprite + dialogue box + click-to-advance + choices -->
+<div id="vnui" class="hidden">
+  <img id="vnsprite" class="hidden" alt="">
+  <div id="vnchoices" class="hidden"></div>
+  <div id="vnbox" onclick="vnAdvance()">
+    <div id="vnname" class="hidden"></div>
+    <div id="vnctl"><span id="vnauto" onclick="event.stopPropagation();vnToggleAuto()" title="自动播放">▶A</span><span onclick="event.stopPropagation();vnToggleLog()" title="回想">📖</span><span onclick="event.stopPropagation();vnToggleFree()" title="自由行动">✏️</span></div>
+    <div id="vntext"></div>
+    <div id="vnnext">▼</div>
+  </div>
+</div>
 <audio id="bgm" loop></audio>
 <audio id="sfx"></audio>
 <div id="app">
@@ -942,6 +975,11 @@ async function enterRun(run) {
   try { st0 = await j(`/stories/${run.story_id}`); mergeAvatars(st0.characters); } catch (e) {}
   isSandbox = !!(st0 && st0.sandbox && st0.sandbox.enabled);
   phoneOn = !(run.state && run.state.phone_on === false);   // 📵 no-signal stories
+  // 🎀 VN 演出: story-driven (tuning.vn_mode); sprites keyed by character id
+  vnMode = !!(st0 && st0.tuning && +(st0.tuning.vn_mode || 0));
+  spriteMap = {};
+  ((st0 && st0.characters) || []).forEach(c => { if (c.name && c.id) spriteMap[c.name] = c.id; });
+  vnShow(vnMode);
   playMode = (run.state && run.state.mode) || "character";
   myName = (playMode === "character" && run.state && run.state.player_character_name) || B("我", "Me");
   runId = run.id;
@@ -990,7 +1028,7 @@ function sendLeave() { if (runId) { try { navigator.sendBeacon(`${API}/runs/${ru
 window.addEventListener("pagehide", sendLeave);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") sendLeave(); });
 
-function backToPick() { sendLeave(); runId = null; stopBgm(); hide("play"); hide("backBtn"); hide("soundBtn"); hide("journalBtn"); hide("mapBtn"); hide("phoneBtn"); show("pick"); }
+function backToPick() { sendLeave(); runId = null; stopBgm(); vnShow(false); vnMode = false; hide("play"); hide("backBtn"); hide("soundBtn"); hide("journalBtn"); hide("mapBtn"); hide("phoneBtn"); show("pick"); }
 async function doLogout() {
   sendLeave();  // must fire while the session cookie is still valid
   try { await j("/auth/logout", { method:"POST" }); } catch(e){}
@@ -2160,6 +2198,29 @@ function renderProgress(prog) {
   el.classList.remove("hidden");
 }
 function renderSuggest(items) {
+  if (vnMode) {
+    // 🎀 galgame: the choices ARE the interaction — clicking one acts immediately
+    const box = document.getElementById("vnchoices");
+    box.innerHTML = "";
+    (items || []).forEach((t, i) => {
+      const btn = document.createElement("button");
+      if (i === 0) btn.className = "prime";
+      btn.textContent = t;
+      btn.onclick = () => {
+        box.classList.add("hidden");
+        const isAct = t.startsWith("用「做」") || t.startsWith("Use “Do”");
+        if (isAct) { channel.value = "do"; vnToggleFree(); return; }
+        msg.value = t; send();
+      };
+      box.appendChild(btn);
+    });
+    const free = document.createElement("button");
+    free.textContent = B("✏️ 自由行动…", "✏️ Free action…");
+    free.onclick = () => { box.classList.add("hidden"); document.body.classList.add("vnfree"); msg.focus(); };
+    box.appendChild(free);
+    box.classList.remove("hidden");
+    return;
+  }
   suggest.innerHTML = "";
   (items||[]).forEach((t, i) => {
     // chip 1 is engine-guaranteed to follow the player's own intent — mark it
@@ -2246,8 +2307,73 @@ async function typeInto(el, text, ms=22) {
   }
   chat.scrollTop = chat.scrollHeight;
 }
+// ── 🎀 VN window (galgame 演出): beats play into the dialogue box, click advances ──
+let vnMode = false, vnAutoOn = false, vnAdvanceResolve = null, spriteMap = {};
+function vnShow(on) {
+  document.getElementById("vnui").classList.toggle("hidden", !on);
+  document.body.classList.toggle("vn", on);
+  if (!on) { document.body.classList.remove("vnlog", "vnfree"); }
+}
+function vnToggleAuto() {
+  vnAutoOn = !vnAutoOn;
+  document.getElementById("vnauto").classList.toggle("on", vnAutoOn);
+  if (vnAutoOn) vnAdvance();
+}
+function vnToggleLog() { document.body.classList.toggle("vnlog"); }
+function vnToggleFree() {
+  document.body.classList.toggle("vnfree");
+  if (document.body.classList.contains("vnfree")) msg.focus();
+}
+function vnAdvance() {
+  if (vnAdvanceResolve) { const r = vnAdvanceResolve; vnAdvanceResolve = null; r(); }
+}
+function vnWait(ms) {
+  document.getElementById("vnnext").style.visibility = "visible";
+  return new Promise(res => {
+    vnAdvanceResolve = () => { document.getElementById("vnnext").style.visibility = "hidden"; res(); };
+    if (vnAutoOn || skipType) setTimeout(vnAdvance, skipType ? 150 : Math.min(6500, ms));
+  });
+}
+document.addEventListener("keydown", (e) => {
+  if (vnMode && (e.key === " " || e.key === "Enter") && document.activeElement !== msg
+      && !document.body.classList.contains("vnfree")) { e.preventDefault(); vnAdvance(); }
+});
+function vnSprite(name) {
+  const img = document.getElementById("vnsprite");
+  const cid = name ? spriteMap[name] : null;
+  if (!cid) { img.classList.add("hidden"); return; }
+  if (img.dataset.cid !== cid) {
+    img.dataset.cid = cid;
+    img.onerror = () => {   // sprite still rendering → square portrait → hide
+      if (img.src.includes("/sprite/")) img.src = `/scene/avatar/${cid}.jpg`;
+      else img.classList.add("hidden");
+    };
+    img.src = `/scene/sprite/${cid}.jpg`;
+  }
+  img.classList.remove("hidden");
+}
+async function playBeatVN(b) {
+  renderBeat(b);   // the hidden chat doubles as the 回想 backlog
+  const box = document.getElementById("vntext");
+  const nameEl = document.getElementById("vnname");
+  if (b.author === "player") {
+    document.getElementById("vnchoices").classList.add("hidden");
+    document.body.classList.remove("vnfree");
+    nameEl.textContent = myName; nameEl.classList.remove("hidden");
+    vnSprite(null); box.className = ""; box.textContent = b.text;
+    return;   // your own line flows straight into their reply
+  }
+  const isNarr = b.type === "description";
+  nameEl.textContent = b.speaker_name || "";
+  nameEl.classList.toggle("hidden", isNarr);
+  vnSprite(isNarr ? null : b.speaker_name);
+  box.className = isNarr ? "narr" : "";
+  await typeInto(box, b.text, isNarr ? 16 : 22);
+  await vnWait(900 + (b.text || "").length * 55);
+}
 // play one engine beat with a "typing…" pause then a typewriter reveal
 async function playBeat(b) {
+  if (vnMode) return playBeatVN(b);
   if (b.author === "player") { renderBeat(b); return; }
   if (pendingSfx) { const n = pendingSfx; pendingSfx = null; playSfx(n); }
   if (b.type === "description") {

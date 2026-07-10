@@ -211,6 +211,7 @@ DEFAULT_TUNING = {
     "golden_chance": 4,         # ✨ 稀有奇遇: % chance per eligible turn (0 = off)
     "golden_cooldown": 10,      # ✨ turns between two golden moments, minimum
     "snap_chance": 12,          # 📷 随手拍: % chance a character's text carries a photo (0 = off)
+    "vn_mode": 0,               # 🎀 galgame 演出: VN window + choice-driven turns (授权本用)
     "letter_away_hours": 48,    # 📮 away at least this long → the warmest heart writes a LETTER
 }
 
@@ -2156,6 +2157,8 @@ def _smart_suggestions(llm, all_beats, player_input, primary, content, state, lo
             "player_name": player_name, "player_desc": player_desc,
             "place": (location or {}).get("name") or "",
             "goal": (state.get("goal") or "")[:60], "pursuit": pursuit,
+            # 🎀 VN mode: choices ARE the interaction — one of them should carry teeth
+            "vn": bool(tuning_for(content).get("vn_mode")),
         }})
         outs = [dedash(s) for s in (out.get("suggestions") or []) if s][:3]
         # en story hard backstop: a chip that came back in Chinese never reaches the UI

@@ -31,6 +31,7 @@ router = APIRouter(prefix="/runs", tags=["runs"])
 _BG_DIR = __import__("pathlib").Path(__file__).resolve().parents[1] / "static" / "scene" / "bg"
 _AV_DIR = __import__("pathlib").Path(__file__).resolve().parents[1] / "static" / "scene" / "avatar"
 _SNAP_DIR = __import__("pathlib").Path(__file__).resolve().parents[1] / "static" / "scene" / "snap"
+_SPRITE_DIR = __import__("pathlib").Path(__file__).resolve().parents[1] / "static" / "scene" / "sprite"
 
 import queue as _imgqueue  # noqa: E402
 import threading as _imgthreading  # noqa: E402
@@ -141,6 +142,25 @@ def _ensure_char_avatars(content: dict) -> bool:
                   "目光看向镜头外，写实风格，柔和的侧光，背景虚化，情绪克制内敛，"
                   "高细节，胶片颗粒感" + (f"。画面基调：{art}" if art else ""))
         _enqueue_image(prompt, path, "768*768")
+    # 🎀 VN stories also render a TALL standing sprite per character (the galgame 立绘);
+    # deep near-black backdrop so the client's fade-mask blends it over any scene
+    if (story.get("tuning") or {}).get("vn_mode"):
+        art = runtime.art_style_of(content)
+        world = ((story.get("world_long") or "").strip().replace("\n", " "))[:120]
+        for c in story.get("characters") or []:
+            cid, name = c.get("id"), c.get("name")
+            if not cid or not name:
+                continue
+            spath = _SPRITE_DIR / f"{cid}.jpg"
+            if spath.exists():
+                continue
+            bits = "，".join(b for b in (name, c.get("role") or "",
+                                         (c.get("persona_text") or "")[:160]) if b)
+            sp = (f"{bits}。世界背景：{world}。游戏立绘：单人半身像，竖构图，正面微侧站姿，"
+                  "视线看向观者，人物完整居中不裁切，背景为纯粹的极深色（近黑），"
+                  "人物打柔和主光，电影质感写实，高细节"
+                  + (f"。画面基调：{art}" if art else ""))
+            _enqueue_image(sp, spath, "720*1280")
     return changed
 
 
