@@ -149,6 +149,30 @@ def test_opening_echo_persistent_fails_loud():
                             prior_openings=["风从天台的边缘掀过来。"])
 
 
+def test_foreign_language_beats_retried_then_fail_loud():
+    # 实弹《野菊之墓》: Japanese source → the compiler mirrored the language
+    JP = "後の月という時分になると、どうしても思い出さずにはいられない。"
+    class JpOnceLLM(MockLLM):
+        def generate(self, prompt):
+            out = super().generate(prompt)
+            if prompt.get("gal_compile") and not (prompt.get("retry") or {}).get("lang"):
+                for b in out["beats"]:
+                    b["text"] = JP
+            return out
+    beats, _ = gal.compile_chapter(JpOnceLLM(), _parsed(), 1)
+    assert not any(gal._kana_heavy(b["text"]) for b in gal._walk_beats(beats))
+
+    class JpAlwaysLLM(MockLLM):
+        def generate(self, prompt):
+            out = super().generate(prompt)
+            if prompt.get("gal_compile"):
+                for b in out["beats"]:
+                    b["text"] = JP
+            return out
+    with pytest.raises(ValueError):
+        gal.compile_chapter(JpAlwaysLLM(), _parsed(), 1)
+
+
 def test_choice_fx_backfilled_when_model_forgets():
     class ForgetfulLLM(MockLLM):
         def generate(self, prompt):

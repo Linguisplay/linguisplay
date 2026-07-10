@@ -212,6 +212,12 @@ def _norm_choice(raw: dict, ch: int, q: int, char_ids: set, scene_ids: set,
     return {"id": f"c{ch}q{q}", "type": "choice", "options": opts}
 
 
+def _kana_heavy(text: str) -> bool:
+    """外语守卫 (实弹《野菊之墓》: 日文底本让第1章整章写成了日文): kana in the
+    prose means the compiler mirrored the source language instead of 转写中文."""
+    return sum(1 for ch in text or "" if "぀" <= ch <= "ヿ") >= 3
+
+
 def _echoes(opening: str, prior: str) -> bool:
     """开场回声检测 (实弹: 《余音》第2/5章从头重演贴告示初遇): does this chapter's
     first beat re-tell an earlier chapter's opening?"""
@@ -313,6 +319,8 @@ def compile_chapter(llm, gal: dict[str, Any], ch_index: int,
         first = next((b["text"] for b in beats if b.get("type") != "choice"), "")
         if any(_echoes(first, po) for po in (prior_openings or [])):
             reasons["echo"] = True
+        if sum(1 for b in _walk_beats(beats) if _kana_heavy(b["text"])) >= 3:
+            reasons["lang"] = True
         if n_beat >= 8 and not reasons:
             break
     if n_beat < 8:
@@ -321,6 +329,8 @@ def compile_chapter(llm, gal: dict[str, Any], ch_index: int,
         raise ValueError(f"第{ch_index}章编译失败：缺少选择点")
     if reasons.get("echo"):
         raise ValueError(f"第{ch_index}章编译失败：重述了前文的开场")
+    if reasons.get("lang"):
+        raise ValueError(f"第{ch_index}章编译失败：拍文字不是中文")
     for b in _walk_beats(beats):
         if not mature:      # 🔞防线在引擎不在模型: un-mature works carry no adult beat
             b["adult"] = False

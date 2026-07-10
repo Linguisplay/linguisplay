@@ -146,6 +146,25 @@ _R18_BLOCK = (
 )
 
 
+def _loads_lenient(txt: str | None) -> dict:
+    """JSON with a truncation salvage: a max_tokens cutoff mid-beats used to void
+    the whole chapter (野菊 ch3: 0拍两连). Cut back to the last complete object
+    and close the array — a chapter missing its tail beats beats an empty one."""
+    import json as _json
+    txt = txt or "{}"
+    try:
+        return _json.loads(txt)
+    except Exception:
+        pass
+    i = txt.rfind("},")
+    if i > 0:
+        try:
+            return _json.loads(txt[:i + 1] + "]}")
+        except Exception:
+            pass
+    return {}
+
+
 def _gal_mature_rider(prompt: dict[str, Any]) -> str:
     """🎀🔞 compile-time twin of _R18_BLOCK: the galgame builder writes WHOLE chapters
     in one call, so the craft rules ride the compiler contract instead of a turn
@@ -2255,7 +2274,8 @@ class QwenLLM:
                           + ("〔可攻略〕" if c.get("route") else "") for c in chars)
         slist = "\n".join(f"- {s['id']}={s['name']}" for s in scenes)
         sys = (
-            "你是视觉小说（galgame）的编剧编译器。把指定章节改编成拍序列，只输出严格JSON："
+            "你是视觉小说（galgame）的编剧编译器。把指定章节改编成【简体中文】的拍序列"
+            "（原文是外语也一律转写成流畅的现代中文），只输出严格JSON："
             '{"beats":[{"who":"说话角色id，旁白则留空","text":"这一拍的文字",'
             '"expr":"常态|喜|怒|哀（说话角色此刻表情）","scene":"场景id",'
             '"bgm":"平静|温馨|紧张|悲伤|激昂 之一","cg":false,"adult":false}],'
@@ -2296,6 +2316,9 @@ class QwenLLM:
             sys += ("【上一次的产出从头重述了前文已经演过的开场，整章作废了。这一次"
                     "绝不重复任何已发生的场面：第一拍直接落在本章自己的新时间、新事件上，"
                     "紧接前一章收尾之后往下演。】")
+        if _r.get("lang"):
+            sys += ("【上一次的产出用外语写了拍文字，整章作废了。所有 text 字段必须是"
+                    "简体中文：把原文内容转写成流畅的现代中文再输出，这是硬性要求。】")
         chtable = "\n".join(f"- 第{c.get('i')}章：{c.get('summary')}"
                             for c in (prompt.get("chapters_all") or []))
         pt = (prompt.get("prev_tail") or "").strip()
@@ -2316,11 +2339,10 @@ class QwenLLM:
                               {"model": self._model,
                                "messages": [{"role": "system", "content": sys},
                                             {"role": "user", "content": u}],
-                               "max_tokens": 7000, "temperature": 0.7,
+                               "max_tokens": 8000, "temperature": 0.7,
                                "response_format": {"type": "json_object"}},
-                              timeout=180, kind="gal_compile")
-            import json as _json
-            return _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
+                              timeout=240, kind="gal_compile")
+            return _loads_lenient(resp.json()["choices"][0]["message"]["content"])
         except Exception:
             return {}
 
