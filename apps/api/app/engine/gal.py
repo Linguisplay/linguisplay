@@ -176,13 +176,27 @@ def _norm_choice(raw: dict, ch: int, q: int, char_ids: set, scene_ids: set,
     return {"id": f"c{ch}q{q}", "type": "choice", "options": opts}
 
 
+def _echoes(opening: str, prior: str) -> bool:
+    """开场回声检测 (实弹: 《余音》第2/5章从头重演贴告示初遇): does this chapter's
+    first beat re-tell an earlier chapter's opening?"""
+    import difflib
+    a, b = (opening or "")[:40], (prior or "")[:40]
+    if not a or not b:
+        return False
+    return a[:12] == b[:12] or difflib.SequenceMatcher(None, a, b).ratio() > 0.55
+
+
 def compile_chapter(llm, gal: dict[str, Any], ch_index: int,
                     prior_summary: str = "",
-                    mature: bool = False) -> tuple[list[dict], str]:
+                    mature: bool = False,
+                    prev_tail: str = "",
+                    prior_openings: list[str] | None = None) -> tuple[list[dict], str]:
     """编剧拍: one chapter → beats + choice points + a summary that feeds the NEXT
     chapter's 编译记忆 (so chapter N can never吃书 chapter N-1). 伪分支 doctrine:
     options move the affinity ledger, branch beats rejoin in-scene, the spine stays
-    choice-agnostic — one compile serves every player."""
+    choice-agnostic — one compile serves every player. prev_tail is the previous
+    chapter's closing prose — the concrete anchor that keeps chapter N from
+    re-telling the book from the top (abstract rules alone didn't hold)."""
     chapter = gal["chapters"][ch_index - 1]
     total = len(gal["chapters"])
     char_ids = {c["id"] for c in gal["characters"]}
@@ -191,8 +205,9 @@ def compile_chapter(llm, gal: dict[str, Any], ch_index: int,
     beats: list[dict] = []
     out: dict = {}
     n_beat = n_choice = 0
-    # one measured retry: field-tested (HP build, DeepSeek) — the model can return a
-    # clean chapter with ZERO choices despite the contract; a sharpened re-ask fixes it
+    # one measured retry with pointed reasons: field-tested — the model can return a
+    # clean chapter with ZERO choices, or re-tell the opening; a named re-ask fixes it
+    reasons: dict = {}
     for attempt in (0, 1):
         out = llm.generate({
             "gal_compile": True,
@@ -202,8 +217,9 @@ def compile_chapter(llm, gal: dict[str, Any], ch_index: int,
             "characters": gal["characters"], "scenes": gal["scenes"],
             "protagonist_id": gal["protagonist_id"],
             "prior_summary": prior_summary[:600],       # 编译记忆
+            "prev_tail": prev_tail[-260:],               # 前章收尾锚 (depth anchor)
             "mature": mature,                            # 🔞 rides into the craft block
-            "choice_retry": attempt > 0,                 # 上一把忘了选择点 → 点名重打
+            "retry": reasons if attempt else {},         # 点名重打: 缺选择/回声
             "target_beats": TARGET_BEATS_PER_CHAPTER,
         }) or {}
         last_scene = gal["scenes"][0]["id"]
@@ -248,14 +264,22 @@ def compile_chapter(llm, gal: dict[str, Any], ch_index: int,
             if nc:
                 n_choice += 1
                 beats.insert(idx, nc)
-        if n_beat >= 8 and (n_choice > 0 or ch_index >= total):
+        reasons = {}
+        if n_choice == 0 and ch_index < total:
+            # the final chapter may run straight into the endings fork; every other
+            # chapter must offer the player a real hand on the wheel
+            reasons["choices"] = True
+        first = next((b["text"] for b in beats if b.get("type") != "choice"), "")
+        if any(_echoes(first, po) for po in (prior_openings or [])):
+            reasons["echo"] = True
+        if n_beat >= 8 and not reasons:
             break
     if n_beat < 8:
         raise ValueError(f"第{ch_index}章编译失败：只产出 {n_beat} 拍")
-    if n_choice == 0 and ch_index < total:
-        # the final chapter may run straight into the endings fork; every other
-        # chapter must offer the player a real hand on the wheel
+    if reasons.get("choices"):
         raise ValueError(f"第{ch_index}章编译失败：缺少选择点")
+    if reasons.get("echo"):
+        raise ValueError(f"第{ch_index}章编译失败：重述了前文的开场")
     for b in _walk_beats(beats):
         if not mature:      # 🔞防线在引擎不在模型: un-mature works carry no adult beat
             b["adult"] = False
@@ -517,9 +541,19 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
             for i in range(len(chapters_done) + 1, total + 1):
                 gal["status"], gal["progress"] = "compiling", f"正在编写第 {i}/{total} 章…"
                 _save(s)
+                # anchors against the re-tell bug: every earlier opening (echo guard)
+                # + the previous chapter's closing prose (the concrete handoff)
+                openings = [next((b["text"] for b in ch if b.get("type") != "choice"), "")
+                            for ch in chapters_done]
+                tail = ""
+                if chapters_done:
+                    tail = "".join(b["text"] for b in chapters_done[-1]
+                                   if b.get("type") != "choice")[-260:]
                 beats, summ = compile_chapter(llm, gal, i,
                                               prior_summary="；".join(summaries)[-600:],
-                                              mature=mature)
+                                              mature=mature,
+                                              prev_tail=tail,
+                                              prior_openings=openings)
                 chapters_done.append(beats)
                 summaries.append(summ)
                 script[pov] = {"chapters": chapters_done}

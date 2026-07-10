@@ -2224,7 +2224,9 @@ class QwenLLM:
             '"chapters":["第1章一句话概要","第2章…（3~5章，覆盖全文的起承转合）"]}。'
             "要求：角色≤6个只留有戏份的；场景≤8个；looks 必须具体（画师依赖它）；"
             "至少标 1 个 route:true 的可攻略角色（与主角情感戏份最重的那个）；"
-            "chapters 必须覆盖到故事结尾。")
+            "chapters 覆盖全书主线并收在临近结局分岔的高潮处：若原文包含多种结局走向"
+            "（如果A…/如果B…），那些分支内容【不写进任何一章】——结局由专门的结局编译负责，"
+            "不占章节。")
         u = f"标题：{prompt.get('title') or '（无）'}\n故事文本：\n{prompt.get('source') or ''}"
         try:
             resp = _post_chat(self._url, self._key,
@@ -2275,16 +2277,24 @@ class QwenLLM:
             "选项的 beats 演完这个选项的即时反应后必须能无缝接回 after 那一拍之后的主线"
             "（就地收敛：分支里不换场景、不开新事件、不再嵌套选择点）。"
             "只用给定的角色id和场景id，不得发明新的。")
-        if prompt.get("choice_retry"):
+        _r = prompt.get("retry") or {}
+        if _r.get("choices"):
             sys += ("【上一次的产出缺少了 choices 选择点，整章作废了。这一次 choices 数组"
                     "必须给出 1~2 个完整的选择点（含 after、2~3 个带 fx 和分支拍的选项），"
                     "这是本次任务的第一优先级。】")
+        if _r.get("echo"):
+            sys += ("【上一次的产出从头重述了前文已经演过的开场，整章作废了。这一次"
+                    "绝不重复任何已发生的场面：第一拍直接落在本章自己的新时间、新事件上，"
+                    "紧接前一章收尾之后往下演。】")
         chtable = "\n".join(f"- 第{c.get('i')}章：{c.get('summary')}"
                             for c in (prompt.get("chapters_all") or []))
+        pt = (prompt.get("prev_tail") or "").strip()
         u = (f"角色表：\n{clist}\n场景表：\n{slist}\n"
              + (f"全书章节表（各章的地盘，绝不越界）：\n{chtable}\n" if chtable else "")
              + f"前情摘要（前面各章已经演完的部分）：{prompt.get('prior_summary') or '（这是第一章，从头开场）'}\n"
-             f"你要编译的是【第{ch.get('i')}章/共{prompt.get('chapter_count')}章】：{ch.get('summary')}\n"
+             + (f"前一章的收尾（铁律：本章第一拍必须发生在这之后，紧接着往下演，"
+                f"绝不回头重演任何已发生的场面）：…{pt}\n" if pt else "")
+             + f"你要编译的是【第{ch.get('i')}章/共{prompt.get('chapter_count')}章】：{ch.get('summary')}\n"
              f"故事原文（全书素材，只取本章那段改编）：\n{(prompt.get('source') or '')[:9000]}")
         _st = (prompt.get("style") or "").strip()
         if _st:

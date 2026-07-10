@@ -85,7 +85,13 @@ class MockLLM:
             other = next((c["id"] for c in (prompt.get("characters") or [])
                           if c["id"] != pro), pro)
             s1 = ((prompt.get("scenes") or [{}])[0]).get("id", "s1")
-            beats = [{"who": None, "text": "风从天台的边缘掀过来。", "scene": s1, "bgm": "平静"},
+            # per-chapter distinct opening — the echo guard treats a re-told
+            # opening as a failed compile, the twin must never trip it
+            ch_i = (prompt.get("chapter") or {}).get("i") or 1
+            openers = {1: "风从天台的边缘掀过来。",
+                       2: "第二天放学，教室里只剩下你们两个。"}
+            beats = [{"who": None, "text": openers.get(ch_i, f"新的一天从第{ch_i}声铃响开始。"),
+                      "scene": s1, "bgm": "平静"},
                      {"who": other, "text": "「你来了。」", "expr": "喜", "scene": s1},
                      {"who": pro, "text": "「嗯。」", "scene": s1},
                      {"who": None, "text": "你在他身边站定。", "scene": s1},

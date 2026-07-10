@@ -80,12 +80,39 @@ def test_missing_choices_retried_once():
             out = super().generate(prompt)
             if prompt.get("gal_compile"):
                 ForgetOnceLLM.calls += 1
-                if not prompt.get("choice_retry"):
+                if not (prompt.get("retry") or {}).get("choices"):
                     out.pop("choices")
             return out
     beats, _ = gal.compile_chapter(ForgetOnceLLM(), _parsed(), 1)
     assert ForgetOnceLLM.calls == 2
     assert any(b.get("type") == "choice" for b in beats)
+
+
+def test_opening_echo_named_retry_fixes_it():
+    # 实弹 (《余音》第2/5章): the model re-tells chapter 1's opening — the echo
+    # guard catches it and the named retry gets a fresh opening
+    class EchoOnceLLM(MockLLM):
+        def generate(self, prompt):
+            out = super().generate(prompt)
+            if prompt.get("gal_compile") and not (prompt.get("retry") or {}).get("echo"):
+                out["beats"][0]["text"] = "风从天台的边缘掀过来。"
+            return out
+    beats, _ = gal.compile_chapter(EchoOnceLLM(), _parsed(), 2,
+                                   prior_openings=["风从天台的边缘掀过来。"])
+    first = next(b["text"] for b in beats if b.get("type") != "choice")
+    assert first != "风从天台的边缘掀过来。"
+
+
+def test_opening_echo_persistent_fails_loud():
+    class HardEchoLLM(MockLLM):
+        def generate(self, prompt):
+            out = super().generate(prompt)
+            if prompt.get("gal_compile"):
+                out["beats"][0]["text"] = "风从天台的边缘掀过来。"
+            return out
+    with pytest.raises(ValueError):
+        gal.compile_chapter(HardEchoLLM(), _parsed(), 2,
+                            prior_openings=["风从天台的边缘掀过来。"])
 
 
 def test_choice_fx_backfilled_when_model_forgets():
