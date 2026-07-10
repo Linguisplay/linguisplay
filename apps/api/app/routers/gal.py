@@ -133,8 +133,8 @@ def rebuild(work_id: str, user: User = Depends(current_user),
     (build_work skips art files already on disk — the backfill doctrine.)"""
     s = _own_work(work_id, user, db)
     g = dict(s.gal or {})
-    if g.get("status") in ("queued", "parsing", "compiling", "art"):
-        raise HTTPException(409, "正在建造中")
+    # the THREAD guard below is the real lock — a mid-build status with no live
+    # thread is an orphan (service restarted mid-build) and must be resumable
     if not (g.get("script") or {}):
         g["status"], g["progress"] = "queued", "重新排队…"   # hard failure → full re-run
     else:
