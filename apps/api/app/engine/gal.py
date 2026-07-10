@@ -86,12 +86,47 @@ def parse_story(llm, source: str, title: str) -> dict[str, Any]:
         raise ValueError("识别失败：没有解析出角色或场景，换一段更具体的故事文本试试")
     by_name = {c["name"]: c["id"] for c in chars}
     protagonist = by_name.get(str(out.get("protagonist") or "").strip(), chars[0]["id"])
-    chapters = [{"i": i + 1, "summary": str(ch).strip()[:200]}
-                for i, ch in enumerate((out.get("chapters") or [])[:5]) if str(ch).strip()]
+    chapters: list[dict] = []
+    for ch in (out.get("chapters") or [])[:5]:
+        if isinstance(ch, dict):
+            summ = str(ch.get("summary") or "").strip()[:200]
+            frm = str(ch.get("from") or "").strip()[:20]
+        else:                                   # legacy string shape tolerated
+            summ, frm = str(ch).strip()[:200], ""
+        if summ:
+            chapters.append({"i": len(chapters) + 1, "summary": summ, "from": frm})
     if not chapters:
-        chapters = [{"i": 1, "summary": "故事的开端。"}]
+        chapters = [{"i": 1, "summary": "故事的开端。", "from": ""}]
     return {"characters": chars, "scenes": scenes,
             "protagonist_id": protagonist, "chapters": chapters}
+
+
+def slice_source(source: str, chapters: list[dict]) -> list[str]:
+    """物理切片: cut the source at the parse's from-quotes so the compiler can
+    only SEE its own chapter's material — the definitive cure for greedy
+    whole-book adaptation (实弹《余音》: every chapter compiled the entire arc
+    to the finale; prompt rules and anchors alone did not hold). Falls back to
+    an even split when the quotes don't locate."""
+    n = len(chapters)
+    if not n or not source:
+        return [source] * n
+    starts: list[int] = []
+    pos = 0
+    ok = True
+    for ch in chapters:
+        q = (ch.get("from") or "").strip()
+        i = source.find(q[:12], pos) if q else -1
+        if i < 0:
+            ok = False
+            break
+        starts.append(i)
+        pos = i + 1
+    if not ok:
+        step = max(1, len(source) // n)
+        starts = [k * step for k in range(n)]
+    starts[0] = 0
+    return [source[starts[k]: (starts[k + 1] if k + 1 < n else len(source))]
+            for k in range(n)]
 
 
 def _norm_beat(b: dict, ch: int, idx: int, char_ids: set, scene_ids: set,
@@ -207,11 +242,16 @@ def compile_chapter(llm, gal: dict[str, Any], ch_index: int,
     n_beat = n_choice = 0
     # one measured retry with pointed reasons: field-tested — the model can return a
     # clean chapter with ZERO choices, or re-tell the opening; a named re-ask fixes it
+    # 只给本章的原文切片 — the compiler cannot re-tell what it cannot see
+    slices = slice_source((gal.get("source_text") or "")[:MAX_SOURCE_CHARS],
+                          gal["chapters"])
+    src = (slices[ch_index - 1] if ch_index <= len(slices) else "") \
+        or (gal.get("source_text") or "")
     reasons: dict = {}
     for attempt in (0, 1):
         out = llm.generate({
             "gal_compile": True,
-            "source": (gal.get("source_text") or "")[:MAX_SOURCE_CHARS],
+            "source": src[:MAX_SOURCE_CHARS],
             "chapter": chapter, "chapter_count": total,
             "chapters_all": gal["chapters"],   # 全书章节表: each chapter knows its slice
             "characters": gal["characters"], "scenes": gal["scenes"],

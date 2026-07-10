@@ -88,6 +88,40 @@ def test_missing_choices_retried_once():
     assert any(b.get("type") == "choice" for b in beats)
 
 
+def test_slice_source_cuts_at_from_quotes():
+    src = "一月的故事开头。" * 10 + "二月的转折来了。" * 10 + "三月的结尾到了。" * 10
+    chs = [{"i": 1, "summary": "a", "from": "一月的故事开头"},
+           {"i": 2, "summary": "b", "from": "二月的转折来了"},
+           {"i": 3, "summary": "c", "from": "三月的结尾到了"}]
+    s = gal.slice_source(src, chs)
+    assert len(s) == 3
+    assert s[0].startswith("一月") and "二月" not in s[0]
+    assert s[1].startswith("二月") and "三月" not in s[1]
+    assert s[2].startswith("三月")
+    # unusable quotes → even split fallback, never a crash
+    s2 = gal.slice_source(src, [{"from": "原文里没有这句"}, {"from": ""}])
+    assert len(s2) == 2 and s2[0] and s2[1]
+
+
+def test_compiler_sees_only_its_slice():
+    # 实弹《余音》根治: greedy whole-book adaptation — every chapter compiled the
+    # arc to the finale. The compiler cannot re-tell what it cannot see.
+    class CaptureLLM(MockLLM):
+        seen = {}
+        def generate(self, prompt):
+            if prompt.get("gal_compile"):
+                CaptureLLM.seen[prompt["chapter"]["i"]] = prompt["source"]
+            return super().generate(prompt)
+    g = _parsed()
+    g["source_text"] = "第一幕天台相遇。" * 30 + "第二幕教室对峙。" * 30
+    g["chapters"] = [{"i": 1, "summary": "a", "from": "第一幕天台相遇"},
+                     {"i": 2, "summary": "b", "from": "第二幕教室对峙"}]
+    gal.compile_chapter(CaptureLLM(), g, 1)
+    gal.compile_chapter(CaptureLLM(), g, 2)
+    assert "第二幕" not in CaptureLLM.seen[1]
+    assert CaptureLLM.seen[2].startswith("第二幕")
+
+
 def test_opening_echo_named_retry_fixes_it():
     # 实弹 (《余音》第2/5章): the model re-tells chapter 1's opening — the echo
     # guard catches it and the named retry gets a fresh opening

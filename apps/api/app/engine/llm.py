@@ -79,7 +79,8 @@ class MockLLM:
                     "scenes": [{"name": "天台", "visual": "夜里的天台，风很大"},
                                {"name": "教室", "visual": "放学后的空教室"}],
                     "protagonist": "林晚",
-                    "chapters": ["天台初遇。", "教室对峙。"]}
+                    "chapters": [{"summary": "天台初遇。", "from": "林晚在天台"},
+                                 {"summary": "教室对峙。", "from": "林晚在天台"}]}
         if prompt.get("gal_compile"):
             pro = prompt.get("protagonist_id") or "c1"
             other = next((c["id"] for c in (prompt.get("characters") or [])
