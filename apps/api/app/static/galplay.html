@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>🎀 LinguisPlay Gal</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; background: #000; color: #e7eaf3; overflow: hidden;
+               font: 15px/1.8 system-ui, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  /* 📱 the phone stage: 9:16, centered; everything outside is pure black */
+  #stage { position: relative; aspect-ratio: 9/16; height: min(100vh, 177.7vw);
+           margin: 0 auto; top: 50%; transform: translateY(-50%);
+           overflow: hidden; background: #05050a; user-select: none; cursor: pointer; }
+  #gbg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+         transition: opacity .6s ease; }
+  #gsprite { position: absolute; left: 50%; bottom: 24%; transform: translateX(-50%);
+             height: 62%; max-width: 92%; object-fit: contain; object-position: bottom;
+             transition: opacity .35s ease; filter: drop-shadow(0 6px 22px rgba(0,0,0,.55)); }
+  .off { opacity: 0 !important; }
+  #gbox { position: absolute; left: 3%; right: 3%; bottom: 2.6%; min-height: 26%;
+          background: rgba(8,8,16,.82); border: 1px solid #3a3a52; border-radius: 14px;
+          padding: 26px 16px 18px; backdrop-filter: blur(4px); }
+  #gname { position: absolute; top: -13px; left: 12px; background: #232346;
+           border: 1px solid #4a4a72; color: #ffd479; border-radius: 9px;
+           padding: 2px 12px; font-size: 13px; font-weight: 700; }
+  #gtext { font-size: 15.5px; line-height: 1.85; min-height: 4.6em; }
+  #gtext.narr { color: #c3c9d9; }
+  #gnext { position: absolute; right: 13px; bottom: 7px; color: #8ea2ff; font-size: 13px;
+           animation: blink 1.1s steps(2) infinite; visibility: hidden; }
+  @keyframes blink { 50% { opacity: 0; } }
+  #gctl { position: absolute; top: 10px; right: 10px; display: flex; gap: 8px; z-index: 5; }
+  #gctl span { background: rgba(20,20,36,.8); border: 1px solid #45456a; border-radius: 9px;
+               padding: 4px 10px; font-size: 12px; color: #9fb0ff; cursor: pointer; }
+  #gctl span.on { color: #ffd479; border-color: #ffd479; }
+  /* 标题画面 */
+  #gtitle { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column;
+            align-items: center; justify-content: flex-end; padding-bottom: 12%;
+            background: #05050a; background-size: cover; background-position: center; }
+  #gtitle::before { content: ""; position: absolute; inset: 0;
+                    background: linear-gradient(transparent 40%, rgba(3,3,8,.9)); }
+  #gtitle h1 { position: relative; font-size: 26px; letter-spacing: 4px;
+               text-shadow: 0 2px 12px rgba(0,0,0,.9); margin-bottom: 24px; }
+  #gtitle button { position: relative; width: 200px; margin-top: 12px; padding: 12px;
+                   background: rgba(20,20,36,.88); border: 1px solid #45456a; color: #e7eaf3;
+                   border-radius: 11px; font: inherit; font-size: 15px; cursor: pointer; }
+  #gtitle button:hover { border-color: #8ea2ff; }
+  #gend { position: absolute; inset: 0; z-index: 9; display: none; flex-direction: column;
+          align-items: center; justify-content: center; background: rgba(3,3,8,.92); }
+  #gend h2 { font-size: 22px; letter-spacing: 6px; margin-bottom: 18px; }
+  #gend .muted, .muted { color: #8b93a7; font-size: 13px; }
+  #glog { position: absolute; inset: 0; z-index: 8; display: none; overflow-y: auto;
+          background: rgba(5,5,10,.96); padding: 46px 16px 20px; }
+  #glog .l { margin-bottom: 10px; font-size: 14px; }
+  #glog .l b { color: #ffd479; margin-right: 6px; }
+</style>
+</head>
+<body>
+<div id="stage" onclick="tap()">
+  <img id="gbg" alt="">
+  <img id="gsprite" class="off" alt="">
+  <div id="gctl">
+    <span id="btnAuto" onclick="event.stopPropagation();toggleAuto()">▶ 自动</span>
+    <span onclick="event.stopPropagation();toggleLog()">📖</span>
+    <span onclick="event.stopPropagation();location.href='/maker'">✕</span>
+  </div>
+  <div id="glog" onclick="event.stopPropagation();toggleLog()"></div>
+  <div id="gbox">
+    <div id="gname" style="display:none"></div>
+    <div id="gtext"></div>
+    <div id="gnext">▼</div>
+  </div>
+  <div id="gend"><h2>第一章 完</h2><div class="muted">后续章节与选择，敬请期待</div>
+    <button style="margin-top:22px;width:180px;padding:11px;background:rgba(20,20,36,.88);border:1px solid #45456a;color:#e7eaf3;border-radius:11px;font:inherit;cursor:pointer"
+            onclick="event.stopPropagation();restart()">从头再看</button></div>
+  <div id="gtitle">
+    <h1 id="gt"></h1>
+    <button onclick="event.stopPropagation();startGame(false)">开 始</button>
+    <button id="btnCont" style="display:none" onclick="event.stopPropagation();startGame(true)">继 续</button>
+  </div>
+</div>
+<script>
+const API = "/api/v1";
+const workId = new URLSearchParams(location.search).get("work");
+let W = null, beats = [], cur = -1, typing = false, autoOn = false, autoT = null;
+const $ = id => document.getElementById(id);
+const key = () => "gal_cur_" + workId;
+
+async function boot() {
+  if (!workId) { location.href = "/maker"; return; }
+  let r = await fetch(`${API}/gal/${workId}/script`);
+  if (r.status === 401) { location.href = "/play"; return; }
+  if (!r.ok) { $("gt").textContent = "作品还没准备好"; return; }
+  W = await r.json();
+  beats = ((W.script[W.protagonist_id] || {}).chapters || [[]])[0] || [];
+  $("gt").textContent = W.title || "";
+  $("gtitle").style.backgroundImage =
+    W.manifest && W.manifest.cover ? `url(/scene/gal/${workId}/cover.jpg)` : "";
+  if (localStorage.getItem(key()) !== null) $("btnCont").style.display = "";
+}
+function startGame(cont) {
+  $("gtitle").style.display = "none";
+  cur = cont ? Math.max(-1, +localStorage.getItem(key()) - 1) : -1;
+  next();
+}
+function nameOf(cid) { const c = (W.characters || []).find(x => x.id === cid); return c ? c.name : ""; }
+function setBg(sid) {
+  const el = $("gbg");
+  const want = `/scene/gal/${workId}/bg_${sid}.jpg`;
+  if (el.dataset.sid === sid) return;
+  el.dataset.sid = sid;
+  el.style.opacity = 0;
+  setTimeout(() => { el.onerror = () => { el.removeAttribute("src"); el.style.opacity = 1; };
+                     el.src = want; el.onload = () => el.style.opacity = 1; }, 320);
+}
+function setSprite(cid, expr, adult) {
+  const el = $("gsprite");
+  // 🔞 成人拍：只有背景+文字框（Yi 拍板）；主角与旁白也不上立绘
+  if (!cid || adult || cid === W.protagonist_id) { el.classList.add("off"); return; }
+  const want = `/scene/gal/${workId}/${cid}_${expr || "常态"}.png`;
+  el.onerror = () => el.classList.add("off");
+  if (el.getAttribute("src") !== location.origin + want) el.src = want;
+  el.classList.remove("off");
+}
+async function typeText(el, text) {
+  typing = true; el.textContent = "";
+  for (const ch of (text || "")) {
+    if (!typing) { el.textContent = text; break; }   // tap-to-complete
+    el.textContent += ch;
+    await new Promise(r => setTimeout(r, "，。！？…、".includes(ch) ? 90 : 26));
+  }
+  typing = false;
+}
+async function showBeat(b) {
+  setBg(b.scene);
+  setSprite(b.who, b.expr, b.adult);
+  const nm = $("gname"), tx = $("gtext");
+  if (b.who) { nm.textContent = b.who === W.protagonist_id ? "你" : nameOf(b.who); nm.style.display = ""; tx.className = ""; }
+  else { nm.style.display = "none"; tx.className = "narr"; }
+  $("gnext").style.visibility = "hidden";
+  await typeText(tx, b.text);
+  $("gnext").style.visibility = "visible";
+  logAdd(b);
+  if (autoOn) { clearTimeout(autoT); autoT = setTimeout(next, 1100 + (b.text || "").length * 60); }
+}
+function next() {
+  if (typing) { typing = false; return; }   // first tap completes the line
+  cur++;
+  if (cur >= beats.length) { $("gend").style.display = "flex"; localStorage.removeItem(key()); return; }
+  localStorage.setItem(key(), cur);
+  showBeat(beats[cur]);
+}
+function tap() { if ($("gtitle").style.display !== "none" || $("gend").style.display === "flex") return; next(); }
+function restart() { $("gend").style.display = "none"; cur = -1; next(); }
+function toggleAuto() { autoOn = !autoOn; $("btnAuto").classList.toggle("on", autoOn); if (autoOn && !typing) next(); }
+function logAdd(b) {
+  const d = document.createElement("div"); d.className = "l";
+  d.innerHTML = (b.who ? `<b>${b.who === W.protagonist_id ? "你" : nameOf(b.who)}</b>` : "") +
+                (b.text || "").replace(/</g, "&lt;");
+  $("glog").appendChild(d);
+}
+function toggleLog() { const l = $("glog"); l.style.display = l.style.display === "block" ? "none" : "block"; l.scrollTop = l.scrollHeight; }
+document.addEventListener("keydown", e => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); tap(); } });
+boot();
+</script>
+</body>
+</html>

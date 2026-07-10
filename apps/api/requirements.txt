@@ -9,3 +9,6 @@ python-jose[cryptography]==3.3.0
 bcrypt==4.2.1
 python-multipart==0.0.20
 httpx==0.28.1
+
+pillow
+rembg[cpu]

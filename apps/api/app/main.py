@@ -13,7 +13,7 @@ for _sub in ("bg", "bgm", "sfx"):
 
 from .config import get_settings
 from .db import init_db
-from .routers import auth, cards, me, personas, phone_mock, runs, stories
+from .routers import auth, cards, gal, me, personas, phone_mock, runs, stories
 
 settings = get_settings()
 
@@ -47,6 +47,7 @@ app.include_router(cards.router, prefix=API)  # 📚 角色卡库 (cross-story c
 app.include_router(stories.router, prefix=API)
 app.include_router(runs.router, prefix=API)
 app.include_router(phone_mock.router, prefix=API)  # MOCK: phone domain skeleton
+app.include_router(gal.router, prefix=API)  # 🎀 galgame 生成器 (docs/galgame-maker.md)
 
 
 @app.get("/", include_in_schema=False)
@@ -67,6 +68,17 @@ def play_page():
 @app.get("/studio", include_in_schema=False)
 def studio_page():
     return FileResponse(os.path.join(_STATIC, "studio.html"), headers=_NO_CACHE)
+
+
+@app.get("/maker", include_in_schema=False)
+def maker_page():
+    """🎀 galgame 生成器: 贴故事 → 建造 → 游玩 (docs/galgame-maker.md)."""
+    return FileResponse(os.path.join(_STATIC, "galmaker.html"), headers=_NO_CACHE)
+
+
+@app.get("/galplay", include_in_schema=False)
+def galplay_page():
+    return FileResponse(os.path.join(_STATIC, "galplay.html"), headers=_NO_CACHE)
 
 
 # Scene assets (background images / BGM / SFX). Drop files here per SCENE_ASSETS.md;

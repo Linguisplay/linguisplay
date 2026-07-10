@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>🎀 Galgame 生成器 · LinguisPlay</title>
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body { background: #0b0b12; color: #e7eaf3; font: 15px/1.7 system-ui, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .wrap { max-width: 640px; margin: 0 auto; padding: 26px 18px 60px; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .muted { color: #8b93a7; font-size: 13px; }
+  .card { background: #14141f; border: 1px solid #2a2a3a; border-radius: 14px; padding: 16px; margin-top: 16px; }
+  label { display: block; font-size: 13px; color: #aab2c4; margin: 12px 0 5px; }
+  input, textarea, select { width: 100%; background: #0e0e16; color: #e7eaf3; border: 1px solid #34344a; border-radius: 9px; padding: 10px 12px; font: inherit; }
+  textarea { min-height: 220px; resize: vertical; }
+  button { background: #4a5adf; color: #fff; border: 0; border-radius: 10px; padding: 12px 18px; font: inherit; font-weight: 700; cursor: pointer; margin-top: 14px; }
+  button.ghost { background: #232336; color: #9fb0ff; border: 1px solid #45456a; }
+  button:disabled { opacity: .5; cursor: default; }
+  .work { display: flex; gap: 12px; align-items: center; border-top: 1px dashed #2a2a3a; padding: 12px 0; }
+  .work img { width: 54px; height: 96px; object-fit: cover; border-radius: 8px; background: #0e0e16; }
+  .st { font-size: 12px; padding: 2px 9px; border-radius: 8px; background: #232336; }
+  .st.ready { color: #7ddf9a; } .st.failed { color: #ff9d9d; } .st.building { color: #ffd479; }
+  #prog { margin-top: 12px; font-size: 14px; }
+  .bar { height: 8px; border-radius: 5px; background: #00000055; overflow: hidden; margin-top: 8px; }
+  .bar span { display: block; height: 100%; width: 30%; border-radius: 5px; background: linear-gradient(90deg,#4a5adf,#8ea2ff); animation: slide 1.4s ease-in-out infinite alternate; }
+  @keyframes slide { from { margin-left: 0 } to { margin-left: 70% } }
+  a { color: #8ea2ff; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎀 Galgame 生成器</h1>
+  <div class="muted">贴进一个故事，我来做成一部手机 galgame：识别角色与场景、绘制立绘与背景、编成可点击的剧本。beta 期每人 1 本。</div>
+
+  <div class="card" id="form">
+    <label>作品标题</label>
+    <input id="title" maxlength="24" placeholder="给你的 galgame 起个名字">
+    <label>故事文本（≥200 字；越具体，人物和画面越准）</label>
+    <textarea id="src" placeholder="把你的故事贴在这里——短篇小说、剧本、一段完整的情节都可以。"></textarea>
+    <label>画风</label>
+    <select id="style">
+      <option value="">默认（电影质感写实）</option>
+      <option value="日漫风格插画，清新明亮的色彩，干净的线条，赛璐璐上色，唯美光效">日漫清新</option>
+      <option value="阴郁冷调的恐怖片美术，低饱和色，深重阴影，胶片噪点，令人不安的构图">暗黑惊悚</option>
+      <option value="中国古风工笔画意，水墨氤氲，绢本设色，古典服饰与建筑，含蓄留白">古风水墨</option>
+      <option value="赛博朋克霓虹夜色，雨湿街道反光，冷紫与青色光源，未来都市质感">赛博霓虹</option>
+    </select>
+    <button id="go" onclick="build()">开始建造</button>
+    <div id="prog" class="muted" style="display:none"></div>
+  </div>
+
+  <div class="card">
+    <b style="font-size:14px">我的作品</b>
+    <div id="mine" class="muted" style="margin-top:8px">加载中…</div>
+  </div>
+</div>
+<script>
+const API = "/api/v1";
+async function j(path, opt = {}) {
+  const r = await fetch(API + path, { headers: { "Content-Type": "application/json" }, ...opt });
+  if (!r.ok) { let d = {}; try { d = await r.json(); } catch (e) {} throw new Error(d.detail || r.status); }
+  return r.json();
+}
+let pollTimer = null;
+async function build() {
+  const go = document.getElementById("go");
+  go.disabled = true;
+  try {
+    const w = await j("/gal", { method: "POST", body: JSON.stringify({
+      title: document.getElementById("title").value.trim(),
+      source_text: document.getElementById("src").value,
+      art_style: document.getElementById("style").value }) });
+    poll(w.id);
+  } catch (e) { alert("⚠️ " + e.message); go.disabled = false; }
+}
+function poll(id) {
+  const prog = document.getElementById("prog");
+  prog.style.display = "block";
+  prog.innerHTML = `建造中…<div class="bar"><span></span></div>`;
+  clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    try {
+      const st = await j(`/gal/${id}/status`);
+      if (st.status === "ready") {
+        clearInterval(pollTimer);
+        prog.innerHTML = `✅ 建造完成！ <a href="/galplay?work=${id}">▶ 开始游玩</a>`
+          + (st.missing && st.missing.length ? `<div class="muted">缺 ${st.missing.length} 张图，可在下方作品列表重跑补齐</div>` : "");
+        document.getElementById("go").disabled = false;
+        loadMine();
+      } else if (st.status === "failed") {
+        clearInterval(pollTimer);
+        prog.innerHTML = `❌ ${st.progress}　<a href="javascript:rebuild('${id}')">重试</a>`;
+        document.getElementById("go").disabled = false;
+        loadMine();
+      } else {
+        prog.innerHTML = `⏳ ${st.progress || "建造中…"}<div class="bar"><span></span></div>`;
+      }
+    } catch (e) {}
+  }, 3000);
+}
+async function rebuild(id) {
+  try { await j(`/gal/${id}/rebuild`, { method: "POST" }); poll(id); }
+  catch (e) { alert("⚠️ " + e.message); }
+}
+async function loadMine() {
+  const el = document.getElementById("mine");
+  try {
+    const rows = await j("/gal/mine");
+    if (!rows.length) { el.textContent = "还没有作品。上面贴一个故事试试。"; return; }
+    el.innerHTML = rows.map(w => {
+      const cls = w.status === "ready" ? "ready" : w.status === "failed" ? "failed" : "building";
+      const lab = { ready: "已完成", failed: "失败" }[w.status] || "建造中";
+      return `<div class="work">${w.cover ? `<img src="${w.cover}">` : `<img>`}
+        <div style="flex:1"><b>${w.title}</b><div class="muted">${w.progress || ""}</div></div>
+        <span class="st ${cls}">${lab}</span>
+        ${w.status === "ready" ? `<a href="/galplay?work=${w.id}">▶ 游玩</a>` : ""}
+        ${w.status !== "ready" && w.status !== "failed" ? `<a href="javascript:poll('${w.id}')">进度</a>` : ""}
+        ${w.status === "failed" || w.status === "ready" ? `<a href="javascript:rebuild('${w.id}')" title="补齐缺图/重试">↻</a>` : ""}
+      </div>`;
+    }).join("");
+  } catch (e) {
+    el.innerHTML = e.message === "401" ? `请先去 <a href="/play">/play</a> 登录，再回到这里` : "加载失败";
+  }
+}
+loadMine();
+</script>
+</body>
+</html>

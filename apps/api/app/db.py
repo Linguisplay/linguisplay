@@ -46,6 +46,7 @@ def _ensure_columns() -> None:
                           ("tuning", "JSON DEFAULT '{}'"), ("pressure", "JSON"),
                           ("threat", "JSON"), ("dooms", "JSON"),
                           ("sanity", "JSON"), ("rules", "JSON"),
+                          ("kind", "TEXT DEFAULT 'story'"), ("gal", "JSON"),
                           ("clock", "JSON"), ("phone", "JSON"),
                           ("verdict", "JSON"), ("sandbox", "JSON"),
                           ("language", "TEXT DEFAULT 'zh'")],

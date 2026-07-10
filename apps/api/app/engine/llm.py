@@ -69,6 +69,29 @@ class MockLLM:
         # suggestions: mock returns none → runtime falls back to its deterministic template.
         if prompt.get("suggest"):
             return {"suggestions": []}
+        # 🎀 galgame maker twins: deterministic parse + compile so build tests never call out
+        if prompt.get("gal_parse"):
+            return {"characters": [
+                        {"name": "林晚", "looks": "短发少女，深色大衣", "personality": "冷静", "weight": 5},
+                        {"name": "沈刻", "looks": "高瘦青年，金丝眼镜", "personality": "温和", "weight": 4}],
+                    "scenes": [{"name": "天台", "visual": "夜里的天台，风很大"},
+                               {"name": "教室", "visual": "放学后的空教室"}],
+                    "protagonist": "林晚",
+                    "chapters": ["天台初遇。", "教室对峙。"]}
+        if prompt.get("gal_compile"):
+            pro = prompt.get("protagonist_id") or "c1"
+            other = next((c["id"] for c in (prompt.get("characters") or [])
+                          if c["id"] != pro), pro)
+            s1 = ((prompt.get("scenes") or [{}])[0]).get("id", "s1")
+            beats = [{"who": None, "text": "风从天台的边缘掀过来。", "scene": s1, "bgm": "平静"},
+                     {"who": other, "text": "「你来了。」", "expr": "喜", "scene": s1},
+                     {"who": pro, "text": "「嗯。」", "scene": s1},
+                     {"who": None, "text": "你在他身边站定。", "scene": s1},
+                     {"who": other, "text": "「有件事想问你。」", "expr": "常态", "scene": s1},
+                     {"who": None, "text": "夜色沉下来。", "scene": s1, "cg": True},
+                     {"who": other, "text": "「明天，还会来吗？」", "expr": "哀", "scene": s1},
+                     {"who": None, "text": "你没有回答。", "scene": s1}]
+            return {"beats": beats, "summary": "天台上的一问，没有答案。"}
         # rolling memory digest: deterministic concat (bounded) so tests stay reproducible.
         if prompt.get("summarize"):
             prior = prompt.get("prior_memory") or ""

@@ -149,6 +149,11 @@ class Story(Base):
     verdict: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # 🏖 无尽沙盒 {enabled, real_time}; None = a normal authored story
     sandbox: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 🎀 galgame 生成器 (docs/galgame-maker.md): kind="gal" marks a compiled work;
+    # gal = {status, progress, source_text, characters, scenes, script{pov:{chapters}},
+    #        manifest, protagonist_id, art_style_preset}
+    kind: Mapped[str] = mapped_column(String(16), default="story")
+    gal: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # 18+ flag. When on, the engine permits explicit adult content (still refusing
     # minors). Players are already age-gated 18+ at signup (DOB gate).

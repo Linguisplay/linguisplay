@@ -2147,6 +2147,73 @@ class QwenLLM:
         except Exception:
             return {"memory": prior}
 
+    def _gal_parse(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🎀 识别拍: story text → characters (with LOOKS for consistent art) / scenes /
+        protagonist / chapter skeleton. One structured call; engine normalizes ids."""
+        sys = (
+            "你是视觉小说（galgame）制作器的识别器。读完用户给的故事文本，只输出严格JSON："
+            '{"characters":[{"name":"","looks":"外貌描述：性别年龄/发型发色/眼睛/服装/体态，'
+            '要具体到能让画师画出同一个人（≤80字）","personality":"≤40字","weight":1到5的戏份}],'
+            '"scenes":[{"name":"≤8字地点名","visual":"画面描述：空间/光线/陈设/氛围（≤80字）"}],'
+            '"protagonist":"主角名（视角人物，玩家将扮演TA）",'
+            '"chapters":["第1章一句话概要","第2章…（3~5章，覆盖全文的起承转合）"]}。'
+            "要求：角色≤6个只留有戏份的；场景≤8个；looks 必须具体（画师依赖它）；"
+            "chapters 必须覆盖到故事结尾。")
+        u = f"标题：{prompt.get('title') or '（无）'}\n故事文本：\n{prompt.get('source') or ''}"
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model,
+                               "messages": [{"role": "system", "content": sys},
+                                            {"role": "user", "content": u}],
+                               "max_tokens": 2200, "temperature": 0.3,
+                               "response_format": {"type": "json_object"}},
+                              timeout=90, kind="gal_parse")
+            import json as _json
+            return _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
+        except Exception:
+            return {}
+
+    def _gal_compile(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🎀 编剧拍: one chapter → the beat sequence. The pacing CONTRACT lives here:
+        每拍≤60字、一拍一个信息点、对白为主旁白为骨、主角人称永远是「你」。"""
+        ch = prompt.get("chapter") or {}
+        chars = prompt.get("characters") or []
+        scenes = prompt.get("scenes") or []
+        pro = prompt.get("protagonist_id") or ""
+        lo, hi = prompt.get("target_beats") or (40, 60)
+        clist = "\n".join(f"- {c['id']}={c['name']}（{c.get('personality','')}）" for c in chars)
+        slist = "\n".join(f"- {s['id']}={s['name']}" for s in scenes)
+        sys = (
+            "你是视觉小说（galgame）的编剧编译器。把指定章节改编成拍序列，只输出严格JSON："
+            '{"beats":[{"who":"说话角色id，旁白则留空","text":"这一拍的文字",'
+            '"expr":"常态|喜|怒|哀（说话角色此刻表情）","scene":"场景id",'
+            '"bgm":"平静|温馨|紧张|悲伤|激昂 之一","cg":false,"adult":false}],'
+            '"summary":"本章≤100字收尾摘要（给下一章编译用）"}。'
+            f"【节奏合同】产出 {lo}~{hi} 拍；每拍≤60字、只装一个信息点；"
+            "对白为主、旁白为骨（旁白连续不超过3拍）；场景切换要换 scene id；"
+            f"主角（{pro}）是视角人物：旁白里永远称TA为「你」，主角自己的台词 who 填 {pro}；"
+            "关键的情绪画面拍（每章至多1拍）标 cg:true；成人内容的拍标 adult:true。"
+            "只用给定的角色id和场景id，不得发明新的。")
+        u = (f"角色表：\n{clist}\n场景表：\n{slist}\n"
+             f"前情摘要：{prompt.get('prior_summary') or '（这是第一章）'}\n"
+             f"本章（第{ch.get('i')}章/共{prompt.get('chapter_count')}章）：{ch.get('summary')}\n"
+             f"故事原文（改编依据）：\n{(prompt.get('source') or '')[:9000]}")
+        _st = (prompt.get("style") or "").strip()
+        if _st:
+            sys += f"【文风·必须贴住】{_st}"
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model,
+                               "messages": [{"role": "system", "content": sys},
+                                            {"role": "user", "content": u}],
+                               "max_tokens": 7000, "temperature": 0.7,
+                               "response_format": {"type": "json_object"}},
+                              timeout=180, kind="gal_compile")
+            import json as _json
+            return _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
+        except Exception:
+            return {}
+
     def _suggest(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """3 short, CONTEXT-aware "what could I do next" hints, drawn from what just happened
         + the current situation. Cheap call; degrades to {} so runtime can fall back."""
@@ -3221,6 +3288,10 @@ class QwenLLM:
             return self._offscreen(prompt)
         if prompt.get("risk_judge"):
             return self._risk(prompt)
+        if prompt.get("gal_parse"):
+            return self._gal_parse(prompt)
+        if prompt.get("gal_compile"):
+            return self._gal_compile(prompt)
         speaker = prompt.get("speaker_name") or "角色"
         channel = prompt.get("channel") or "say"
         observe = bool(prompt.get("observe"))
