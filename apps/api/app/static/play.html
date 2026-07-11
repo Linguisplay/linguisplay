@@ -358,11 +358,11 @@
   text-shadow: 0 1px 3px rgba(0,0,0,.9); }
 #vnctl span:hover { color: #ece9e2; }
 #vnctl span.on { color: #d8b57a; }
-/* 辅助选项 chips (打字为主, Yi 定): 停靠在对话框和输入栏之间 — 不许飘在人物身上,
-   位置本身就说明它是「快捷回复」: 点一个, 或在下面自己打字 */
-#vnchoices { position: absolute; left: 50%; transform: translateX(-50%); bottom: 92px;
-  width: min(720px, 94%); display: flex; flex-direction: column; align-items: stretch;
-  gap: 7px; pointer-events: auto; z-index: 5; }
+/* 辅助选项 chips (打字为主, Yi 定): 住在对话面板内部、正文下方 — 同一个流,
+   layout 自己管间距, 文字和选项永远不重叠; 点一个直接行动, 或在输入栏自己打字 */
+#vnchoices { display: flex; flex-direction: column; align-items: stretch; gap: 7px;
+  max-width: 860px; margin: 13px auto 0; cursor: default; }
+#vnchoices.hidden { display: none; }
 #vnchoices button { background: rgba(8,9,15,.88); border: 1px solid rgba(216,181,122,.38);
   border-radius: 12px; color: rgba(236,233,226,.88); padding: 8px 13px;
   font-size: 12.5px; letter-spacing: .5px; cursor: pointer; text-align: left;
@@ -392,7 +392,7 @@ body.vn.vnstat #bars { display: block; position: fixed; z-index: 62;
 body.vn.vnfree footer { display: flex; position: fixed; left: 0; right: 0; bottom: 0;
   z-index: 60; background: rgba(6,7,12,.97); padding: 8px 10px
   calc(8px + env(safe-area-inset-bottom)); }
-body.vn.vnfree #vnbox { bottom: calc(86px + var(--chips, 0px)); transition: bottom .25s ease; }
+body.vn.vnfree #vnbox { bottom: 86px; max-height: calc(100vh - 200px); overflow-y: auto; }
 /* 🧠 理智条: watching the number slide IS the dread (CoC's oldest trick) */
 #sanitybar { flex:0 0 auto; margin:6px 16px 0; padding:7px 12px; border-radius:10px; background:#131022cc; border:1px solid #33285a; font-size:12.5px; display:flex; align-items:center; gap:10px; color:#c9c2e8; }
 #sanitybar .strack { flex:1; height:7px; border-radius:5px; background:#00000055; overflow:hidden; }
@@ -530,11 +530,12 @@ body.dread #dread { opacity:1; }
 <div id="vnui" class="hidden" onclick="vnUnhide()">
   <img id="vnsprite2" class="hidden" alt="">
   <img id="vnsprite" class="hidden" alt="">
-  <div id="vnchoices" class="hidden"></div>
   <div id="vnbox" onclick="vnAdvance()">
     <div id="vnname" class="hidden"></div>
     <div id="vnctl"><span onclick="event.stopPropagation();vnToggleStat()" title="目标/理智/警觉等状态">状态</span><span onclick="event.stopPropagation();vnHide()" title="隐藏界面看立绘">隐藏</span><span id="vnauto" onclick="event.stopPropagation();vnToggleAuto()" title="自动播放">自动</span><span onclick="event.stopPropagation();vnToggleLog()" title="回想">记录</span></div>
     <div id="vntext"></div>
+    <!-- 选项住在对话面板内部: 文字和选项同一个流, 物理上不可能互相遮挡 -->
+    <div id="vnchoices" class="hidden" onclick="event.stopPropagation()"></div>
     <div id="vnnext">▼</div>
   </div>
 </div>
@@ -2376,7 +2377,7 @@ function renderSuggest(items) {
       if (i === 0) btn.className = "prime";
       btn.textContent = t; btn.title = t;
       btn.onclick = () => {
-        box.classList.add("hidden"); vnChipsPad();
+        box.classList.add("hidden");
         const isAct = t.startsWith("用「做」") || t.startsWith("Use “Do”");
         if (isAct) { channel.value = "do"; msg.focus(); return; }
         msg.value = t; send();
@@ -2384,7 +2385,7 @@ function renderSuggest(items) {
       box.appendChild(btn);
     });
     box.classList.toggle("hidden", !(items || []).length);
-    vnChipsPad(); vnCue("act");
+    vnCue("act");
     return;
   }
   suggest.innerHTML = "";
@@ -2481,7 +2482,6 @@ function vnShow(on) {
   // 打字为主: VN 里输入栏永远在场 (vnfree 常开), 选项只是它上面的辅助 chips
   if (on) document.body.classList.add("vnfree");
   else { document.body.classList.remove("vnlog", "vnfree");
-         document.body.style.setProperty("--chips", "0px");
          msg.placeholder = _defPlaceholder(); }
 }
 function vnToggleAuto() {
@@ -2490,12 +2490,6 @@ function vnToggleAuto() {
   if (vnAutoOn) vnAdvance();
 }
 function vnToggleLog() { document.body.classList.toggle("vnlog"); }
-// 📐 chips 停靠联动: 对话框上移让出选项的高度 (选项绝不压人物/文字)
-function vnChipsPad() {
-  const box = document.getElementById("vnchoices");
-  const h = (vnMode && box && !box.classList.contains("hidden")) ? box.offsetHeight + 10 : 0;
-  document.body.style.setProperty("--chips", h + "px");
-}
 // 🧭 状态提示 (Yi: 什么时候点/选/打字不能模糊) — 输入框的占位符就是路标
 const _defPlaceholder = () => B("对所有人说…（点上方头像可单独对一个人说）",
                                 "Say to everyone… (tap an avatar to address one)");
@@ -2710,12 +2704,13 @@ async function playBeatVN(b, skipLog) {
   const nameEl = document.getElementById("vnname");
   if (b.author === "player") {
     document.getElementById("vnchoices").classList.add("hidden");
-    vnChipsPad();
     nameEl.textContent = myName; nameEl.classList.remove("hidden");
     vnSprite(null); box.className = ""; box.textContent = b.text;
     return;   // your own line flows straight into their reply
   }
   const isNarr = b.type === "description";
+  // 播放中面板只属于正文 — 上一轮的选项此刻已是旧闻
+  document.getElementById("vnchoices").classList.add("hidden");
   // 🎬 导演注记: 白闪与音效跟着这一拍的字一起落 (VN 此前从不消费 pendingSfx)
   if (b.fx === "flash") vnFlash();
   if (b.sfx) { if (pendingSfx === b.sfx) pendingSfx = null; playSfx(b.sfx); }
@@ -2901,7 +2896,7 @@ async function send(chOverride) {
   // VN: 发完就把焦点还给舞台, 空格/回车立即可推进回复 (手机顺带收起键盘)
   if (vnMode) { try { msg.blur(); } catch (e) {}
     document.getElementById("vnchoices").classList.add("hidden");
-    vnChipsPad(); vnCue("play"); }
+    vnCue("play"); }
   if (text) {
     if (playMode === "god") renderBeat({ author:"player", type:"description", text: B("（旁观指引）", "(Direction) ") + text });
     else renderBeat({ author:"player", type: ch==="think"?"think":"dialogue", text });
