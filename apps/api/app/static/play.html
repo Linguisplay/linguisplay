@@ -279,23 +279,53 @@
 #mapov .mexits { font-size:11px; color:#7b8a80; margin-top:3px; }
 #mapov .mhidden { color:#7b8296; font-size:12px; font-style:italic; margin-top:10px; }
 #pressurebar { flex:0 0 auto; margin:6px 16px 0; padding:7px 12px; border-radius:10px; background:#241416cc; border:1px solid #4a2a28; font-size:12.5px; display:flex; align-items:center; gap:10px; color:#e8c9c4; }
-/* 🎀 VN window (galgame 演出) */
+/* 🎀 VN window (galgame 演出) — gal 播放器同款设计语言: 淡金/渐变面板/幽灵按钮 */
 #vnui { position: fixed; inset: 0; z-index: 45; pointer-events: none; }
-#vnsprite { position: absolute; right: 2vw; bottom: 0; height: 82vh; max-width: 46vw; object-fit: contain; object-position: bottom; -webkit-mask-image: linear-gradient(to top, transparent 0, #000 12%); mask-image: linear-gradient(to top, transparent 0, #000 12%); filter: drop-shadow(0 0 26px rgba(0,0,0,.65)); animation: vnbreathe 4.5s ease-in-out infinite; }
-@keyframes vnbreathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.008) translateY(-2px); } }
-#vnbox { position: absolute; left: 50%; transform: translateX(-50%); bottom: 12px; width: min(860px, 94vw); min-height: 116px; background: rgba(10,10,20,.87); border: 1px solid #34344a; border-radius: 14px; padding: 26px 18px 16px; pointer-events: auto; cursor: pointer; }
-#vnname { position: absolute; top: -14px; left: 14px; background: #232346; border: 1px solid #45456a; color: #ffd479; border-radius: 9px; padding: 3px 12px; font-size: 13px; font-weight: 700; }
-#vntext { font-size: 15px; line-height: 1.9; color: #e7eaf3; min-height: 3.4em; }
-#vntext.narr { color: #b7bdcd; }
-#vnnext { position: absolute; right: 14px; bottom: 6px; color: #8ea2ff; animation: vnblink 1.1s steps(2) infinite; visibility: hidden; }
-@keyframes vnblink { 50% { opacity: 0; } }
-#vnctl { position: absolute; top: -14px; right: 12px; display: flex; gap: 8px; }
-#vnctl span { background: #232346; border: 1px solid #45456a; border-radius: 9px; padding: 3px 9px; font-size: 12px; cursor: pointer; color: #9fb0ff; }
-#vnctl span.on { color: #ffd479; border-color: #ffd479; }
-#vnchoices { position: absolute; left: 50%; transform: translateX(-50%); bottom: 158px; width: min(620px, 90vw); display: flex; flex-direction: column; gap: 9px; pointer-events: auto; }
-#vnchoices button { background: rgba(20,20,36,.93); border: 1px solid #45456a; color: #e7eaf3; border-radius: 10px; padding: 11px 14px; font-size: 14px; cursor: pointer; text-align: center; }
-#vnchoices button:hover { border-color: #8ea2ff; background: rgba(30,30,56,.96); }
-#vnchoices button.prime { border-color: #ffd479; }
+#vnsprite, #vnsprite2 { position: absolute; bottom: 0; object-fit: contain;
+  object-position: bottom;
+  -webkit-mask-image: linear-gradient(to top, transparent 0, #000 12%);
+  mask-image: linear-gradient(to top, transparent 0, #000 12%);
+  filter: drop-shadow(0 0 26px rgba(0,0,0,.65));
+  transform-origin: 50% 100%; animation: vnbreathe 5.2s ease-in-out infinite;
+  transition: filter .3s ease, height .3s ease, opacity .35s ease; }
+#vnsprite  { right: 2vw; height: 82vh; max-width: 46vw; z-index: 2; }
+#vnsprite2 { left: 2vw; height: 72vh; max-width: 40vw; z-index: 1;
+  filter: brightness(.45) drop-shadow(0 0 26px rgba(0,0,0,.65));
+  animation-duration: 6.6s; }
+#vnsprite.dim { filter: brightness(.72) drop-shadow(0 0 26px rgba(0,0,0,.65)); }
+@keyframes vnbreathe { 50% { scale: 1 1.006; } }
+#vnbox { position: absolute; left: 0; right: 0; bottom: 0; min-height: 148px;
+  background: linear-gradient(180deg, rgba(4,5,10,0), rgba(4,5,10,.62) 26%, rgba(4,5,10,.95) 62%);
+  padding: 44px 8% 18px; pointer-events: auto; cursor: pointer; }
+#vnname { display: inline-block; font-family: "Source Han Serif SC","Noto Serif CJK SC","Songti SC",Georgia,serif;
+  font-size: 15px; letter-spacing: 3px; color: #d8b57a; padding-bottom: 3px;
+  margin-bottom: 7px; border-bottom: 1px solid rgba(216,181,122,.45); }
+#vntext { font-size: 15px; line-height: 2; color: #ece9e2; min-height: 3.4em;
+  text-shadow: 0 1px 3px rgba(0,0,0,.8); max-width: 860px; margin: 0 auto; }
+#vntext.narr { color: rgba(236,233,226,.78); }
+#vnnext { position: absolute; right: 8%; bottom: 12px; color: #d8b57a; font-size: 11px;
+  animation: vnpulse 1.6s ease-in-out infinite; visibility: hidden; }
+@keyframes vnpulse { 50% { opacity: .15; transform: translateY(2px); } }
+#vnctl { position: absolute; top: 12px; right: 8%; display: flex; gap: 15px; }
+#vnctl span { background: none; border: 0; padding: 4px 1px; font-size: 11px;
+  letter-spacing: 2px; cursor: pointer; color: rgba(236,233,226,.52);
+  text-shadow: 0 1px 3px rgba(0,0,0,.9); }
+#vnctl span:hover { color: #ece9e2; }
+#vnctl span.on { color: #d8b57a; }
+#vnchoices { position: absolute; left: 50%; transform: translateX(-50%); bottom: 190px;
+  width: min(560px, 84vw); display: flex; flex-direction: column; gap: 13px;
+  pointer-events: auto; }
+#vnchoices button { background: linear-gradient(90deg, rgba(8,9,15,0),
+    rgba(8,9,15,.88) 14%, rgba(8,9,15,.88) 86%, rgba(8,9,15,0));
+  border: 0; border-top: 1px solid rgba(216,181,122,.45);
+  border-bottom: 1px solid rgba(216,181,122,.45); color: #ece9e2;
+  padding: 12px 14px; font-size: 14.5px; letter-spacing: 1px; cursor: pointer;
+  text-align: center; }
+#vnchoices button:hover { color: #d8b57a; }
+#vnchoices button.prime { border-color: #d8b57a; }
+body.vnhide #vnbox, body.vnhide #vnchoices { opacity: 0; pointer-events: none; }
+body.vnhide #vnui { pointer-events: auto; }
+#vnbox, #vnchoices { transition: opacity .3s ease; }
 body.vn #chat { visibility: hidden; }
 body.vn.vnlog #chat { visibility: visible; position: fixed; inset: 56px 0 0 0; z-index: 60; background: rgba(8,8,14,.97); padding: 12px 16px; overflow-y: auto; }
 body.vn #suggest { display: none; }
@@ -403,12 +433,13 @@ body.dread #dread { opacity:1; }
 <div id="bg"></div>
 <div id="dread"></div>
 <!-- 🎀 VN window (galgame 演出): sprite + dialogue box + click-to-advance + choices -->
-<div id="vnui" class="hidden">
+<div id="vnui" class="hidden" onclick="vnUnhide()">
+  <img id="vnsprite2" class="hidden" alt="">
   <img id="vnsprite" class="hidden" alt="">
   <div id="vnchoices" class="hidden"></div>
   <div id="vnbox" onclick="vnAdvance()">
     <div id="vnname" class="hidden"></div>
-    <div id="vnctl"><span id="vnauto" onclick="event.stopPropagation();vnToggleAuto()" title="自动播放">▶A</span><span onclick="event.stopPropagation();vnToggleLog()" title="回想">📖</span><span onclick="event.stopPropagation();vnToggleFree()" title="自由行动">✏️</span></div>
+    <div id="vnctl"><span onclick="event.stopPropagation();vnHide()" title="隐藏界面看立绘">隐藏</span><span id="vnauto" onclick="event.stopPropagation();vnToggleAuto()" title="自动播放">自动</span><span onclick="event.stopPropagation();vnToggleLog()" title="回想">记录</span><span onclick="event.stopPropagation();vnToggleFree()" title="自由行动">行动</span></div>
     <div id="vntext"></div>
     <div id="vnnext">▼</div>
   </div>
@@ -2371,10 +2402,7 @@ document.addEventListener("keydown", (e) => {
   if (vnMode && (e.key === " " || e.key === "Enter") && document.activeElement !== msg
       && !document.body.classList.contains("vnfree")) { e.preventDefault(); vnAdvance(); }
 });
-function vnSprite(name) {
-  const img = document.getElementById("vnsprite");
-  const cid = name ? spriteMap[name] : null;
-  if (!cid) { img.classList.add("hidden"); return; }
+function _vnSet(img, cid) {
   if (img.dataset.cid !== cid) {
     img.dataset.cid = cid;
     img.onerror = () => {   // sprite still rendering → square portrait → hide
@@ -2384,6 +2412,28 @@ function vnSprite(name) {
     img.src = `/scene/sprite/${cid}.jpg`;
   }
   img.classList.remove("hidden");
+}
+// 🎭 双立绘对手戏 (gal 播放器移植): 说话者右位点亮, 上一位发言的对手左位压暗;
+// 旁白时右位轻压一档 (都在听). ADV 掛け合い惯例: 新speaker上右位, 原右位让到左.
+let vnRight = null;   // {name, cid}
+function vnSprite(name) {
+  const R = document.getElementById("vnsprite");
+  const L = document.getElementById("vnsprite2");
+  if (!name) { R.classList.add("dim"); return; }        // narration: keep stage, dim
+  const cid = spriteMap[name];
+  if (!cid) { R.classList.add("hidden"); L.classList.add("hidden"); vnRight = null; return; }
+  R.classList.remove("dim");
+  if (vnRight && vnRight.name === name) { _vnSet(R, cid); return; }
+  if (vnRight && spriteMap[vnRight.name]) _vnSet(L, spriteMap[vnRight.name]);
+  else L.classList.add("hidden");
+  vnRight = { name: name, cid: cid };
+  _vnSet(R, cid);
+}
+// 🫥 隐藏界面 (gal 移植): 欣赏立绘, 点任意处恢复
+function vnHide() { document.body.classList.add("vnhide"); }
+function vnUnhide() {
+  if (document.body.classList.contains("vnhide"))
+    document.body.classList.remove("vnhide");
 }
 // 🎀 entering a VN run: the hidden chat holds the history, but the WINDOW must play —
 // a fresh run replays its opening beat-by-beat; a resumed run surfaces the last beat.
@@ -2456,7 +2506,12 @@ function _ramp(el, to, ms, then) {
 }
 function swapBgm(mood) {           // crossfade instead of a hard src cut
   const start = () => {
-    bgm.src = `/scene/bgm/${mood}.mp3`;
+    // 🎵 甘茶曲库优先 (gal 移植: 高质量钢琴/管弦), 缺曲回退旧合成器曲
+    bgm.onerror = () => {
+      if (bgm.src.includes("gal_")) { bgm.src = `/scene/bgm/${mood}.mp3`;
+                                      if (soundOn) bgm.play().catch(()=>{}); }
+    };
+    bgm.src = `/scene/bgm/gal_${mood}.mp3`;
     bgm.volume = 0;
     if (soundOn) bgm.play().catch(()=>{});
     _ramp(bgm, BGM_VOL, 3200);
