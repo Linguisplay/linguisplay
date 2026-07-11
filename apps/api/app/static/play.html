@@ -2613,8 +2613,8 @@ function vnSprite(name, expr) {
   const R = document.getElementById("vnsprite");
   const L = document.getElementById("vnsprite2");
   if (!name) { R.classList.add("dim"); return; }        // narration: keep stage, dim
-  const cid = spriteMap[name];
-  if (!cid) { R.classList.add("hidden"); L.classList.add("hidden"); vnRight = null; return; }
+  // 🕴 路人杂兵 (Yi 定): 没有立绘的说话者上一具黑灰人影 — 谁说话谁就得在台上
+  const cid = spriteMap[name] || "_extra";
   R.classList.remove("dim");
   if (vnRight && vnRight.name === name) {
     if (expr !== undefined) vnRight.expr = expr || null;   // 同人续说: 表情可更新
