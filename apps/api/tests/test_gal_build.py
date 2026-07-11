@@ -51,7 +51,9 @@ def test_compile_normalizes_and_splices_choices():
     assert len(choices) == 1
     c = choices[0]
     assert c["id"] == "c1q1"
-    assert beats[7] is c                     # spliced right after the 7th normal beat
+    # TEXT anchor (实弹《余音》: numeric indexes went stale) — the choice lands
+    # right after the beat whose text the anchor quotes
+    assert beats[7] is c and "明天" in beats[6]["text"]
     assert len(c["options"]) == 2
     o1, o2 = c["options"]
     assert o1["fx"] == {"c2": 2} and o2["fx"] == {"c2": -1}   # ledger moves, clamped

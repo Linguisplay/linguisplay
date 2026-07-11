@@ -101,8 +101,8 @@ class MockLLM:
                      {"who": other, "text": "「明天，还会来吗？」", "expr": "哀", "scene": s1},
                      {"who": None, "text": "你没有回答。", "scene": s1}]
             # production contract shape: choices ride a separate top-level array
-            # with an insertion anchor; the engine splices them into the stream
-            choices = [{"after": 7, "options": [
+            # with a TEXT anchor; the engine splices them into the stream
+            choices = [{"after_text": "「明天，还会来吗？」", "options": [
                 {"text": "「明天见。」", "fx": {other: 2},
                  "beats": [{"who": other, "text": "「一言为定。」", "expr": "喜", "scene": s1},
                            {"who": None, "text": "他笑了。", "scene": s1}]},

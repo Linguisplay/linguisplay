@@ -314,17 +314,33 @@ def compile_chapter(llm, gal: dict[str, Any], ch_index: int,
                 n_beat += 1
                 last_scene = nb["scene"]
                 beats.append(nb)
-        # production contract shape: top-level "choices" with an insertion point —
-        # uniform beats + a separate required array is what models actually honor
+        # production contract shape: top-level "choices" with a TEXT anchor —
+        # numeric beat indexes proved fragile (实弹《余音》: both ch2 choices'
+        # numbers went stale after normalization and the 60% fallback dumped
+        # 巧克力选项 onto 桐生凛进门). Text locates like slice_source does.
+        used_pos: set = set()
         for raw in (out.get("choices") or [])[:2]:
             if not isinstance(raw, dict):
                 continue
-            try:
-                pos = int(raw.get("after"))
-            except (TypeError, ValueError):
-                pos = 0
+            normals = [e for e in beats if e.get("type") != "choice"]
+            pos = 0
+            key = str(raw.get("after_text") or "").strip()[:10]
+            if key:
+                for ordi, nb in enumerate(normals, 1):
+                    if key in nb["text"]:
+                        pos = ordi
+                        break
+            if not pos:
+                try:
+                    pos = int(raw.get("after"))
+                except (TypeError, ValueError):
+                    pos = 0
             if pos < 1 or pos > n_beat:
-                pos = max(1, round(n_beat * 0.6))   # bad anchor → 60% into the chapter
+                slots = (0.55, 0.82, 0.3)           # spread stale anchors apart
+                pos = max(1, round(n_beat * slots[min(n_choice, 2)]))
+            if pos in used_pos:                     # never stack two choices
+                pos = min(n_beat, pos + max(6, n_beat // 5))
+            used_pos.add(pos)
             cnt, idx, scn = 0, len(beats), gal["scenes"][0]["id"]
             for i, e in enumerate(beats):
                 if e.get("type") == "choice":
