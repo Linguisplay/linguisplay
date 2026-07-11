@@ -460,11 +460,11 @@ body.dread #dread { opacity:1; }
   body.vn #vnchap, body.vn #vncg, body.vn #vnui { left: var(--sx); right: var(--sx); }
   body.vn #app { margin: 0 var(--sx); }
   body.vn.vnfree footer { left: var(--sx); right: var(--sx); }
-  /* 竖版舞台摆不下对手戏: 说话者单立绘居中、举到面板之上 (同手机端) */
-  body.vn #vnsprite { right: 50%; transform: translateX(50%); bottom: 44%;
-    height: 44vh; max-width: calc(var(--sw) * .8); }
+  /* 竖版舞台摆不下对手戏: 说话者单立绘居中、站在地上 (同手机端) */
+  body.vn #vnsprite { right: 50%; transform: translateX(50%); bottom: 0;
+    height: 78vh; max-width: calc(var(--sw) * .84); }
   body.vn #vnsprite2 { display: none; }
-  body.vn.vnfree #vnbox { max-height: 50vh; }
+  body.vn.vnfree #vnbox { max-height: 48vh; }
   body.vn #vntext { max-width: calc(var(--sw) * .9); }
   body.vn.vnstat #cast, body.vn.vnstat #bars { width: min(720px, var(--sw)); }
 }
@@ -508,12 +508,12 @@ body.dread #dread { opacity:1; }
   #state { display: none; }
   #suggest { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .chip { flex: 0 0 auto; }
-  /* VN 竖屏 (最终形态是手机 App, 竖版是第一设计目标):
-     单立绘居中且【举到对话面板之上】— 人物不许被面板整个吞掉 (Yi 报障) */
-  #vnsprite { right: 50%; transform: translateX(50%); bottom: 45%;
-    height: 42vh; max-width: 80vw; }
+  /* VN 竖屏: 人要【站在地上】— 立绘锚屏底拉高个头, 头胸露在面板上方,
+     腿脚藏在面板后面 (gal 正统排法; 悬浮半空和被整个吞掉都是错) */
+  #vnsprite { right: 50%; transform: translateX(50%); bottom: 0;
+    height: 74vh; max-width: 86vw; }
   #vnsprite2 { display: none !important; }
-  body.vn.vnfree #vnbox { max-height: 52vh; }
+  body.vn.vnfree #vnbox { max-height: 50vh; }
   #vnctl { top: -40px; right: 10px; gap: 7px; }
   #vnctl span { background: rgba(6,7,12,.74); border-radius: 999px; padding: 7px 11px; }
   /* iOS: 输入框字号 <16px 会触发聚焦自动放大 — 竖屏 App 铁律 */
