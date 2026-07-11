@@ -21,7 +21,7 @@ SPRITE_DIR = _STATIC / "sprite"
 AVATAR_DIR = _STATIC / "avatar"
 
 _KEEP = ("。严格保持同一个人：发型、五官、服装、姿势、构图、光线、背景完全不变，"
-         "只改变面部表情，保持写实照片质感")
+         "只改变面部表情，画风质感与原图保持一致")
 EXPRS: dict[str, str] = {
     "喜": "把人物的表情改成克制的浅笑，嘴角微微上扬，眼神放松了一点" + _KEEP,
     "怒": "把人物的表情改成压着火的愠怒，眉头紧锁，眼神冷硬，嘴唇抿紧" + _KEEP,
@@ -37,6 +37,58 @@ def base_of(cid: str) -> Path | None:
         if p.exists():
             return p
     return None
+
+
+def ingest_upload(cid: str, data: bytes) -> dict[str, Any]:
+    """🖼 玩家上传的人物图 → 智能裁剪三件套 (Yi 定):
+    ① 透底立绘: rembg 找人抠底 + 裁 alpha 包围盒 → sprite/{cid}.webp
+    ② 改脸源图: 原图瘦身留档 → sprite/{cid}_src.jpg (表情差分继续可做)
+    ③ 方形头像: 以人形包围盒顶部为中心取方窗 (脸在人形上部) → avatar/{cid}.jpg
+    旧表情差分随之作废删除 (那是旧脸)。rembg 失败自动退化为居中裁切。"""
+    import io as _io
+
+    from PIL import Image
+
+    from .gal import debg, shrink_jpg, to_webp, trim_alpha
+    SPRITE_DIR.mkdir(parents=True, exist_ok=True)
+    AVATAR_DIR.mkdir(parents=True, exist_ok=True)
+    im = Image.open(_io.BytesIO(data)).convert("RGB")
+
+    cut = debg(data)
+    (SPRITE_DIR / f"{cid}.webp").write_bytes(to_webp(trim_alpha(cut)))
+    (SPRITE_DIR / f"{cid}_src.jpg").write_bytes(shrink_jpg(data, quality=85, max_side=1280))
+
+    box = None
+    try:
+        ci = Image.open(_io.BytesIO(cut))
+        if ci.mode == "RGBA" and ci.size == im.size:
+            box = ci.getchannel("A").getbbox()
+    except Exception:
+        pass
+    if box and box[2] > box[0]:
+        side = max(64, min(int((box[2] - box[0]) * 1.25), im.width, im.height))
+        cx = (box[0] + box[2]) // 2
+        left = max(0, min(cx - side // 2, im.width - side))
+        top = max(0, min(box[1] - side // 12, im.height - side))
+    else:   # 没抠出人 → 居中方裁兜底
+        side = min(im.size)
+        left, top = (im.width - side) // 2, max(0, (im.height - side) // 4)
+        top = min(top, im.height - side)
+    av = im.crop((left, top, left + side, top + side))
+    buf = _io.BytesIO()
+    av.save(buf, format="JPEG", quality=88)
+    (AVATAR_DIR / f"{cid}.jpg").write_bytes(shrink_jpg(buf.getvalue(), quality=85, max_side=768))
+
+    removed = 0
+    for e in EXPRS:
+        for suffix in (".webp", ".jpg"):
+            p = SPRITE_DIR / f"{cid}_{e}{suffix}"
+            if p.exists():
+                p.unlink()
+                removed += 1
+    return {"sprite": f"/scene/sprite/{cid}.webp",
+            "avatar": f"/scene/avatar/{cid}.jpg",
+            "smart": bool(box), "stale_exprs_removed": removed}
 
 
 def build_expr_pack(cids: list[str], exprs: list[str] | None = None,

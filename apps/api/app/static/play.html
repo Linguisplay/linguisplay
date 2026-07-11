@@ -2042,6 +2042,39 @@ for (const id of ["placebar", "goalbar", "hintbar", "clues"]) {
   });
 }
 
+// 🖼 玩家上传人物形象 (智能裁剪: rembg 找人 → 透底立绘 + 方形头像); 版本号防旧缓存
+let spriteVer = {};
+const _sv = (cid) => spriteVer[cid] ? `?v=${spriteVer[cid]}` : "";
+function pickCharImage(cid) {
+  let inp = document.getElementById("cimgpick");
+  if (!inp) {
+    inp = document.createElement("input");
+    inp.type = "file"; inp.accept = "image/*"; inp.id = "cimgpick"; inp.hidden = true;
+    document.body.appendChild(inp);
+  }
+  inp.onchange = async () => {
+    const f = inp.files && inp.files[0]; inp.value = "";
+    if (!f || !runId) return;
+    pushToast("🖼 " + B("智能裁剪中…", "Smart-cropping…"), "", 2200);
+    try {
+      const fd = new FormData(); fd.append("file", f);
+      const r = await fetch(`${API}/runs/${runId}/character/${cid}/image`,
+                            { method: "POST", credentials: "include", body: fd });
+      if (!r.ok) { let d = ""; try { d = (await r.json()).detail || ""; } catch (e) {}
+                   throw new Error(d || ("HTTP " + r.status)); }
+      const out = await r.json();
+      spriteVer[cid] = Date.now();
+      Object.keys(spriteMap).forEach(n => {
+        if (spriteMap[n] === cid) avatarMap[n] = out.avatar + _sv(cid); });
+      pushToast("✅ " + B(out.smart ? "已换上你的形象（智能裁剪完成，立绘已透底）"
+                                    : "已换上你的形象（没识别到人物，用了居中裁切）",
+                          out.smart ? "New look applied (smart-cropped)"
+                                    : "Applied (center-crop fallback)"), "t-unlock", 3800);
+      openCharCard(cid);
+    } catch (e) { pushToast("⚠️ " + escapeHtml(e.message), "", 3200); }
+  };
+  inp.click();
+}
 // ── 角色档案卡: one place where a PERSON comes together ──────────────────────
 function barHtml(label, val, min, max, color) {
   const pct = Math.max(0, Math.min(100, ((val - min) / (max - min)) * 100));
@@ -2068,10 +2101,11 @@ async function openCharCard(cid) {
   const bio = (p.bio || []).map(b => `<div class="jfrag">${escapeHtml(b)}</div>`).join("")
     + (p.bio_next_at != null ? `<div class="jlocked">${B(`🔒 关系再近一点（亲近≥${p.bio_next_at}），你会更了解TA…`, `🔒 Get closer (closeness ≥${p.bio_next_at}) to learn more…`)}</div>` : "");
   const nextTxt = rel.next && rel.next.name ? `<span class="jwho">${B(`（差${rel.next.to_next}到「${rel.next.name}」）`, ` (${rel.next.to_next} to “${rel.next.name}”)`)}</span>` : "";
-  const av = p.avatar_url ? `<img class="cportrait" src="${p.avatar_url}" alt="" onerror="this.style.display=\'none\'">`
+  const av = p.avatar_url ? `<img class="cportrait" src="${p.avatar_url}${_sv(p.id)}" alt="" onerror="this.style.display=\'none\'">`
                           : `<div class="cportrait cletter" style="background:${avatarColor(p.name)}">${escapeHtml((p.name||"?").slice(0,1))}</div>`;
   const followBtn = (!p.dead && playMode !== "god")
     ? `<button class="ghost" style="font-size:12px;padding:5px 10px" onclick="toggleFollow('${p.id}', ${!p.following}); document.getElementById('charcard').remove()">${p.following ? B("🚶同行中 · 分开走", "🚶Together · part ways") : (p.can_follow ? B("邀TA同行", "Invite along") : B("🔒关系不够", "🔒Not close enough"))}</button>` : "";
+  const uploadBtn = `<button class="ghost" style="font-size:12px;padding:5px 10px" onclick="pickCharImage('${p.id}')">🖼 ${B("上传形象", "Upload look")}</button>`;
   ov.innerHTML = `<div class="jcard" onclick="event.stopPropagation()">
     <div class="jbar"><b>${p.dead ? "🕯 " : ""}${escapeHtml(p.name)}</b>
       <button class="ghost" onclick="document.getElementById('charcard').remove()">${B("关闭", "Close")}</button></div>
@@ -2080,7 +2114,7 @@ async function openCharCard(cid) {
       <div class="cdesc">${escapeHtml(p.persona_text || "")}</div>
       ${p.where ? `<div class="jwho">📍 ${escapeHtml(p.where)}</div>` : ""}
       ${p.hp === "hurt" ? `<div class="jwho">${B("🩸 带着伤", "🩸 Wounded")}</div>` : p.hp === "dying" ? `<div class="jwho" style="color:#ff7a7a">${B("🩸 重伤濒死，需要救治", "🩸 Dying — needs help now")}</div>` : ""}
-      ${followBtn}
+      <div style="display:flex;gap:6px;flex-wrap:wrap">${followBtn}${uploadBtn}</div>
     </div></div>
     ${p.dead ? `<div class="jlocked">${B("TA 已不在人世。", "They are gone.")}</div>` : `
     <div class="jh">${B("你们的关系", "Your relationship")} · ${escapeHtml(rel.mode_name || "")} ${nextTxt}</div>
@@ -2518,21 +2552,21 @@ document.addEventListener("keydown", (e) => {
     { e.preventDefault(); vnAdvance(); }
 });
 function _vnSet(img, cid, expr) {
-  const key = cid + "|" + (expr || "");
+  const key = cid + "|" + (expr || "") + "|" + (spriteVer[cid] || 0);
   if (img.dataset.key !== key) {
     img.dataset.key = key;
     // 🎭 回落链: 表情差分(透底) → 常态剪影(透底) → 旧版jpg人像卡 → 头像 → 隐藏
     img.onerror = () => {
-      if (img.dataset.stage === "expr") { img.dataset.stage = "base"; img.src = `/scene/sprite/${cid}.webp`; }
+      if (img.dataset.stage === "expr") { img.dataset.stage = "base"; img.src = `/scene/sprite/${cid}.webp` + _sv(cid); }
       else if (img.dataset.stage === "base") { img.dataset.stage = "legacy"; img.src = `/scene/sprite/${cid}.jpg`; }
-      else if (img.dataset.stage === "legacy") { img.dataset.stage = "avatar"; img.src = `/scene/avatar/${cid}.jpg`; }
+      else if (img.dataset.stage === "legacy") { img.dataset.stage = "avatar"; img.src = `/scene/avatar/${cid}.jpg` + _sv(cid); }
       else img.classList.add("hidden");
     };
     // 剪影不装相框: 透底 webp 撤掉 3:4 裁切/描边, 站姿贴地
-    img.onload = () => img.classList.toggle("cut", img.src.endsWith(".webp"));
+    img.onload = () => img.classList.toggle("cut", img.src.includes(".webp"));
     img.dataset.stage = expr ? "expr" : "base";
-    img.src = expr ? `/scene/sprite/${cid}_${encodeURIComponent(expr)}.webp`
-                   : `/scene/sprite/${cid}.webp`;
+    img.src = (expr ? `/scene/sprite/${cid}_${encodeURIComponent(expr)}.webp`
+                    : `/scene/sprite/${cid}.webp`) + _sv(cid);
   }
   img.classList.remove("hidden");
 }

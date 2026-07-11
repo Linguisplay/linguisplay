@@ -3,7 +3,7 @@ import json
 import time as _time_mod
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -52,14 +52,14 @@ def _img_worker():
     from ..engine.gal import debg, shrink_jpg, to_webp, trim_alpha
     from ..engine.qwen import generate_image
     while True:
-        prompt, path, size = _IMG_Q.get()
+        prompt, path, size, negative, seed = _IMG_Q.get()
         try:
             if not path.exists():
-                img = generate_image(prompt, size=size)
+                img = generate_image(prompt, size=size, negative=negative, seed=seed)
                 if not img:      # throttled / transient → one measured retry
                     import time
                     time.sleep(6)
-                    img = generate_image(prompt, size=size)
+                    img = generate_image(prompt, size=size, negative=negative, seed=seed)
                 if img:
                     path.parent.mkdir(parents=True, exist_ok=True)
                     if path.suffix == ".webp":
@@ -78,7 +78,8 @@ def _img_worker():
             _IMG_Q.task_done()
 
 
-def _enqueue_image(prompt: str, path, size: str) -> None:
+def _enqueue_image(prompt: str, path, size: str,
+                   negative: str = "", seed: int | None = None) -> None:
     with _IMG_LOCK:
         if str(path) in _IMG_PENDING:
             return
@@ -87,18 +88,36 @@ def _enqueue_image(prompt: str, path, size: str) -> None:
             t = _imgthreading.Thread(target=_img_worker, daemon=True)
             _IMG_WORKER.append(t)
             t.start()
-    _IMG_Q.put((prompt, path, size))
+    _IMG_Q.put((prompt, path, size, negative, seed))
+
+
+def _story_art(content: dict) -> tuple[str, str]:
+    """🎨 一世界一画风 (Yi: 角色画风要统一): 统一的风格引导 (开头压阵, gal 实弹教训:
+    风格词放尾巴会被人物描述带跑) + 反向词封另一头 (写实店禁二次元, 动漫店禁真人)."""
+    art = runtime.art_style_of(content) \
+        or "电影质感写实，柔和主光，胶片颗粒感，克制的调色，高细节"
+    anime = any(k in art for k in ("动漫", "二次元", "赛璐璐", "水彩", "插画", "漫画", "国漫"))
+    neg = (("写实照片,真人,3D渲染,照片质感," if anime
+            else "动漫风格,卡通,二次元,赛璐璐,手办,")
+           + "低质量,崩坏,变形,畸形,肢体错误,多余的手指,面部扭曲,画面模糊,文字,水印")
+    return art, neg
+
+
+def _char_seed(content: dict, cid: str) -> int:
+    """同一个角色每次重画都长同一张脸 (gal 的 char_seed 同款)."""
+    import zlib
+    sid = str(((content.get("story") or {}).get("id")) or "")
+    return zlib.crc32(f"{sid}|{cid}".encode("utf-8")) % (2 ** 31 - 1) + 1
 
 
 def _bg_prompt(content: dict, loc: dict) -> str:
     story = content.get("story") or {}
     era = ((story.get("world_long") or story.get("world_facts") or "")
            .strip().replace("\n", " "))[:140]
-    art = runtime.art_style_of(content)  # 🎨 the story's own art direction rides every render
-    return (f"{era} 场景：{loc.get('name', '')}。{(loc.get('detail') or '')[:200]} "
-            "电影感写实场景概念图，强烈氛围与光影，景深，电影级调色，横构图宽幅；"
-            "空镜，画面里没有任何人物，没有文字、字幕或水印。"
-            + (f"画面基调：{art}。" if art else ""))
+    art, _ = _story_art(content)  # 🎨 场景与人物同一画风 (风格开头压阵)
+    return (f"{art}。场景概念图，强烈氛围与光影，景深，横构图宽幅；"
+            f"空镜，画面里没有任何人物，没有文字、字幕或水印。{era} "
+            f"场景：{loc.get('name', '')}。{(loc.get('detail') or '')[:200]}")
 
 
 def _spawn_location_bg(content: dict, loc: dict | None) -> None:
@@ -109,7 +128,8 @@ def _spawn_location_bg(content: dict, loc: dict | None) -> None:
     path = _BG_DIR / f"{loc['id']}.jpg"
     if path.exists():
         return
-    _enqueue_image(_bg_prompt(content, loc), path, "1280*720")
+    _enqueue_image(_bg_prompt(content, loc), path, "1280*720",
+                   negative=_story_art(content)[1])
 
 
 def _queue_snap(payload: dict | None) -> None:
@@ -146,15 +166,16 @@ def _ensure_char_avatars(content: dict, vn: bool = False) -> bool:
             continue
         bits = "，".join(b for b in (name, c.get("role") or "",
                                      (c.get("persona_text") or "")[:160]) if b)
-        art = runtime.art_style_of(content)
-        prompt = (f"{bits}。世界背景：{world}。电影质感人物肖像，胸像特写，正面微侧，"
-                  "目光看向镜头外，写实风格，柔和的侧光，背景虚化，情绪克制内敛，"
-                  "高细节，胶片颗粒感" + (f"。画面基调：{art}" if art else ""))
-        _enqueue_image(prompt, path, "768*768")
+        # 🎨 一世界一画风: 风格开头压阵 + 反向词 + 稳定种子 (同角色重画不换脸)
+        art, neg = _story_art(content)
+        prompt = (f"{art}。人物肖像，胸像特写，正面微侧，目光看向镜头外，"
+                  f"柔和的侧光，背景虚化，情绪克制内敛：{bits}。世界背景：{world}")
+        _enqueue_image(prompt, path, "768*768", negative=neg,
+                       seed=_char_seed(content, cid))
     # 🎀 VN stories also render a TALL standing sprite per character (the galgame 立绘);
     # deep near-black backdrop → worker 抠底成透底剪影 (Yi: 和 galgame 一样要无背景)
     if vn or (story.get("tuning") or {}).get("vn_mode"):
-        art = runtime.art_style_of(content)
+        art, neg = _story_art(content)
         world = ((story.get("world_long") or "").strip().replace("\n", " "))[:120]
         for c in story.get("characters") or []:
             cid, name = c.get("id"), c.get("name")
@@ -165,11 +186,11 @@ def _ensure_char_avatars(content: dict, vn: bool = False) -> bool:
                 continue
             bits = "，".join(b for b in (name, c.get("role") or "",
                                          (c.get("persona_text") or "")[:160]) if b)
-            sp = (f"{bits}。世界背景：{world}。游戏立绘：单人半身像，竖构图，正面微侧站姿，"
+            sp = (f"{art}。游戏立绘：单人站姿，全身或及膝，竖构图，正面微侧，"
                   "视线看向观者，人物完整居中不裁切，背景为纯粹的极深色（近黑），"
-                  "人物打柔和主光，电影质感写实，高细节"
-                  + (f"。画面基调：{art}" if art else ""))
-            _enqueue_image(sp, spath, "720*1280")
+                  f"人物打柔和主光：{bits}。世界背景：{world}")
+            _enqueue_image(sp, spath, "720*1280", negative=neg,
+                           seed=_char_seed(content, cid))
     return changed
 
 
@@ -1327,6 +1348,35 @@ def living_tick_now(run_id: str, user: User = Depends(current_user),
     return {"tick": out, "living": living.cfg(st),
             "clock": (st.get("clock") or {}),
             "news": [n for n in (st.get("living_news") or []) if not n.get("told")]}
+
+
+@router.post("/{run_id}/character/{char_id}/image")
+async def upload_character_image(run_id: str, char_id: str, file: UploadFile = File(...),
+                                 user: User = Depends(current_user),
+                                 db: Session = Depends(get_db)):
+    """🖼 玩家给角色换形象 (Yi: 玩家也可以自己上传人物图, 智能裁剪):
+    一张图进来, rembg 找人 → 透底立绘 + 方形头像 + 改脸源图三件套;
+    旧表情差分作废 (可再跑 /sprites/exprs 按新脸重做)。"""
+    from ..engine import sprites as sprites_mod
+    from .stories import _sniff_image
+    r = _own_run(run_id, user, db)
+    content = r.pinned_content or {}
+    c = next((x for x in (content.get("story") or {}).get("characters", [])
+              if x.get("id") == char_id), None)
+    if not c:
+        raise HTTPException(404, "这个剧本里没有该角色")
+    data = await file.read()
+    if len(data) > 5 * 1024 * 1024:
+        raise HTTPException(413, "图片太大（上限 5MB）")
+    if not _sniff_image(data):
+        raise HTTPException(415, "只支持 JPG / PNG / WebP 图片")
+    out = sprites_mod.ingest_upload(char_id, data)
+    c["avatar_url"] = out["avatar"]
+    c["generated"] = False   # 玩家亲选的脸 — 引擎回填不许再重画它
+    r.pinned_content = content
+    flag_modified(r, "pinned_content")
+    db.commit()
+    return out
 
 
 _EXPR_BUILDING: set = set()
