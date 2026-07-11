@@ -45,6 +45,12 @@ GAL_DIR = Path(__file__).resolve().parents[1] / "static" / "scene" / "gal"
 # P0 规格 (blueprint §1): keeps build cost and play length predictable
 # (40k: 中篇经典整本可入 — 野菊の墓 34k; per-chapter slices keep compile prompts small)
 MAX_SOURCE_CHARS = 40000
+# 🖼 模型分工 (2026-07 烤面包机实测): qwen-image-plus 场景细节高一档(剥落墙皮/
+# 光瀑/道具叙事)但会把「手机竖屏」画成手机壳——场景/CG 用它(措辞已避雷);
+# 立绘/封面留 wanx2.1-plus(同脸 seed 体系已验证, 不轻动).
+SCENE_MODEL = "qwen-image-plus"
+FIGURE_MODEL = "wanx2.1-t2i-plus"
+_FRAME_NEG = ",手机,相框,画框,边框"   # qwen-image 的相框陷阱
 TARGET_BEATS_PER_CHAPTER = (40, 60)
 
 
@@ -620,9 +626,9 @@ def bg_prompt(scene: dict, world: str, art: str) -> str:
     # 画风统一实锤病根 (Yi 报障): 这里曾写死「电影感写实场景」而画风只在句尾——
     # 日漫立绘配写实背景一眼割裂。全部四类图统一: 画风引子第一句 + 反向提示词。
     lead = (art or "电影质感写实，强烈氛围与光影")
-    return (f"{lead}。视觉小说场景背景图，手机竖屏竖构图：{scene.get('name')}。"
+    return (f"{lead}。视觉小说场景背景插画，竖构图：{scene.get('name')}。"
             f"{(scene.get('visual') or '')[:180]} 世界背景：{world[:80]}。"
-            "空镜，画面里没有任何人物，没有文字、字幕或水印，景深，氛围光。")
+            "空镜，画面里没有任何人物，没有文字、字幕、水印或相框边框，景深，氛围光。")
 
 
 def cover_prompt(gal: dict, title: str, world: str, art: str) -> str:
@@ -876,7 +882,7 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
                         neg += ",睁开的眼睛,明亮的瞳孔,直视镜头的目光"
                     img = generate_image(portrait_prompt(c, world, art, expr),
                                          size="720*1280", seed=seed,
-                                         model="wanx2.1-t2i-plus",   # 人物用高质量档
+                                         model=FIGURE_MODEL,
                                          negative=neg)
                     if img:
                         p.write_bytes(to_webp(debg(img)))
@@ -892,7 +898,8 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
                     man["bgs"].append(sc["id"])
                     continue
                 img = generate_image(bg_prompt(sc, world, art), size="720*1280",
-                                     negative=portrait_negative(art))
+                                     model=SCENE_MODEL,
+                                     negative=portrait_negative(art) + _FRAME_NEG)
                 if img:
                     p.write_bytes(shrink_jpg(img))
                     man["bgs"].append(sc["id"])
@@ -901,7 +908,7 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
             cp = wdir / "cover.jpg"
             if not cp.exists():
                 img = generate_image(cover_prompt(gal, s.title or "", world, art),
-                                     size="720*1280", model="wanx2.1-t2i-plus",
+                                     size="720*1280", model=FIGURE_MODEL,
                                      negative=portrait_negative(art))
                 if img:
                     cp.write_bytes(shrink_jpg(img))
@@ -915,8 +922,8 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
                     gal["progress"] = f"正在绘制CG插画 {bi + 1}/{len(todo)}…"
                     _save(s)
                     img = generate_image(cg_prompt(gal, b, art), size="720*1280",
-                                         model="wanx2.1-t2i-plus",
-                                         negative=portrait_negative(art))
+                                         model=SCENE_MODEL,
+                                         negative=portrait_negative(art) + _FRAME_NEG)
                     if img:
                         p.write_bytes(shrink_jpg(img))
                 if p.exists():
