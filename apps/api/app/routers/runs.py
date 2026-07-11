@@ -48,6 +48,7 @@ _TURN_GUARD = _imgthreading.Lock()
 
 
 def _img_worker():
+    from ..engine.gal import shrink_jpg
     from ..engine.qwen import generate_image
     while True:
         prompt, path, size = _IMG_Q.get()
@@ -60,7 +61,8 @@ def _img_worker():
                     img = generate_image(prompt, size=size)
                 if img:
                     path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_bytes(img)
+                    # 出生即瘦身: 原始生图 1-3MB, 小水管服务器上手机要下载几十秒
+                    path.write_bytes(shrink_jpg(img, quality=80, max_side=1600))
         except Exception:
             pass
         finally:

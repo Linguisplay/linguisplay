@@ -616,17 +616,30 @@ def debg(png_bytes: bytes) -> bytes:
 
 
 # 图片必须瘦身 (实弹: 万相原图 0.9~1.7MB/张, 一本书 29MB, 跨洋一次换场 3MB+):
-def shrink_jpg(data: bytes, quality: int = 82) -> bytes:
-    """Recompress a generated image to web weight; keeps the original if smaller."""
+def shrink_jpg(data: bytes, quality: int = 82, max_side: int = 0) -> bytes:
+    """Recompress a generated image to web weight; keeps the original if smaller.
+    max_side>0 also downsamples the long edge — 手机 App 优先, 服务器出口带宽小,
+    1.2MB 的沙盒背景在真机上实测要下载 36 秒。"""
     import io as _io
 
     from PIL import Image
     try:
-        im = Image.open(_io.BytesIO(data)).convert("RGB")
+        im = Image.open(_io.BytesIO(data))
+        if im.mode in ("RGBA", "LA", "P"):   # 上传可能是 PNG/WebP — 平铺到白底
+            im = im.convert("RGBA")
+            base = Image.new("RGB", im.size, (255, 255, 255))
+            base.paste(im, mask=im.split()[-1])
+            im = base
+        else:
+            im = im.convert("RGB")
+        resized = False
+        if max_side and max(im.size) > max_side:
+            im.thumbnail((max_side, max_side), Image.LANCZOS)
+            resized = True
         buf = _io.BytesIO()
         im.save(buf, format="JPEG", quality=quality, optimize=True)
         out = buf.getvalue()
-        return out if len(out) < len(data) else data
+        return out if resized or len(out) < len(data) else data
     except Exception:
         return data
 

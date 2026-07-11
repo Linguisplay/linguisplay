@@ -504,10 +504,11 @@ async def upload_media(
     else:
         if not any((l.get("id") == target_id) for l in (s.locations or [])):
             raise HTTPException(404, "这个剧本里没有该地点")
-    # the play UI loads bg by the fixed `{id}.jpg` convention → always save as .jpg
-    # (browsers sniff real content; the extension is just the lookup key)
+    # the play UI loads bg by the fixed `{id}.jpg` convention → always save as .jpg;
+    # shrink_jpg also converts real PNG/WebP bytes into true JPEG at web weight
+    from ..engine.gal import shrink_jpg
     path = _media_dir(kind) / f"{target_id}.jpg"
-    path.write_bytes(data)
+    path.write_bytes(shrink_jpg(data, quality=82, max_side=1600 if kind == "bg" else 1024))
     url = f"/scene/{'avatar' if kind == 'avatar' else 'bg'}/{target_id}.jpg"
     if kind == "avatar":
         c["avatar_url"] = url

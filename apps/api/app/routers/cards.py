@@ -124,8 +124,9 @@ async def upload_avatar(card_id: str, file: UploadFile = File(...),
         raise HTTPException(413, "图片太大（上限 5MB）")
     if not _sniff_image(data):
         raise HTTPException(415, "只支持 JPG / PNG / WebP 图片")
+    from ..engine.gal import shrink_jpg
     path = _media_dir("avatar") / f"{card_id}.jpg"
-    path.write_bytes(data)
+    path.write_bytes(shrink_jpg(data, quality=82, max_side=1024))
     c.avatar_url = f"/scene/avatar/{card_id}.jpg"
     db.commit()
     return {"avatar_url": c.avatar_url}
