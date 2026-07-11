@@ -301,6 +301,25 @@
   font-size: 21px; letter-spacing: 7px; color: #d8b57a; padding: 15px 30px;
   border-top: 1px solid rgba(216,181,122,.5); border-bottom: 1px solid rgba(216,181,122,.5); }
 #vnchap .s { margin-top: 12px; font-size: 12px; letter-spacing: 3px; color: rgba(236,233,226,.62); }
+/* ⚖️ 阻断型交互在 VN 里必须上台面 (Yi 排雷): 抉择/移动确认变居中卡,
+   骰子有自己的台位, 终局结局全屏谢幕 — 谁也不许死在隐藏的聊天流里 */
+body.vn #choiceask, body.vn #moveask { position: fixed; z-index: 58; left: 50%;
+  top: 40%; transform: translate(-50%, -50%); width: min(560px, 90vw); margin: 0;
+  box-shadow: 0 18px 56px rgba(0,0,0,.7); }
+#vndice { position: fixed; z-index: 57; left: 50%; top: 22%; transform: translateX(-50%);
+  pointer-events: none; display: flex; flex-direction: column; gap: 8px; align-items: center; }
+#vnend { position: fixed; inset: 0; z-index: 74; display: grid; place-items: center;
+  background: rgba(4,5,9,.94); opacity: 0; pointer-events: none; transition: opacity .8s ease; }
+#vnend.on { opacity: 1; pointer-events: auto; }
+#vnend .w { text-align: center; max-width: min(620px, 88vw); padding: 0 16px; }
+#vnend .k { color: #d8b57a; font-size: 12px; letter-spacing: 6px; margin-bottom: 14px; }
+#vnend h2 { font-family: "Source Han Serif SC","Noto Serif CJK SC","Songti SC",Georgia,serif;
+  font-size: 26px; color: #f2ead8; letter-spacing: 3px; margin-bottom: 14px; }
+#vnend p { color: rgba(236,233,226,.85); font-size: 14px; line-height: 2; margin-bottom: 24px; }
+#vnend button { background: none; border: 1px solid rgba(216,181,122,.55); color: #d8b57a;
+  border-radius: 999px; padding: 10px 26px; font-size: 14px; letter-spacing: 2px; cursor: pointer; }
+body.vn #rebirth { position: fixed; z-index: 76; left: 50%; transform: translateX(-50%);
+  bottom: calc(96px + env(safe-area-inset-bottom)); width: min(560px, 90vw); margin: 0; }
 /* 📸 CG 时刻 (gal 移植): 稀有时刻全屏亮相, 卡面=回忆册同款 (地点艺术图+关键台词) */
 #vncg { position: fixed; inset: 0; z-index: 72; background: #06070c; opacity: 0;
   pointer-events: none; transition: opacity .6s ease; display: grid;
@@ -523,6 +542,8 @@ body.dread #dread { opacity:1; }
 <div id="vntint"></div>
 <div id="vnflash"></div>
 <div id="vnchap"><div class="w"><div class="t"></div><div class="s"></div></div></div>
+<div id="vndice"></div>
+<div id="vnend"><div class="w"><div class="k"></div><h2></h2><p></p><button onclick="backToPick()"></button></div></div>
 <div id="vncg" onclick="this.classList.remove('on')"><div class="cgbg"></div><div class="cgshade"></div>
   <div class="cgtxt"><div class="cgk"></div><div class="cgt"></div><div class="cgl"></div>
   <div class="cgm">✦ 已存入回忆册 · 点按继续</div></div></div>
@@ -1946,7 +1967,10 @@ function showDice(d) {
   const cls = d.outcome === "mixed" ? "mix"
     : (d.outcome === "success" || d.outcome === "crit_success") ? "win" : "lose";
   row.innerHTML = `${B("🎲 命运判定 d20 · 需要", "🎲 Fate check d20 · need")} ≥${d.dc || "?"} <b class="roll">--</b>`;
-  chat.appendChild(row); chat.scrollTop = chat.scrollHeight;
+  // 🎲 VN 里骰子有自己的台位 (隐藏的聊天流不是舞台), 揭晓后自行退场
+  const stage = vnMode ? document.getElementById("vndice") : chat;
+  stage.appendChild(row);
+  if (!vnMode) chat.scrollTop = chat.scrollHeight;
   const rollEl = row.querySelector(".roll");
   const t = setInterval(() => { rollEl.textContent = 1 + Math.floor(Math.random() * 20); }, 55);
   setTimeout(() => {
@@ -1954,7 +1978,8 @@ function showDice(d) {
     rollEl.textContent = d.roll;
     row.classList.add(cls);
     row.innerHTML += ` · <b>${label}</b>`;
-    chat.scrollTop = chat.scrollHeight;
+    if (!vnMode) chat.scrollTop = chat.scrollHeight;
+    else setTimeout(() => row.remove(), 3000);
   }, 900);
 }
 
@@ -2458,6 +2483,16 @@ function showEnding(ending) {
   msg.disabled = true; sendBtn.disabled = true; channel.disabled = true;
   suggest.innerHTML = "";
   msg.placeholder = t("你已经死了");
+  // 🏁 VN 终局谢幕: 聊天流是隐藏的 — 死也要死在台上, 不许死成一个冻结的输入框
+  if (vnMode) {
+    const ov = document.getElementById("vnend");
+    ov.querySelector(".k").textContent = `— ${KIND_LABEL[kind] || KIND_LABEL.normal} —`;
+    ov.querySelector("h2").textContent = ending.title || "";
+    ov.querySelector("p").textContent = ending.text || "";
+    ov.querySelector("button").textContent = t("再玩一局 / 换个剧本");
+    document.getElementById("vnchoices").classList.add("hidden");
+    ov.classList.add("on");
+  }
 }
 function resetEnded() { ended = false; msg.disabled = false; channel.disabled = false; sendBtn.disabled = false; }
 
@@ -2516,6 +2551,7 @@ function vnShow(on) {
   // 打字为主: VN 里输入栏永远在场 (vnfree 常开), 选项只是它上面的辅助 chips
   if (on) document.body.classList.add("vnfree");
   else { document.body.classList.remove("vnlog", "vnfree");
+         document.getElementById("vnend").classList.remove("on");
          msg.placeholder = _defPlaceholder(); }
 }
 function vnToggleAuto() {
