@@ -175,9 +175,11 @@ def _norm_beat(b: dict, ch: int, idx: int, char_ids: set, scene_ids: set,
     return {"id": f"c{ch}b{idx:03d}", "who": who, "text": text, "expr": expr,
             "scene": scene, "bgm": str(b.get("bgm") or "").strip()[:12],
             "date": str(b.get("date") or "").strip()[:16],   # 📅 时间跳跃戳
+            "sfx": str(b.get("sfx") or "").strip()[:8],      # 🔉 拍级音效点
+            "require": str(b.get("require") or "").strip()[:12],  # 🚩 flag 条件拍
             "enter": [], "exit": [],
             "cg": bool(b.get("cg")), "adult": bool(b.get("adult")),
-            "fx": str(b.get("fx") or "").strip()[:12],
+            "fx": str(b.get("fx") or "").strip()[:12],       # 🎬 震动/白闪/黑闪
             "voice": None}              # 🔊 filled by the TTS build stage later
 
 
@@ -214,6 +216,7 @@ def _norm_choice(raw: dict, ch: int, q: int, char_ids: set, scene_ids: set,
         text = str(o.get("text") or "").strip()[:20]
         if not text:
             continue
+        flag = str(o.get("flag") or "").strip()[:12]   # 🚩 该选项立下的事实标记
         fx: dict[str, int] = {}
         raw_fx = o.get("fx") if isinstance(o.get("fx"), dict) else {}
         for cid, d in raw_fx.items():
@@ -230,7 +233,7 @@ def _norm_choice(raw: dict, ch: int, q: int, char_ids: set, scene_ids: set,
             if nb:
                 nb["id"] = f"c{ch}q{q}o{len(opts) + 1}b{i + 1:02d}"
                 beats.append(nb)
-        opts.append({"text": text, "fx": fx, "beats": beats})
+        opts.append({"text": text, "fx": fx, "flag": flag, "beats": beats})
     if len(opts) < 2:
         return None
     # 数值必须动: a choice where no option gains anyone would make every ending
@@ -422,51 +425,69 @@ def values_meta(chapters: list[list[dict]], characters: list[dict],
 def compile_endings(llm, gal: dict[str, Any], full_summary: str = "",
                     mature: bool = False) -> list[dict]:
     """结局编译: the ONLY true fork (blueprint §3). The engine owns the structure —
-    ending #1 belongs to the target route character behind their affinity
-    threshold, ending #2 is the unconditional fallback; the model only writes."""
+    one good ending per route character (top 2 by attainable affinity) behind
+    each threshold, plus the unconditional fallback; the model only writes."""
     vm = gal.get("values") or {}
-    target = vm.get("target")
-    tchar = next((c for c in gal["characters"] if c["id"] == target), None)
+    names = {c["id"]: c["name"] for c in gal["characters"]}
+    targets = [cid for cid in (vm.get("routes") or [])
+               if (vm.get("max") or {}).get(cid, 0) > 0][:2]
     out = llm.generate({
         "gal_endings": True,
         "source": (gal.get("source_text") or "")[:MAX_SOURCE_CHARS],
         "characters": gal["characters"], "scenes": gal["scenes"],
         "protagonist_id": gal["protagonist_id"],
-        "target": ({"id": tchar["id"], "name": tchar["name"]} if tchar else None),
+        "targets": [{"id": t, "name": names.get(t, t)} for t in targets],
+        "target": ({"id": targets[0], "name": names.get(targets[0])}
+                   if targets else None),      # legacy single-target shape
         "summary": full_summary[:600],
         "mature": mature,
     }) or {}
     char_ids = {c["id"] for c in gal["characters"]}
     scene_ids = {s["id"] for s in gal["scenes"]}
-    endings: list[dict] = []
-    for k, raw in enumerate((out.get("endings") or [])[:3]):
+    routed: dict[str, dict] = {}
+    fallback: dict | None = None
+    for raw in (out.get("endings") or [])[:4]:
         if not isinstance(raw, dict):
             continue
         last_scene = gal["scenes"][0]["id"]
+        k = len(routed) + (1 if fallback else 0)
         beats: list[dict] = []
         for rb in (raw.get("beats") or [])[:20]:
             nb = _norm_beat(rb if isinstance(rb, dict) else {}, 0, 0, char_ids,
                             scene_ids, last_scene)
             if nb:
-                nb["id"] = f"e{len(endings) + 1}b{len(beats) + 1:03d}"
+                nb["id"] = f"e{k + 1}b{len(beats) + 1:03d}"
                 if not mature:
                     nb["adult"] = False
                 if nb["who"] == gal["protagonist_id"]:
                     nb["who_face"] = None
                 last_scene = nb["scene"]
                 beats.append(nb)
-        if len(beats) >= 6:
-            endings.append({"id": f"e{len(endings) + 1}",
-                            "title": (str(raw.get("title") or "").strip()[:12]
-                                      or f"结局{len(endings) + 1}"),
-                            "beats": beats})
-    if len(endings) < 2:
+        if len(beats) < 6:
+            continue
+        e = {"id": f"e{k + 1}",
+             "title": str(raw.get("title") or "").strip()[:12] or f"结局{k + 1}",
+             "beats": beats}
+        who = str(raw.get("char") or "").strip()
+        if who in targets and who not in routed:
+            routed[who] = e
+        elif fallback is None:
+            fallback = e
+    endings: list[dict] = []
+    thr = vm.get("threshold") or {}
+    # 阈值高的线优先判定 (双线都达标时，走要求更高的那条)
+    for cid in sorted(routed, key=lambda c: -thr.get(c, 0)):
+        routed[cid]["cond"] = {"char": cid, "gte": thr.get(cid, 1)}
+        endings.append(routed[cid])
+    if fallback is not None:
+        fallback["cond"] = {"default": True}
+        endings.append(fallback)
+    if len(endings) < 2 or not any((e["cond"] or {}).get("default") for e in endings):
         raise ValueError(f"结局编译失败：只产出 {len(endings)} 个可用结局")
-    thr = (vm.get("threshold") or {}).get(target)
-    endings[0]["cond"] = ({"char": target, "gte": thr} if target and thr
-                          else {"default": True})
-    for e in endings[1:]:
-        e["cond"] = {"default": True}
+    for i, e in enumerate(endings):        # ids follow final order
+        e["id"] = f"e{i + 1}"
+        for j, b in enumerate(e["beats"]):
+            b["id"] = f"e{i + 1}b{j + 1:03d}"
     return endings
 
 
@@ -603,6 +624,58 @@ def cover_prompt(gal: dict, title: str, world: str, art: str) -> str:
             f"（{(pro.get('looks') or '')[:120]}）的半身像立于画面中心偏下，"
             f"上方留出标题空间。世界背景：{world[:80]}。"
             "高细节，画面里没有任何文字")
+
+
+# ── 📋 剧本 linter: 机器能查的硬伤机器查 (零 LLM, 主线引擎逻辑严谨哲学的移植) ────
+def gal_lint(gal: dict[str, Any]) -> list[dict]:
+    """Static findings over the compiled book. warn = worth a look in 修订台;
+    error = the book is broken for play (smoke gate fails on these)."""
+    out: list[dict] = []
+    pov = gal.get("protagonist_id")
+    chs = ((gal.get("script") or {}).get(pov) or {}).get("chapters") or []
+    sizes = [sum(1 for b in ch if b.get("type") != "choice") for ch in chs]
+    if sizes:
+        if min(sizes) < 12:
+            out.append({"level": "warn",
+                        "msg": f"第{sizes.index(min(sizes)) + 1}章太薄（{min(sizes)}拍），"
+                               "可在修订台重编"})
+        if max(sizes) > 3 * max(1, min(sizes)):
+            out.append({"level": "warn",
+                        "msg": f"章节篇幅失衡（{min(sizes)}~{max(sizes)}拍）"})
+    for i, ch in enumerate(chs):
+        last_expr: dict[str, str] = {}
+        for b in ch:
+            if b.get("type") == "choice":
+                vals = [v for o in b["options"] for v in (o.get("fx") or {}).values()]
+                if vals and (all(v > 0 for v in vals) or all(v <= 0 for v in vals)):
+                    out.append({"level": "warn",
+                                "msg": f"第{i + 1}章选择 {b['id']} 的选项好感全同向"
+                                       "（假选择：选什么都一样）"})
+                continue
+            w = b.get("who")
+            if w:
+                prev = last_expr.get(w)
+                pair = {prev, b.get("expr")}
+                if prev and pair == {"怒", "喜"}:
+                    out.append({"level": "warn",
+                                "msg": f"第{i + 1}章 {b['id']}：角色表情怒↔喜直跳，"
+                                       "情绪无过渡"})
+                last_expr[w] = b.get("expr")
+    vm = gal.get("values") or {}
+    for e in gal.get("endings") or []:
+        c = e.get("cond") or {}
+        if c.get("char") and c.get("gte", 0) > (vm.get("max") or {}).get(c["char"], 0):
+            out.append({"level": "error",
+                        "msg": f"结局〈{e.get('title')}〉阈值 {c['gte']} 超过可得上限，"
+                               "永远打不出来"})
+    if gal.get("endings") and not any((e.get("cond") or {}).get("default")
+                                      for e in gal["endings"]):
+        out.append({"level": "error", "msg": "没有兜底结局：好感不达标时无路可走"})
+    no_cg = [i + 1 for i, ch in enumerate(chs)
+             if not any(b.get("cg") for b in ch if b.get("type") != "choice")]
+    if no_cg:
+        out.append({"level": "info", "msg": f"第{'、'.join(map(str, no_cg))}章没有CG拍"})
+    return out
 
 
 # ── 制作台修订 (blueprint §5: 修订能力是加速工具的灵魂) ──────────────────────────
@@ -838,6 +911,7 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
                     man["cgs"].append(b["id"])
                 else:
                     man["missing"].append(f"cg:{b['id']}")
+        gal["lint"] = gal_lint(gal)     # 📋 体检报告挂在修订台
         gal["status"] = "ready"
         gal["progress"] = ("建造完成" if not (gal.get("manifest") or {}).get("missing")
                            else "建造完成（部分美术缺失，可重跑补齐）")

@@ -18,7 +18,16 @@
      （说话者前景点亮，另一位缩小压暗置后；位置一旦分定不再交换，防跳动） */
   .sp { position: absolute; bottom: 24%; transform: translateX(-50%);
         max-width: 92%; object-fit: contain; object-position: bottom;
-        transition: opacity .35s ease, left .3s ease, height .3s ease, filter .3s ease; }
+        transition: opacity .35s ease, left .3s ease, height .3s ease, filter .3s ease;
+        animation: breathe 4.6s ease-in-out infinite; }   /* 立绘呼吸: 活的 */
+  @keyframes breathe { 50% { bottom: 24.55%; } }
+  .sp.back { animation-duration: 5.8s; }                  /* 前后景呼吸错拍 */
+  /* 🎬 演出小件: 震动 + 白闪/黑闪 */
+  @keyframes shake { 20% { left: -9px; } 45% { left: 8px; } 70% { left: -5px; }
+                     90% { left: 3px; } 100% { left: 0; } }
+  #stage.shaking { animation: shake .4s ease; }
+  #gflash { position: absolute; inset: 0; z-index: 7; opacity: 0; pointer-events: none;
+            transition: opacity .55s ease; }
   .sp.center { left: 50%; }
   .sp.left   { left: 32%; }
   .sp.right  { left: 68%; }
@@ -116,6 +125,7 @@
   <img id="gsp1" class="sp off" alt="">
   <img id="gcg" class="off" alt="">
   <div id="gctl">
+    <span onclick="event.stopPropagation();openHearts()">💗</span>
     <span id="btnAuto" onclick="event.stopPropagation();toggleAuto()">▶ 自动</span>
     <span id="btnSkip" onclick="event.stopPropagation();toggleSkip()">⏩ 跳过</span>
     <span id="btnBgm" onclick="event.stopPropagation();bgmToggle()">🔊</span>
@@ -139,6 +149,11 @@
     <div id="gnext">▼</div>
   </div>
   <div id="gdate"></div>
+  <div id="gflash"></div>
+  <div id="ghearts" class="book" onclick="event.stopPropagation()">
+    <h3>💗 心动记录 <span style="float:right;cursor:pointer" onclick="this.closest('.book').style.display='none'">✕</span></h3>
+    <div id="gheartRows"></div>
+  </div>
   <div id="gchap"><div class="num" id="gchapNum"></div><div class="date" id="gchapD"></div>
     <h2 id="gchapT"></h2><div class="lead" id="gchapL"></div></div>
   <div id="gend"><h2 id="gendT"></h2><div class="muted" id="gendS"></div>
@@ -299,7 +314,14 @@ function endingHint(got) {
 function unlocked() {
   try { return JSON.parse(localStorage.getItem(EKEY()) || "[]"); } catch (e) { return []; }
 }
-function fresh() { return { ch: 0, i: -1, br: null, end: null, vals: {}, picks: {} }; }
+function fresh() { return { ch: 0, i: -1, br: null, end: null, vals: {}, picks: {}, flags: {} }; }
+// 🚩 flag 条件拍: require="标记名" 只在立过时演, "!标记名" 只在没立过时演
+function flagOk(b) {
+  const r = b.require;
+  if (!r) return true;
+  const flags = (sav && sav.flags) || {};
+  return r[0] === "!" ? !flags[r.slice(1)] : !!flags[r];
+}
 function save() { localStorage.setItem(SKEY(), JSON.stringify(sav)); }
 function nameOf(cid) { const c = (W.characters || []).find(x => x.id === cid); return c ? c.name : ""; }
 function curChoice(qid) {
@@ -411,6 +433,55 @@ async function typeText(el, text) {
   }
   typing = false;
 }
+// 🔉 拍级音效: 中文标签 → 主站音效库, 一次性播放
+const SFX_MAP = { "雷鸣": "thunder", "雨声": "rain", "风声": "wind", "海浪": "waves",
+                  "脚步": "footsteps", "敲门": "knock", "开门": "door", "吱呀": "creak",
+                  "翻书": "book", "钟声": "bell", "心跳": "heartbeat", "碎裂": "glass",
+                  "爆炸": "explosion", "魔法": "magic", "剑击": "sword", "拳击": "punch",
+                  "拔剑": "draw", "交锋": "clash", "硬币": "coin", "铃声": "ringtone" };
+function playSfx(tag) {
+  const f = SFX_MAP[tag];
+  if (!f || !bgmOn) return;
+  const a = new Audio(`/scene/sfx/${f}.mp3`);
+  a.volume = 0.5;
+  a.play().catch(() => {});
+}
+// 🎬 演出小件
+function playFx(fx) {
+  if (fx === "震动") {
+    const st = $("stage");
+    st.classList.remove("shaking"); void st.offsetWidth;   // retrigger
+    st.classList.add("shaking");
+  } else if (fx === "白闪" || fx === "黑闪") {
+    const el = $("gflash");
+    el.style.background = fx === "白闪" ? "#fff" : "#000";
+    el.style.transition = "none"; el.style.opacity = .92; void el.offsetWidth;
+    el.style.transition = "opacity .55s ease"; el.style.opacity = 0;
+  }
+}
+// 💗 心动记录: 好感可视化 (十心制, 按可得上限归一)
+function openHearts() {
+  const vm = W.values || {};
+  const rows = (vm.routes || []).map(cid => {
+    const cur = (sav && sav.vals && sav.vals[cid]) || 0;
+    const mx = (vm.max || {})[cid] || 1;
+    const n = Math.max(0, Math.min(10, Math.round(cur / mx * 10)));
+    return `<div class="e"><b>${nameOf(cid)}</b>　` +
+      `<span style="color:#ff7d9d">${"♥".repeat(n)}</span>` +
+      `<span style="color:#3a3a52">${"♡".repeat(10 - n)}</span></div>`;
+  }).join("");
+  $("gheartRows").innerHTML = rows || `<div class="muted">这本书没有感情线数值</div>`;
+  $("ghearts").style.display = "block";
+}
+function floatHeart() {         // 选中加分选项时飘一颗心
+  const h = document.createElement("div");
+  h.textContent = "♥";
+  h.style.cssText = "position:absolute;left:50%;bottom:36%;z-index:8;color:#ff7d9d;" +
+    "font-size:26px;pointer-events:none;transition:all 1.1s ease;opacity:1";
+  $("stage").appendChild(h);
+  requestAnimationFrame(() => { h.style.bottom = "48%"; h.style.opacity = 0; });
+  setTimeout(() => h.remove(), 1200);
+}
 let dateT = null;
 function showDate(d) {          // 📅 time-skip banner: fade in, hold, fade out
   const el = $("gdate");
@@ -425,6 +496,8 @@ async function showBeat(b) {
   setCg(b);
   if (b.bgm) setBgm(b.bgm);
   if (b.date) showDate(b.date);
+  if (b.sfx) playSfx(b.sfx);
+  if (b.fx) playFx(b.fx);
   // ⏩ 既读跳过: synthetic cards (no id) count as read so skip flows through them
   const seen = b.id ? readSet.has(b.id) : true;
   markRead(b.id);
@@ -459,6 +532,8 @@ function next() {
   }
   sav.i++;
   const list = listNow();
+  while (sav.i < list.length && list[sav.i].type !== "choice" && !flagOk(list[sav.i]))
+    sav.i++;                                   // 🚩 条件拍: 条件不满足就静默跳过
   if (sav.i >= list.length) {
     if (sav.end) { finish(); return; }
     if (sav.ch + 1 >= chapters().length) { startEnding(); return; }
@@ -514,6 +589,8 @@ function pick(c, k) {
   sav.picks[c.id] = k;
   const fx = o.fx || {};
   for (const cid in fx) sav.vals[cid] = (sav.vals[cid] || 0) + fx[cid];
+  if (o.flag) (sav.flags = sav.flags || {})[o.flag] = 1;   // 🚩 立下事实标记
+  if (Object.values(fx).some(v => v > 0)) floatHeart();     // 💗 加分飘心
   logPick(o.text);
   if (o.beats && o.beats.length) { sav.br = { q: c.id, o: k, j: 0 }; save(); showBeat(o.beats[0]); }
   else { sav.br = null; save(); next(); }

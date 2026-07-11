@@ -2218,21 +2218,24 @@ class QwenLLM:
         writes two closures — the target route's good ending and the plain one."""
         chars = prompt.get("characters") or []
         scenes = prompt.get("scenes") or []
-        t = prompt.get("target") or {}
-        tname = t.get("name") or "感情线角色"
+        ts = prompt.get("targets") or ([prompt["target"]] if prompt.get("target") else [])
         clist = "\n".join(f"- {c['id']}={c['name']}（{c.get('personality','')}）" for c in chars)
         slist = "\n".join(f"- {s['id']}={s['name']}" for s in scenes)
+        want = "".join(f"【{t.get('name')}线好结局】char 填 {t.get('id')}，与{t.get('name')}"
+                       "感情圆满的收束，8~14拍，有一拍情绪最高点标 cg:true；"
+                       for t in ts)
         sys = (
-            "你是视觉小说（galgame）的结局编剧。为整个故事写两个结局，只输出严格JSON："
+            f"你是视觉小说（galgame）的结局编剧。为整个故事写 {len(ts) + 1} 个结局，"
+            "只输出严格JSON："
             '{"endings":[{"char":"结局归属的角色id（普通结局留空字符串）","title":"≤10字结局名",'
             '"beats":[{"who":"说话角色id，旁白留空","text":"≤60字",'
             '"expr":"常态|喜|怒|哀","scene":"场景id",'
             '"bgm":"平静|温馨|浪漫|紧张|悲伤|寂寞|悬疑|激昂 之一","cg":false,"adult":false}]}]}。'
-            f"结局一：与{tname}（{t.get('id') or '?'}）感情圆满的【好结局】，8~14拍，"
-            "有一拍情绪最高点标 cg:true；"
-            "结局二：感情未满时的【普通结局】，怅然或平静地收束主线，6~12拍。"
-            f"两个结局都必须真正收束故事（回应主线的悬念，别开新钩子）；"
-            f"主角旁白人称永远是「你」；只用给定的角色id和场景id；"
+            + want +
+            "【普通结局】char 留空，感情未满时怅然或平静地收束主线，6~12拍。"
+            "每个结局都必须真正收束故事（回应主线的悬念，别开新钩子），"
+            "不同感情线的结局要有各自的专属场面，不许互相换皮；"
+            "主角旁白人称永远是「你」；只用给定的角色id和场景id；"
             "所有拍文字一律用简体中文（原文若是外语，转写成流畅的中文）。")
         sys += _gal_mature_rider(prompt)
         u = (f"角色表：\n{clist}\n场景表：\n{slist}\n"
@@ -2301,10 +2304,14 @@ class QwenLLM:
             '"bgm":"平静|温馨|浪漫|紧张|悲伤|寂寞|悬疑|激昂 之一（跟着这一段的情绪走，'
             '亲密暧昧用浪漫，独处思念用寂寞，追查不安用悬疑）","cg":false,"adult":false,'
             '"date":"仅当这一拍发生时间跳跃（新的一天/几天后/时段大变）才填，'
-            '如「二月十四日 放学后」，其余拍一律留空"}],'
+            '如「二月十四日 放学后」，其余拍一律留空",'
+            '"sfx":"仅当这一拍有明确的声音事件才填：雷鸣|雨声|风声|海浪|脚步|敲门|开门|'
+            '吱呀|翻书|钟声|心跳|碎裂|爆炸|魔法|剑击|拳击|拔剑|交锋|硬币|铃声 之一，其余留空",'
+            '"fx":"仅在剧情冲击的瞬间才填：震动|白闪|黑闪 之一（如巨响/顿悟/昏厥），其余留空"}],'
             '"choices":[{"after_text":"选择点插入处：它前面那一拍 text 的前10~15个字，逐字照抄",'
             '"options":[{"text":"≤20字，主角「你」此刻会说的话或会做的事",'
             '"fx":{"可攻略角色id":好感变化（-2到3的整数）},'
+            '"flag":"该选项立下的事实标记（≤8字，如「送过巧克力」；无需要则留空）",'
             '"beats":[该选项的即时反应，2~6个与普通拍同构的分支拍]}]}],'
             '"summary":"本章≤100字收尾摘要（给下一章编译用）",'
             '"title":"≤8字章题（像小说目录那样的短题）",'

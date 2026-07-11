@@ -92,7 +92,7 @@ class MockLLM:
             openers = {1: "风从天台的边缘掀过来。",
                        2: "第二天放学，教室里只剩下你们两个。"}
             beats = [{"who": None, "text": openers.get(ch_i, f"新的一天从第{ch_i}声铃响开始。"),
-                      "scene": s1, "bgm": "平静"},
+                      "scene": s1, "bgm": "平静", "sfx": "风声"},
                      {"who": other, "text": "「你来了。」", "expr": "喜", "scene": s1},
                      {"who": pro, "text": "「嗯。」", "scene": s1},
                      {"who": None, "text": "你在他身边站定。", "scene": s1},
@@ -103,7 +103,7 @@ class MockLLM:
             # production contract shape: choices ride a separate top-level array
             # with a TEXT anchor; the engine splices them into the stream
             choices = [{"after_text": "「明天，还会来吗？」", "options": [
-                {"text": "「明天见。」", "fx": {other: 2},
+                {"text": "「明天见。」", "fx": {other: 2}, "flag": "约好明天",
                  "beats": [{"who": other, "text": "「一言为定。」", "expr": "喜", "scene": s1},
                            {"who": None, "text": "他笑了。", "scene": s1}]},
                 {"text": "转身离开", "fx": {other: -1},
@@ -116,16 +116,17 @@ class MockLLM:
             return {"text": prompt.get("text") or ""}
         if prompt.get("gal_endings"):
             s1 = ((prompt.get("scenes") or [{}])[0]).get("id", "s1")
-            t = (prompt.get("target") or {}).get("id") or ""
+            ts = prompt.get("targets") or ([prompt["target"]] if prompt.get("target") else [])
             def _nar(texts):
                 return [{"who": None, "text": x, "scene": s1} for x in texts]
-            return {"endings": [
-                {"char": t, "title": "并肩", "beats": _nar(
-                    ["风停了。", "他站在老地方。", "你走过去。",
-                     "「我等你很久了。」", "你们并肩看向远处。", "天亮了。"])},
-                {"char": "", "title": "独行", "beats": _nar(
-                    ["天台空着。", "你独自站了一会儿。", "风很大。",
-                     "你把外套裹紧。", "转身下楼。", "故事在这里停笔。"])}]}
+            ends = [{"char": t.get("id") or "", "title": f"与{t.get('name')}并肩",
+                     "beats": _nar([f"风停了，{t.get('name')}站在老地方。", "你走过去。",
+                                    "「我等你很久了。」", "你们并肩看向远处。",
+                                    "夜色温柔。", "天亮了。"])} for t in ts]
+            ends.append({"char": "", "title": "独行", "beats": _nar(
+                ["天台空着。", "你独自站了一会儿。", "风很大。",
+                 "你把外套裹紧。", "转身下楼。", "故事在这里停笔。"])})
+            return {"endings": ends}
         # rolling memory digest: deterministic concat (bounded) so tests stay reproducible.
         if prompt.get("summarize"):
             prior = prompt.get("prior_memory") or ""

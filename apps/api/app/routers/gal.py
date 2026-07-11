@@ -132,6 +132,7 @@ def work_script(work_id: str, user: User = Depends(current_user),
             "script": g.get("script") or {},
             "endings": g.get("endings") or [],
             "values": g.get("values") or {},
+            "lint": g.get("lint") or [],
             "mature": bool(g.get("mature")),
             "manifest": g.get("manifest") or {}}
 

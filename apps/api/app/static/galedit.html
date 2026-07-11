@@ -45,6 +45,7 @@
   <h1 id="title">🛠 修订台</h1>
   <div class="muted">重画限每张 3 次 · 重编限每章 2 次 · 换画风限 2 次　<a href="/gal">← 回书架</a></div>
 
+  <div id="lint"></div>
   <h2>🎨 全本画风</h2>
   <select id="style">
     <option value="日漫风格插画，清新明亮的色彩，干净的线条，赛璐璐上色，唯美光效">日漫清新</option>
@@ -99,6 +100,12 @@ function cell(img, cap, onclick) {
 async function load() {
   W = await j(`/gal/${workId}/script`);
   $("title").textContent = `🛠 修订台 · ${W.title}`;
+  // 📋 体检报告: build 时静态 lint 出的硬伤与建议
+  const icons = { error: "🟥", warn: "🟡", info: "◽" };
+  $("lint").innerHTML = (W.lint || []).length
+    ? `<h2>📋 体检报告</h2>` + W.lint.map(f =>
+        `<div class="muted" style="font-size:13px">${icons[f.level] || "◽"} ${f.msg}</div>`).join("")
+    : "";
   const pov = W.protagonist_id;
   const exprs = ["常态", "喜", "怒", "哀"];
   $("sprites").classList.remove("muted");
