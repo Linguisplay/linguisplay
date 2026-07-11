@@ -508,6 +508,15 @@ _EXPR_FACE = {"常态": "平静自然的神情", "喜": "开心微笑的神情",
               # E-mote 丐版: 一张闭眼帧, 播放器随机切换 ≈ 眨眼 (立绘活的最大单点)
               "眨": "双眼轻轻闭合的瞬间的神情，除闭眼外与平静的神情完全一致"}
 BLINK = "眨"
+# 🎭 差分正解 (qwen-image-edit): 常态是唯一的 t2i 底图, 其余表情按指令改脸 —
+# 独立重生成的"差分"连衣服都会换 (实弹: 老师的眨眼帧换了一套西装)
+_EDIT_TAIL = ("。除面部表情之外，人物的姿势、服装、发型、身体、构图和画风"
+              "必须保持与原图完全一致。")
+_EDIT_FACE = {"喜": "把人物的表情改为开心微笑" + _EDIT_TAIL,
+              "怒": "把人物的表情改为愤怒皱眉" + _EDIT_TAIL,
+              "哀": "把人物的表情改为悲伤低落，眼神黯淡" + _EDIT_TAIL,
+              "眨": "把人物的双眼改为完全闭合（自然眨眼的一瞬），眼睑合拢、"
+                    "睫毛低垂" + _EDIT_TAIL}
 
 
 def portrait_prompt(char: dict, world: str, art: str, expr: str) -> str:
@@ -868,8 +877,9 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
                 if c["id"] == gal["protagonist_id"]:
                     continue   # 主角无立绘 — the "你" has no face on screen
                 seed = char_seed(story_id, c["id"])
+                base = wdir / f"{c['id']}_常态.webp"
                 got: list[str] = []
-                for expr in EXPRESSIONS + (BLINK,):
+                for expr in EXPRESSIONS + (BLINK,):   # 常态 first — it is the base
                     p = wdir / f"{c['id']}_{expr}.webp"
                     if p.exists():
                         got.append(expr)
@@ -877,13 +887,18 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
                     gal["progress"] = (f"正在绘制立绘 {ci + 1}/{len(gal['characters'])}"
                                        f" · {expr}…")
                     _save(s)
-                    neg = portrait_negative(art)
-                    if expr == BLINK:
-                        neg += ",睁开的眼睛,明亮的瞳孔,直视镜头的目光"
-                    img = generate_image(portrait_prompt(c, world, art, expr),
-                                         size="720*1280", seed=seed,
-                                         model=FIGURE_MODEL,
-                                         negative=neg)
+                    from .qwen import edit_image
+                    img = None
+                    if expr != "常态" and base.exists():
+                        # 差分=改脸不重画: body/framing stay pixel-consistent
+                        img = edit_image(base.read_bytes(), _EDIT_FACE[expr])
+                    if not img:                        # base 缺失/编辑失败 → t2i 兜底
+                        neg = portrait_negative(art)
+                        if expr == BLINK:
+                            neg += ",睁开的眼睛,明亮的瞳孔,直视镜头的目光"
+                        img = generate_image(portrait_prompt(c, world, art, expr),
+                                             size="720*1280", seed=seed,
+                                             model=FIGURE_MODEL, negative=neg)
                     if img:
                         p.write_bytes(to_webp(debg(img)))
                         got.append(expr)

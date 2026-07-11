@@ -2012,6 +2012,46 @@ DASHSCOPE_T2I_URL = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2im
 DASHSCOPE_TASK_URL = "https://dashscope.aliyuncs.com/api/v1/tasks/"
 
 
+DASHSCOPE_MM_URL = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
+
+
+def edit_image(image_bytes: bytes, prompt: str, model: str = "qwen-image-edit",
+               mime: str = "image/webp", timeout_s: int = 120) -> bytes | None:
+    """Instruction-based image editing (qwen-image-edit): base image bytes in
+    (Base64 data URI — DashScope 的审查器拉不动我们非 443 端口的 URL), edited
+    image bytes out. 差分正解: expressions edit the 常态 base so body/framing
+    stay pixel-consistent — fresh generations never were (实弹: 老师的眨眼帧
+    连西装都换了一套). Returns None on any failure."""
+    import base64
+    s = get_settings()
+    if not s.dashscope_api_key or not image_bytes:
+        return None
+    data_uri = f"data:{mime};base64," + base64.b64encode(image_bytes).decode()
+    try:
+        resp = httpx.post(
+            DASHSCOPE_MM_URL,
+            headers={"Authorization": f"Bearer {s.dashscope_api_key}",
+                     "Content-Type": "application/json"},
+            json={"model": model,
+                  "input": {"messages": [{"role": "user", "content": [
+                      {"image": data_uri}, {"text": prompt[:500]}]}]},
+                  "parameters": {"watermark": False}},
+            timeout=timeout_s,
+        )
+        resp.raise_for_status()
+        content = (resp.json().get("output", {}).get("choices") or
+                   [{}])[0].get("message", {}).get("content") or []
+        url = next((c.get("image") for c in content
+                    if isinstance(c, dict) and c.get("image")), None)
+        if not url:
+            return None
+        img = httpx.get(url, timeout=60)
+        img.raise_for_status()
+        return img.content
+    except Exception:
+        return None
+
+
 def generate_image(prompt: str, size: str = "1280*720",
                    model: str = "wanx2.1-t2i-turbo", timeout_s: int = 120,
                    seed: int | None = None, negative: str = "") -> bytes | None:
