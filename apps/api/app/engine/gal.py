@@ -529,7 +529,8 @@ _EDIT_FACE = {"喜": "把人物的表情改为开心微笑" + _EDIT_TAIL,
                     "像正在说话的一瞬）" + _EDIT_TAIL}
 
 
-def portrait_prompt(char: dict, world: str, art: str, expr: str) -> str:
+def portrait_prompt(char: dict, world: str, art: str, expr: str,
+                    anon: bool = False) -> str:
     # style anchor rides FIRST — with seed held fixed, a trailing style hint was
     # weak enough that single portraits flipped photoreal↔anime between a
     # character's own expressions (实弹: 卢娜三张三个画风)
@@ -540,7 +541,10 @@ def portrait_prompt(char: dict, world: str, art: str, expr: str) -> str:
                 "看不到任何瞳孔，像眨眼落下的那一瞬；除闭眼外与平静的神情完全一致")
     else:
         face = _EXPR_FACE.get(expr, _EXPR_FACE["常态"])
-    return (f"{lead}。单人半身立绘：{char.get('name')}，"
+    # anon: 角色名撞知名 IP 会触发 IPInfringementSuspect (实弹: 「瑞克」被拒) —
+    # 去名重试, 画像的主料本来就是外貌描述
+    who = "" if anon else f"{char.get('name')}，"
+    return (f"{lead}。单人半身立绘：{who}"
             f"{(char.get('looks') or '')[:160]}。"
             f"{face}。"
             "正面半身像，人物居中且完整（从头顶到腰部都在画面内，头顶上方留出空间），"
@@ -650,11 +654,13 @@ def bg_prompt(scene: dict, world: str, art: str) -> str:
             "空镜，画面里没有任何人物，没有文字、字幕、水印或相框边框，景深，氛围光。")
 
 
-def cover_prompt(gal: dict, title: str, world: str, art: str) -> str:
+def cover_prompt(gal: dict, title: str, world: str, art: str,
+                 anon: bool = False) -> str:
     pro = next((c for c in gal["characters"] if c["id"] == gal["protagonist_id"]),
                gal["characters"][0])
     lead = (art or "电影质感，情绪张力")
-    return (f"{lead}。视觉小说封面插画，竖构图：{pro.get('name')}"
+    who = "" if anon else f"{pro.get('name')}"
+    return (f"{lead}。视觉小说封面插画，竖构图：{who}"
             f"（{(pro.get('looks') or '')[:120]}）的半身像立于画面中心偏下，"
             f"上方留出标题空间。世界背景：{world[:80]}。"
             "高细节，画面里没有任何文字")
@@ -1017,6 +1023,11 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
                         img = generate_image(portrait_prompt(c, world, art, expr),
                                              size="720*1280", seed=seed,
                                              model=FIGURE_MODEL, negative=neg)
+                        if not img:   # 名字撞 IP 过滤 (IPInfringementSuspect) → 去名重试
+                            img = generate_image(
+                                portrait_prompt(c, world, art, expr, anon=True),
+                                size="720*1280", seed=seed,
+                                model=FIGURE_MODEL, negative=neg)
                     if img:
                         p.write_bytes(to_webp(debg(img)))
                         got.append(expr)
@@ -1043,6 +1054,11 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
                 img = generate_image(cover_prompt(gal, s.title or "", world, art),
                                      size="720*1280", model=FIGURE_MODEL,
                                      negative=portrait_negative(art))
+                if not img:   # IP 名过滤 → 去名重试
+                    img = generate_image(cover_prompt(gal, s.title or "", world, art,
+                                                      anon=True),
+                                         size="720*1280", model=FIGURE_MODEL,
+                                         negative=portrait_negative(art))
                 if img:
                     cp.write_bytes(shrink_jpg(img))
             man["cover"] = cp.exists()
@@ -1057,6 +1073,12 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
                     img = generate_image(cg_prompt(gal, b, art), size="720*1280",
                                          model=SCENE_MODEL,
                                          negative=portrait_negative(art) + _FRAME_NEG)
+                    if not img:   # IP 名过滤 → 去名(空镜)重试
+                        anon_b = dict(b)
+                        anon_b["who"] = None
+                        img = generate_image(cg_prompt(gal, anon_b, art),
+                                             size="720*1280", model=SCENE_MODEL,
+                                             negative=portrait_negative(art) + _FRAME_NEG)
                     if img:
                         p.write_bytes(shrink_jpg(img))
                 if p.exists():
