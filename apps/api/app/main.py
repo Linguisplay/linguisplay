@@ -21,7 +21,28 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    # 🌍 活世界心跳: 服务端后台扫描, 到点的存档跳一次世界心跳 —
+    # 玩家不在, 剧情照样往前走 (Yi 2026-07-11 的长期战略地基)
+    import asyncio
+
+    from .routers.runs import living_heartbeat_pass
+    stop = asyncio.Event()
+
+    async def _heartbeat_loop():
+        while not stop.is_set():
+            try:
+                await asyncio.to_thread(living_heartbeat_pass)
+            except Exception:
+                pass
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=600)
+            except asyncio.TimeoutError:
+                pass
+
+    task = asyncio.create_task(_heartbeat_loop())
     yield
+    stop.set()
+    task.cancel()
 
 
 app = FastAPI(

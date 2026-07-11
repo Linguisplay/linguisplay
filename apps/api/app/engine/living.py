@@ -153,14 +153,15 @@ def world_tick(content: dict[str, Any], state: dict[str, Any],
     if state.get("ended") or tun["turns_per_slot"] <= 0:
         return out
 
-    # ① the world's day turns over (real-time stories sync exactly; others count one)
+    # ① the world's day turns over. Real-time stories: the real clock IS the world's
+    # clock — the tick only re-syncs it (a forced +1 would fight the in-play sync and
+    # yo-yo the calendar); expiry lands when the real hour truly passes. Others: one
+    # heartbeat = one diegetic day.
     clk = dict(state.get("clock") or {"day": 1, "slot": 0, "turns_in_slot": 0})
     if runtime.real_time_on(content):
         runtime.sync_real_clock(content, state)
-        if int((state.get("clock") or {}).get("day", 1)) <= int(clk.get("day", 1)):
-            state["clock"] = {**clk, "day": int(clk.get("day", 1)) + 1, "turns_in_slot": 0}
     else:
-        state["clock"] = {**clk, "day": int(clk.get("day", 1)) + 1, "turns_in_slot": 0}
+        state["clock"] = {**clk, "day": int(clk.get("day", 1) or 1) + 1, "turns_in_slot": 0}
     out["advanced"] = True
 
     # ② 缺席因果: promises the turned day rolled past — the scene happens WITHOUT you

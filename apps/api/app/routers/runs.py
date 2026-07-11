@@ -3,7 +3,7 @@ import json
 import time as _time_mod
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -11,7 +11,8 @@ from sqlalchemy.orm.attributes import flag_modified
 from .. import metrics
 from ..db import SessionLocal, get_db
 from ..deps import current_user
-from ..engine import runtime
+from ..engine import director, living, runtime
+from ..engine.llm import get_llm
 from ..models import Beat as BeatModel
 from ..models import Persona as PersonaModel
 from ..models import Run as RunModel
@@ -680,6 +681,7 @@ def play(
             run = db2.get(RunModel, run_id)
             seq = start_seq
             final = None
+            stage = director.TurnStage()   # 🎬 本回合的演出记忆 (音效去重/单次白闪)
             for kind, payload in runtime.run_turn_stream(
                 content=content, state=state0, persona=persona_dict,
                 player_input=body.input, channel=body.channel,
@@ -712,7 +714,12 @@ def play(
                     db2.commit()
                     db2.refresh(eb)
                     seq += 1
-                    yield _event({"event": "beat", "beat": _to_beat(eb).model_dump()})
+                    bd = _to_beat(eb).model_dump()
+                    try:   # 🎬 导演注记 (sfx/flash/expr) 只随流走, 不进库
+                        bd.update(stage.beat_fx(payload.get("text", ""), payload.get("mood")))
+                    except Exception:
+                        pass
+                    yield _event({"event": "beat", "beat": bd})
                 else:
                     final = payload
             # persist final state + emit the trailing meta events
@@ -760,6 +767,10 @@ def play(
                 if final.get("sanity_view"):
                     yield _event({"event": "sanity", "sanity": final["sanity_view"]})
                 yield _event({"event": "place", "location": final.get("location")})
+                try:   # 🎬 回合演出单: BGM 选曲 + 色调 (danger>frail>night>none)
+                    yield _event({"event": "direct", "direct": director.stage_turn(final)})
+                except Exception:
+                    pass
                 yield _event({"event": "promises", "promises": final.get("promises", [])})
                 yield _event({"event": "verdict", "verdict": final.get("verdict")})
                 if final.get("pending_choice"):
@@ -1080,6 +1091,7 @@ def confront(run_id: str, body: ConfrontIn, user: User = Depends(current_user),
             run = db2.get(RunModel, run_id)
             seq = start_seq
             final = None
+            stage = director.TurnStage()   # 🎬 本回合的演出记忆 (音效去重/单次白闪)
             for kind, payload in gen:
                 if kind == "dice":
                     yield _event({"event": "dice", "dice": payload})
@@ -1095,7 +1107,12 @@ def confront(run_id: str, body: ConfrontIn, user: User = Depends(current_user),
                     db2.commit()
                     db2.refresh(eb)
                     seq += 1
-                    yield _event({"event": "beat", "beat": _to_beat(eb).model_dump()})
+                    bd = _to_beat(eb).model_dump()
+                    try:   # 🎬 导演注记 (sfx/flash/expr) 只随流走, 不进库
+                        bd.update(stage.beat_fx(payload.get("text", ""), payload.get("mood")))
+                    except Exception:
+                        pass
+                    yield _event({"event": "beat", "beat": bd})
                 else:
                     final = payload
             if final is not None:
@@ -1245,3 +1262,58 @@ def follow(run_id: str, body: FollowIn, user: User = Depends(current_user), db: 
     db.commit()
     db.refresh(r)
     return _to_run(r)
+
+
+# ── 🌍 活世界 (living world): 开关 + 手动心跳 + 调度入口 ──────────────────────────
+@router.post("/{run_id}/living")
+def living_switch(run_id: str, body: dict = Body(default={}),
+                  user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Flip a run's living-world switch (on/off + heartbeat interval in real hours).
+    While ON, the server ticks the world even when the player is away: the clock
+    turns, stood-up promises commit their consequences, and characters propose new
+    dated meetings into the 小手机."""
+    r = _own_run(run_id, user, db)
+    st = dict(r.state or {})
+    lc = living.set_living(st, bool(body.get("on")), body.get("hours"))
+    r.state = st
+    db.commit()
+    return {"living": lc}
+
+
+@router.post("/{run_id}/living/tick")
+def living_tick_now(run_id: str, user: User = Depends(current_user),
+                    db: Session = Depends(get_db)):
+    """Owner-triggered immediate heartbeat (testing / 手动推一天). Same tick the
+    scheduler runs, minus the due() wait."""
+    r = _own_run(run_id, user, db)
+    st = dict(r.state or {})
+    out = living.world_tick(r.pinned_content or {}, st, get_llm())
+    r.state = st
+    db.commit()
+    return {"tick": out, "living": living.cfg(st),
+            "clock": (st.get("clock") or {}),
+            "news": [n for n in (st.get("living_news") or []) if not n.get("told")]}
+
+
+def living_heartbeat_pass() -> int:
+    """Scheduler entry (main.py lifespan): one pass over the shelf, tick what's due.
+    Own session, per-run commit — one bad run never stalls the others."""
+    db = SessionLocal()
+    ticked = 0
+    try:
+        rows = db.query(RunModel).filter(RunModel.archived == 0).all()
+        for r in rows:
+            st0 = r.state or {}
+            if not living.is_on(st0) or not living.due(st0):
+                continue
+            st = copy.deepcopy(st0)
+            try:
+                living.world_tick(r.pinned_content or {}, st, get_llm())
+                r.state = st
+                db.commit()
+                ticked += 1
+            except Exception:
+                db.rollback()
+    finally:
+        db.close()
+    return ticked

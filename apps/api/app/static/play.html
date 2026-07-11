@@ -279,11 +279,13 @@
 #mapov .mexits { font-size:11px; color:#7b8a80; margin-top:3px; }
 #mapov .mhidden { color:#7b8296; font-size:12px; font-style:italic; margin-top:10px; }
 #pressurebar { flex:0 0 auto; margin:6px 16px 0; padding:7px 12px; border-radius:10px; background:#241416cc; border:1px solid #4a2a28; font-size:12.5px; display:flex; align-items:center; gap:10px; color:#e8c9c4; }
-/* 🎬 导演 v1 (客户端规则): 夜色调 / 惊吓白闪 / 章节过场卡 — 全由引擎状态驱动 */
+/* 🎬 导演 v1: 色调分级 (danger 猎手贴脸 > frail 理智见底 > night 夜) / 白闪 / 过场卡 */
 #vntint { position: fixed; inset: 0; z-index: 41; pointer-events: none; opacity: 0;
-  transition: opacity 2s ease;
-  background: linear-gradient(180deg, rgba(22,34,64,.16), rgba(10,14,30,.24)); }
-body.vn.vnnight #vntint { opacity: 1; }
+  transition: opacity 1.4s ease, background 1.4s ease; }
+#vntint[data-k] { opacity: 1; }
+#vntint[data-k="night"]  { background: linear-gradient(180deg, rgba(12,18,46,.30), rgba(6,8,22,.28)); }
+#vntint[data-k="danger"] { background: radial-gradient(ellipse at center, rgba(40,4,8,.06) 36%, rgba(66,6,10,.46) 100%); }
+#vntint[data-k="frail"]  { background: linear-gradient(180deg, rgba(40,26,60,.30), rgba(15,10,26,.32)); }
 #vnflash { position: fixed; inset: 0; z-index: 80; pointer-events: none; background: #fff; opacity: 0; }
 #vnflash.on { animation: vnflashk .42s ease-out 1; }
 @keyframes vnflashk { 0% { opacity: .92; } 100% { opacity: 0; } }
@@ -507,6 +509,7 @@ body.dread #dread { opacity:1; }
       <button id="mapBtn" class="iconbtn hidden" title="地图" onclick="openMap()">🗺</button>
       <button id="journalBtn" class="iconbtn hidden" title="档案" onclick="openJournal()">📔</button>
       <button id="spdBtn" class="iconbtn hidden" title="文字速度" onclick="cycleSpeed()">🐇</button>
+      <button id="worldBtn" class="iconbtn hidden" title="活世界：你不在的时候，世界照样往前走" onclick="toggleLiving()">🌍</button>
       <button id="soundBtn" class="iconbtn hidden" title="背景音乐" onclick="toggleSound()">🔊</button>
       <button id="backBtn" class="ghost hidden" style="padding:5px 10px" onclick="backToPick()">← 剧本</button>
       <span id="who" class="muted"></span>
@@ -1094,6 +1097,9 @@ async function enterRun(run) {
   document.getElementById("driveBtn").classList.toggle("hidden", !isSandbox || playMode === "god");
   maybeShowHowto(st0, run, tutOpen);
   hide("pick"); show("play"); show("backBtn"); show("soundBtn"); show("journalBtn"); show("mapBtn"); show("phoneBtn"); show("spdBtn"); applySpeedIcon();
+  // 🌍 活世界开关: 沙盒且有钟的故事才有 (世界心跳挂在游戏内时钟上)
+  livingCfg = (run.state && run.state.living) || null;
+  if (isSandbox) { show("worldBtn"); applyWorldIcon(); }
   resetEnded();
   chat.innerHTML = ""; suggest.innerHTML = ""; state.innerHTML = "";
   curBgmMood = null; curScene = null; curLocId = null;
@@ -1139,7 +1145,7 @@ function sendLeave() { if (runId) { try { navigator.sendBeacon(`${API}/runs/${ru
 window.addEventListener("pagehide", sendLeave);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") sendLeave(); });
 
-function backToPick() { sendLeave(); runId = null; stopBgm(); vnShow(false); vnMode = false; hide("play"); hide("backBtn"); hide("soundBtn"); hide("journalBtn"); hide("mapBtn"); hide("phoneBtn"); show("pick"); }
+function backToPick() { sendLeave(); runId = null; stopBgm(); vnShow(false); vnMode = false; hide("play"); hide("backBtn"); hide("soundBtn"); hide("journalBtn"); hide("mapBtn"); hide("phoneBtn"); hide("worldBtn"); show("pick"); }
 async function doLogout() {
   sendLeave();  // must fire while the session cookie is still valid
   try { await j("/auth/logout", { method:"POST" }); } catch(e){}
@@ -2482,6 +2488,31 @@ function vnSprite(name) {
   vnRight = { name: name, cid: cid };
   _vnSet(R, cid);
 }
+// ── 🌍 活世界: 你不在的时候, 世界照样往前走 (心跳/缺席因果在服务端) ──
+let livingCfg = null;
+function applyWorldIcon() {
+  const b = document.getElementById("worldBtn");
+  if (!b) return;
+  const on = !!(livingCfg && livingCfg.on);
+  b.style.opacity = on ? "1" : ".45";
+  b.title = on ? B("活世界运转中：每天心跳一次，爽约有因果。点击关闭",
+                   "Living world ON — tap to turn off")
+               : B("活世界（关）：开启后你不在时世界照样往前走", "Living world OFF — tap to enable");
+}
+async function toggleLiving() {
+  if (!runId) return;
+  const want = !(livingCfg && livingCfg.on);
+  try {
+    const res = await j(`/runs/${runId}/living`, { method: "POST",
+      body: JSON.stringify({ on: want }) });
+    livingCfg = res.living || null;
+    applyWorldIcon();
+    pushToast(want
+      ? "🌍 " + B("活世界已开启：你不在的时候，时间照走、约定照数、角色照过日子。爽约，是有因果的。",
+                  "Living world ON: time flows while you're away, and standing people up has consequences.")
+      : "🌍 " + B("活世界已关闭：世界只在你玩的时候转。", "Living world OFF."), "t-unlock", 4200);
+  } catch (e) { pushToast("⚠️ " + escapeHtml(e.message), "", 2600); }
+}
 // ── 🎬 导演 v1 (客户端规则): 引擎状态直接驱动演出, 不加模型调用不加延迟 ──
 let vnChapTimer = null;
 function vnChapCard(title, sub) {
@@ -2497,6 +2528,18 @@ function vnFlash() {
   if (!vnMode) return;
   const el = document.getElementById("vnflash");
   el.classList.remove("on"); void el.offsetWidth; el.classList.add("on");
+}
+// 色调层: direct 事件说了算; 场景事件只做 night/none 兜底 (移动等非回合通路)
+function vnTint(kind) {
+  const el = document.getElementById("vntint");
+  if (!el) return;
+  if (!vnMode || !kind || kind === "none") el.removeAttribute("data-k");
+  else el.setAttribute("data-k", kind);
+}
+function applyDirect(d) {
+  if (!d) return;
+  if (d.tint !== undefined) vnTint(d.tint);
+  if (d.bgm && d.bgm !== curBgmMood) { curBgmMood = d.bgm; swapBgm(d.bgm); }
 }
 // 🫥 隐藏界面 (gal 移植): 欣赏立绘, 点任意处恢复
 function vnHide() { document.body.classList.add("vnhide"); }
@@ -2532,6 +2575,10 @@ async function playBeatVN(b, skipLog) {
     return;   // your own line flows straight into their reply
   }
   const isNarr = b.type === "description";
+  // 🎬 导演注记: 白闪与音效跟着这一拍的字一起落 (VN 此前从不消费 pendingSfx)
+  if (b.fx === "flash") vnFlash();
+  if (b.sfx) { if (pendingSfx === b.sfx) pendingSfx = null; playSfx(b.sfx); }
+  else if (pendingSfx) { const n = pendingSfx; pendingSfx = null; playSfx(n); }
   nameEl.textContent = b.speaker_name || "";
   nameEl.classList.toggle("hidden", isNarr);
   vnSprite(isNarr ? null : b.speaker_name);
@@ -2546,7 +2593,8 @@ async function playBeat(b) {
     catch (e) { reportClientError(e.stack || e.message, "playBeatVN"); vnShow(false); vnMode = false; }
   }
   if (b.author === "player") { renderBeat(b); return; }
-  if (pendingSfx) { const n = pendingSfx; pendingSfx = null; playSfx(n); }
+  if (b.sfx) { if (pendingSfx === b.sfx) pendingSfx = null; playSfx(b.sfx); }
+  else if (pendingSfx) { const n = pendingSfx; pendingSfx = null; playSfx(n); }
   if (b.type === "description") {
     const node = document.createElement("div"); node.className = "desc"; chat.appendChild(node);
     if (b._instant) node.textContent = b.text || "";   // already read as live tokens
@@ -2613,8 +2661,8 @@ function applyScene(scene) {
   if (!scene) return;
   curScene = scene;
   const mood = scene.mood || "daily";
-  // 🎬 夜色调: 夜里给整个舞台压一层青蓝 (只在 VN 演出层)
-  document.body.classList.toggle("vnnight", !!(vnMode && scene.night));
+  // 🎬 夜色兜底 (非回合通路如移动也会走这里); 回合末的 direct 演出单会覆盖它
+  vnTint(scene.night ? "night" : "none");
   paintBackground();
   if (mood !== curBgmMood) {
     curBgmMood = mood;
@@ -2749,6 +2797,7 @@ async function streamTurn(url, bodyObj) {
         else if (ev.event === "token") { onToken(ev.t); }
         else if (ev.event === "state") { renderState(ev.state); }
         else if (ev.event === "scene") { applyScene(ev.scene); }
+        else if (ev.event === "direct") { applyDirect(ev.direct); }
         else if (ev.event === "cast") { updateCast(ev.cast); }
         else if (ev.event === "here") { relations = ev.relations || {}; following = ev.following || []; updateCast(ev.here || []); }
         else if (ev.event === "goal") { renderGoal(ev.goal); }
