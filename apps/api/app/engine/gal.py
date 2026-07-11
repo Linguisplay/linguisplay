@@ -509,9 +509,15 @@ def portrait_prompt(char: dict, world: str, art: str, expr: str) -> str:
     # weak enough that single portraits flipped photoreal↔anime between a
     # character's own expressions (实弹: 卢娜三张三个画风)
     lead = (art or "电影质感写实，真人照片般的质感")
+    if expr == BLINK:
+        # 实弹: 同 seed 的构图惯性会顶掉一句轻飘飘的表情短语——闭眼要前置重申
+        face = ("闭着眼睛的人物：双眼完全闭合，眼睑合拢，长睫毛低垂，"
+                "看不到任何瞳孔，像眨眼落下的那一瞬；除闭眼外与平静的神情完全一致")
+    else:
+        face = _EXPR_FACE.get(expr, _EXPR_FACE["常态"])
     return (f"{lead}。单人半身立绘：{char.get('name')}，"
             f"{(char.get('looks') or '')[:160]}。"
-            f"{_EXPR_FACE.get(expr, _EXPR_FACE['常态'])}。"
+            f"{face}。"
             "正面半身像，人物居中且完整（从头顶到腰部都在画面内，头顶上方留出空间），"
             f"画面里只有这一个人。世界背景：{world[:80]}。"
             "纯色极深背景（近黑），柔和主光，高细节，画面里没有任何文字或水印")
@@ -865,10 +871,13 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
                     gal["progress"] = (f"正在绘制立绘 {ci + 1}/{len(gal['characters'])}"
                                        f" · {expr}…")
                     _save(s)
+                    neg = portrait_negative(art)
+                    if expr == BLINK:
+                        neg += ",睁开的眼睛,明亮的瞳孔,直视镜头的目光"
                     img = generate_image(portrait_prompt(c, world, art, expr),
                                          size="720*1280", seed=seed,
                                          model="wanx2.1-t2i-plus",   # 人物用高质量档
-                                         negative=portrait_negative(art))
+                                         negative=neg)
                     if img:
                         p.write_bytes(to_webp(debg(img)))
                         got.append(expr)
