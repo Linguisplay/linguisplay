@@ -152,6 +152,8 @@ def my_works(user: User = Depends(current_user), db: Session = Depends(get_db)):
             .order_by(Story.updated_at.desc()).all())
     return [{"id": s.id, "title": s.title,
              "status": (s.gal or {}).get("status"),
+             "published": bool((s.gal or {}).get("published")),
+             "plays": int((s.gal or {}).get("plays") or 0),
              "progress": (s.gal or {}).get("progress", ""),
              "chapters": len((((s.gal or {}).get("script") or {})
                               .get((s.gal or {}).get("protagonist_id")) or {})
@@ -173,11 +175,84 @@ def work_status(work_id: str, user: User = Depends(current_user),
             "missing": (g.get("manifest") or {}).get("missing", [])}
 
 
+# ── 🎀 发布分区: 作品发布 / 他人游玩 / 游玩数 (blueprint §7) ─────────────────────
+@router.post("/{work_id}/publish")
+def publish(work_id: str, user: User = Depends(current_user),
+            db: Session = Depends(get_db)):
+    s = _own_work(work_id, user, db)
+    g = dict(s.gal or {})
+    if g.get("status") != "ready":
+        raise HTTPException(409, "建造完成后才能发布")
+    if any(f.get("level") == "error" for f in g.get("lint") or []):
+        raise HTTPException(422, "体检报告里还有🟥硬伤，修好再发布（见修订台）")
+    g["published"] = True
+    g.setdefault("plays", 0)
+    s.gal = g
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(s, "gal")
+    db.commit()
+    return {"published": True}
+
+
+@router.post("/{work_id}/unpublish")
+def unpublish(work_id: str, user: User = Depends(current_user),
+              db: Session = Depends(get_db)):
+    s = _own_work(work_id, user, db)
+    g = dict(s.gal or {})
+    g["published"] = False
+    s.gal = g
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(s, "gal")
+    db.commit()
+    return {"published": False}
+
+
+@router.get("/discover")
+def discover(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """🎀 玩家作品分区: everyone's published works, play-count ordered."""
+    rows = db.query(Story).filter(Story.kind == "gal").all()
+    out = []
+    for s in rows:
+        g = s.gal or {}
+        if not g.get("published"):
+            continue
+        author = db.get(User, s.owner_id)
+        out.append({"id": s.id, "title": s.title,
+                    "author": (getattr(author, "display_name", None)
+                               or (author.email.split("@")[0] if author else "匿名")),
+                    "mine": s.owner_id == user.id,
+                    "plays": int(g.get("plays") or 0),
+                    "chapters": len(g.get("ch_summaries") or []),
+                    "endings": len(g.get("endings") or []),
+                    "mature": bool(g.get("mature")),
+                    "cover": f"/scene/gal/{s.id}/cover.jpg"
+                             if (g.get("manifest") or {}).get("cover") else None})
+    out.sort(key=lambda x: -x["plays"])
+    return out
+
+
 @router.get("/{work_id}/script")
 def work_script(work_id: str, user: User = Depends(current_user),
                 db: Session = Depends(get_db)):
-    s = _own_work(work_id, user, db)
+    s = db.get(Story, work_id)
+    if not s or s.kind != "gal":
+        raise HTTPException(404, "work not found")
     g = s.gal or {}
+    mine = s.owner_id == user.id
+    if not mine:
+        # 他人游玩: 只对已发布的作品开门; 🔞 作品走 18+ 门
+        if not g.get("published"):
+            raise HTTPException(404, "work not found")
+        if g.get("mature"):
+            from ..security import is_adult
+            if not (user.dob and is_adult(user.dob)):
+                raise HTTPException(403, "这部作品含成人内容，仅限 18+ 玩家")
+        g = dict(g)
+        g["plays"] = int(g.get("plays") or 0) + 1     # 游玩数: 粗粒度但诚实
+        s.gal = g
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(s, "gal")
+        db.commit()
     if g.get("status") != "ready":
         raise HTTPException(409, "还在建造中")
     return {"id": s.id, "title": s.title,

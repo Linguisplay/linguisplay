@@ -41,6 +41,9 @@
     <a href="/play">← 回主站</a>
   </div>
   <div id="grid" class="muted">加载中…</div>
+  <div class="top" style="margin-top:34px"><h1>🎀 玩家作品</h1>
+    <span class="muted">大家发布的书，点开即玩</span></div>
+  <div id="dgrid" class="muted">加载中…</div>
 </div>
 <script>
 const API = "/api/v1";
@@ -81,7 +84,10 @@ async function load() {
       `<span class="st ${cls}">${lab}</span>` +
       (w.status === "ready"
         ? ` <a href="/galedit?work=${w.id}" onclick="event.stopPropagation()"
-             style="color:#8ea2ff;font-size:12px">🛠 修订</a>` : "") +
+             style="color:#8ea2ff;font-size:12px">🛠 修订</a>
+            <a href="javascript:void 0" onclick="event.stopPropagation();togglePub('${w.id}',${w.published ? "true" : "false"})"
+             style="color:${w.published ? "#7ddf9a" : "#8ea2ff"};font-size:12px">
+             ${w.published ? "✓ 已发布" : "⇪ 发布"}</a>` : "") +
       `<div class="muted" style="margin-top:6px">${prog}</div></div>`;
     b.onclick = () => {
       if (w.status === "ready") location.href = `/galplay?work=${w.id}`;
@@ -97,7 +103,36 @@ async function load() {
   add.onclick = () => location.href = "/maker";
   grid.appendChild(add);
 }
+async function togglePub(id, cur) {
+  try {
+    await j(`/gal/${id}/${cur ? "unpublish" : "publish"}`, { method: "POST" });
+    load();
+  } catch (e) { alert("⚠️ " + e.message); }
+}
+async function loadDiscover() {
+  const g = document.getElementById("dgrid");
+  try {
+    const rows = await j("/gal/discover");
+    if (!rows.length) { g.textContent = "还没有人发布作品——第一本会是你的吗？"; return; }
+    g.className = "";
+    g.innerHTML = "";
+    g.style.cssText = "display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px";
+    rows.forEach(w => {
+      const b = document.createElement("div");
+      b.className = "book";
+      b.innerHTML = (w.cover ? `<img class="cov" src="${w.cover}" loading="lazy">`
+                             : `<div class="nocov">🎀</div>`) +
+        `<div class="info"><b>${w.title}</b>` +
+        (w.mature ? `<span class="st failed">18+</span>` : "") +
+        `<div class="muted" style="margin-top:6px">${w.author} · ${w.chapters}章` +
+        `${w.endings}结局 · ▶ ${w.plays}</div></div>`;
+      b.onclick = () => location.href = `/galplay?work=${w.id}`;
+      g.appendChild(b);
+    });
+  } catch (e) { g.textContent = "加载失败"; }
+}
 load();
+loadDiscover();
 </script>
 </body>
 </html>
