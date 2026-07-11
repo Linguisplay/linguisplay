@@ -330,7 +330,22 @@ body.vn #chat { visibility: hidden; }
 body.vn.vnlog #chat { visibility: visible; position: fixed; inset: 56px 0 0 0; z-index: 60; background: rgba(8,8,14,.97); padding: 12px 16px; overflow-y: auto; }
 body.vn #suggest { display: none; }
 body.vn footer { display: none; }
-body.vn.vnfree footer { display: flex; position: relative; z-index: 46; }
+/* VN 整页接管 (Yi: 电脑端两套布局叠穿没法玩): 头像栏+状态条默认收纳,
+   vnctl「状态」键按需弹出浮层 */
+body.vn #cast, body.vn #bars { display: none; }
+body.vn.vnstat #cast { display: block; position: fixed; z-index: 62;
+  left: 50%; transform: translateX(-50%); top: 54px; width: min(720px, 94vw);
+  background: rgba(6,7,12,.97); border-radius: 12px 12px 0 0; padding: 10px 12px 4px; }
+body.vn.vnstat #bars { display: block; position: fixed; z-index: 62;
+  left: 50%; transform: translateX(-50%); top: 148px; width: min(720px, 94vw);
+  background: rgba(6,7,12,.97); border-radius: 0 0 12px 12px; padding: 4px 12px 12px;
+  max-height: 62vh; overflow-y: auto; }
+/* 自由输入模式: 输入栏固定置底(z 60), 对话面板上移让位 — 不许重叠 (Yi 报障) */
+body.vn.vnfree footer { display: flex; position: fixed; left: 0; right: 0; bottom: 0;
+  z-index: 60; background: rgba(6,7,12,.97); padding: 8px 10px
+  calc(8px + env(safe-area-inset-bottom)); }
+body.vn.vnfree #vnbox { bottom: 86px; }
+body.vn.vnfree #vnchoices { bottom: 268px; }
 /* 🧠 理智条: watching the number slide IS the dread (CoC's oldest trick) */
 #sanitybar { flex:0 0 auto; margin:6px 16px 0; padding:7px 12px; border-radius:10px; background:#131022cc; border:1px solid #33285a; font-size:12.5px; display:flex; align-items:center; gap:10px; color:#c9c2e8; }
 #sanitybar .strack { flex:1; height:7px; border-radius:5px; background:#00000055; overflow:hidden; }
@@ -439,7 +454,7 @@ body.dread #dread { opacity:1; }
   <div id="vnchoices" class="hidden"></div>
   <div id="vnbox" onclick="vnAdvance()">
     <div id="vnname" class="hidden"></div>
-    <div id="vnctl"><span onclick="event.stopPropagation();vnHide()" title="隐藏界面看立绘">隐藏</span><span id="vnauto" onclick="event.stopPropagation();vnToggleAuto()" title="自动播放">自动</span><span onclick="event.stopPropagation();vnToggleLog()" title="回想">记录</span><span onclick="event.stopPropagation();vnToggleFree()" title="自由行动">行动</span></div>
+    <div id="vnctl"><span onclick="event.stopPropagation();vnToggleStat()" title="目标/理智/警觉等状态">状态</span><span onclick="event.stopPropagation();vnHide()" title="隐藏界面看立绘">隐藏</span><span id="vnauto" onclick="event.stopPropagation();vnToggleAuto()" title="自动播放">自动</span><span onclick="event.stopPropagation();vnToggleLog()" title="回想">记录</span><span onclick="event.stopPropagation();vnToggleFree()" title="自由行动">行动</span></div>
     <div id="vntext"></div>
     <div id="vnnext">▼</div>
   </div>
@@ -2433,6 +2448,8 @@ function vnSprite(name) {
 }
 // 🫥 隐藏界面 (gal 移植): 欣赏立绘, 点任意处恢复
 function vnHide() { document.body.classList.add("vnhide"); }
+// 📊 状态浮层: 收纳的头像栏+状态条按需查看
+function vnToggleStat() { document.body.classList.toggle("vnstat"); }
 function vnUnhide() {
   if (document.body.classList.contains("vnhide"))
     document.body.classList.remove("vnhide");
