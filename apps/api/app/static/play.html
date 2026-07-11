@@ -281,20 +281,23 @@
 #pressurebar { flex:0 0 auto; margin:6px 16px 0; padding:7px 12px; border-radius:10px; background:#241416cc; border:1px solid #4a2a28; font-size:12.5px; display:flex; align-items:center; gap:10px; color:#e8c9c4; }
 /* 🎀 VN window (galgame 演出) — gal 播放器同款设计语言: 淡金/渐变面板/幽灵按钮 */
 #vnui { position: fixed; inset: 0; z-index: 45; pointer-events: none; }
-#vnsprite, #vnsprite2 { position: absolute; bottom: 0; object-fit: contain;
-  object-position: bottom;
+/* 沙盒立绘是带背景的照片 (非透底人物): 统一裁成 3:4 竖构图人像卡, 杜绝横幅/拼贴感;
+   真立绘差分管线上线后再回归 gal 式站姿 */
+#vnsprite, #vnsprite2 { position: absolute; bottom: 0; object-fit: cover;
+  object-position: top; aspect-ratio: 3/4;
+  border-radius: 14px 14px 0 0; border: 1px solid rgba(216,181,122,.22); border-bottom: 0;
   -webkit-mask-image: linear-gradient(to top, transparent 0, #000 12%);
   mask-image: linear-gradient(to top, transparent 0, #000 12%);
   filter: drop-shadow(0 0 26px rgba(0,0,0,.65));
   transform-origin: 50% 100%; animation: vnbreathe 5.2s ease-in-out infinite;
   transition: filter .3s ease, height .3s ease, opacity .35s ease; }
-#vnsprite  { right: 2vw; height: 82vh; max-width: 46vw; z-index: 2; }
-#vnsprite2 { left: 2vw; height: 72vh; max-width: 40vw; z-index: 1;
+#vnsprite  { right: 3vw; height: 64vh; max-width: 42vw; z-index: 2; }
+#vnsprite2 { left: 3vw; height: 55vh; max-width: 36vw; z-index: 1;
   filter: brightness(.45) drop-shadow(0 0 26px rgba(0,0,0,.65));
   animation-duration: 6.6s; }
 #vnsprite.dim { filter: brightness(.72) drop-shadow(0 0 26px rgba(0,0,0,.65)); }
 @keyframes vnbreathe { 50% { scale: 1 1.006; } }
-#vnbox { position: absolute; left: 0; right: 0; bottom: 0; min-height: 148px;
+#vnbox { position: absolute; left: 0; right: 0; bottom: 0; min-height: 148px; z-index: 4;
   background: linear-gradient(180deg, rgba(4,5,10,0), rgba(4,5,10,.62) 26%, rgba(4,5,10,.95) 62%);
   padding: 44px 8% 18px; pointer-events: auto; cursor: pointer; }
 #vnname { display: inline-block; font-family: "Source Han Serif SC","Noto Serif CJK SC","Songti SC",Georgia,serif;
@@ -312,20 +315,20 @@
   text-shadow: 0 1px 3px rgba(0,0,0,.9); }
 #vnctl span:hover { color: #ece9e2; }
 #vnctl span.on { color: #d8b57a; }
-#vnchoices { position: absolute; left: 50%; transform: translateX(-50%); bottom: 190px;
-  width: min(560px, 84vw); display: flex; flex-direction: column; gap: 13px;
-  pointer-events: auto; }
-#vnchoices button { background: linear-gradient(90deg, rgba(8,9,15,0),
-    rgba(8,9,15,.88) 14%, rgba(8,9,15,.88) 86%, rgba(8,9,15,0));
-  border: 0; border-top: 1px solid rgba(216,181,122,.45);
-  border-bottom: 1px solid rgba(216,181,122,.45); color: #ece9e2;
-  padding: 12px 14px; font-size: 14.5px; letter-spacing: 1px; cursor: pointer;
-  text-align: center; }
-#vnchoices button:hover { color: #d8b57a; }
-#vnchoices button.prime { border-color: #d8b57a; }
-body.vnhide #vnbox, body.vnhide #vnchoices { opacity: 0; pointer-events: none; }
+/* 辅助选项 chips (打字为主, Yi 定): 小胶囊悬在对话框上方, 点了直接行动, 不点就打字 */
+#vnchoices { position: absolute; left: 50%; transform: translateX(-50%); bottom: 268px;
+  width: min(720px, 92vw); display: flex; flex-wrap: wrap; justify-content: center;
+  gap: 8px; pointer-events: auto; z-index: 5; }
+#vnchoices button { background: rgba(8,9,15,.82); border: 1px solid rgba(216,181,122,.38);
+  border-radius: 999px; color: rgba(236,233,226,.88); padding: 6px 15px;
+  font-size: 12.5px; letter-spacing: 1px; cursor: pointer; max-width: 100%; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#vnchoices button:hover { color: #d8b57a; border-color: #d8b57a; }
+#vnchoices button.prime { border-color: #d8b57a; color: #d8b57a; }
+body.vnhide #vnbox, body.vnhide #vnchoices, body.vn.vnhide footer
+  { opacity: 0; pointer-events: none; }
 body.vnhide #vnui { pointer-events: auto; }
-#vnbox, #vnchoices { transition: opacity .3s ease; }
+#vnbox, #vnchoices, body.vn footer { transition: opacity .3s ease; }
 body.vn #chat { visibility: hidden; }
 body.vn.vnlog #chat { visibility: visible; position: fixed; inset: 56px 0 0 0; z-index: 60; background: rgba(8,8,14,.97); padding: 12px 16px; overflow-y: auto; }
 body.vn #suggest { display: none; }
@@ -340,12 +343,11 @@ body.vn.vnstat #bars { display: block; position: fixed; z-index: 62;
   left: 50%; transform: translateX(-50%); top: 148px; width: min(720px, 94vw);
   background: rgba(6,7,12,.97); border-radius: 0 0 12px 12px; padding: 4px 12px 12px;
   max-height: 62vh; overflow-y: auto; }
-/* 自由输入模式: 输入栏固定置底(z 60), 对话面板上移让位 — 不许重叠 (Yi 报障) */
+/* 打字为主 (Yi 定): 输入栏常驻置底(z 60), 对话面板上移让位 — 不许重叠 (Yi 报障) */
 body.vn.vnfree footer { display: flex; position: fixed; left: 0; right: 0; bottom: 0;
   z-index: 60; background: rgba(6,7,12,.97); padding: 8px 10px
   calc(8px + env(safe-area-inset-bottom)); }
 body.vn.vnfree #vnbox { bottom: 86px; }
-body.vn.vnfree #vnchoices { bottom: 268px; }
 /* 🧠 理智条: watching the number slide IS the dread (CoC's oldest trick) */
 #sanitybar { flex:0 0 auto; margin:6px 16px 0; padding:7px 12px; border-radius:10px; background:#131022cc; border:1px solid #33285a; font-size:12.5px; display:flex; align-items:center; gap:10px; color:#c9c2e8; }
 #sanitybar .strack { flex:1; height:7px; border-radius:5px; background:#00000055; overflow:hidden; }
@@ -420,6 +422,10 @@ body.dread #dread { opacity:1; }
   #state { display: none; }
   #suggest { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .chip { flex: 0 0 auto; }
+  /* VN 手机端: 屏幕摆不下对手戏双立绘 — 说话者单立绘居中放大, 上一位收起 */
+  #vnsprite { right: 50%; transform: translateX(50%); height: 46vh; max-width: 70vw; }
+  #vnsprite2 { display: none !important; }
+  #vnchoices { bottom: 252px; }
 }
 .av img { width:100%; height:100%; object-fit:cover; border-radius:50%; }
 .castitem .cinfo { color:#8a93a8; margin-left:3px; cursor:pointer; font-style:normal; }
@@ -454,7 +460,7 @@ body.dread #dread { opacity:1; }
   <div id="vnchoices" class="hidden"></div>
   <div id="vnbox" onclick="vnAdvance()">
     <div id="vnname" class="hidden"></div>
-    <div id="vnctl"><span onclick="event.stopPropagation();vnToggleStat()" title="目标/理智/警觉等状态">状态</span><span onclick="event.stopPropagation();vnHide()" title="隐藏界面看立绘">隐藏</span><span id="vnauto" onclick="event.stopPropagation();vnToggleAuto()" title="自动播放">自动</span><span onclick="event.stopPropagation();vnToggleLog()" title="回想">记录</span><span onclick="event.stopPropagation();vnToggleFree()" title="自由行动">行动</span></div>
+    <div id="vnctl"><span onclick="event.stopPropagation();vnToggleStat()" title="目标/理智/警觉等状态">状态</span><span onclick="event.stopPropagation();vnHide()" title="隐藏界面看立绘">隐藏</span><span id="vnauto" onclick="event.stopPropagation();vnToggleAuto()" title="自动播放">自动</span><span onclick="event.stopPropagation();vnToggleLog()" title="回想">记录</span></div>
     <div id="vntext"></div>
     <div id="vnnext">▼</div>
   </div>
@@ -2276,28 +2282,22 @@ function renderProgress(prog) {
 }
 function renderSuggest(items) {
   if (vnMode) {
-    // 🎀 galgame: the choices ARE the interaction — clicking one acts immediately
+    // 🎀 打字为主 (Yi 定): 输入栏常驻, 选项只是辅助 chips — 点了直接行动, 不点就自己打
     const box = document.getElementById("vnchoices");
     box.innerHTML = "";
-    (items || []).forEach((t, i) => {
+    (items || []).slice(0, 3).forEach((t, i) => {
       const btn = document.createElement("button");
       if (i === 0) btn.className = "prime";
-      btn.textContent = t;
+      btn.textContent = t; btn.title = t;
       btn.onclick = () => {
         box.classList.add("hidden");
         const isAct = t.startsWith("用「做」") || t.startsWith("Use “Do”");
-        if (isAct) { channel.value = "do"; vnToggleFree(); return; }
+        if (isAct) { channel.value = "do"; msg.focus(); return; }
         msg.value = t; send();
       };
       box.appendChild(btn);
     });
-    const free = document.createElement("button");
-    free.textContent = B("✏️ 自由行动…", "✏️ Free action…");
-    free.onclick = () => { box.classList.add("hidden"); document.body.classList.add("vnfree"); msg.focus(); };
-    box.appendChild(free);
-    box.classList.remove("hidden");
-    // no generated choices → open the composer outright so there is ALWAYS a way forward
-    if (!(items || []).length) { document.body.classList.add("vnfree"); }
+    box.classList.toggle("hidden", !(items || []).length);
     return;
   }
   suggest.innerHTML = "";
@@ -2391,7 +2391,9 @@ let vnMode = false, vnAutoOn = false, vnAdvanceResolve = null, spriteMap = {};
 function vnShow(on) {
   document.getElementById("vnui").classList.toggle("hidden", !on);
   document.body.classList.toggle("vn", on);
-  if (!on) { document.body.classList.remove("vnlog", "vnfree"); }
+  // 打字为主: VN 里输入栏永远在场 (vnfree 常开), 选项只是它上面的辅助 chips
+  if (on) document.body.classList.add("vnfree");
+  else document.body.classList.remove("vnlog", "vnfree");
 }
 function vnToggleAuto() {
   vnAutoOn = !vnAutoOn;
@@ -2399,10 +2401,6 @@ function vnToggleAuto() {
   if (vnAutoOn) vnAdvance();
 }
 function vnToggleLog() { document.body.classList.toggle("vnlog"); }
-function vnToggleFree() {
-  document.body.classList.toggle("vnfree");
-  if (document.body.classList.contains("vnfree")) msg.focus();
-}
 function vnAdvance() {
   if (vnAdvanceResolve) { const r = vnAdvanceResolve; vnAdvanceResolve = null; r(); }
 }
@@ -2416,8 +2414,9 @@ function vnWait(ms) {
   });
 }
 document.addEventListener("keydown", (e) => {
-  if (vnMode && (e.key === " " || e.key === "Enter") && document.activeElement !== msg
-      && !document.body.classList.contains("vnfree")) { e.preventDefault(); vnAdvance(); }
+  // 输入框聚焦时键盘归打字; 焦点在外面时空格/回车推进文本
+  if (vnMode && (e.key === " " || e.key === "Enter") && document.activeElement !== msg)
+    { e.preventDefault(); vnAdvance(); }
 });
 function _vnSet(img, cid) {
   if (img.dataset.cid !== cid) {
@@ -2473,7 +2472,6 @@ async function playBeatVN(b, skipLog) {
   const nameEl = document.getElementById("vnname");
   if (b.author === "player") {
     document.getElementById("vnchoices").classList.add("hidden");
-    document.body.classList.remove("vnfree");
     nameEl.textContent = myName; nameEl.classList.remove("hidden");
     vnSprite(null); box.className = ""; box.textContent = b.text;
     return;   // your own line flows straight into their reply
@@ -2572,9 +2570,11 @@ function applyScene(scene) {
 // Paint the backdrop. Priority: AI-generated per-LOCATION image (consistent for a place) →
 // keyword/preset image from the scene classifier → mood gradient. Each step degrades to the
 // next if the image 404s, so missing art is never a hard failure.
+let bgPaintSeq = 0;   // 代际号: 慢图后到不许盖新图 (office 盖 ward 的竞速实锤)
 function paintBackground() {
   const scene = curScene || {};
   const mood = scene.mood || "daily";
+  const seq = ++bgPaintSeq;
   bg.style.background = MOOD_GRAD[mood] || MOOD_GRAD.daily;  // gradient base, always set
   // the shorthand above RESETS size/position/repeat inline (mobile showed the raw
   // 1280px image pinned top-left) — restore the cover behavior explicitly
@@ -2586,7 +2586,7 @@ function paintBackground() {
   if (pin) {
     const purl = `/scene/bg/${encodeURIComponent(pin)}.jpg`;
     const pim = new Image();
-    pim.onload = () => { bg.style.backgroundImage = `url(${purl})`; };
+    pim.onload = () => { if (seq === bgPaintSeq) bg.style.backgroundImage = `url(${purl})`; };
     pim.onerror = () => { localStorage.removeItem("lp_chatbg_" + runId); paintBackground(); };
     pim.src = purl;
     return;
@@ -2595,9 +2595,9 @@ function paintBackground() {
     // a redraw bumps bgVer so the browser can't serve the stale cached image
     const locUrl = `/scene/bg/${curLocId}.jpg` + (bgVer[curLocId] ? `?v=${bgVer[curLocId]}` : "");
     const im = new Image();
-    im.onload = () => { bg.style.backgroundImage = `url(${locUrl})`; };
+    im.onload = () => { if (seq === bgPaintSeq) bg.style.backgroundImage = `url(${locUrl})`; };
     im.onerror = () => {
-      paintKeywordBg(scene);  // no AI image for this place (yet) → fall back
+      paintKeywordBg(scene, seq);  // no AI image for this place (yet) → fall back
       // an emergent place (or a just-requested redraw) renders server-side — check back
       const lid = curLocId;
       if ((/^loc_(gen|start)_/.test(lid) || bgVer[lid]) && (bgRetry[lid] || 0) < 8) {
@@ -2607,18 +2607,19 @@ function paintBackground() {
     };
     im.src = locUrl;
   } else {
-    paintKeywordBg(scene);
+    paintKeywordBg(scene, seq);
   }
 }
 let bgRetry = {};   // locId → poll attempts while its AI background is still rendering
 let bgVer = {};     // locId → cache-buster stamped when the player requests a redraw
-function paintKeywordBg(scene) {
+function paintKeywordBg(scene, seq) {
   if (!scene || !scene.bg) return;  // gradient stays
+  const live = () => seq === undefined || seq === bgPaintSeq;
   const stem = scene.night ? scene.bg + "_night" : scene.bg;
   const url = `/scene/bg/${stem}.jpg`;
   const img = new Image();
-  img.onload = () => { bg.style.backgroundImage = `url(${url})`; };
-  img.onerror = () => { if (scene.night) { const f=new Image(); const u2=`/scene/bg/${scene.bg}.jpg`; f.onload=()=>bg.style.backgroundImage=`url(${u2})`; f.src=u2; } };
+  img.onload = () => { if (live()) bg.style.backgroundImage = `url(${url})`; };
+  img.onerror = () => { if (scene.night) { const f=new Image(); const u2=`/scene/bg/${scene.bg}.jpg`; f.onload=()=>{ if (live()) bg.style.backgroundImage=`url(${u2})`; }; f.src=u2; } };
   img.src = url;
 }
 // AUTOPLAY UNLOCK: browsers reject play() that isn't tied to a fresh user gesture (our
@@ -2650,6 +2651,8 @@ async function send(chOverride) {
   const canEmpty = playMode === "god" || ch === "think" || ch === "drive";
   if (!text && !canEmpty) return;
   msg.value = ""; sendBtn.disabled = true; suggest.innerHTML = "";
+  // VN: 发完就把焦点还给舞台, 空格/回车立即可推进回复 (手机顺带收起键盘)
+  if (vnMode) { try { msg.blur(); } catch (e) {} document.getElementById("vnchoices").classList.add("hidden"); }
   if (text) {
     if (playMode === "god") renderBeat({ author:"player", type:"description", text: B("（旁观指引）", "(Direction) ") + text });
     else renderBeat({ author:"player", type: ch==="think"?"think":"dialogue", text });
