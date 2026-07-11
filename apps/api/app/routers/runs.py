@@ -1330,6 +1330,24 @@ def build_expr_sprites(run_id: str, user: User = Depends(current_user),
     return {"queued": cids, "exprs": list(sprites_mod.EXPRS.keys())}
 
 
+def _push_heartbeat_news(db, run, tick_out: dict) -> None:
+    """🔔 一次心跳至多敲一次窗: 邀约优先 (角色亲笔的那句), 其次缺席留言."""
+    from .. import webpush
+    if not tick_out or webpush.quiet_now():
+        return
+    tag = f"lp-{run.id[:8]}"
+    ev = tick_out.get("event")
+    if ev:
+        webpush.push_to_user(db, run.owner_id, ev.get("name") or "有人找你",
+                             ev.get("invite") or f"{ev.get('when', '')}：{ev.get('what', '')}",
+                             url="/play", tag=tag)
+        return
+    ab = tick_out.get("absent") or []
+    if ab:
+        webpush.push_to_user(db, run.owner_id, ab[0].get("name") or "有人",
+                             "你没来。TA给你留了话。", url="/play", tag=tag)
+
+
 def living_heartbeat_pass() -> int:
     """Scheduler entry (main.py lifespan): one pass over the shelf, tick what's due.
     Own session, per-run commit — one bad run never stalls the others."""
@@ -1343,10 +1361,14 @@ def living_heartbeat_pass() -> int:
                 continue
             st = copy.deepcopy(st0)
             try:
-                living.world_tick(r.pinned_content or {}, st, get_llm())
+                out = living.world_tick(r.pinned_content or {}, st, get_llm())
                 r.state = st
                 db.commit()
                 ticked += 1
+                try:   # 🔔 P3 破壁: 心跳产出敲到现实; 静默时段不敲窗 (消息本体在小手机)
+                    _push_heartbeat_news(db, r, out)
+                except Exception:
+                    pass
             except Exception:
                 db.rollback()
     finally:

@@ -28,6 +28,15 @@ class Settings(BaseSettings):
     # (Tavily) instead of the model's own knowledge.
     tavily_api_key: str = ""
 
+    # 🔔 Web Push (活世界 P3): keys unset = the whole layer degrades silently.
+    # Quiet hours are Asia/Shanghai wall-clock; pushes are a knock on the window,
+    # the message itself always lands in the 小手机 regardless.
+    vapid_private_key: str = ""
+    vapid_public_key: str = ""
+    vapid_sub: str = "mailto:ops@linguisplay.app"
+    push_quiet_start: int = 23
+    push_quiet_end: int = 8
+
     # plan/render 双拍合同 (docs/plan-render.md): the primary speaker's turn runs as a fast
     # structured plan call + a streamed prose render instead of one overloaded call.
     # Default OFF; a story can override either way via tuning.plan_render (pilot switch).

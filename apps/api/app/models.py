@@ -24,6 +24,20 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+class PushSub(Base):
+    """🔔 Web-Push mailbox (活世界 P3): one row per browser subscription.
+    endpoint is the identity; dead mailboxes (404/410 on send) are pruned."""
+
+    __tablename__ = "push_subs"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    endpoint: Mapped[str] = mapped_column(Text, unique=True)
+    p256dh: Mapped[str] = mapped_column(String(255))
+    auth: Mapped[str] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
 class User(Base):
     __tablename__ = "users"
 

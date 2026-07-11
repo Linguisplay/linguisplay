@@ -145,7 +145,7 @@ def _heartbeat_event(content, state, llm: LLM) -> dict[str, Any] | None:
     msgs = [invite]
     runtime.phone_push(content, state, char, msgs, now_label)
     return {"char_id": char.get("id"), "name": char.get("name"),
-            "what": what, "when": when}
+            "what": what, "when": when, "invite": invite}
 
 
 def world_tick(content: dict[str, Any], state: dict[str, Any],

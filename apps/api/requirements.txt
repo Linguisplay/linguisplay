@@ -12,3 +12,5 @@ httpx==0.28.1
 
 pillow
 rembg[cpu]
+pywebpush>=2.0
+tzdata; sys_platform == "win32"

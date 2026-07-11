@@ -13,7 +13,7 @@ for _sub in ("bg", "bgm", "sfx"):
 
 from .config import get_settings
 from .db import init_db
-from .routers import auth, cards, gal, me, personas, phone_mock, runs, stories
+from .routers import auth, cards, gal, me, personas, phone_mock, push, runs, stories
 
 settings = get_settings()
 
@@ -69,6 +69,7 @@ app.include_router(stories.router, prefix=API)
 app.include_router(runs.router, prefix=API)
 app.include_router(phone_mock.router, prefix=API)  # MOCK: phone domain skeleton
 app.include_router(gal.router, prefix=API)  # 🎀 galgame 生成器 (docs/galgame-maker.md)
+app.include_router(push.router, prefix=API)  # 🔔 Web Push 订阅 (活世界 P3)
 
 
 @app.get("/", include_in_schema=False)
@@ -112,6 +113,30 @@ def maker_page():
 @app.get("/galplay", include_in_schema=False)
 def galplay_page():
     return FileResponse(os.path.join(_STATIC, "galplay.html"), headers=_NO_CACHE)
+
+
+# 🔔 PWA 三件套 (活世界 P3): service worker 必须从根作用域伺服, 否则控不住 /play
+@app.get("/sw.js", include_in_schema=False)
+def service_worker():
+    return FileResponse(os.path.join(_STATIC, "sw.js"),
+                        media_type="application/javascript",
+                        headers={**_NO_CACHE, "Service-Worker-Allowed": "/"})
+
+
+@app.get("/manifest.json", include_in_schema=False)
+def manifest():
+    return FileResponse(os.path.join(_STATIC, "manifest.json"),
+                        media_type="application/manifest+json")
+
+
+@app.get("/icon-192.png", include_in_schema=False)
+def icon_192():
+    return FileResponse(os.path.join(_STATIC, "icon-192.png"), media_type="image/png")
+
+
+@app.get("/icon-512.png", include_in_schema=False)
+def icon_512():
+    return FileResponse(os.path.join(_STATIC, "icon-512.png"), media_type="image/png")
 
 
 # Scene assets (background images / BGM / SFX). Drop files here per SCENE_ASSETS.md;

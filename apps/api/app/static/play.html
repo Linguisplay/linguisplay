@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="theme-color" content="#0b0c12" />
+<link rel="manifest" href="/manifest.json" />
+<link rel="apple-touch-icon" href="/icon-192.png" />
 <title>LinguisPlay</title>
 <style>
   :root { color-scheme: dark; }
@@ -2542,7 +2545,49 @@ async function toggleLiving() {
       ? "🌍 " + B("活世界已开启：你不在的时候，时间照走、约定照数、角色照过日子。爽约，是有因果的。",
                   "Living world ON: time flows while you're away, and standing people up has consequences.")
       : "🌍 " + B("活世界已关闭：世界只在你玩的时候转。", "Living world OFF."), "t-unlock", 4200);
+    if (want) ensurePush();   // 🔔 世界要在现实里找到你, 得先有一条通道
   } catch (e) { pushToast("⚠️ " + escapeHtml(e.message), "", 2600); }
+}
+// ── 🔔 Web Push (活世界 P3): 角色把话推到现实世界 ──
+function _b64ToU8(s) {
+  const pad = "=".repeat((4 - s.length % 4) % 4);
+  const raw = atob((s + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(raw, ch => ch.charCodeAt(0));
+}
+async function ensurePush() {
+  try {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+      // iPhone 上 Safari 网页拿不到推送 — 装成 App 才有 (iOS 16.4+)
+      const ios = /iPhone|iPad/.test(navigator.userAgent);
+      pushToast(ios ? "📲 " + B("想收到角色的消息推送：先用 Safari 分享 →「添加到主屏幕」，再从桌面打开",
+                                "On iPhone: Share → Add to Home Screen, then open from there for push")
+                    : "🔕 " + B("这个浏览器不支持推送，消息会照常留在小手机里", "No push here — messages still land in the phone"),
+                "", 5200);
+      return "unsupported";
+    }
+    const reg = await navigator.serviceWorker.register("/sw.js");
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted") return "denied";
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      const vk = (await j("/push/vapid")).key;
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true,
+                                              applicationServerKey: _b64ToU8(vk) });
+    }
+    await j("/push/subscribe", { method: "POST", body: JSON.stringify(sub.toJSON()) });
+    pushToast("🔔 " + B("通道已打通：你不在的时候，TA的消息会追到你手机上", "Push is live — they can reach you now"), "t-unlock", 4200);
+    return "ok";
+  } catch (e) { reportClientError(e.message, "push"); return "fail"; }
+}
+// 回头客静默续订: SW 常驻 + 已授权的订阅悄悄对齐到当前登录人
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js").then(async (reg) => {
+    try {
+      if (Notification.permission !== "granted") return;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) await j("/push/subscribe", { method: "POST", body: JSON.stringify(sub.toJSON()) });
+    } catch (e) {}
+  }).catch(() => {});
 }
 // ── 🎬 导演 v1 (客户端规则): 引擎状态直接驱动演出, 不加模型调用不加延迟 ──
 let vnChapTimer = null;
