@@ -304,7 +304,9 @@
 /* ⚖️ 阻断型交互在 VN 里必须上台面 (Yi 排雷): 抉择/移动确认变居中卡,
    骰子有自己的台位, 终局结局全屏谢幕 — 谁也不许死在隐藏的聊天流里 */
 body.vn #choiceask, body.vn #moveask { position: fixed; z-index: 58; left: 50%;
-  top: 40%; transform: translate(-50%, -50%); width: min(560px, 90vw); margin: 0;
+  bottom: calc(96px + env(safe-area-inset-bottom)); top: auto;
+  transform: translateX(-50%); width: min(560px, 92vw); margin: 0;
+  max-height: 58vh; overflow-y: auto;
   box-shadow: 0 18px 56px rgba(0,0,0,.7); }
 /* 铁律: .hidden 必须赢 — #moveask 基础样式的 display:flex (ID 特异性) 曾把它
    压成一条永远藏不掉的空绿条 (Yi 报障「莫名其妙的绿条」实锤) */
