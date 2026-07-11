@@ -22,12 +22,15 @@
          transition: opacity .6s ease; }
   /* 🎭 双立绘位: 竖屏不平分左右（脸会小），前后景深错位 + Auto Highlight
      （说话者前景点亮，另一位缩小压暗置后；位置一旦分定不再交换，防跳动） */
+  /* 呼吸=以脚底为轴的极微纵向缩放(肩膀起伏, 脚钉在地上) — 整体平移会变成飘 */
   .sp { position: absolute; bottom: 24%; transform: translateX(-50%);
+        transform-origin: 50% 100%;
         max-width: 92%; object-fit: contain; object-position: bottom;
         transition: opacity .35s ease, left .3s ease, height .3s ease, filter .3s ease;
-        animation: breathe 4.6s ease-in-out infinite; }   /* 立绘呼吸: 活的 */
-  @keyframes breathe { 50% { bottom: 24.55%; } }
-  .sp.back { animation-duration: 5.8s; }                  /* 前后景呼吸错拍 */
+        animation: breathe 5.2s ease-in-out infinite; }
+  @keyframes breathe { 50% { scale: 1 1.006; } }
+  .sp.back { animation-duration: 6.6s; }                  /* 前后景呼吸错拍 */
+  #stage.nomotion .sp { animation: none; }                /* ⚙ 立绘动效可关 */
   /* 🎬 演出小件: 震动 + 白闪/黑闪 */
   @keyframes shake { 20% { left: -9px; } 45% { left: 8px; } 70% { left: -5px; }
                      90% { left: 3px; } 100% { left: 0; } }
@@ -207,6 +210,8 @@
       <input id="cfgBgm" type="range" min="0" max="0.6" step="0.05" style="width:100%" oninput="cfgChange()"></div>
     <div class="e">音效音量<br>
       <input id="cfgSfx" type="range" min="0" max="1" step="0.1" style="width:100%" oninput="cfgChange()"></div>
+    <div class="e"><label style="cursor:pointer">
+      <input id="cfgMotion" type="checkbox" onchange="cfgChange()"> 立绘呼吸动效</label></div>
   </div>
   <div id="ghearts" class="book" onclick="event.stopPropagation()">
     <h3><span class="x" onclick="this.closest('.book').style.display='none'">✕</span>心动记录 <span class="muted">AFFECTION</span></h3>
@@ -353,6 +358,7 @@ async function boot() {
   if (((W.manifest || {}).cgs || []).length) $("btnGal").style.display = "";
   if (n) $("btnEdb").style.display = "";
   $("btnBgm").classList.toggle("on", bgmOn);   // 🔊 初始就亮出开关状态
+  applyMotion();
   preloadAssets();
 }
 // 🚚 后台预载: 开场就把整本书的图拖回本地缓存 (跨洋链路一次换场 3MB 的解药),
@@ -550,16 +556,20 @@ async function typeText(el, text) {
   typing = false;
 }
 // ⚙ 全局设置: 文字速度 + 分轨音量 (localStorage 全局持久)
-let CFG = { speed: 1, bgm: 0.22, sfx: 0.5 };
+let CFG = { speed: 1, bgm: 0.22, sfx: 0.5, motion: 1 };
 try { CFG = { ...CFG, ...JSON.parse(localStorage.getItem("gal_cfg") || "{}") }; } catch (e) {}
 function saveCfg() { localStorage.setItem("gal_cfg", JSON.stringify(CFG)); }
+function applyMotion() { $("stage").classList.toggle("nomotion", !CFG.motion); }
 function openSettings() {
   $("gset").style.display = "block";
   $("cfgSpeed").value = CFG.speed; $("cfgBgm").value = CFG.bgm; $("cfgSfx").value = CFG.sfx;
+  $("cfgMotion").checked = !!CFG.motion;
 }
 function cfgChange() {
   CFG.speed = +$("cfgSpeed").value; CFG.bgm = +$("cfgBgm").value; CFG.sfx = +$("cfgSfx").value;
+  CFG.motion = $("cfgMotion").checked ? 1 : 0;
   if (bgm && !bgm.paused) bgm.volume = CFG.bgm;
+  applyMotion();
   saveCfg();
 }
 
