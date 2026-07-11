@@ -19,6 +19,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from . import profile as profile_mod
 from . import relationships
 from . import runtime
 from .llm import LLM
@@ -116,6 +117,9 @@ def _heartbeat_event(content, state, llm: LLM) -> dict[str, Any] | None:
                                      "persona_text": (char.get("persona_text") or "")[:160]},
                             "relation": relationships.name_of(
                                 relationships.derive_mode(char, scores, tun)),
+                            # 🪞 P2 个性化: TA 按自己对你的了解来约, 不发通用邀请
+                            "impression": profile_mod.impression_of(state, char.get("id")),
+                            "player_facts": profile_mod.facts_of(state)[:4],
                             "worldview": ((content.get("story") or {}).get("world_long")
                                           or "")[:400],
                             "recent_news": [n.get("text") for n in

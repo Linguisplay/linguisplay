@@ -2066,6 +2066,7 @@ async function openCharCard(cid) {
     ${barHtml(B("亲近", "Closeness"), p.closeness, -40, 100, "#8fe0a6")}
     ${barHtml(B("心动", "Romance"), p.romance, 0, 100, "#ff8fb3")}`}
     ${bio ? `<div class="jh">${B("你所了解的TA", "What you know of them")}</div>${bio}` : ""}
+    ${p.impression ? `<div class="jh">${B("🪞 TA眼中的你", "🪞 How they see you")}</div><div class="jfrag">${escapeHtml(p.impression)}</div>` : ""}
     ${(p.carrying||[]).length || (p.keepsakes||[]).length ? `<div class="jh">${B("TA带着的", "What they carry")}</div><div class="clog">${
       (p.carrying||[]).map(escapeHtml).join("、")}${(p.keepsakes||[]).length ? `<span class="jwho">　🎁 ${p.keepsakes.map(escapeHtml).join("、")}${B("（你送的）", " (your gifts)")}</span>` : ""}</div>` : ""}
     ${(p.ties||[]).length ? `<div class="jh">${B("TA与其他人", "Them and the others")}</div>` + p.ties.map(t =>

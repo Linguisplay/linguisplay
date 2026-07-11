@@ -423,6 +423,11 @@ def _build_system(prompt: dict[str, Any]) -> str:
     if rel_pb:
         lines.append("")
         lines.append(rel_pb)
+    # 🪞 玩家档案 (只有你自己见证过的印象, 不开上帝视角): 让相处有积累感
+    pread = (prompt.get("player_read") or "").strip()
+    if pread:
+        lines.append(f"你相处下来对这位玩家的印象：{pread}——该印象可以被这回合的言行更新，"
+                     "自然流露在态度里，不要复述它。")
 
     # group naturalness: the transcript of what others ALREADY said THIS turn (data; the
     # how-to-react rules live in the charter's 群戏 line)
@@ -2794,6 +2799,8 @@ class QwenLLM:
             if ch.get("examples") else "",
             f"你自己的盘算：{ch.get('agenda','')}" if ch.get("agenda") else "",
             f"你与{pl}的关系：{prompt.get('relation','')}。{prompt.get('relationship_playbook','')}",
+            (f"你相处下来对{pl}的印象：{prompt.get('player_read','')}"
+             if prompt.get("player_read") else ""),
             f"你们此前的经历（你的记忆）：{(prompt.get('memory') or '')[:400]}" if prompt.get("memory") else "",
             (f"最离谱的是：TA此刻就和你在【同一个地方】，人就在几步开外，却用{device}给你发消息。"
              "先就着这件事本身回应——按你的性格来：好笑、无语、抬头瞪TA一眼、或干脆凑趣配合。"
@@ -3074,6 +3081,34 @@ class QwenLLM:
         except Exception:
             return {}
 
+    def _player_profile(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🪞 玩家档案蒸馏: 近期对话 → 玩家习惯 facts + 每个在场角色眼中的印象.
+        见证名单由引擎给定, 只许更新名单内的角色. Degrades to {} (下轮再蒸)."""
+        wit = prompt.get("witnesses") or []
+        prior = prompt.get("prior") or {}
+        sys = ("你为一个长线运转的游戏维护【玩家画像】。只输出JSON："
+               '{"facts":["玩家的习惯/偏好/雷点，每条≤18字，最多6条"],'
+               '"impressions":{"角色ID":"该角色相处出来对玩家的印象，≤28字，口语"}}。'
+               "要求：facts 写行为规律（爱莽/谨慎/嘴硬/吃软不吃硬/常深夜上线这类），"
+               "不写剧情事件；impressions 只能写给定名单里的角色，各写各的视角，"
+               "允许与旧印象矛盾（人会改观）；没有新东西的角色可以不写；不用破折号。")
+        u = (f"旧画像：{prior}\n"
+             f"在场角色名单：{[(w.get('id'), w.get('name')) for w in wit]}\n"
+             "近期对话（旧→新）：\n" + "\n".join(str(x) for x in prompt.get("recent") or []))
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model,
+                               "messages": [{"role": "system", "content": sys},
+                                            {"role": "user", "content": u}],
+                               "max_tokens": 300, "temperature": 0.6,
+                               "response_format": {"type": "json_object"}},
+                              timeout=25)
+            import json as _json
+            data = _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
     def _living_event(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """🌍 世界心跳: this character PROPOSES a dated meeting (the world moves first,
         恋与深空-style). Engine already picked who; the model writes what/when/invite.
@@ -3086,6 +3121,8 @@ class QwenLLM:
                "day_offset 只能是1或2；短信口语、有性格、不解释背景；不用破折号。")
         u = (f"角色：{ch.get('name','')}（{ch.get('role','')}）。人设：{ch.get('persona_text','')}\n"
              f"与玩家的关系：{prompt.get('relation','')}\n"
+             f"TA相处出来对玩家的印象：{prompt.get('impression') or '（还不深）'}\n"
+             f"玩家的习惯：{'；'.join(prompt.get('player_facts') or []) or '（未知）'}\n"
              f"世界观：{prompt.get('worldview','')}\n"
              f"世界近况：{'；'.join(prompt.get('recent_news') or []) or '（无）'}")
         try:
@@ -3612,6 +3649,8 @@ class QwenLLM:
             return self._world_news(prompt)
         if prompt.get("absent_scene"):
             return self._absent_scene(prompt)
+        if prompt.get("player_profile"):
+            return self._player_profile(prompt)
         if prompt.get("living_event"):
             return self._living_event(prompt)
         if prompt.get("parting"):

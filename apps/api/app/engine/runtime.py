@@ -22,6 +22,7 @@ from . import gating
 from . import heat as heat_mod
 from . import intent as intent_mod
 from . import logic
+from . import profile as profile_mod
 from . import relationships
 from . import sanity as sanity_mod
 from . import scene as scene_mod
@@ -3487,6 +3488,7 @@ def _phone_exchange(content: dict[str, Any], state: dict[str, Any], persona: dic
                         "relation": relationships.name_of(mode),
                         "relationship_playbook": relationships.playbook_block(
                             mode, mature=bool(state.get("mature"))),
+                        "player_read": profile_mod.impression_of(state, char_id),  # 🪞
                         "context": ctx,
                         "player_name": (pc or {}).get("name") or (persona or {}).get("name") or "",
                         # 信息不开天眼: strictly THIS character's own digest — the global
@@ -4897,6 +4899,8 @@ def character_profile(content: dict[str, Any], state: dict[str, Any],
         "log": list((state.get("rel_log") or {}).get(char_id) or []),
         "bio": [b for b in bio_open if b], "bio_next_at": bio_next,
         "closeness": closeness, "romance": int(scores.get("romance", 0)),
+        # 🪞 TA眼中的你 (活世界 P2): 相处蒸馏出的印象, 档案卡可见
+        "impression": profile_mod.impression_of(state, char_id),
     }
 
 
@@ -6970,6 +6974,8 @@ def run_turn_stream(
             # 🎯 this character's OWN goal/will: authored wants + the engine-tracked step
             "agenda": _agenda_prompt(content, state, sp),
             "relationship_playbook": rel_playbook,  # current relationship mode toward player
+            # 🪞 玩家档案: 这个角色自己相处出来的印象 (认知边界: 只有见证过的才有)
+            "player_read": profile_mod.impression_of(state, sp_id),
             "player_emotion": state.get("player_emotion", ""),  # prior emotional read (continuity)
             "knowledge": sp.get("knowledge", ""),  # 智能增强: this character's background lore
             "mature": bool(state.get("mature")),   # 18+ run → adult content permitted
@@ -7857,6 +7863,18 @@ def run_turn_stream(
                     state["fate_turns"] = 0
                     state["fate_next"] = random.randint(_lo, _hi)
                     _audit(state, "fate.offered", True, _fc["prompt"][:30])
+
+    # 🪞 玩家档案 (活世界 P2): 记回合, 到节拍就蒸馏一次; 见证名单=此刻在场的角色
+    if player_input and channel in ("say", "do") and not observer:
+        if profile_mod.note_turn(state):
+            _wit = [{"id": c.get("id"), "name": c.get("name")}
+                    for c in scene_characters(content, state)
+                    if c.get("id") and c.get("id") != state.get("player_character_id")]
+            _rec = [f"玩家：{player_input}"] + [
+                f"{b.get('speaker_name') or '旁白'}：{(b.get('text') or '')[:100]}"
+                for b in all_beats[-12:]]
+            _ok = profile_mod.distill(content, state, _rec, _wit, llm)
+            _audit(state, "profile.distill", _ok, f"wit={len(_wit)}")
 
     # 建议随档持久化: 重开 App 恢复存档时, 上一轮的下一步 chips 原样还在 (竖屏 App 常驻件)
     state["suggestions"] = suggestions

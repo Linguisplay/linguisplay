@@ -76,6 +76,12 @@ class MockLLM:
         if prompt.get("living_event"):
             return {"what": "去湖边走走", "slot": "夜", "day_offset": 1,
                     "invite": "明晚有空吗？想去湖边走走，你来。"}
+        # 🪞 玩家档案 twin: 只给见证名单内的角色写印象 (认知边界由引擎裁定)
+        if prompt.get("player_profile"):
+            wits = prompt.get("witnesses") or []
+            return {"facts": ["行动前爱先观察", "对陌生人嘴硬心软"],
+                    "impressions": {w["id"]: "看着莽，其实每一步都先掂量过"
+                                    for w in wits if w.get("id")}}
         # 🎀 galgame maker twins: deterministic parse + compile so build tests never call out
         if prompt.get("gal_parse"):
             return {"characters": [
