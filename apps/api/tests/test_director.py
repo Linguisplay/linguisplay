@@ -55,7 +55,7 @@ def test_calm_beat_yields_nothing():
 def test_pressure_hot_overrides_bgm_and_tints_danger():
     d = director.stage_turn({"scene": {"mood": "daily", "night": False},
                              "pressure_view": {"name": "压力", "value": 82}})
-    assert d["bgm"] == "tense"
+    assert d["bgm"].rstrip("0123456789") == "tense"   # 变奏键 tense/tense2 都算
     assert d["tint"] == "danger"
 
 
@@ -68,7 +68,7 @@ def test_hunter_alert_tints_danger():
 def test_battle_mood_keeps_its_own_bgm():
     d = director.stage_turn({"scene": {"mood": "battle"},
                              "pressure_view": {"value": 90}})
-    assert d["bgm"] == "battle"
+    assert d["bgm"].rstrip("0123456789") == "battle"
 
 
 # ── pick_bgm (曲库标签选曲) ──────────────────────────────
@@ -91,6 +91,17 @@ def test_bgm_night_and_frailty_recolor_daily():
 
 def test_bgm_unknown_mood_falls_to_daily():
     assert director.pick_bgm("弹幕未来贝斯") == "daily"
+
+
+def test_bgm_variants_rotate_by_place_and_day():
+    a = director.pick_variant("daily", "loc_alley|1")
+    b = director.pick_variant("daily", "loc_alley|1")
+    assert a == b, "同场景同一天曲目稳定"
+    picks = {director.pick_variant("daily", f"loc{i}|{i}") for i in range(12)}
+    assert len(picks) >= 2, "换地方/过天要能换到别的曲子"
+    for p in picks:
+        assert p in ("daily", "daily2", "daily3")
+    assert director.pick_variant("romantic", "x|1") == "romantic", "单曲情绪不变奏"
 
 
 # ── logic_audit (导演审稿: 确认逻辑无漏洞) ──────────────────

@@ -2846,12 +2846,16 @@ function _ramp(el, to, ms, then) {
 }
 function swapBgm(mood) {           // crossfade instead of a hard src cut
   const start = () => {
-    // 🎵 甘茶曲库优先 (gal 移植: 高质量钢琴/管弦), 缺曲回退旧合成器曲
+    // 🎵 甘茶曲库优先, 变奏曲目 (daily2/daily3…) 缺失时回退基准曲, 再回退旧合成器曲
+    const base = String(mood || "").replace(/\d+$/, "");
+    const tries = [...new Set([`gal_${mood}`, `gal_${base}`, base])];
+    let ti = 0;
     bgm.onerror = () => {
-      if (bgm.src.includes("gal_")) { bgm.src = `/scene/bgm/${mood}.mp3`;
-                                      if (soundOn) bgm.play().catch(()=>{}); }
+      ti++;
+      if (ti < tries.length) { bgm.src = `/scene/bgm/${tries[ti]}.mp3`;
+                               if (soundOn) bgm.play().catch(()=>{}); }
     };
-    bgm.src = `/scene/bgm/gal_${mood}.mp3`;
+    bgm.src = `/scene/bgm/${tries[0]}.mp3`;
     bgm.volume = 0;
     if (soundOn) bgm.play().catch(()=>{});
     _ramp(bgm, BGM_VOL, 3200);

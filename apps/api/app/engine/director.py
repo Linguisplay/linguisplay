@@ -26,18 +26,29 @@ _HEARTBEAT_RE = re.compile(r"心跳|心脏(狂|猛|骤)|窒息|屏住呼吸|汗�
 # 文件名词干 (客户端 gal_{key}.mp3 优先、{key}.mp3 兜底)。energy 1安~4烈;
 # 加新曲 = 加一行数据, 选曲逻辑不用动。
 BGM_TRACKS: dict[str, dict] = {
-    "daily":    {"tags": {"日常", "平静", "闲适"}, "energy": 1},
-    "warm":     {"tags": {"温馨", "治愈", "陪伴"}, "energy": 1},
-    "romantic": {"tags": {"浪漫", "心动", "暧昧", "亲密"}, "energy": 1},
-    "sad":      {"tags": {"悲伤", "失去", "离别"}, "energy": 1},
-    "lonely":   {"tags": {"孤独", "空寂", "夜"}, "energy": 1},
-    "mystery":  {"tags": {"悬疑", "调查", "线索"}, "energy": 2},
-    "eerie":    {"tags": {"诡异", "阴森", "不安", "夜"}, "energy": 2},
-    "ancient":  {"tags": {"古风", "修行", "宗门"}, "energy": 2},
-    "grimdark": {"tags": {"黑暗", "宏大", "压抑"}, "energy": 3},
-    "tense":    {"tags": {"紧张", "恐惧", "追逐", "危机"}, "energy": 3},
-    "battle":   {"tags": {"战斗", "厮杀", "激烈"}, "energy": 4},
+    "daily":    {"tags": {"日常", "平静", "闲适"}, "energy": 1, "variants": 3},
+    "warm":     {"tags": {"温馨", "治愈", "陪伴"}, "energy": 1, "variants": 2},
+    "romantic": {"tags": {"浪漫", "心动", "暧昧", "亲密"}, "energy": 1, "variants": 1},
+    "sad":      {"tags": {"悲伤", "失去", "离别"}, "energy": 1, "variants": 2},
+    "lonely":   {"tags": {"孤独", "空寂", "夜"}, "energy": 1, "variants": 2},
+    "mystery":  {"tags": {"悬疑", "调查", "线索"}, "energy": 2, "variants": 2},
+    "eerie":    {"tags": {"诡异", "阴森", "不安", "夜"}, "energy": 2, "variants": 2},
+    "ancient":  {"tags": {"古风", "修行", "宗门"}, "energy": 2, "variants": 1},
+    "grimdark": {"tags": {"黑暗", "宏大", "压抑"}, "energy": 3, "variants": 1},
+    "tense":    {"tags": {"紧张", "恐惧", "追逐", "危机"}, "energy": 3, "variants": 2},
+    "battle":   {"tags": {"战斗", "厮杀", "激烈"}, "energy": 4, "variants": 2},
 }
+
+
+def pick_variant(key: str, salt: str) -> str:
+    """🎵 同情绪多曲目轮换 (Yi: 别老是这一首): 换地方/过一天就换曲,
+    同一场景内稳定不跳 — salt 定曲, 不靠随机 (随机=每回合乱切)."""
+    n = int(BGM_TRACKS.get(key, {}).get("variants", 1) or 1)
+    if n <= 1:
+        return key
+    import zlib
+    i = zlib.crc32(f"{key}|{salt}".encode("utf-8")) % n
+    return key if i == 0 else f"{key}{i + 1}"
 
 
 def pick_bgm(mood: str, pressure: int = 0, hot: bool = False, night: bool = False,
@@ -168,8 +179,10 @@ def stage_turn(final: dict[str, Any]) -> dict[str, Any]:
             heat = int(st["heat"].get("stage") or 0)
         except (TypeError, ValueError):
             pass
-    out["bgm"] = pick_bgm(mood, pressure=pressure, hot=hot,
-                          night=bool(scene.get("night")), frail=frail, heat=heat)
+    base = pick_bgm(mood, pressure=pressure, hot=hot,
+                    night=bool(scene.get("night")), frail=frail, heat=heat)
+    salt = f"{st.get('location_id') or ''}|{(st.get('clock') or {}).get('day', 0)}"
+    out["bgm"] = pick_variant(base, salt)
     if hot:
         out["tint"] = "danger"
     elif frail:
