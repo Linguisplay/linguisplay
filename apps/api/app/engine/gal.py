@@ -181,6 +181,7 @@ def _norm_beat(b: dict, ch: int, idx: int, char_ids: set, scene_ids: set,
     return {"id": f"c{ch}b{idx:03d}", "who": who, "text": text, "expr": expr,
             "scene": scene, "bgm": str(b.get("bgm") or "").strip()[:12],
             "date": str(b.get("date") or "").strip()[:16],   # 📅 时间跳跃戳
+            "weather": str(b.get("weather") or "").strip()[:4],  # 🌦 天气层(雪|雨|樱|晴)
             "sfx": str(b.get("sfx") or "").strip()[:8],      # 🔉 拍级音效点
             "require": str(b.get("require") or "").strip()[:12],  # 🚩 flag 条件拍
             "enter": [], "exit": [],
@@ -508,6 +509,7 @@ _EXPR_FACE = {"常态": "平静自然的神情", "喜": "开心微笑的神情",
               # E-mote 丐版: 一张闭眼帧, 播放器随机切换 ≈ 眨眼 (立绘活的最大单点)
               "眨": "双眼轻轻闭合的瞬间的神情，除闭眼外与平静的神情完全一致"}
 BLINK = "眨"
+MOUTH = "口"        # 🗣 口パク: 说话时张嘴帧与常态交替
 # 🎭 差分正解 (qwen-image-edit): 常态是唯一的 t2i 底图, 其余表情按指令改脸 —
 # 独立重生成的"差分"连衣服都会换 (实弹: 老师的眨眼帧换了一套西装)
 _EDIT_TAIL = ("。除面部表情之外，人物的姿势、服装、发型、身体、构图和画风"
@@ -516,7 +518,9 @@ _EDIT_FACE = {"喜": "把人物的表情改为开心微笑" + _EDIT_TAIL,
               "怒": "把人物的表情改为愤怒皱眉" + _EDIT_TAIL,
               "哀": "把人物的表情改为悲伤低落，眼神黯淡" + _EDIT_TAIL,
               "眨": "把人物的双眼改为完全闭合（自然眨眼的一瞬），眼睑合拢、"
-                    "睫毛低垂" + _EDIT_TAIL}
+                    "睫毛低垂" + _EDIT_TAIL,
+              "口": "把人物的嘴改为说话时自然微张的口型（嘴唇张开一点，"
+                    "像正在说话的一瞬）" + _EDIT_TAIL}
 
 
 def portrait_prompt(char: dict, world: str, art: str, expr: str) -> str:
@@ -957,7 +961,7 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
                 seed = char_seed(story_id, c["id"])
                 base = wdir / f"{c['id']}_常态.webp"
                 got: list[str] = []
-                for expr in EXPRESSIONS + (BLINK,):   # 常态 first — it is the base
+                for expr in EXPRESSIONS + (BLINK, MOUTH):   # 常态 first — it is the base
                     p = wdir / f"{c['id']}_{expr}.webp"
                     if p.exists():
                         got.append(expr)

@@ -37,6 +37,34 @@
   #stage.shaking { animation: shake .4s ease; }
   #gflash { position: absolute; inset: 0; z-index: 7; opacity: 0; pointer-events: none;
             transition: opacity .55s ease; }
+  /* 🌦 天气粒子层 (雪/雨/樱) — 环境是叙事的一部分 */
+  #gweather { position: absolute; inset: 0; z-index: 4; pointer-events: none; overflow: hidden; }
+  .wp { position: absolute; top: -4%; will-change: transform, top; }
+  .wp.snow { width: 5px; height: 5px; border-radius: 50%; background: rgba(255,255,255,.85);
+             filter: blur(.5px); animation: fall linear infinite; }
+  .wp.rain { width: 1.5px; height: 26px;
+             background: linear-gradient(rgba(200,220,255,0), rgba(200,220,255,.6));
+             animation: fall linear infinite; }
+  .wp.petal { width: 9px; height: 7px; border-radius: 60% 10% 60% 10%;
+              background: rgba(255,190,205,.8); animation: fall linear infinite, sway 2.6s ease-in-out infinite alternate; }
+  @keyframes fall { to { top: 104%; } }
+  @keyframes sway { from { margin-left: -14px; transform: rotate(-30deg); }
+                    to { margin-left: 14px; transform: rotate(40deg); } }
+  /* 🌇 时段色调滤镜: 从日期戳里的时段词推 */
+  #gtint { position: absolute; inset: 0; z-index: 4; pointer-events: none;
+           transition: background 1.2s ease; }
+  /* 📖 翻页转场: 章节卡出现时一页光从右向左掠过 (书本气质) */
+  #gpage { position: absolute; inset: 0; z-index: 10; pointer-events: none; opacity: 0;
+           background: linear-gradient(100deg, transparent 30%, rgba(236,233,226,.14) 46%,
+                       rgba(236,233,226,.3) 50%, rgba(236,233,226,.14) 54%, transparent 70%);
+           transform: translateX(60%); }
+  #gpage.turn { animation: pageturn .8s ease-in-out; }
+  @keyframes pageturn { 0% { opacity: 1; transform: translateX(60%); }
+                        100% { opacity: 1; transform: translateX(-90%); } }
+  /* 🫥 隐藏界面: 欣赏立绘与CG (任意点击恢复) */
+  #stage.hideui #gbox, #stage.hideui #gctl, #stage.hideui #gback,
+  #stage.hideui #gchoice { opacity: 0 !important; pointer-events: none; }
+  #gbox, #gctl, #gback { transition: opacity .3s ease; }
   .sp.center { left: 50%; }
   .sp.left   { left: 32%; }
   .sp.right  { left: 68%; }
@@ -176,6 +204,7 @@
   <img id="gcg" class="off" alt="">
   <span id="gback" onclick="event.stopPropagation();location.href='/gal'">‹ 返回</span>
   <div id="gctl">
+    <span onclick="event.stopPropagation();hideUI()" title="隐藏界面看立绘">隐藏</span>
     <span onclick="event.stopPropagation();openHearts()" title="心动记录">心动</span>
     <span id="btnAuto" onclick="event.stopPropagation();toggleAuto()" title="自动播放">自动</span>
     <span id="btnSkip" onclick="event.stopPropagation();toggleSkip()" title="已读跳过">跳过</span>
@@ -200,6 +229,9 @@
     <div id="gtext"></div>
     <div id="gnext">▼</div>
   </div>
+  <div id="gweather"></div>
+  <div id="gtint"></div>
+  <div id="gpage"></div>
   <div id="gdate"></div>
   <div id="gflash"></div>
   <div id="gset" class="book" onclick="event.stopPropagation()">
@@ -253,10 +285,21 @@ function bgmToggle() {
   bgmOn = !bgmOn;
   localStorage.setItem("gal_bgm", bgmOn ? "on" : "off");
   $("btnBgm").classList.toggle("on", bgmOn);
-  if (!bgmOn && bgm) bgm.pause();
-  else if (bgm && bgmTrack) bgm.play().catch(() => {});
+  if (!bgmOn) { if (bgm) bgm.pause(); if (amb) amb.pause(); }
+  else {
+    if (bgm && bgmTrack && bgmTrack !== "静") bgm.play().catch(() => {});
+    if (amb) amb.play().catch(() => {});
+  }
 }
 function setBgm(mood) {
+  if (mood === "静") {                      // 🔇 无音是最强的音: 骤停
+    if (bgm && !bgm.paused) {
+      clearInterval(fadeT);
+      bgm.pause();
+    }
+    bgmTrack = "静";
+    return;
+  }
   const t = BGM_MAP[mood];
   if (!t || t === bgmTrack) return;
   bgmTrack = t;
@@ -573,6 +616,79 @@ function cfgChange() {
   saveCfg();
 }
 
+// 🫥 隐藏界面 (任意点击恢复)
+let uiHidden = false;
+function hideUI() { uiHidden = true; $("stage").classList.add("hideui"); }
+function showUIBack() { uiHidden = false; $("stage").classList.remove("hideui"); }
+
+// 🌦 天气粒子层: 雪/雨/樱 (环境是叙事的一部分)
+let curWeather = "";
+function setWeather(w) {
+  if (!w || w === curWeather) return;
+  curWeather = w;
+  const box = $("gweather");
+  box.innerHTML = "";
+  const kind = { "雪": "snow", "雨": "rain", "樱": "petal" }[w];
+  if (!kind) return;                       // 晴 = clear the layer
+  const n = kind === "rain" ? 54 : 34;
+  for (let i = 0; i < n; i++) {
+    const p = document.createElement("div");
+    p.className = "wp " + kind;
+    const dur = kind === "rain" ? (0.7 + Math.random() * 0.5)
+                                : (6 + Math.random() * 7);
+    p.style.cssText = `left:${Math.random() * 100}%;` +
+      `animation-duration:${dur}s${kind === "petal" ? "," + (2 + Math.random() * 2) + "s" : ""};` +
+      `animation-delay:-${Math.random() * dur}s;opacity:${.4 + Math.random() * .6}`;
+    box.appendChild(p);
+  }
+  setAmbient(w);
+}
+// 🔉 环境音层: 与 BGM 并行的天气底噪 (雨要有雨声)
+let amb = null;
+function setAmbient(w) {
+  const f = { "雨": "rain", "雪": "wind", "晴": "" , "樱": "" }[w];
+  if (amb) { amb.pause(); amb = null; }
+  if (!f || !bgmOn) return;
+  amb = new Audio(`/scene/sfx/${f}.mp3`);
+  amb.loop = true;
+  amb.volume = Math.min(0.3, CFG.sfx * 0.5);
+  amb.play().catch(() => {});
+}
+// 🌇 时段色调: 从日期戳时段词推
+function setTint(d) {
+  const t = /夜|深夜|晚/.test(d) ? "rgba(18,34,80,.30)"
+          : /黄昏|夕|傍晚/.test(d) ? "rgba(255,138,60,.14)"
+          : /清晨|黎明|早/.test(d) ? "rgba(255,244,214,.10)" : "";
+  $("gtint").style.background = t;
+}
+// 🗣 口パク: 打字机进行中, 说话者的嘴一开一合
+const mouthable = {};
+function probeMouth(cid) {
+  if (cid in mouthable) return;
+  mouthable[cid] = false;
+  const im = new Image();
+  im.onload = () => { mouthable[cid] = true; };
+  im.src = `/scene/gal/${workId}/${cid}_口.webp`;
+}
+let mouthT = null;
+function talkStart(cid) {
+  clearInterval(mouthT);
+  if (!mouthable[cid]) return;
+  let open = false;
+  mouthT = setInterval(() => {
+    const i = stageSlots.findIndex(s => s && s.cid === cid);
+    if (i < 0 || !typing) { talkStop(); return; }
+    const el = spEls()[i];
+    open = !open;
+    if (open) el.src = `/scene/gal/${workId}/${cid}_口.webp`;
+    else setSrc(el, cid, stageSlots[i].expr);
+  }, 180);
+}
+function talkStop() {
+  clearInterval(mouthT);
+  stageSlots.forEach((s, i) => { if (s) setSrc(spEls()[i], s.cid, s.expr); });
+}
+
 // 👀 眨眼 (E-mote 丐版): 有闭眼帧的角色每隔几秒快速切一下
 const blinkable = {};
 function probeBlink(cid) {
@@ -660,7 +776,8 @@ async function showBeat(b) {
   setStage(b);
   setCg(b);
   if (b.bgm) setBgm(b.bgm);
-  if (b.date) showDate(b.date);
+  if (b.date) { showDate(b.date); setTint(b.date); }
+  if (b.weather) setWeather(b.weather);
   if (b.sfx) playSfx(b.sfx);
   if (b.fx) playFx(b.fx);
   // ⏩ 既读跳过: synthetic cards (no id) count as read so skip flows through them
@@ -673,7 +790,9 @@ async function showBeat(b) {
   if (skipOn && seen) { typing = false; tx.textContent = b.text || ""; }
   else {
     if (skipOn) { skipOn = false; $("btnSkip").classList.remove("on"); }  // 未读处停跳
+    if (b.who && b.who !== W.protagonist_id) { probeMouth(b.who); talkStart(b.who); }
     await typeText(tx, b.text);
+    talkStop();
   }
   if (!choosing) $("gnext").style.visibility = "visible";
   logAdd(b);
@@ -721,6 +840,9 @@ function showChapCard(k, isFinal) {
   const el = $("gchap");
   el.style.display = "flex";
   requestAnimationFrame(() => { el.style.opacity = 1; });
+  if (c.date) setTint(c.date);
+  const pg = $("gpage");                    // 📖 翻页光掠过 (书本气质的转场)
+  pg.classList.remove("turn"); void pg.offsetWidth; pg.classList.add("turn");
   chapCardOn = true;
   clearTimeout(autoT);
   autoT = setTimeout(hideChapCard, skipOn ? 700 : 2600);
@@ -794,8 +916,9 @@ function finishSimple(t) {
 }
 
 function tap() {
+  if (uiHidden) { showUIBack(); return; }   // 🫥 隐藏中: 点一下先把界面请回来
   // 每次点击都是合法的用户手势: 顺手唤醒被 autoplay 策略拦下的 BGM
-  if (bgm && bgm.paused && bgmOn && bgm.src) bgm.play().catch(() => {});
+  if (bgm && bgm.paused && bgmOn && bgm.src && bgmTrack !== "静") bgm.play().catch(() => {});
   if ($("gtitle").style.display !== "none" || $("gend").style.display === "flex") return;
   if (chapCardOn) { hideChapCard(); return; }     // 过场卡: 点一下提前进章
   next();

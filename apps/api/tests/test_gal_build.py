@@ -35,7 +35,8 @@ def test_compile_obeys_contract_shape():
     assert len(normal) >= 8
     assert normal[0]["id"] == "c1b001"
     for b in normal:
-        for k in ("cg", "adult", "fx", "voice", "expr", "scene", "bgm"):
+        for k in ("cg", "adult", "fx", "voice", "expr", "scene", "bgm",
+                  "date", "sfx", "require", "weather"):
             assert k in b                                # reserved fields present
         assert b["scene"] in ("s1", "s2")
         assert b["who"] in (None, "c1", "c2")
