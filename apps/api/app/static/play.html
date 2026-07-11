@@ -306,6 +306,9 @@
 body.vn #choiceask, body.vn #moveask { position: fixed; z-index: 58; left: 50%;
   top: 40%; transform: translate(-50%, -50%); width: min(560px, 90vw); margin: 0;
   box-shadow: 0 18px 56px rgba(0,0,0,.7); }
+/* 铁律: .hidden 必须赢 — #moveask 基础样式的 display:flex (ID 特异性) 曾把它
+   压成一条永远藏不掉的空绿条 (Yi 报障「莫名其妙的绿条」实锤) */
+#moveask.hidden, #choiceask.hidden { display: none; }
 #vndice { position: fixed; z-index: 57; left: 50%; top: 22%; transform: translateX(-50%);
   pointer-events: none; display: flex; flex-direction: column; gap: 8px; align-items: center; }
 #vnend { position: fixed; inset: 0; z-index: 74; display: grid; place-items: center;
@@ -455,10 +458,11 @@ body.dread #dread { opacity:1; }
   body.vn #vnchap, body.vn #vncg, body.vn #vnui { left: var(--sx); right: var(--sx); }
   body.vn #app { margin: 0 var(--sx); }
   body.vn.vnfree footer { left: var(--sx); right: var(--sx); }
-  /* 竖版舞台摆不下对手戏: 说话者单立绘居中 (同手机端) */
-  body.vn #vnsprite { right: 50%; transform: translateX(50%); height: 48vh;
-    max-width: calc(var(--sw) * .74); }
+  /* 竖版舞台摆不下对手戏: 说话者单立绘居中、举到面板之上 (同手机端) */
+  body.vn #vnsprite { right: 50%; transform: translateX(50%); bottom: 44%;
+    height: 44vh; max-width: calc(var(--sw) * .8); }
   body.vn #vnsprite2 { display: none; }
+  body.vn.vnfree #vnbox { max-height: 50vh; }
   body.vn #vntext { max-width: calc(var(--sw) * .9); }
   body.vn.vnstat #cast, body.vn.vnstat #bars { width: min(720px, var(--sw)); }
 }
@@ -503,9 +507,11 @@ body.dread #dread { opacity:1; }
   #suggest { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .chip { flex: 0 0 auto; }
   /* VN 竖屏 (最终形态是手机 App, 竖版是第一设计目标):
-     单立绘居中; vnctl 变触控药丸垫底衬; chips 两行完整可读不省略 */
-  #vnsprite { right: 50%; transform: translateX(50%); height: 46vh; max-width: 70vw; }
+     单立绘居中且【举到对话面板之上】— 人物不许被面板整个吞掉 (Yi 报障) */
+  #vnsprite { right: 50%; transform: translateX(50%); bottom: 45%;
+    height: 42vh; max-width: 80vw; }
   #vnsprite2 { display: none !important; }
+  body.vn.vnfree #vnbox { max-height: 52vh; }
   #vnctl { top: -40px; right: 10px; gap: 7px; }
   #vnctl span { background: rgba(6,7,12,.74); border-radius: 999px; padding: 7px 11px; }
   /* iOS: 输入框字号 <16px 会触发聚焦自动放大 — 竖屏 App 铁律 */
