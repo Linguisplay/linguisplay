@@ -2091,7 +2091,15 @@ def _logic_guard(llm, prompt: dict[str, Any], directed: dict[str, Any], content:
     # 🎙 fifth check: narration hijacked into a character's first person (旁白人称乱)
     _pcn = _char_name(content, state.get("player_character_id")) or ""
     pov_broke = _pov_break(directed, _pcn)
-    if not verdict["hard"] and not lang_broke and not power_broke and not heat_broke             and not pov_broke:
+    # 🔎 sixth check: 导演审稿 (Yi: 导演要确认逻辑无漏洞) — 死者开口/昼夜矛盾/整局复读
+    from . import director as director_mod
+    _dead_nm = [c.get("name") for c in _characters(content)
+                if c.get("id") in _dead_ids(state) and c.get("name")]
+    dir_finds = director_mod.logic_audit(
+        directed.get("beats", []), slot=active_slot(content, state),
+        dead_names=_dead_nm, prev_text=str(state.get("_last_text") or ""))
+    if not verdict["hard"] and not lang_broke and not power_broke and not heat_broke \
+            and not pov_broke and not dir_finds:
         return directed
     # regenerate once, telling the model exactly what broke (labels only — never the secret body)
     corr_parts: list[str] = []
@@ -2114,6 +2122,11 @@ def _logic_guard(llm, prompt: dict[str, Any], directed: dict[str, Any], content:
         corr_parts.append(_POV_CORRECTION)
         _audit(state, "pov.enforced", True, prompt.get("speaker_name") or "",
                "旁白滑成角色第一人称，已强制重写")
+    if dir_finds:
+        corr_parts.append("导演审稿发现漏洞：" + "；".join(dir_finds) +
+                          "。请重写这一轮，把这些破绽全部修掉：死了的人不能出声，"
+                          "时辰景象要贴合当前时段，不许复读上一轮的内容。")
+        _audit(state, "director.audit", True, "；".join(dir_finds)[:60], "已强制重写")
     retry = llm.generate({**prompt, "logic_correction": "\n".join(corr_parts)})
     if not _check(retry)["hard"]:
         return retry  # a lingering language slip is tolerable; a logic break is not
@@ -7890,6 +7903,9 @@ def run_turn_stream(
                 for b in all_beats[-12:]]
             _ok = profile_mod.distill(content, state, _rec, _wit, llm)
             _audit(state, "profile.distill", _ok, f"wit={len(_wit)}")
+
+    # 🔎 导演审稿的比对底稿: 本回合正文留档, 下回合据此识破「整局复读」
+    state["_last_text"] = " ".join((b.get("text") or "") for b in all_beats)[:1600]
 
     # 建议随档持久化: 重开 App 恢复存档时, 上一轮的下一步 chips 原样还在 (竖屏 App 常驻件)
     state["suggestions"] = suggestions

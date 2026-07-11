@@ -93,6 +93,38 @@ def test_bgm_unknown_mood_falls_to_daily():
     assert director.pick_bgm("弹幕未来贝斯") == "daily"
 
 
+# ── logic_audit (导演审稿: 确认逻辑无漏洞) ──────────────────
+
+
+def test_audit_dead_speaker_is_a_hole():
+    beats = [{"type": "dialogue", "speaker_name": "老陈", "text": "我没死。"}]
+    finds = director.logic_audit(beats, dead_names=["老陈"])
+    assert any("老陈" in f for f in finds)
+
+
+def test_audit_day_night_contradiction_narration_only():
+    night = [{"type": "description", "speaker_name": None, "text": "晌午的日头正毒。"}]
+    assert director.logic_audit(night, slot="夜"), "夜里写晌午 = 漏洞"
+    moon = [{"type": "description", "speaker_name": None, "text": "月光漫进走廊。"}]
+    assert director.logic_audit(moon, slot="夜") == [], "夜里写月光天经地义"
+    quoted = [{"type": "dialogue", "speaker_name": "甲", "text": "那天晌午的日头正毒。"}]
+    assert director.logic_audit(quoted, slot="夜") == [], "台词里回忆白天不算罪"
+
+
+def test_audit_echo_repeat():
+    text = "他把病历翻到最后一页，指腹停在一行褪色的签名上，很久没有说话。" * 3
+    beats = [{"type": "description", "speaker_name": None, "text": text}]
+    assert director.logic_audit(beats, prev_text=text), "整局复读要抓"
+    assert director.logic_audit(beats, prev_text="完全不同的一段前情。") == []
+
+
+def test_audit_clean_turn_is_silent():
+    beats = [{"type": "dialogue", "speaker_name": "甲", "text": "跟我来。"},
+             {"type": "description", "speaker_name": None, "text": "夜风掠过走廊。"}]
+    assert director.logic_audit(beats, slot="夜", dead_names=["乙"],
+                                prev_text="上一回合的另一段。") == []
+
+
 def test_low_sanity_tints_frail():
     d = director.stage_turn({"scene": {"mood": "eerie"},
                              "sanity_view": {"name": "理智", "value": 20, "max": 100}})

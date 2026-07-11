@@ -107,6 +107,40 @@ class TurnStage:
         return out
 
 
+# ── 🔎 导演审稿 (Yi: 导演要确认逻辑无漏洞) ──────────────────────────────────
+# 只查铁证不搞猜测 (误杀一段好戏比漏放一个破绽更贵); 查出即随逻辑护卫定向重写。
+_SLOT_CONTRA = {   # 时段 → 旁白里不该出现的相反时辰铁证 (月光/星空这类两可词不算罪)
+    "夜": re.compile(r"烈日|正午的太阳|晌午|艳阳高照|日头正|大中午"),
+    "晨": re.compile(r"深夜|午夜|夜半|入夜|夜深了"),
+    "午": re.compile(r"深夜|午夜|夜半|入夜|夜深了|天刚亮"),
+}
+
+
+def logic_audit(beats: list[dict[str, Any]], *, slot: str | None = None,
+                dead_names: tuple | list = (), prev_text: str = "") -> list[str]:
+    """确定性审稿: 返回破绽清单 (空 = 无漏洞)。
+    ① 死者开口 ② 昼夜矛盾 (只查旁白) ③ 整回合复读上一回合 (模型卡拍)."""
+    finds: list[str] = []
+    dead = {str(n) for n in dead_names if n}
+    for b in beats:
+        sp = (b.get("speaker_name") or "").strip()
+        if b.get("type") == "dialogue" and sp in dead:
+            finds.append(f"死者「{sp}」开口说话了")
+            break
+    rx = _SLOT_CONTRA.get(slot or "")
+    if rx:
+        for b in beats:
+            if b.get("type") == "description" and rx.search(b.get("text") or ""):
+                finds.append(f"此刻时段是「{slot}」，旁白却写出了相反的时辰景象")
+                break
+    joined = " ".join((b.get("text") or "") for b in beats)[:1600]
+    if prev_text and len(joined) > 60:
+        import difflib
+        if difflib.SequenceMatcher(None, prev_text[:1600], joined).ratio() >= 0.92:
+            finds.append("这一回合几乎在逐字复读上一回合")
+    return finds
+
+
 def stage_turn(final: dict[str, Any]) -> dict[str, Any]:
     """回合演出单 {bgm, tint} from the turn's final meta. 都总是给:
     bgm 走标签选曲 (导演每回合选, 客户端同曲不切), tint 阶梯 danger>frail>night>none."""
