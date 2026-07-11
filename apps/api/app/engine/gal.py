@@ -174,6 +174,7 @@ def _norm_beat(b: dict, ch: int, idx: int, char_ids: set, scene_ids: set,
         expr = "常态"
     return {"id": f"c{ch}b{idx:03d}", "who": who, "text": text, "expr": expr,
             "scene": scene, "bgm": str(b.get("bgm") or "").strip()[:12],
+            "date": str(b.get("date") or "").strip()[:16],   # 📅 时间跳跃戳
             "enter": [], "exit": [],
             "cg": bool(b.get("cg")), "adult": bool(b.get("adult")),
             "fx": str(b.get("fx") or "").strip()[:12],
@@ -387,6 +388,7 @@ def compile_chapter(llm, gal: dict[str, Any], ch_index: int,
     # reads them from there; build_work persists gal per chapter)
     chapter["title"] = str(out.get("title") or "").strip()[:12]
     chapter["lead"] = str(out.get("lead") or "").strip()[:40]
+    chapter["date"] = str(out.get("date") or "").strip()[:16]   # 章节卡上的日期行
     return beats, summary
 
 

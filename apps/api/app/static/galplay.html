@@ -75,6 +75,12 @@
   #gchap .num { font-size: 14px; letter-spacing: 10px; color: #8b93a7; margin-bottom: 16px; }
   #gchap h2 { font-size: 24px; letter-spacing: 6px; margin-bottom: 20px; min-height: 1em; }
   #gchap .lead { color: #8b93a7; font-size: 14px; letter-spacing: 2px; }
+  #gchap .date { color: #b9c2d8; font-size: 13px; letter-spacing: 3px; margin-bottom: 12px; }
+  /* 📅 时间跳跃横幅: 拍带 date 时左上角浮现, 停两秒淡走 */
+  #gdate { position: absolute; top: 44px; left: 12px; z-index: 6;
+           background: rgba(8,8,16,.85); border: 1px solid #3a3a52; border-radius: 9px;
+           padding: 4px 14px; font-size: 13px; letter-spacing: 2px; color: #ffd479;
+           opacity: 0; transition: opacity .5s ease; pointer-events: none; }
   #gend { position: absolute; inset: 0; z-index: 9; display: none; flex-direction: column;
           align-items: center; justify-content: center; background: rgba(3,3,8,.92); }
   #gend h2 { font-size: 22px; letter-spacing: 6px; margin-bottom: 18px; }
@@ -132,8 +138,9 @@
     <div id="gtext"></div>
     <div id="gnext">▼</div>
   </div>
-  <div id="gchap"><div class="num" id="gchapNum"></div><h2 id="gchapT"></h2>
-    <div class="lead" id="gchapL"></div></div>
+  <div id="gdate"></div>
+  <div id="gchap"><div class="num" id="gchapNum"></div><div class="date" id="gchapD"></div>
+    <h2 id="gchapT"></h2><div class="lead" id="gchapL"></div></div>
   <div id="gend"><h2 id="gendT"></h2><div class="muted" id="gendS"></div>
     <button onclick="event.stopPropagation();restart()">从头再看</button></div>
   <div id="gtitle">
@@ -230,6 +237,7 @@ async function boot() {
   if (localStorage.getItem(SKEY()) !== null) $("btnCont").style.display = "";
   if (((W.manifest || {}).cgs || []).length) $("btnGal").style.display = "";
   if (n) $("btnEdb").style.display = "";
+  $("btnBgm").classList.toggle("on", bgmOn);   // 🔊 初始就亮出开关状态
   preloadAssets();
 }
 // 🚚 后台预载: 开场就把整本书的图拖回本地缓存 (跨洋链路一次换场 3MB 的解药),
@@ -403,11 +411,20 @@ async function typeText(el, text) {
   }
   typing = false;
 }
+let dateT = null;
+function showDate(d) {          // 📅 time-skip banner: fade in, hold, fade out
+  const el = $("gdate");
+  el.textContent = `— ${d} —`;
+  el.style.opacity = 1;
+  clearTimeout(dateT);
+  dateT = setTimeout(() => { el.style.opacity = 0; }, 2200);
+}
 async function showBeat(b) {
   setBg(b.scene);
   setStage(b);
   setCg(b);
   if (b.bgm) setBgm(b.bgm);
+  if (b.date) showDate(b.date);
   // ⏩ 既读跳过: synthetic cards (no id) count as read so skip flows through them
   const seen = b.id ? readSet.has(b.id) : true;
   markRead(b.id);
@@ -458,6 +475,7 @@ const CN = "一二三四五六七八九十";
 function showChapCard(k, isFinal) {
   const c = (W.chapters || [])[k] || {};
   $("gchapNum").textContent = isFinal ? "终 章" : `第 ${CN[k] || k + 1} 章`;
+  $("gchapD").textContent = isFinal ? "" : (c.date || "");
   $("gchapT").textContent = isFinal ? "" : (c.title || "");
   $("gchapL").textContent = isFinal ? "" : (c.lead || "");
   const el = $("gchap");
