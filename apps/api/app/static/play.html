@@ -2498,7 +2498,8 @@ function _ramp(el, to, ms, then) {
   if (fadeTimer && el === bgm) cancelAnimationFrame(fadeTimer);
   function step(t) {
     const k = Math.min(1, (t - t0) / ms);
-    el.volume = from + (to - from) * k;
+    // 钳位: 浮点溢出算出 -0.00014 会让浏览器抛 IndexSizeError, 换曲回调随之夭折
+    el.volume = Math.min(1, Math.max(0, from + (to - from) * k));
     if (k < 1) { const id = requestAnimationFrame(step); if (el === bgm) fadeTimer = id; }
     else if (then) then();
   }
