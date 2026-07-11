@@ -605,6 +605,84 @@ def cover_prompt(gal: dict, title: str, world: str, art: str) -> str:
             "高细节，画面里没有任何文字")
 
 
+# ── 制作台修订 (blueprint §5: 修订能力是加速工具的灵魂) ──────────────────────────
+def set_beat_text(gal: dict[str, Any], beat_id: str, text: str) -> bool:
+    """改字零成本: locate a beat by id anywhere (main line, choice branches,
+    endings) and replace its text. The script is data."""
+    text = str(text or "").strip()[:120]
+    if not text:
+        return False
+    pov = gal.get("protagonist_id")
+    pools = [b for ch in ((gal.get("script") or {}).get(pov) or {}).get("chapters") or []
+             for b in _walk_beats(ch)]
+    pools += [b for e in gal.get("endings") or [] for b in e.get("beats") or []]
+    for b in pools:
+        if b.get("id") == beat_id:
+            b["text"] = text
+            return True
+    return False
+
+
+def rechapter_work(story_id: str, session_factory, index: int) -> None:
+    """重编第 index 章 (1-based), keeping the confirmed skeleton: earlier chapters
+    and endings stay, values + the ending threshold recompute, the CG ledger
+    rebuilds (build_work backfills only what's missing on disk)."""
+    from sqlalchemy.orm.attributes import flag_modified
+
+    from ..models import Story
+    from .llm import get_llm
+    db = session_factory()
+    db.expire_on_commit = False
+    try:
+        s = db.get(Story, story_id)
+        if not s or not s.gal:
+            return
+        g = dict(s.gal)
+        pov = g.get("protagonist_id")
+        chs = ((g.get("script") or {}).get(pov) or {}).get("chapters") or []
+        if not pov or not (1 <= index <= len(chs)):
+            return
+        g["status"], g["progress"] = "compiling", f"重编第 {index} 章…"
+        s.gal = g
+        flag_modified(s, "gal")
+        db.commit()
+        try:
+            summaries = list(g.get("ch_summaries") or [])
+            prior = "；".join(summaries[:index - 1])[-600:]
+            tail, openings = "", []
+            if index > 1:
+                tail = "".join(b["text"] for b in chs[index - 2]
+                               if b.get("type") != "choice")[-260:]
+            openings = [next((b["text"] for b in ch if b.get("type") != "choice"), "")
+                        for k, ch in enumerate(chs) if k != index - 1]
+            beats, summ = compile_chapter(get_llm(), g, index, prior_summary=prior,
+                                          mature=bool(g.get("mature")),
+                                          prev_tail=tail, prior_openings=openings)
+            chs[index - 1] = beats
+            if index - 1 < len(summaries):
+                summaries[index - 1] = summ
+            g["script"][pov]["chapters"] = chs
+            g["ch_summaries"] = summaries
+            g["values"] = values_meta(chs, g["characters"], pov)
+            t = g["values"].get("target")
+            if g.get("endings") and t:
+                g["endings"][0]["cond"] = {"char": t, "gte": g["values"]["threshold"][t]}
+            g["manifest"]["cgs"] = []
+            g["status"], g["progress"] = "art", "重建CG账本…"
+        except Exception as e:
+            g["status"], g["progress"] = "ready", f"重编失败，保留原章：{e}"
+            s.gal = g
+            flag_modified(s, "gal")
+            db.commit()
+            return
+        s.gal = g
+        flag_modified(s, "gal")
+        db.commit()
+    finally:
+        db.close()
+    build_work(story_id, session_factory)   # art untouched; new CG backfills
+
+
 # ── build orchestration (runs on a background thread; commits progress per step) ──
 def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
     """The whole build. Each step persists gal.status/progress so the polling UI

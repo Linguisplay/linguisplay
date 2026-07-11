@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>🛠 修订台 · LinguisPlay Gal</title>
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body { background: #0b0b12; color: #e7eaf3;
+         font: 14px/1.7 system-ui, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 24px 16px 80px; }
+  h1 { font-size: 19px; } h2 { font-size: 15px; margin: 26px 0 10px; color: #ffd479; }
+  .muted { color: #8b93a7; font-size: 12px; }
+  a { color: #8ea2ff; text-decoration: none; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }
+  .cell { background: #14141f; border: 1px solid #2a2a3a; border-radius: 10px;
+          overflow: hidden; text-align: center; }
+  .cell img { width: 100%; aspect-ratio: 9/16; object-fit: cover; display: block;
+              background: #0e0e16; }
+  .cell .cap { font-size: 11px; padding: 3px 4px 1px; color: #aab2c4; }
+  button { background: #232336; color: #9fb0ff; border: 1px solid #45456a;
+           border-radius: 8px; padding: 3px 10px; font: inherit; font-size: 12px;
+           cursor: pointer; margin: 4px 0 8px; }
+  button:hover { border-color: #ffd479; color: #ffd479; }
+  button.big { background: #4a5adf; color: #fff; border: 0; padding: 9px 16px;
+               font-size: 14px; }
+  .chap { background: #14141f; border: 1px solid #2a2a3a; border-radius: 12px;
+          padding: 12px 14px; margin-bottom: 14px; }
+  .chap b { color: #e7eaf3; }
+  .beats { display: none; margin-top: 10px; }
+  .beats input { width: 100%; background: #0e0e16; color: #e7eaf3;
+                 border: 1px solid #2a2a3a; border-radius: 7px; padding: 5px 9px;
+                 font: inherit; font-size: 13px; margin-bottom: 5px; }
+  .beats input.dirty { border-color: #ffd479; }
+  .beats .who { color: #ffd479; font-size: 11px; }
+  select { background: #0e0e16; color: #e7eaf3; border: 1px solid #34344a;
+           border-radius: 8px; padding: 7px 10px; font: inherit; max-width: 100%; }
+  #busy { display: none; position: fixed; inset: 0; background: rgba(5,5,10,.9);
+          z-index: 9; text-align: center; padding-top: 40vh; font-size: 15px; }
+</style>
+</head>
+<body>
+<div id="busy">🛠 施工中，完成后自动刷新…</div>
+<div class="wrap">
+  <h1 id="title">🛠 修订台</h1>
+  <div class="muted">重画限每张 3 次 · 重编限每章 2 次 · 换画风限 2 次　<a href="/gal">← 回书架</a></div>
+
+  <h2>🎨 全本画风</h2>
+  <select id="style">
+    <option value="日漫风格插画，清新明亮的色彩，干净的线条，赛璐璐上色，唯美光效">日漫清新</option>
+    <option value="">电影质感写实</option>
+    <option value="阴郁冷调的恐怖片美术，低饱和色，深重阴影，胶片噪点，令人不安的构图">暗黑惊悚</option>
+    <option value="中国古风工笔画意，水墨氤氲，绢本设色，古典服饰与建筑，含蓄留白">古风水墨</option>
+    <option value="赛博朋克霓虹夜色，雨湿街道反光，冷紫与青色光源，未来都市质感">赛博霓虹</option>
+  </select>
+  <button onclick="restyle()">换画风重绘全书（贵！）</button>
+
+  <h2>🧍 立绘（点重画换新的）</h2>
+  <div id="sprites" class="grid muted">加载中…</div>
+  <h2>🖼 背景 / 封面 / CG</h2>
+  <div id="bgs" class="grid"></div>
+  <h2>📖 章节（重编 / 直接改字）</h2>
+  <div id="chaps"></div>
+</div>
+<script>
+const API = "/api/v1";
+const workId = new URLSearchParams(location.search).get("work");
+let W = null;
+const $ = id => document.getElementById(id);
+async function j(path, opt = {}) {
+  const r = await fetch(API + path, { headers: { "Content-Type": "application/json" }, ...opt });
+  if (!r.ok) { let d = {}; try { d = await r.json(); } catch (e) {} throw new Error(d.detail || r.status); }
+  return r.json();
+}
+function busyUntilReady() {
+  $("busy").style.display = "block";
+  const t = setInterval(async () => {
+    try {
+      const st = await j(`/gal/${workId}/status`);
+      if (st.status === "ready" || st.status === "failed") { clearInterval(t); location.reload(); }
+    } catch (e) {}
+  }, 4000);
+}
+async function act(path, body) {
+  try { await j(path, { method: "POST", body: JSON.stringify(body) }); busyUntilReady(); }
+  catch (e) { alert("⚠️ " + e.message); }
+}
+const redraw = (kind, key) => confirm("重画这一张？") && act(`/gal/${workId}/redraw`, { kind, key });
+const rechapter = i => confirm(`重编第 ${i} 章？文字全部重写（保持大纲），改过的字会丢。`) &&
+  act(`/gal/${workId}/rechapter`, { i });
+const restyle = () => confirm("按所选画风重绘全书所有美术？次数有限且较贵。") &&
+  act(`/gal/${workId}/restyle`, { art_style: $("style").value });
+
+function cell(img, cap, onclick) {
+  return `<div class="cell"><img src="${img}" loading="lazy"
+    onerror="this.style.opacity=.15"><div class="cap">${cap}</div>
+    <button onclick="${onclick}">重画</button></div>`;
+}
+async function load() {
+  W = await j(`/gal/${workId}/script`);
+  $("title").textContent = `🛠 修订台 · ${W.title}`;
+  const pov = W.protagonist_id;
+  const exprs = ["常态", "喜", "怒", "哀"];
+  $("sprites").classList.remove("muted");
+  $("sprites").innerHTML = W.characters.filter(c => c.id !== pov).map(c =>
+    exprs.map(e => cell(`/scene/gal/${workId}/${c.id}_${e}.webp`, `${c.name} · ${e}`,
+      `redraw('sprite','${c.id}_${e}')`)).join("")).join("");
+  $("bgs").innerHTML =
+    W.scenes.map(s => cell(`/scene/gal/${workId}/bg_${s.id}.jpg`, `背景 · ${s.name}`,
+      `redraw('bg','${s.id}')`)).join("") +
+    cell(`/scene/gal/${workId}/cover.jpg`, "封面", `redraw('cover','')`) +
+    ((W.manifest || {}).cgs || []).map(id =>
+      cell(`/scene/gal/${workId}/cg_${id}.jpg`, `CG · ${id}`, `redraw('cg','${id}')`)).join("");
+  const chs = ((W.script || {})[pov] || {}).chapters || [];
+  $("chaps").innerHTML = chs.map((ch, k) => {
+    const meta = (W.chapters || [])[k] || {};
+    const rows = [];
+    const walk = b => rows.push(`<div class="who">${b.who ? nameOf(b.who) : "旁白"}</div>` +
+      `<input data-id="${b.id}" data-orig="${esc(b.text)}" value="${esc(b.text)}">`);
+    ch.forEach(e => {
+      if (e.type === "choice") e.options.forEach(o => (o.beats || []).forEach(walk));
+      else walk(e);
+    });
+    return `<div class="chap"><b>第 ${k + 1} 章〔${meta.title || ""}〕</b>
+      <span class="muted">${meta.date || ""}</span>
+      <button onclick="rechapter(${k + 1})">重编本章</button>
+      <button onclick="this.parentElement.querySelector('.beats').style.display='block';this.remove()">展开改字</button>
+      <div class="beats">${rows.join("")}
+        <button class="big" onclick="saveTexts(this)">保存本章改动</button></div></div>`;
+  }).join("");
+  document.querySelectorAll(".beats input").forEach(inp =>
+    inp.addEventListener("input", () => inp.classList.toggle("dirty", inp.value !== inp.dataset.orig)));
+}
+function nameOf(cid) { const c = (W.characters || []).find(x => x.id === cid); return c ? c.name : "？"; }
+function esc(s) { return (s || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;"); }
+async function saveTexts(btn) {
+  const edits = {};
+  btn.parentElement.querySelectorAll("input.dirty").forEach(i => { edits[i.dataset.id] = i.value; });
+  if (!Object.keys(edits).length) { alert("没有改动"); return; }
+  try {
+    const r = await j(`/gal/${workId}/retext`, { method: "POST", body: JSON.stringify({ edits }) });
+    alert(`✅ 已保存 ${r.updated} 处改动`);
+    btn.parentElement.querySelectorAll("input.dirty").forEach(i => { i.dataset.orig = i.value; i.classList.remove("dirty"); });
+  } catch (e) { alert("⚠️ " + e.message); }
+}
+load().catch(e => { document.body.innerHTML = e.message === "401"
+  ? '请先在 <a href="/play">/play</a> 登录' : "加载失败：" + e.message; });
+</script>
+</body>
+</html>

@@ -76,6 +76,12 @@ def gal_shelf_page():
     return FileResponse(os.path.join(_STATIC, "galshelf.html"), headers=_NO_CACHE)
 
 
+@app.get("/galedit", include_in_schema=False)
+def gal_edit_page():
+    """🛠 修订台: 重画/重编/改字/换画风 (blueprint §5 制作台)."""
+    return FileResponse(os.path.join(_STATIC, "galedit.html"), headers=_NO_CACHE)
+
+
 @app.get("/maker", include_in_schema=False)
 def maker_page():
     """🎀 galgame 生成器: 贴故事 → 建造 → 游玩 (docs/galgame-maker.md)."""

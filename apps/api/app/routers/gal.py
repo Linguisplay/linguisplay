@@ -136,6 +136,133 @@ def work_script(work_id: str, user: User = Depends(current_user),
             "manifest": g.get("manifest") or {}}
 
 
+# ── 制作台修订 (blueprint §5): 重画/重编/改字/换画风 ─────────────────────────────
+class Redraw(BaseModel):
+    kind: str          # sprite | bg | cg | cover
+    key: str = ""      # sprite: "c2_喜" / bg: "s1" / cg: beat id / cover: ignored
+
+
+class Rechapter(BaseModel):
+    i: int
+
+
+class Retext(BaseModel):
+    edits: dict        # {beat_id: new_text}
+
+
+class Restyle(BaseModel):
+    art_style: str
+
+
+def _bump_limit(g: dict, bucket: str, key: str, cap: int) -> None:
+    used = (g.setdefault(bucket, {})).get(key, 0)
+    if used >= cap:
+        raise HTTPException(403, f"这一项的修订次数用完了（上限 {cap} 次）")
+    g[bucket][key] = used + 1
+
+
+@router.post("/{work_id}/redraw")
+def redraw(body: Redraw, work_id: str, user: User = Depends(current_user),
+           db: Session = Depends(get_db)):
+    """重画单张: delete the file, art backfill regenerates only what's missing."""
+    s = _own_work(work_id, user, db)
+    g = dict(s.gal or {})
+    if g.get("status") != "ready":
+        raise HTTPException(409, "还在建造中")
+    from ..engine.gal import GAL_DIR
+    wdir = GAL_DIR / work_id
+    files = {"sprite": [wdir / f"{body.key}.webp"],
+             "bg": [wdir / f"bg_{body.key}.jpg"],
+             "cg": [wdir / f"cg_{body.key}.jpg"],
+             "cover": [wdir / "cover.jpg"]}.get(body.kind)
+    if not files:
+        raise HTTPException(400, "unknown kind")
+    _bump_limit(g, "redraws", f"{body.kind}:{body.key}", 3)
+    for p in files:
+        p.unlink(missing_ok=True)
+    g["status"], g["progress"] = "art", "重画中…"
+    s.gal = g
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(s, "gal")
+    db.commit()
+    if not _spawn_build(s.id):
+        raise HTTPException(409, "正在建造中")
+    return {"ok": True}
+
+
+@router.post("/{work_id}/rechapter")
+def rechapter(body: Rechapter, work_id: str, user: User = Depends(current_user),
+              db: Session = Depends(get_db)):
+    """重编某章 (保持大纲); values 与结局阈值随之重算。"""
+    s = _own_work(work_id, user, db)
+    g = dict(s.gal or {})
+    if g.get("status") != "ready":
+        raise HTTPException(409, "还在建造中")
+    _bump_limit(g, "reedits", str(body.i), 2)
+    s.gal = g
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(s, "gal")
+    db.commit()
+    with _BUILD_LOCK:
+        if work_id in _BUILDING:
+            raise HTTPException(409, "正在建造中")
+        _BUILDING.add(work_id)
+
+    def _run():
+        try:
+            gal_mod.rechapter_work(work_id, SessionLocal, body.i)
+        finally:
+            with _BUILD_LOCK:
+                _BUILDING.discard(work_id)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"ok": True}
+
+
+@router.post("/{work_id}/retext")
+def retext(body: Retext, work_id: str, user: User = Depends(current_user),
+           db: Session = Depends(get_db)):
+    """改字零成本: the script is data."""
+    s = _own_work(work_id, user, db)
+    g = dict(s.gal or {})
+    n = 0
+    for bid, text in (body.edits or {}).items():
+        if gal_mod.set_beat_text(g, str(bid), str(text)):
+            n += 1
+    if n:
+        s.gal = g
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(s, "gal")
+        db.commit()
+    return {"updated": n}
+
+
+@router.post("/{work_id}/restyle")
+def restyle(body: Restyle, work_id: str, user: User = Depends(current_user),
+            db: Session = Depends(get_db)):
+    """全本换画风: 一键重刷所有美术 (贵, 限 2 次)。"""
+    s = _own_work(work_id, user, db)
+    g = dict(s.gal or {})
+    if g.get("status") != "ready":
+        raise HTTPException(409, "还在建造中")
+    _bump_limit(g, "redraws", "restyle", 2)
+    s.tuning = {**(s.tuning or {}), "art_style": (body.art_style or "").strip()[:200]}
+    from ..engine.gal import GAL_DIR
+    wdir = GAL_DIR / work_id
+    if wdir.exists():
+        for p in wdir.iterdir():
+            p.unlink(missing_ok=True)
+    g["manifest"] = {"sprites": {}, "bgs": [], "cover": False, "missing": [], "cgs": []}
+    g["status"], g["progress"] = "art", "按新画风重绘全部美术…"
+    s.gal = g
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(s, "gal")
+    db.commit()
+    if not _spawn_build(s.id):
+        raise HTTPException(409, "正在建造中")
+    return {"ok": True}
+
+
 @router.post("/{work_id}/rebuild")
 def rebuild(work_id: str, user: User = Depends(current_user),
             db: Session = Depends(get_db)):

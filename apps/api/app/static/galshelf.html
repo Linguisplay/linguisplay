@@ -79,6 +79,9 @@ async function load() {
                            : `<div class="nocov">🎀</div>`) +
       `<div class="info"><b>${w.title}</b>` +
       `<span class="st ${cls}">${lab}</span>` +
+      (w.status === "ready"
+        ? ` <a href="/galedit?work=${w.id}" onclick="event.stopPropagation()"
+             style="color:#8ea2ff;font-size:12px">🛠 修订</a>` : "") +
       `<div class="muted" style="margin-top:6px">${prog}</div></div>`;
     b.onclick = () => {
       if (w.status === "ready") location.href = `/galplay?work=${w.id}`;

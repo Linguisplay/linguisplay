@@ -258,6 +258,23 @@ def test_endings_engine_owns_the_fork():
     assert ends[0]["title"] and ends[1]["title"]
 
 
+def test_set_beat_text_reaches_everywhere():
+    g = _parsed()
+    b1, _ = gal.compile_chapter(MockLLM(), g, 1)
+    g["script"] = {g["protagonist_id"]: {"chapters": [b1]}}
+    g["values"] = gal.values_meta([b1], g["characters"], g["protagonist_id"])
+    g["endings"] = gal.compile_endings(MockLLM(), g)
+    # main line, a choice branch, and an ending — 改字 must reach all three
+    branch_id = next(b for b in b1 if b.get("type") == "choice")["options"][0]["beats"][0]["id"]
+    for bid in ("c1b001", branch_id, "e1b001"):
+        assert gal.set_beat_text(g, bid, "改过的字。")
+    assert not gal.set_beat_text(g, "nope", "x")
+    assert not gal.set_beat_text(g, "c1b001", "")     # empty text refused
+    texts = [b["text"] for ch in g["script"][g["protagonist_id"]]["chapters"]
+             for b in gal._walk_beats(ch)]
+    assert texts.count("改过的字。") == 2              # main + branch
+
+
 def test_bad_parse_fails_loud():
     class EmptyLLM(MockLLM):
         def generate(self, prompt):
