@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .gal import shrink_jpg
+from .gal import debg, to_webp
 from .qwen import edit_image
 
 _STATIC = Path(__file__).resolve().parents[1] / "static" / "scene"
@@ -31,9 +31,9 @@ EXPRS: dict[str, str] = {
 
 
 def base_of(cid: str) -> Path | None:
-    """The character's best available base image (立绘优先, 头像兜底)."""
-    for d in (SPRITE_DIR, AVATAR_DIR):
-        p = d / f"{cid}.jpg"
+    """改脸差分的底图: 立绘源图 (带背景, 编辑器吃这个) → 旧版立绘 jpg → 头像."""
+    for p in (SPRITE_DIR / f"{cid}_src.jpg", SPRITE_DIR / f"{cid}.jpg",
+              AVATAR_DIR / f"{cid}.jpg"):
         if p.exists():
             return p
     return None
@@ -55,7 +55,7 @@ def build_expr_pack(cids: list[str], exprs: list[str] | None = None,
         for expr in todo:
             if expr not in EXPRS:
                 continue
-            out_path = SPRITE_DIR / f"{cid}_{expr}.jpg"
+            out_path = SPRITE_DIR / f"{cid}_{expr}.webp"
             if out_path.exists() and not force:
                 report["skipped"].append(out_path.name)
                 continue
@@ -63,6 +63,7 @@ def build_expr_pack(cids: list[str], exprs: list[str] | None = None,
             if not img:
                 report["failed"].append(out_path.name)
                 continue
-            out_path.write_bytes(shrink_jpg(img, quality=82, max_side=1024))
+            # 🎭 差分同样上台前抠底 — 换表情不许换出一块背景板
+            out_path.write_bytes(to_webp(debg(img)))
             report["done"].append(out_path.name)
     return report

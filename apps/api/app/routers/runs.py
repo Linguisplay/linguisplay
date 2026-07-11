@@ -49,7 +49,7 @@ _TURN_GUARD = _imgthreading.Lock()
 
 
 def _img_worker():
-    from ..engine.gal import shrink_jpg
+    from ..engine.gal import debg, shrink_jpg, to_webp
     from ..engine.qwen import generate_image
     while True:
         prompt, path, size = _IMG_Q.get()
@@ -62,8 +62,14 @@ def _img_worker():
                     img = generate_image(prompt, size=size)
                 if img:
                     path.parent.mkdir(parents=True, exist_ok=True)
-                    # 出生即瘦身: 原始生图 1-3MB, 小水管服务器上手机要下载几十秒
-                    path.write_bytes(shrink_jpg(img, quality=80, max_side=1600))
+                    if path.suffix == ".webp":
+                        # 🎭 透底立绘: 抠底出剪影上台; 源图留在旁边作改脸差分的底
+                        path.with_name(path.stem + "_src.jpg").write_bytes(
+                            shrink_jpg(img, quality=82, max_side=1280))
+                        path.write_bytes(to_webp(debg(img)))
+                    else:
+                        # 出生即瘦身: 原始生图 1-3MB, 小水管服务器上手机要下载几十秒
+                        path.write_bytes(shrink_jpg(img, quality=80, max_side=1600))
         except Exception:
             pass
         finally:
@@ -115,7 +121,7 @@ def _queue_snap(payload: dict | None) -> None:
         _enqueue_image(sn["prompt"], _SNAP_DIR / sn["url"].rsplit("/", 1)[-1], "768*768")
 
 
-def _ensure_char_avatars(content: dict) -> bool:
+def _ensure_char_avatars(content: dict, vn: bool = False) -> bool:
     """Point every faceless character at /scene/avatar/{id}.jpg and queue any missing
     portrait. Generated cast always follows the convention; an AUTHORED character
     keeps whatever art its author set — only empty faces are filled (寂声 shipped an
@@ -146,15 +152,15 @@ def _ensure_char_avatars(content: dict) -> bool:
                   "高细节，胶片颗粒感" + (f"。画面基调：{art}" if art else ""))
         _enqueue_image(prompt, path, "768*768")
     # 🎀 VN stories also render a TALL standing sprite per character (the galgame 立绘);
-    # deep near-black backdrop so the client's fade-mask blends it over any scene
-    if (story.get("tuning") or {}).get("vn_mode"):
+    # deep near-black backdrop → worker 抠底成透底剪影 (Yi: 和 galgame 一样要无背景)
+    if vn or (story.get("tuning") or {}).get("vn_mode"):
         art = runtime.art_style_of(content)
         world = ((story.get("world_long") or "").strip().replace("\n", " "))[:120]
         for c in story.get("characters") or []:
             cid, name = c.get("id"), c.get("name")
             if not cid or not name:
                 continue
-            spath = _SPRITE_DIR / f"{cid}.jpg"
+            spath = _SPRITE_DIR / f"{cid}.webp"
             if spath.exists():
                 continue
             bits = "，".join(b for b in (name, c.get("role") or "",
@@ -441,7 +447,7 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
             "generated": True,
         })
     # 🖼 conjured cast (sandbox opening people, carried-in 旧识) get portraits rendering
-    _ensure_char_avatars(content)
+    _ensure_char_avatars(content, vn=bool((state.get("tuning") or {}).get("vn_mode")))
     run = RunModel(
         owner_id=user.id,
         story_id=story.id,
@@ -451,9 +457,13 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
         state=state,
     )
     # Opening: a detailed intro (who you are / where / what's happening / first goal).
+    # 保真落库 (Yi: 进沙盒要有开场白) — 钩子里主角开口那句是 dialogue+speaker,
+    # 压成无名旁白的话, VN 里整个开场没有人亮、没有人说话
     opening = runtime.build_opening(content, state)
     run.beats = [
-        BeatModel(seq=i, type="description", text=b.get("text", ""), author="engine")
+        BeatModel(seq=i, type=b.get("type", "description"),
+                  speaker_name=b.get("speaker_name"), text=b.get("text", ""),
+                  author="engine")
         for i, b in enumerate(opening)
     ]
     db.add(run)
@@ -747,7 +757,9 @@ def play(
                 # (or whose renders got throttled) pick their faces up here
                 av_changed = False
                 try:
-                    av_changed = _ensure_char_avatars(content)
+                    av_changed = _ensure_char_avatars(
+                        content,
+                        vn=bool(((final["state"] or {}).get("tuning") or {}).get("vn_mode")))
                 except Exception:
                     pass
                 if final.get("content_mutated") or av_changed:

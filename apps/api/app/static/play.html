@@ -335,6 +335,9 @@
 #vnsprite2 { left: 3vw; height: 55vh; max-width: 36vw; z-index: 1;
   filter: brightness(.45) drop-shadow(0 0 26px rgba(0,0,0,.65));
   animation-duration: 6.6s; }
+/* 🎭 透底剪影 (gal 同款, Yi: 无背景+说话的人亮): 不装相框, 站姿贴地 */
+#vnsprite.cut, #vnsprite2.cut { aspect-ratio: auto; border: 0; border-radius: 0;
+  object-fit: contain; object-position: bottom; }
 #vnsprite.dim { filter: brightness(.72) drop-shadow(0 0 26px rgba(0,0,0,.65)); }
 @keyframes vnbreathe { 50% { scale: 1 1.006; } }
 #vnbox { position: absolute; left: 0; right: 0; bottom: 0; min-height: 148px; z-index: 4;
@@ -422,6 +425,23 @@ body.dread #dread { opacity:1; }
 /* chip 分型: chip 1 follows the player's intent — it reads louder */
 #suggest .chip.prime { border-color:#5b79c9; background:#1d2438; color:#c9d6ff; }
 #suggest .chip.redo { border-color:#6a5b2c; color:#e8d9a0; }
+
+/* ── 🖼 竖屏画框 (最终形态=手机 App): 宽屏下 VN 收进居中竖版舞台, 两侧留黑 ── */
+@media (min-width: 800px) {
+  body.vn { --sw: min(100vw, 47vh); --sx: max(0px, calc((100vw - var(--sw)) / 2));
+    background: #000; }
+  body.vn #bg, body.vn #dread, body.vn #vntint, body.vn #vnflash,
+  body.vn #vnchap, body.vn #vncg, body.vn #vnui { left: var(--sx); right: var(--sx); }
+  body.vn #app { margin: 0 var(--sx); }
+  body.vn.vnfree footer { left: var(--sx); right: var(--sx); }
+  /* 竖版舞台摆不下对手戏: 说话者单立绘居中 (同手机端) */
+  body.vn #vnsprite { right: 50%; transform: translateX(50%); height: 48vh;
+    max-width: calc(var(--sw) * .74); }
+  body.vn #vnsprite2 { display: none; }
+  body.vn #vnchoices { width: min(720px, calc(var(--sw) * .94)); }
+  body.vn #vntext { max-width: calc(var(--sw) * .9); }
+  body.vn.vnstat #cast, body.vn.vnstat #bars { width: min(720px, var(--sw)); }
+}
 
 /* ── mobile: uncramp the pinned stack, bigger readable text ── */
 #barsToggle { display: none; }  /* mobile-only strip; desktop keeps the full bars */
@@ -2490,15 +2510,18 @@ function _vnSet(img, cid, expr) {
   const key = cid + "|" + (expr || "");
   if (img.dataset.key !== key) {
     img.dataset.key = key;
-    // 🎭 回落链: 表情差分 → 常态立绘 → 头像 → 隐藏 (缺素材永不闪断)
+    // 🎭 回落链: 表情差分(透底) → 常态剪影(透底) → 旧版jpg人像卡 → 头像 → 隐藏
     img.onerror = () => {
-      if (img.dataset.stage === "expr") { img.dataset.stage = "base"; img.src = `/scene/sprite/${cid}.jpg`; }
-      else if (img.dataset.stage === "base") { img.dataset.stage = "avatar"; img.src = `/scene/avatar/${cid}.jpg`; }
+      if (img.dataset.stage === "expr") { img.dataset.stage = "base"; img.src = `/scene/sprite/${cid}.webp`; }
+      else if (img.dataset.stage === "base") { img.dataset.stage = "legacy"; img.src = `/scene/sprite/${cid}.jpg`; }
+      else if (img.dataset.stage === "legacy") { img.dataset.stage = "avatar"; img.src = `/scene/avatar/${cid}.jpg`; }
       else img.classList.add("hidden");
     };
+    // 剪影不装相框: 透底 webp 撤掉 3:4 裁切/描边, 站姿贴地
+    img.onload = () => img.classList.toggle("cut", img.src.endsWith(".webp"));
     img.dataset.stage = expr ? "expr" : "base";
-    img.src = expr ? `/scene/sprite/${cid}_${encodeURIComponent(expr)}.jpg`
-                   : `/scene/sprite/${cid}.jpg`;
+    img.src = expr ? `/scene/sprite/${cid}_${encodeURIComponent(expr)}.webp`
+                   : `/scene/sprite/${cid}.webp`;
   }
   img.classList.remove("hidden");
 }
