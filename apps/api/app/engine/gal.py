@@ -105,7 +105,9 @@ def parse_story(llm, source: str, title: str) -> dict[str, Any]:
     if not chapters:
         chapters = [{"i": 1, "summary": "故事的开端。", "from": ""}]
     return {"characters": chars, "scenes": scenes,
-            "protagonist_id": protagonist, "chapters": chapters}
+            "protagonist_id": protagonist, "chapters": chapters,
+            # ✍️ 文风卡 (主线引擎移植: 每本书自带作者腔+忌清单, 文风问题调书不调引擎)
+            "style": str(out.get("style") or "").strip()[:120]}
 
 
 def needs_translation(text: str) -> bool:
@@ -305,6 +307,8 @@ def compile_chapter(llm, gal: dict[str, Any], ch_index: int,
             "prior_summary": prior_summary[:600],       # 编译记忆
             "prev_tail": prev_tail[-260:],               # 前章收尾锚 (depth anchor)
             "mature": mature,                            # 🔞 rides into the craft block
+            "style": (gal.get("style") or "")[:120],     # ✍️ 文风卡贴住
+            "knowledge": (gal.get("knowledge") or "")[:1800],  # 🔎 联网设定铁律
             "retry": reasons if attempt else {},         # 点名重打: 缺选择/回声
             "target_beats": TARGET_BEATS_PER_CHAPTER,
         }) or {}
@@ -447,6 +451,8 @@ def compile_endings(llm, gal: dict[str, Any], full_summary: str = "",
         "target": ({"id": targets[0], "name": names.get(targets[0])}
                    if targets else None),      # legacy single-target shape
         "summary": full_summary[:600],
+        "style": (gal.get("style") or "")[:120],
+        "knowledge": (gal.get("knowledge") or "")[:1800],
         "mature": mature,
     }) or {}
     char_ids = {c["id"] for c in gal["characters"]}
@@ -696,6 +702,7 @@ def expand_work(story_id: str, session_factory) -> None:
                 db.commit()
                 out = llm.generate({"gal_expand": True, "idea": idea[:2000],
                                     "outline": outline, "index": i,
+                                    "style": (gal.get("style") or "")[:120],
                                     "prior_tail": (texts[-1][-300:] if texts else "")}) or {}
                 t = str(out.get("text") or "").strip()
                 if len(t) < 200:
@@ -778,6 +785,15 @@ def gal_lint(gal: dict[str, Any]) -> list[dict]:
              if not any(b.get("cg") for b in ch if b.get("type") != "choice")]
     if no_cg:
         out.append({"level": "info", "msg": f"第{'、'.join(map(str, no_cg))}章没有CG拍"})
+    # 🎙 人称守卫 (主线我-劫持检测的移植): 旁白应称主角为「你」
+    import re as _re
+    bad = sum(1 for ch in chs for b in ch
+              if b.get("type") != "choice" and not b.get("who")
+              and "我" in _re.sub(r"「[^」]*」|“[^”]*”", "", b.get("text") or ""))
+    if bad >= 3:
+        out.append({"level": "warn",
+                    "msg": f"约 {bad} 个旁白拍疑似「我」视角——旁白应称主角为「你」，"
+                           "可在修订台改字或重编"})
     return out
 
 
@@ -900,9 +916,29 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
                 gal["status"], gal["progress"] = "parsing", "正在识别角色与场景…"
                 _save(s)
                 locked = gal.get("chapters") if gal.get("chapters_locked") else None
+                preset_style = (gal.get("style") or "").strip()   # 拓写档创作者选的预设
                 gal.update(parse_story(llm, gal.get("source_text") or "", s.title or ""))
                 if locked:
                     gal["chapters"] = locked
+                if preset_style:
+                    gal["style"] = preset_style   # 创作者的选择优先于归纳
+                # 🔎 智能搜索设定增强 (主线 generate_knowledge 移植, Tavily 打底):
+                # 同人/IP 题材联网搜原作设定, 编译时立设定铁律
+                if gal.get("enrich") and not gal.get("knowledge"):
+                    gal["progress"] = "正在联网搜集背景设定…"
+                    _save(s)
+                    from .qwen import generate_knowledge
+                    tops = sorted(
+                        [c for c in gal["characters"] if c["id"] != gal["protagonist_id"]],
+                        key=lambda c: (not c.get("route"), -c.get("weight", 3)))[:2]
+                    parts = []
+                    for c in tops:
+                        k = generate_knowledge(
+                            c["name"], f"{c.get('looks', '')} {c.get('personality', '')}",
+                            (gal.get("source_text") or "")[:300])
+                        if k:
+                            parts.append(f"◆ {c['name']}\n{k}")
+                    gal["knowledge"] = "\n\n".join(parts)[:1800]
             mature = bool(gal.get("mature"))
             pov = gal["protagonist_id"]
             # 2. 编译: all chapters, 编译记忆 chained through per-chapter summaries

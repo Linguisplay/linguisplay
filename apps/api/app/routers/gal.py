@@ -34,6 +34,8 @@ class GalCreate(BaseModel):
     mode: str = "text"    # "text"=A档全文 | "expand"=B档大纲拓写
     idea: str = ""        # B档: 梗概/想法
     outline: list = []    # B档: 创作者确认过的章节大纲
+    style: str = ""       # ✍️ 文风预设 (拓写档; A档由识别拍从原文归纳)
+    enrich: bool = False  # 🔎 联网补设定 (同人/IP 题材)
 
 
 class OutlineReq(BaseModel):
@@ -104,7 +106,10 @@ def create_work(body: GalCreate, user: User = Depends(current_user),
         raise HTTPException(409, "你有一本正在建造中——等它完成或失败后再开新的")
     gal = {"status": "expanding" if expand else "queued",
            "progress": "排队拓写…" if expand else "排队中…",
-           "mature": bool(body.mature)}
+           "mature": bool(body.mature),
+           "enrich": bool(body.enrich)}
+    if (body.style or "").strip():
+        gal["style"] = body.style.strip()[:120]
     if expand:
         gal["idea"], gal["outline"] = idea[:2000], outline
     else:

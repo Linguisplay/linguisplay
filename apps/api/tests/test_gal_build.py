@@ -26,6 +26,7 @@ def test_parse_normalizes_ids_and_protagonist():
     assert all("voice" in c for c in out["characters"])  # 🔊 reserved for TTS
     # 💘 可攻略 flag survives normalization — the affinity ledger needs it
     assert [c["route"] for c in out["characters"]] == [False, True]
+    assert "忌" in out["style"]                          # ✍️ 文风卡 (作者腔+忌清单)
 
 
 def test_compile_obeys_contract_shape():

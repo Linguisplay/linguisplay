@@ -75,6 +75,17 @@
       <option value="中国古风工笔画意，水墨氤氲，绢本设色，古典服饰与建筑，含蓄留白">古风水墨</option>
       <option value="赛博朋克霓虹夜色，雨湿街道反光，冷紫与青色光源，未来都市质感">赛博霓虹</option>
     </select>
+    <label>文风（A档全文会自动从原文归纳；此处选择的优先）</label>
+    <select id="wstyle">
+      <option value="">自动归纳 / 默认</option>
+      <option value="轻快的轻小说腔：短句多、对话密、吐槽有节奏。忌沉重长段；忌华丽辞藻">轻小说·轻快</option>
+      <option value="细腻克制的纯文学腔：白描见情，留白多。忌直给情绪词；忌网络用语；忌滥用比喻">纯文学·细腻</option>
+      <option value="热血直给的网文腔：节奏快、钩子密、情绪拉满。忌拖沓景物描写">网文·爽利</option>
+      <option value="冷冽压抑的悬疑腔：短促、感官化、信息克制。忌解释过度；忌轻佻">悬疑·冷冽</option>
+    </select>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+      <input type="checkbox" id="enrich" style="width:auto"> 🔎 联网补设定（同人/IP 题材推荐——搜集原作设定当编译铁律）
+    </label>
     <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
       <input type="checkbox" id="mature" style="width:auto"> 🔞 含成人内容（18+；成人片段以背景+文字呈现，不出立绘）
     </label>
@@ -127,6 +138,8 @@ async function build() {
   const go = document.getElementById("go");
   const body = { title: $id("title").value.trim(),
                  art_style: $id("style").value,
+                 style: $id("wstyle").value,
+                 enrich: $id("enrich").checked,
                  mature: $id("mature").checked };
   if (MODE === "text") body.source_text = $id("src").value;
   else {

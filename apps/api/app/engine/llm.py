@@ -79,6 +79,7 @@ class MockLLM:
                     "scenes": [{"name": "天台", "visual": "夜里的天台，风很大"},
                                {"name": "教室", "visual": "放学后的空教室"}],
                     "protagonist": "林晚",
+                    "style": "冷静克制的都市青春腔。忌华丽辞藻；忌网络用语；忌长句",
                     "chapters": [{"summary": "天台初遇。", "from": "林晚在天台"},
                                  {"summary": "教室对峙。", "from": "林晚在天台"}]}
         if prompt.get("gal_compile"):

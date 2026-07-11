@@ -2263,6 +2263,10 @@ class QwenLLM:
                "900~1500字，对话与描写并重，人物言行具体可感；"
                "只写本章大纲覆盖的剧情，收在能接下一章的地方；"
                "不写章节标题、不写任何说明，只输出正文本身。")
+        _st = (prompt.get("style") or "").strip()
+        if _st:
+            sys += f"【文风·必须贴住】{_st}"
+        sys += _STYLE_PUNCT
         u = (f"整体想法：{prompt.get('idea') or ''}\n全书大纲：\n{chtable}\n"
              + (f"前一章的结尾（紧接着往下写）：…{pt}\n" if pt else "")
              + f"现在写【第{i}章】：{ol[i - 1] if i - 1 < len(ol) else ''}")
@@ -2340,10 +2344,17 @@ class QwenLLM:
             "不同感情线的结局要有各自的专属场面，不许互相换皮；"
             "主角旁白人称永远是「你」；只用给定的角色id和场景id；"
             "所有拍文字一律用简体中文（原文若是外语，转写成流畅的中文）。")
+        _st = (prompt.get("style") or "").strip()
+        if _st:
+            sys += f"【文风·必须贴住】{_st}"
+        sys += _STYLE_PUNCT
         sys += _gal_mature_rider(prompt)
         u = (f"角色表：\n{clist}\n场景表：\n{slist}\n"
              f"全书前情：{prompt.get('summary') or ''}\n"
              f"故事原文（收束依据）：\n{(prompt.get('source') or '')[:6000]}")
+        _kn = (prompt.get("knowledge") or "").strip()
+        if _kn:
+            u = f"【背景设定·铁律】\n{_kn}\n\n" + u
         try:
             resp = _post_chat(self._url, self._key,
                               {"model": self._model,
@@ -2367,6 +2378,8 @@ class QwenLLM:
             '"route":true或false（可攻略角色：玩家能与之发展感情线的对象；主角自己恒为false）}],'
             '"scenes":[{"name":"≤8字地点名","visual":"画面描述：空间/光线/陈设/氛围（≤80字）"}],'
             '"protagonist":"主角名（视角人物，玩家将扮演TA）",'
+            '"style":"从原文归纳的文风卡（≤80字）：作者腔一句话＋三条忌清单，'
+            '如「克制白描的乡土抒情。忌华丽辞藻；忌现代网络词；忌长句堆叠」",'
             '"chapters":[{"summary":"第1章一句话概要",'
             '"from":"该章在原文中起点处的前10~15个字，必须逐字照抄原文"}，…（3~5章）]}。'
             "要求：角色≤6个只留有戏份的；场景≤8个；looks 必须具体（画师依赖它）；"
@@ -2471,6 +2484,10 @@ class QwenLLM:
         _st = (prompt.get("style") or "").strip()
         if _st:
             sys += f"【文风·必须贴住】{_st}"
+        _kn = (prompt.get("knowledge") or "").strip()
+        if _kn:
+            u = f"【背景设定·铁律，拍文字绝不能与之矛盾】\n{_kn}\n\n" + u
+        sys += _STYLE_PUNCT
         sys += _gal_mature_rider(prompt)
         try:
             resp = _post_chat(self._url, self._key,
