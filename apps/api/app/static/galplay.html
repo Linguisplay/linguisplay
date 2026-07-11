@@ -5,8 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <title>🎀 LinguisPlay Gal</title>
 <style>
+  /* ── design tokens: 一套皮一个声音 ─────────────────────────────────────────
+     accent 淡金 / warm-ink 文字 / 衬线只给标题与名牌 / 面板一律渐变无描边 */
+  :root { --gold: #d8b57a; --gold-dim: rgba(216,181,122,.45);
+          --ink: #ece9e2; --ink-dim: rgba(236,233,226,.52);
+          --pane: rgba(6,7,12,.94);
+          --serif: "Source Han Serif SC","Noto Serif CJK SC","Songti SC",Georgia,"SimSun",serif; }
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-  html, body { height: 100%; background: #000; color: #e7eaf3; overflow: hidden;
+  html, body { height: 100%; background: #000; color: var(--ink); overflow: hidden;
                font: 15px/1.8 system-ui, "PingFang SC", "Microsoft YaHei", sans-serif; }
   /* 📱 the phone stage: 9:16, centered; everything outside is pure black */
   #stage { position: relative; aspect-ratio: 9/16; height: min(100vh, 177.7vw);
@@ -40,90 +46,123 @@
   /* 📸 CG 全屏插画: covers the stage above sprites, below text & controls */
   #gcg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
          z-index: 4; transition: opacity .5s ease; }
-  #gbox { position: absolute; left: 3%; right: 3%; bottom: 2.6%; min-height: 26%;
-          z-index: 5;
-          background: rgba(8,8,16,.82); border: 1px solid #3a3a52; border-radius: 14px;
-          padding: 26px 16px 18px; backdrop-filter: blur(4px); }
-  #gname { position: absolute; top: -13px; left: 12px; background: #232346;
-           border: 1px solid #4a4a72; color: #ffd479; border-radius: 9px;
-           padding: 2px 12px; font-size: 13px; font-weight: 700; }
-  #gtext { font-size: 15.5px; line-height: 1.85; min-height: 4.6em; }
-  #gtext.narr { color: #c3c9d9; }
-  #gnext { position: absolute; right: 13px; bottom: 7px; color: #8ea2ff; font-size: 13px;
-           animation: blink 1.1s steps(2) infinite; visibility: hidden; }
-  @keyframes blink { 50% { opacity: 0; } }
-  /* 📱 顶栏: 返回键独立左上角(永不被挤掉); 其余纯图标, 可换行, 避让刘海安全区 */
-  #gback { position: absolute; top: calc(8px + env(safe-area-inset-top)); left: 10px;
-           z-index: 5; background: rgba(20,20,36,.8); border: 1px solid #45456a;
-           border-radius: 9px; padding: 6px 12px; font-size: 13px; color: #9fb0ff;
-           cursor: pointer; }
-  #gctl { position: absolute; top: calc(8px + env(safe-area-inset-top)); right: 10px;
-          display: flex; gap: 6px; z-index: 5; flex-wrap: wrap;
-          justify-content: flex-end; max-width: 72%; }
-  #gctl span { background: rgba(20,20,36,.8); border: 1px solid #45456a; border-radius: 9px;
-               padding: 6px 9px; font-size: 13px; color: #9fb0ff; cursor: pointer;
-               line-height: 1; }
-  #gctl span.on { color: #ffd479; border-color: #ffd479; }
-  /* 🎯 选择点: the player's hand on the wheel */
-  #gchoice { position: absolute; left: 7%; right: 7%; bottom: 31%; z-index: 6;
-             display: none; flex-direction: column; gap: 10px; }
-  #gchoice button { background: rgba(12,12,26,.93); border: 1px solid #5a5a8a;
-                    color: #e7eaf3; border-radius: 12px; padding: 12px 14px;
-                    font: inherit; font-size: 14.5px; cursor: pointer;
-                    text-align: center; backdrop-filter: blur(3px); }
-  #gchoice button:hover { border-color: #ffd479; color: #ffd479; }
-  /* 标题画面 */
+  /* 💬 对话面板: 底部渐变, 无描边无圆角盒 — 电影字幕式的沉入感 */
+  #gbox { position: absolute; left: 0; right: 0; bottom: 0; min-height: 31%;
+          z-index: 5; padding: 40px 7% calc(20px + env(safe-area-inset-bottom));
+          background: linear-gradient(180deg, rgba(4,5,10,0) 0%,
+                      rgba(4,5,10,.62) 22%, rgba(4,5,10,.95) 58%); }
+  #gname { display: inline-block; font-family: var(--serif); font-size: 15px;
+           letter-spacing: 3px; color: var(--gold); padding-bottom: 3px;
+           margin-bottom: 8px; border-bottom: 1px solid var(--gold-dim); }
+  #gtext { font-size: 15.5px; line-height: 2; min-height: 4.4em;
+           text-shadow: 0 1px 3px rgba(0,0,0,.8); }
+  #gtext.narr { color: rgba(236,233,226,.78); }
+  #gnext { position: absolute; right: 7%; bottom: calc(14px + env(safe-area-inset-bottom));
+           color: var(--gold); font-size: 11px;
+           animation: pulse 1.6s ease-in-out infinite; visibility: hidden; }
+  @keyframes pulse { 50% { opacity: .15; transform: translateY(2px); } }
+  /* 📱 顶栏: 幽灵文字键 — 无框无底, 字距撑排版感; 返回独立左上; 避让刘海 */
+  #gback { position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 14px;
+           z-index: 5; font-size: 12px; letter-spacing: 2px; color: var(--ink-dim);
+           cursor: pointer; text-shadow: 0 1px 3px rgba(0,0,0,.9); padding: 6px 4px; }
+  #gback:hover { color: var(--gold); }
+  #gctl { position: absolute; top: calc(12px + env(safe-area-inset-top)); right: 14px;
+          display: flex; gap: 15px; z-index: 5; flex-wrap: wrap;
+          justify-content: flex-end; max-width: 74%; }
+  #gctl span { font-size: 11px; letter-spacing: 2px; color: var(--ink-dim);
+               cursor: pointer; padding: 6px 1px; line-height: 1;
+               text-shadow: 0 1px 3px rgba(0,0,0,.9); }
+  #gctl span:hover { color: var(--ink); }
+  #gctl span.on { color: var(--gold); }
+  /* 🎯 选择点: 细金线夹着的半透明横幅 */
+  #gchoice { position: absolute; left: 9%; right: 9%; bottom: 34%; z-index: 6;
+             display: none; flex-direction: column; gap: 13px; }
+  #gchoice button { background: linear-gradient(90deg, rgba(8,9,15,0),
+                      rgba(8,9,15,.88) 14%, rgba(8,9,15,.88) 86%, rgba(8,9,15,0));
+                    border: 0; border-top: 1px solid var(--gold-dim);
+                    border-bottom: 1px solid var(--gold-dim);
+                    color: var(--ink); padding: 13px 12px; font: inherit;
+                    font-size: 14.5px; letter-spacing: 1px; cursor: pointer;
+                    text-align: center; }
+  #gchoice button:hover { color: var(--gold); }
+  /* 标题画面: 衬线大标题 + 细金线 + 幽灵菜单 */
   #gtitle { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column;
-            align-items: center; justify-content: flex-end; padding-bottom: 12%;
+            align-items: center; justify-content: flex-end;
+            padding-bottom: calc(11% + env(safe-area-inset-bottom));
             background: #05050a; background-size: cover; background-position: center; }
   #gtitle::before { content: ""; position: absolute; inset: 0;
-                    background: linear-gradient(transparent 40%, rgba(3,3,8,.9)); }
-  #gtitle h1 { position: relative; font-size: 26px; letter-spacing: 4px;
-               text-shadow: 0 2px 12px rgba(0,0,0,.9); margin-bottom: 24px; }
-  #gtitle .muted { position: relative; }
-  #gtitle button { position: relative; width: 200px; margin-top: 12px; padding: 12px;
-                   background: rgba(20,20,36,.88); border: 1px solid #45456a; color: #e7eaf3;
-                   border-radius: 11px; font: inherit; font-size: 15px; cursor: pointer; }
-  #gtitle button:hover { border-color: #8ea2ff; }
-  /* 🎬 章节过场卡: 黑场 + 章号/章题/引言, 淡入停顿淡出 */
+                    background: linear-gradient(rgba(3,3,8,.15) 30%, rgba(3,3,8,.93)); }
+  #gtitle h1 { position: relative; font-family: var(--serif); font-weight: 600;
+               font-size: 30px; letter-spacing: 8px; text-indent: 8px;
+               text-shadow: 0 2px 14px rgba(0,0,0,.95); margin-bottom: 10px; }
+  #gtitle h1::after { content: ""; display: block; width: 44px; height: 1px;
+                      background: var(--gold-dim); margin: 14px auto 0; }
+  #gtitle .muted { position: relative; letter-spacing: 2px; margin-bottom: 12px; }
+  #gtitle button { position: relative; background: none; border: 0; color: var(--ink-dim);
+                   margin-top: 15px; padding: 4px 20px; font: inherit; font-size: 15px;
+                   letter-spacing: 7px; text-indent: 7px; cursor: pointer;
+                   text-shadow: 0 1px 4px rgba(0,0,0,.9); }
+  #gtitle button:hover { color: var(--gold); }
+  /* 🎬 章节过场卡: 衬线章题 + 细线装饰 */
   #gchap { position: absolute; inset: 0; z-index: 9; display: none; flex-direction: column;
            align-items: center; justify-content: center; background: #000;
            text-align: center; opacity: 0; transition: opacity .5s ease; padding: 0 10%; }
-  #gchap .num { font-size: 14px; letter-spacing: 10px; color: #8b93a7; margin-bottom: 16px; }
-  #gchap h2 { font-size: 24px; letter-spacing: 6px; margin-bottom: 20px; min-height: 1em; }
-  #gchap .lead { color: #8b93a7; font-size: 14px; letter-spacing: 2px; }
-  #gchap .date { color: #b9c2d8; font-size: 13px; letter-spacing: 3px; margin-bottom: 12px; }
-  /* 📅 时间跳跃横幅: 拍带 date 时左上角浮现, 停两秒淡走 */
-  #gdate { position: absolute; top: calc(46px + env(safe-area-inset-top)); left: 12px; z-index: 6;
-           background: rgba(8,8,16,.85); border: 1px solid #3a3a52; border-radius: 9px;
-           padding: 4px 14px; font-size: 13px; letter-spacing: 2px; color: #ffd479;
+  #gchap .num { font-size: 12px; letter-spacing: 11px; text-indent: 11px;
+                color: var(--ink-dim); margin-bottom: 18px; }
+  #gchap .num::after { content: ""; display: block; width: 30px; height: 1px;
+                       background: var(--gold-dim); margin: 16px auto 0; }
+  #gchap h2 { font-family: var(--serif); font-weight: 600; font-size: 26px;
+              letter-spacing: 7px; text-indent: 7px; margin-bottom: 20px; min-height: 1em; }
+  #gchap .lead { color: var(--ink-dim); font-size: 13.5px; letter-spacing: 2px; }
+  #gchap .date { color: var(--gold); font-size: 12px; letter-spacing: 4px;
+                 margin-bottom: 12px; }
+  /* 📅 时间跳跃横幅: 左侧金线示意, 无框 */
+  #gdate { position: absolute; top: calc(52px + env(safe-area-inset-top)); left: 0;
+           z-index: 6; padding: 5px 18px 5px 16px; font-size: 12.5px; letter-spacing: 3px;
+           color: var(--gold); border-left: 2px solid var(--gold);
+           background: linear-gradient(90deg, rgba(4,5,10,.85), rgba(4,5,10,0));
            opacity: 0; transition: opacity .5s ease; pointer-events: none; }
   #gend { position: absolute; inset: 0; z-index: 9; display: none; flex-direction: column;
-          align-items: center; justify-content: center; background: rgba(3,3,8,.92); }
-  #gend h2 { font-size: 22px; letter-spacing: 6px; margin-bottom: 18px; }
-  #gend .muted, .muted { color: #8b93a7; font-size: 13px; }
-  #gend button { margin-top: 22px; width: 180px; padding: 11px;
-                 background: rgba(20,20,36,.88); border: 1px solid #45456a; color: #e7eaf3;
-                 border-radius: 11px; font: inherit; cursor: pointer; }
+          align-items: center; justify-content: center; background: rgba(3,3,8,.93); }
+  #gend h2 { font-family: var(--serif); font-weight: 600; font-size: 24px;
+             letter-spacing: 7px; text-indent: 7px; margin-bottom: 20px; }
+  #gend .muted, .muted { color: var(--ink-dim); font-size: 13px; letter-spacing: 1px; }
+  #gend button { margin-top: 26px; background: none; color: var(--ink-dim);
+                 border: 1px solid rgba(236,233,226,.25); border-radius: 2px;
+                 padding: 10px 34px; font: inherit; font-size: 14px;
+                 letter-spacing: 5px; text-indent: 5px; cursor: pointer; }
+  #gend button:hover { color: var(--gold); border-color: var(--gold-dim); }
   #glog { position: absolute; inset: 0; z-index: 8; display: none; overflow-y: auto;
-          background: rgba(5,5,10,.96); padding: 46px 16px 20px; }
-  #glog .l { margin-bottom: 10px; font-size: 14px; }
-  #glog .l b { color: #ffd479; margin-right: 6px; }
-  #glog .l.pick { color: #ffd479; }
-  /* 📖 图鉴: CG 回忆册 + 结局图鉴 overlays */
+          background: rgba(4,5,10,.97);
+          padding: calc(50px + env(safe-area-inset-top)) 8% 26px; }
+  #glog .l { margin-bottom: 13px; font-size: 14px; color: rgba(236,233,226,.82);
+             padding-bottom: 13px; border-bottom: 1px solid rgba(236,233,226,.07); }
+  #glog .l b { color: var(--gold); margin-right: 8px; font-family: var(--serif); }
+  #glog .l.pick { color: var(--gold); }
+  /* 📖 图鉴与面板 */
   .book { position: absolute; inset: 0; z-index: 11; display: none; overflow-y: auto;
-          background: rgba(5,5,10,.96); padding: 20px 14px; }
-  .book h3 { font-size: 16px; letter-spacing: 3px; margin: 4px 0 14px; color: #ffd479; }
-  #ggrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+          background: rgba(4,5,10,.97);
+          padding: calc(24px + env(safe-area-inset-top)) 7% 26px; }
+  .book h3 { font-family: var(--serif); font-weight: 600; font-size: 17px;
+             letter-spacing: 4px; margin: 4px 0 6px; color: var(--ink); }
+  .book h3::after { content: ""; display: block; width: 100%; height: 1px;
+                    background: linear-gradient(90deg, var(--gold-dim), transparent);
+                    margin-top: 10px; }
+  .book { --x: 1; }
+  .book .x { float: right; color: var(--ink-dim); cursor: pointer; font-size: 14px;
+             letter-spacing: 0; font-family: system-ui; }
+  #ggrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; margin-top: 12px; }
   #ggrid img, #ggrid .lock { width: 100%; aspect-ratio: 9/16; object-fit: cover;
-          border-radius: 8px; border: 1px solid #3a3a52; cursor: pointer; }
+          border-radius: 2px; border: 1px solid rgba(236,233,226,.12); cursor: pointer; }
   #ggrid .lock { display: flex; align-items: center; justify-content: center;
-          background: #10101c; color: #4a4a66; font-size: 24px; cursor: default; }
-  #gedb .e { padding: 12px 8px; border-bottom: 1px dashed #2a2a3a; font-size: 15px; }
-  #gedb .e.got { color: #ffd479; }
+          background: #0a0b12; color: rgba(236,233,226,.2); font-size: 22px; cursor: default; }
+  #gedb .e, #gset .e, #ghearts .e { padding: 14px 2px; font-size: 15px;
+          border-bottom: 1px solid rgba(236,233,226,.08); }
+  #gedb .e.got { color: var(--gold); }
   #gview { position: absolute; inset: 0; z-index: 12; display: none;
            background: #000; cursor: pointer; }
   #gview img { width: 100%; height: 100%; object-fit: contain; }
+  input[type=range] { accent-color: var(--gold); }
 </style>
 </head>
 <body>
@@ -134,21 +173,21 @@
   <img id="gcg" class="off" alt="">
   <span id="gback" onclick="event.stopPropagation();location.href='/gal'">‹ 返回</span>
   <div id="gctl">
-    <span onclick="event.stopPropagation();openHearts()" title="心动记录">💗</span>
-    <span id="btnAuto" onclick="event.stopPropagation();toggleAuto()" title="自动播放">▶</span>
-    <span id="btnSkip" onclick="event.stopPropagation();toggleSkip()" title="已读跳过">⏩</span>
-    <span onclick="event.stopPropagation();ffwd()" title="快进到下个选择">⏭</span>
-    <span onclick="event.stopPropagation();openSettings()" title="设置">⚙</span>
-    <span id="btnBgm" onclick="event.stopPropagation();bgmToggle()" title="背景音乐">🔊</span>
-    <span onclick="event.stopPropagation();toggleLog()" title="回想">📖</span>
+    <span onclick="event.stopPropagation();openHearts()" title="心动记录">心动</span>
+    <span id="btnAuto" onclick="event.stopPropagation();toggleAuto()" title="自动播放">自动</span>
+    <span id="btnSkip" onclick="event.stopPropagation();toggleSkip()" title="已读跳过">跳过</span>
+    <span onclick="event.stopPropagation();ffwd()" title="快进到下个选择">快进</span>
+    <span onclick="event.stopPropagation();openSettings()" title="设置">设定</span>
+    <span id="btnBgm" onclick="event.stopPropagation();bgmToggle()" title="背景音乐">音乐</span>
+    <span onclick="event.stopPropagation();toggleLog()" title="回想">记录</span>
   </div>
   <div id="glog" onclick="event.stopPropagation();toggleLog()"></div>
   <div id="ggal" class="book" onclick="event.stopPropagation()">
-    <h3>📸 CG 回忆册 <span style="float:right;cursor:pointer" onclick="closeBooks()">✕</span></h3>
+    <h3><span class="x" onclick="closeBooks()">✕</span>回忆册 <span class="muted">GALLERY</span></h3>
     <div id="ggrid"></div>
   </div>
   <div id="gedb" class="book" onclick="event.stopPropagation()">
-    <h3>🏁 结局图鉴 <span style="float:right;cursor:pointer" onclick="closeBooks()">✕</span></h3>
+    <h3><span class="x" onclick="closeBooks()">✕</span>结局图鉴 <span class="muted">ENDINGS</span></h3>
     <div id="gends"></div>
   </div>
   <div id="gview" onclick="event.stopPropagation();this.style.display='none'"><img alt=""></div>
@@ -161,7 +200,7 @@
   <div id="gdate"></div>
   <div id="gflash"></div>
   <div id="gset" class="book" onclick="event.stopPropagation()">
-    <h3>⚙ 设置 <span style="float:right;cursor:pointer" onclick="this.closest('.book').style.display='none'">✕</span></h3>
+    <h3><span class="x" onclick="this.closest('.book').style.display='none'">✕</span>设定 <span class="muted">CONFIG</span></h3>
     <div class="e">文字速度<br>
       <input id="cfgSpeed" type="range" min="0.5" max="3" step="0.25" style="width:100%" oninput="cfgChange()"></div>
     <div class="e">背景音乐音量<br>
@@ -170,7 +209,7 @@
       <input id="cfgSfx" type="range" min="0" max="1" step="0.1" style="width:100%" oninput="cfgChange()"></div>
   </div>
   <div id="ghearts" class="book" onclick="event.stopPropagation()">
-    <h3>💗 心动记录 <span style="float:right;cursor:pointer" onclick="this.closest('.book').style.display='none'">✕</span></h3>
+    <h3><span class="x" onclick="this.closest('.book').style.display='none'">✕</span>心动记录 <span class="muted">AFFECTION</span></h3>
     <div id="gheartRows"></div>
   </div>
   <div id="gchap"><div class="num" id="gchapNum"></div><div class="date" id="gchapD"></div>
