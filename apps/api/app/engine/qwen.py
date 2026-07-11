@@ -3047,6 +3047,61 @@ class QwenLLM:
         except Exception:
             return {}
 
+    def _absent_scene(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🌍 缺席因果: the scene that happened WITHOUT the player — they stood this
+        character up, and the world keeps the receipt. Degrades to {} (deterministic
+        line backstops it in living.py)."""
+        ch = prompt.get("char") or {}
+        sys = ("你为一个持续运转的世界写【玩家缺席的那场戏】：角色如约赴了约，玩家没来。"
+               '只输出JSON：{"scene":"≤80字，第三人称，一件具体发生了的事"}。'
+               "要求：写角色真实做了什么（等了多久、做了什么小动作、最后怎么离开、顺手发生了什么），"
+               "贴人设与关系；克制，不哭喊不控诉，细节越具体越疼；不要对白引号堆砌；不用破折号。")
+        u = (f"角色：{ch.get('name','')}（{ch.get('role','')}）。人设：{ch.get('persona_text','')}\n"
+             f"与玩家的关系：{prompt.get('relation','')}\n"
+             f"约定：{prompt.get('when','')}，{prompt.get('what','')}\n"
+             f"世界背景：{prompt.get('world','')}")
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model,
+                       "messages": [{"role": "system", "content": sys},
+                                    {"role": "user", "content": u}],
+                       "max_tokens": 160, "temperature": 0.9,
+                       "response_format": {"type": "json_object"}},
+                              timeout=25)
+            import json as _json
+            data = _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def _living_event(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🌍 世界心跳: this character PROPOSES a dated meeting (the world moves first,
+        恋与深空-style). Engine already picked who; the model writes what/when/invite.
+        Degrades to {} (deterministic invite backstops)."""
+        ch = prompt.get("char") or {}
+        sys = ("你为一个持续运转的世界生成【角色主动发起的约】。只输出JSON："
+               '{"what":"≤16字的具体事由","slot":"晨|午|夜","day_offset":1,'
+               '"invite":"≤40字，TA发给玩家的邀约短信，必须是TA的口吻"}。'
+               "要求：事由从人设、关系与世界近况里自然长出来（不要泛泛的散步吃饭，除非贴人设）；"
+               "day_offset 只能是1或2；短信口语、有性格、不解释背景；不用破折号。")
+        u = (f"角色：{ch.get('name','')}（{ch.get('role','')}）。人设：{ch.get('persona_text','')}\n"
+             f"与玩家的关系：{prompt.get('relation','')}\n"
+             f"世界观：{prompt.get('worldview','')}\n"
+             f"世界近况：{'；'.join(prompt.get('recent_news') or []) or '（无）'}")
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model,
+                       "messages": [{"role": "system", "content": sys},
+                                    {"role": "user", "content": u}],
+                       "max_tokens": 160, "temperature": 0.95,
+                       "response_format": {"type": "json_object"}},
+                              timeout=25)
+            import json as _json
+            data = _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
     def _sandbox_cast(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """🏖 conjure the sandbox's opening cast from the player's worldview. Strict
         JSON; degrades to {} (runtime seeds a deterministic stranger instead)."""
@@ -3555,6 +3610,10 @@ class QwenLLM:
             return self._gen_progression(prompt)
         if prompt.get("world_news"):
             return self._world_news(prompt)
+        if prompt.get("absent_scene"):
+            return self._absent_scene(prompt)
+        if prompt.get("living_event"):
+            return self._living_event(prompt)
         if prompt.get("parting"):
             return self._parting(prompt)
         if prompt.get("arrive"):

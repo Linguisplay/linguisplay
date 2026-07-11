@@ -6677,6 +6677,17 @@ def run_turn_stream(
                           sch, rarity=2)
                 moments.append({"kind": "secret_full", "title": title})
 
+    # 🌍 活世界回归播报: 心跳期间落账的后果 (缺席戏/世界邀约), 玩家一回来就摆在面前，
+    # 各讲一次 — 你看到的是既成事实，不是过期任务列表
+    if (state.get("mode") or "character") != "god" and channel != "think":
+        from . import living as _living_mod
+        for _nw in _living_mod.serve_living_news(state):
+            _lb = dedash_beat({"type": "description", "speaker_name": None,
+                               "text": _t(content, f"（你不在的时候：{_nw}）",
+                                          f"(While you were gone: {_nw})")})
+            all_beats.append(_lb)
+            yield ("beat", _lb)
+
     # 💌 你不在的时候: this turn is a COMEBACK → the absent hearts that missed the
     # player reach out first thing (texts; a long absence earns a letter). The present
     # primary's greeting rides on the `returning` prompt flag as before.

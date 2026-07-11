@@ -69,6 +69,13 @@ class MockLLM:
         # suggestions: mock returns none → runtime falls back to its deterministic template.
         if prompt.get("suggest"):
             return {"suggestions": []}
+        # 🌍 活世界 twins: deterministic heartbeat pieces so living-world tests never call out
+        if prompt.get("absent_scene"):
+            return {"scene": (prompt.get("char") or {}).get("name", "") +
+                             "把茶续到第三遍，最后把杯子倒扣在桌上，先走了。"}
+        if prompt.get("living_event"):
+            return {"what": "去湖边走走", "slot": "夜", "day_offset": 1,
+                    "invite": "明晚有空吗？想去湖边走走，你来。"}
         # 🎀 galgame maker twins: deterministic parse + compile so build tests never call out
         if prompt.get("gal_parse"):
             return {"characters": [
