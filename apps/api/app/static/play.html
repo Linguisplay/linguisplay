@@ -2461,32 +2461,41 @@ document.addEventListener("keydown", (e) => {
   if (vnMode && (e.key === " " || e.key === "Enter") && document.activeElement !== msg)
     { e.preventDefault(); vnAdvance(); }
 });
-function _vnSet(img, cid) {
-  if (img.dataset.cid !== cid) {
-    img.dataset.cid = cid;
-    img.onerror = () => {   // sprite still rendering → square portrait → hide
-      if (img.src.includes("/sprite/")) img.src = `/scene/avatar/${cid}.jpg`;
+function _vnSet(img, cid, expr) {
+  const key = cid + "|" + (expr || "");
+  if (img.dataset.key !== key) {
+    img.dataset.key = key;
+    // 🎭 回落链: 表情差分 → 常态立绘 → 头像 → 隐藏 (缺素材永不闪断)
+    img.onerror = () => {
+      if (img.dataset.stage === "expr") { img.dataset.stage = "base"; img.src = `/scene/sprite/${cid}.jpg`; }
+      else if (img.dataset.stage === "base") { img.dataset.stage = "avatar"; img.src = `/scene/avatar/${cid}.jpg`; }
       else img.classList.add("hidden");
     };
-    img.src = `/scene/sprite/${cid}.jpg`;
+    img.dataset.stage = expr ? "expr" : "base";
+    img.src = expr ? `/scene/sprite/${cid}_${encodeURIComponent(expr)}.jpg`
+                   : `/scene/sprite/${cid}.jpg`;
   }
   img.classList.remove("hidden");
 }
 // 🎭 双立绘对手戏 (gal 播放器移植): 说话者右位点亮, 上一位发言的对手左位压暗;
 // 旁白时右位轻压一档 (都在听). ADV 掛け合い惯例: 新speaker上右位, 原右位让到左.
-let vnRight = null;   // {name, cid}
-function vnSprite(name) {
+let vnRight = null;   // {name, cid, expr}
+function vnSprite(name, expr) {
   const R = document.getElementById("vnsprite");
   const L = document.getElementById("vnsprite2");
   if (!name) { R.classList.add("dim"); return; }        // narration: keep stage, dim
   const cid = spriteMap[name];
   if (!cid) { R.classList.add("hidden"); L.classList.add("hidden"); vnRight = null; return; }
   R.classList.remove("dim");
-  if (vnRight && vnRight.name === name) { _vnSet(R, cid); return; }
-  if (vnRight && spriteMap[vnRight.name]) _vnSet(L, spriteMap[vnRight.name]);
+  if (vnRight && vnRight.name === name) {
+    if (expr !== undefined) vnRight.expr = expr || null;   // 同人续说: 表情可更新
+    _vnSet(R, cid, vnRight.expr); return;
+  }
+  // 让位到左侧时带着自己最后的表情走 (表情是状态, 不是闪灯)
+  if (vnRight && spriteMap[vnRight.name]) _vnSet(L, spriteMap[vnRight.name], vnRight.expr);
   else L.classList.add("hidden");
-  vnRight = { name: name, cid: cid };
-  _vnSet(R, cid);
+  vnRight = { name: name, cid: cid, expr: expr || null };
+  _vnSet(R, cid, vnRight.expr);
 }
 // ── 🌍 活世界: 你不在的时候, 世界照样往前走 (心跳/缺席因果在服务端) ──
 let livingCfg = null;
@@ -2581,7 +2590,7 @@ async function playBeatVN(b, skipLog) {
   else if (pendingSfx) { const n = pendingSfx; pendingSfx = null; playSfx(n); }
   nameEl.textContent = b.speaker_name || "";
   nameEl.classList.toggle("hidden", isNarr);
-  vnSprite(isNarr ? null : b.speaker_name);
+  vnSprite(isNarr ? null : b.speaker_name, isNarr ? undefined : b.expr);
   box.className = isNarr ? "narr" : "";
   await typeInto(box, b.text, isNarr ? 16 : 22);
   await vnWait(900 + (b.text || "").length * 55);

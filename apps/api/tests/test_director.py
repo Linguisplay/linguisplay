@@ -38,8 +38,11 @@ def test_heartbeat_backstop_when_no_physical_sfx():
     assert fx.get("sfx") == "heartbeat"
 
 
-def test_expr_passthrough():
+def test_expr_classified_from_free_text_mood():
     assert _stage().beat_fx("她笑了。", mood="喜").get("expr") == "喜"
+    assert _stage().beat_fx("他后退。", mood="警惕又紧张").get("expr") == "惊"
+    assert _stage().beat_fx("他叹气。", mood="疲惫的失望").get("expr") == "哀"
+    assert "expr" not in _stage().beat_fx("他点头。", mood="平静")
 
 
 def test_calm_beat_yields_nothing():

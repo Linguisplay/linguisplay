@@ -1295,6 +1295,41 @@ def living_tick_now(run_id: str, user: User = Depends(current_user),
             "news": [n for n in (st.get("living_news") or []) if not n.get("told")]}
 
 
+_EXPR_BUILDING: set = set()
+
+
+@router.post("/{run_id}/sprites/exprs")
+def build_expr_sprites(run_id: str, user: User = Depends(current_user),
+                       db: Session = Depends(get_db)):
+    """🎭 表情差分包: 给这局已登场的角色生成 喜/怒/哀/惊 改脸差分 (后台线程,
+    编辑既有底图不重画, 幂等可重跑补齐). 客户端按 beat.expr 换脸."""
+    r = _own_run(run_id, user, db)
+    content = r.pinned_content or {}
+    st = r.state or {}
+    met = set(st.get("met_ids") or [])
+    from ..engine import sprites as sprites_mod
+    cids = [c.get("id") for c in runtime._characters(content)
+            if c.get("id") and (not met or c.get("id") in met)
+            and c.get("id") != st.get("player_character_id")
+            and sprites_mod.base_of(c.get("id"))][:6]
+    if not cids:
+        raise HTTPException(400, "还没有可用的角色底图")
+    with _IMG_LOCK:
+        if run_id in _EXPR_BUILDING:
+            return {"queued": [], "busy": True}
+        _EXPR_BUILDING.add(run_id)
+
+    def _work():
+        try:
+            sprites_mod.build_expr_pack(cids)
+        finally:
+            with _IMG_LOCK:
+                _EXPR_BUILDING.discard(run_id)
+
+    _imgthreading.Thread(target=_work, daemon=True).start()
+    return {"queued": cids, "exprs": list(sprites_mod.EXPRS.keys())}
+
+
 def living_heartbeat_pass() -> int:
     """Scheduler entry (main.py lifespan): one pass over the shelf, tick what's due.
     Own session, per-run commit — one bad run never stalls the others."""

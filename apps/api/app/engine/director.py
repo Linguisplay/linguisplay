@@ -25,6 +25,24 @@ _HEARTBEAT_RE = re.compile(r"心跳|心脏(狂|猛|骤)|窒息|屏住呼吸|汗�
 # 压力压过场景 mood 的选曲阈值; battle/grimdark 本身够紧, 不夺
 _TENSE_OVERRIDE_SKIP = {"battle", "grimdark", "tense"}
 
+# 心象仪 mood (自由文本, ≤12字) → 表情差分四分类; 恐怖游戏里「惊」最常见, 先判
+_EXPR_MAP = [
+    ("惊", re.compile(r"惊|骇|怕|恐|悚|紧张|警惕|戒备|不安|慌|发毛|发凉")),
+    ("怒", re.compile(r"怒|恼|烦躁|火|不满|愠|敌意|冷硬|厌|狠")),
+    ("哀", re.compile(r"哀|悲|伤|失落|沮丧|愧|疲惫|苦涩|难过|失望|黯然")),
+    ("喜", re.compile(r"喜|笑|高兴|开心|愉|轻松|得意|温暖|放松|安心|雀跃")),
+]
+
+
+def expr_of(mood: str | None) -> str | None:
+    """分不出就不给 — 常态脸比错误的脸好."""
+    if not mood:
+        return None
+    for name, rx in _EXPR_MAP:
+        if rx.search(mood):
+            return name
+    return None
+
 
 class TurnStage:
     """One turn's per-beat director memory: sfx dedupe + the single flash."""
@@ -49,8 +67,9 @@ class TurnStage:
         if not self.flashed and _FLASH_RE.search(t):
             self.flashed = True
             out["fx"] = "flash"
-        if mood:
-            out["expr"] = mood   # 表情差分位: 差分素材上线即用, 现在先随拍下发
+        ex = expr_of(mood)
+        if ex:
+            out["expr"] = ex   # 表情差分位: 客户端按 {cid}_{expr}.jpg 换脸, 缺素材回落常态
         return out
 
 
