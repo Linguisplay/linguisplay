@@ -4837,6 +4837,19 @@ def mint_sought_character(content: dict[str, Any], state: dict[str, Any], name: 
     return {"char": char, "loc": loc}
 
 
+def echo_line(content: dict[str, Any], state: dict[str, Any], sp_id: str | None) -> str:
+    """🌌 跨存档残响 (活世界 P4): 上一段人生里暖过的角色, 新时间线里对玩家有一种
+    说不清的既视感 — 一瞬恍惚级别, 绝不解释, 绝不复述前尘 (TA并不真的记得)."""
+    if not sp_id or sp_id not in ((state.get("echo") or {}).get("chars") or []):
+        return ""
+    return _t(content,
+              "你对这位玩家有一种说不清的既视感，像在另一段人生里认识过TA。"
+              "偶尔（低频）可以流露一瞬恍惚，一句『我们是不是在哪儿见过』的程度，"
+              "说不出所以然，也绝不解释。",
+              "You feel an inexplicable deja vu about this player, as if you knew them "
+              "in another life. Rarely, let a flicker of it slip; never explain it.")
+
+
 def character_profile(content: dict[str, Any], state: dict[str, Any],
                       char_id: str) -> dict[str, Any] | None:
     """Everything the player may KNOW about one character, gathered for the 档案卡:
@@ -6976,6 +6989,8 @@ def run_turn_stream(
             "relationship_playbook": rel_playbook,  # current relationship mode toward player
             # 🪞 玩家档案: 这个角色自己相处出来的印象 (认知边界: 只有见证过的才有)
             "player_read": profile_mod.impression_of(state, sp_id),
+            # 🌌 跨存档残响: 前一段人生的回声 (仅上一档暖过的角色)
+            "echo": echo_line(content, state, sp_id),
             "player_emotion": state.get("player_emotion", ""),  # prior emotional read (continuity)
             "knowledge": sp.get("knowledge", ""),  # 智能增强: this character's background lore
             "mature": bool(state.get("mature")),   # 18+ run → adult content permitted

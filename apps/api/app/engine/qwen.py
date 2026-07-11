@@ -428,6 +428,10 @@ def _build_system(prompt: dict[str, Any]) -> str:
     if pread:
         lines.append(f"你相处下来对这位玩家的印象：{pread}——该印象可以被这回合的言行更新，"
                      "自然流露在态度里，不要复述它。")
+    # 🌌 跨存档残响: 另一段人生的回声 (一瞬恍惚, 不解释)
+    echo = (prompt.get("echo") or "").strip()
+    if echo:
+        lines.append(echo)
 
     # group naturalness: the transcript of what others ALREADY said THIS turn (data; the
     # how-to-react rules live in the charter's 群戏 line)

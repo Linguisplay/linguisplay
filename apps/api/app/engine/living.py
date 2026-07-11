@@ -205,8 +205,39 @@ def world_tick(content: dict[str, Any], state: dict[str, Any],
         out["absent"].append({"char_id": cid, "name": char.get("name"),
                               "what": pr.get("what")})
 
+    # ②.5 纪念日 (P4): 认识满月的日子, 温度够的角色会记得 — 一次心跳至多过一个,
+    # 过纪念日的当天不再发普通邀约 (这一天的心意只有一种)
+    annil = dict(state.get("anniv_met") or {})
+    for cid in set(state.get("met_ids") or []):
+        if cid not in annil:
+            annil[cid] = day   # 老档近似: 从今天起算; 新识的人下次心跳落账 (≤1天误差)
+    state["anniv_met"] = annil
+    out["anniv"] = None
+    dead = runtime._dead_ids(state)
+    for cid, d0 in sorted(annil.items()):
+        span = day - int(d0 or day)
+        if span <= 0 or span % 30:
+            continue
+        char = runtime._char_by_id(content, cid)
+        if not char or cid in dead or _warmth(state, cid) < 35:
+            continue
+        months = span // 30
+        if runtime.phone_enabled(content):
+            msgs = runtime.compose_message(
+                content, state, char, "anniversary",
+                f"今天是你们认识满{months}个月的日子，TA记得，想对玩家说点什么"
+                "（贴人设，可以提一件你们共同经历的小事，别煽情过头）",
+                f"今天，是我们认识满{months}个月的日子。我记得。", llm)
+            runtime.phone_push(content, state, char, msgs, now_label)
+        news.append({"day": day, "kind": "anniv", "char_id": cid,
+                     "name": char.get("name") or "",
+                     "text": f"{char.get('name', '')}记得：今天是你们认识满{months}个月的日子。",
+                     "told": False})
+        out["anniv"] = {"char_id": cid, "name": char.get("name"), "months": months}
+        break
+
     # ③ the world proposes something new (one per heartbeat, engine-picked, model-worded)
-    out["event"] = _heartbeat_event(content, state, llm)
+    out["event"] = None if out["anniv"] else _heartbeat_event(content, state, llm)
     if out["event"]:
         news.append({"day": day, "kind": "invite", "char_id": out["event"]["char_id"],
                      "name": out["event"]["name"],

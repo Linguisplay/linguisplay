@@ -402,6 +402,24 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
             base = runtime.relationships.new_scores()
             state["rel"] = {c["id"]: {**base, "closeness": base["closeness"] + runtime.VETERAN_CLOSENESS}
                             for c in (content.get("story") or {}).get("characters", []) if c.get("id")}
+    # 🌌 跨存档残响 (活世界 P4): 同一剧本的上一段人生留下回声 — 当时暖过的角色
+    # 在新时间线里带着说不清的既视感; 玩家习惯档案跟人走 (角色印象不带 —
+    # 他们没见证这条线, 认知边界不破)
+    prev = (db.query(RunModel)
+            .filter(RunModel.owner_id == user.id, RunModel.story_id == story.id)
+            .order_by(RunModel.created_at.desc()).first())
+    if prev is not None and isinstance(prev.state, dict):
+        pst = prev.state or {}
+        facts = [str(f) for f in ((pst.get("profile") or {}).get("facts") or [])][:6]
+        warm = [cid for cid, sc in (pst.get("rel") or {}).items()
+                if isinstance(sc, dict)
+                and (int(sc.get("closeness", 0) or 0) >= 30
+                     or int(sc.get("romance", 0) or 0) >= 25)]
+        if warm:
+            state["echo"] = {"from_run": prev.id, "chars": warm[:6]}
+        if facts:
+            state["profile"] = {"facts": facts, "by_char": {}, "turns": 0}
+
     # 🃏 carry a minted character card in: they join the cast at the starting place
     if body.carry_card_id:
         meta = (db.query(StoryMeta)
@@ -1336,6 +1354,12 @@ def _push_heartbeat_news(db, run, tick_out: dict) -> None:
     if not tick_out or webpush.quiet_now():
         return
     tag = f"lp-{run.id[:8]}"
+    an = tick_out.get("anniv")
+    if an:   # 纪念日最优先: 这一天的敲窗只为这一件事
+        webpush.push_to_user(db, run.owner_id, an.get("name") or "有人",
+                             f"今天，是我们认识满{an.get('months', 1)}个月的日子。",
+                             url="/play", tag=tag)
+        return
     ev = tick_out.get("event")
     if ev:
         webpush.push_to_user(db, run.owner_id, ev.get("name") or "有人找你",
