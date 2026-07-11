@@ -443,7 +443,20 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
 
 @router.get("/{run_id}", response_model=Run)
 def get_run(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    return _to_run(_own_run(run_id, user, db))
+    r = _own_run(run_id, user, db)
+    out = _to_run(r)
+    # 竖屏 App 常驻件: 恢复存档时建议 chips 必须在。新档回合会把它们写进 state；
+    # 老档缺这一份就现算一次（含确定性兜底），下一回合起自然走持久化通路。
+    st = r.state or {}
+    saved = st.get("suggestions") or []
+    if saved:
+        out.suggestions = saved
+    elif not st.get("ended"):
+        try:
+            out.suggestions = runtime.arrival_suggestions(r.pinned_content or {}, st)
+        except Exception:
+            pass
+    return out
 
 
 @router.delete("/{run_id}", status_code=204)
@@ -864,6 +877,11 @@ def move(run_id: str, body: MoveIn, user: User = Depends(current_user), db: Sess
         for i, d in enumerate(discoveries):
             db.add(BeatModel(run_id=r.id, seq=seq + i, type="description", speaker_name=None,
                              text=d.get("text", ""), author="engine", present_ids=present_ids))
+    # the scene just changed under the player's feet — regenerate the next-step chips
+    # for THIS place and THESE people (the old ones point at who's no longer here);
+    # persisted so a resume shows these, not the pre-move set
+    sugg = runtime.arrival_suggestions(content, st)
+    st["suggestions"] = sugg
     r.state = st
     if generated:
         r.pinned_content = content
@@ -872,9 +890,7 @@ def move(run_id: str, body: MoveIn, user: User = Depends(current_user), db: Sess
     db.refresh(r)
     out = _to_run(r)
     out.discoveries = discoveries
-    # the scene just changed under the player's feet — regenerate the next-step chips
-    # for THIS place and THESE people (the old ones point at who's no longer here)
-    out.suggestions = runtime.arrival_suggestions(content, st)
+    out.suggestions = sugg
     return out
 
 

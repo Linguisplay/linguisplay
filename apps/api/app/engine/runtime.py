@@ -7847,6 +7847,9 @@ def run_turn_stream(
                     state["fate_next"] = random.randint(_lo, _hi)
                     _audit(state, "fate.offered", True, _fc["prompt"][:30])
 
+    # 建议随档持久化: 重开 App 恢复存档时, 上一轮的下一步 chips 原样还在 (竖屏 App 常驻件)
+    state["suggestions"] = suggestions
+
     yield ("final", {
         "state": state,
         "newly_unlocked": newly,

@@ -279,6 +279,23 @@
 #mapov .mexits { font-size:11px; color:#7b8a80; margin-top:3px; }
 #mapov .mhidden { color:#7b8296; font-size:12px; font-style:italic; margin-top:10px; }
 #pressurebar { flex:0 0 auto; margin:6px 16px 0; padding:7px 12px; border-radius:10px; background:#241416cc; border:1px solid #4a2a28; font-size:12.5px; display:flex; align-items:center; gap:10px; color:#e8c9c4; }
+/* 🎬 导演 v1 (客户端规则): 夜色调 / 惊吓白闪 / 章节过场卡 — 全由引擎状态驱动 */
+#vntint { position: fixed; inset: 0; z-index: 41; pointer-events: none; opacity: 0;
+  transition: opacity 2s ease;
+  background: linear-gradient(180deg, rgba(22,34,64,.16), rgba(10,14,30,.24)); }
+body.vn.vnnight #vntint { opacity: 1; }
+#vnflash { position: fixed; inset: 0; z-index: 80; pointer-events: none; background: #fff; opacity: 0; }
+#vnflash.on { animation: vnflashk .42s ease-out 1; }
+@keyframes vnflashk { 0% { opacity: .92; } 100% { opacity: 0; } }
+#vnchap { position: fixed; inset: 0; z-index: 55; display: grid; place-items: center;
+  background: rgba(4,5,9,.9); opacity: 0; pointer-events: none; transition: opacity .55s ease; }
+#vnchap.on { opacity: 1; }
+#vnchap .w { text-align: center; }
+#vnchap .t { display: inline-block;
+  font-family: "Source Han Serif SC","Noto Serif CJK SC","Songti SC",Georgia,serif;
+  font-size: 21px; letter-spacing: 7px; color: #d8b57a; padding: 15px 30px;
+  border-top: 1px solid rgba(216,181,122,.5); border-bottom: 1px solid rgba(216,181,122,.5); }
+#vnchap .s { margin-top: 12px; font-size: 12px; letter-spacing: 3px; color: rgba(236,233,226,.62); }
 /* 🎀 VN window (galgame 演出) — gal 播放器同款设计语言: 淡金/渐变面板/幽灵按钮 */
 #vnui { position: fixed; inset: 0; z-index: 45; pointer-events: none; }
 /* 沙盒立绘是带背景的照片 (非透底人物): 统一裁成 3:4 竖构图人像卡, 杜绝横幅/拼贴感;
@@ -422,10 +439,19 @@ body.dread #dread { opacity:1; }
   #state { display: none; }
   #suggest { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .chip { flex: 0 0 auto; }
-  /* VN 手机端: 屏幕摆不下对手戏双立绘 — 说话者单立绘居中放大, 上一位收起 */
+  /* VN 竖屏 (最终形态是手机 App, 竖版是第一设计目标):
+     单立绘居中; vnctl 变触控药丸垫底衬; chips 两行完整可读不省略 */
   #vnsprite { right: 50%; transform: translateX(50%); height: 46vh; max-width: 70vw; }
   #vnsprite2 { display: none !important; }
-  #vnchoices { bottom: 252px; }
+  #vnctl { top: -40px; right: 10px; gap: 7px; }
+  #vnctl span { background: rgba(6,7,12,.74); border-radius: 999px; padding: 7px 11px; }
+  #vnchoices { bottom: 244px; width: 94vw; gap: 7px; }
+  #vnchoices button { white-space: normal; line-height: 1.55; text-align: left;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    border-radius: 15px; padding: 7px 13px; }
+  /* iOS: 输入框字号 <16px 会触发聚焦自动放大 — 竖屏 App 铁律 */
+  body.vn footer #msg { font-size: 16px; }
+  #vnchap .t { font-size: 18px; letter-spacing: 5px; }
 }
 .av img { width:100%; height:100%; object-fit:cover; border-radius:50%; }
 .castitem .cinfo { color:#8a93a8; margin-left:3px; cursor:pointer; font-style:normal; }
@@ -453,6 +479,10 @@ body.dread #dread { opacity:1; }
 <body>
 <div id="bg"></div>
 <div id="dread"></div>
+<!-- 🎬 导演 v1 层: 夜色调 / 惊吓白闪 / 章节过场卡 -->
+<div id="vntint"></div>
+<div id="vnflash"></div>
+<div id="vnchap"><div class="w"><div class="t"></div><div class="s"></div></div></div>
 <!-- 🎀 VN window (galgame 演出): sprite + dialogue box + click-to-advance + choices -->
 <div id="vnui" class="hidden" onclick="vnUnhide()">
   <img id="vnsprite2" class="hidden" alt="">
@@ -1080,7 +1110,7 @@ async function enterRun(run) {
   const beats = await j(`/runs/${runId}/play`);
   beats.forEach(renderBeat);
   if (vnMode) {   // 🎀 the window plays, not the log; a VN-layer crash degrades to chat
-    try { await vnBootstrap(beats, run.state); }
+    try { await vnBootstrap(beats, run); }
     catch (e) { reportClientError(e.stack || e.message, "vnBootstrap"); vnShow(false); vnMode = false; }
   }
   // ✨ a brand-new run: make the promise perceivable — this world is LOCKED, go earn it
@@ -1092,6 +1122,8 @@ async function enterRun(run) {
     } catch (e) {}
   }
   curClock = (run.state && run.state.clock) || null;
+  // 建议 chips 常驻: 聊天模式的续档也要回位 (VN 由 vnBootstrap 负责)
+  if (!vnMode) renderSuggest(((run.state || {}).suggestions) || run.suggestions || []);
   renderState(run.state);
   renderChoiceAsk(run.state && run.state.pending_choice);
   renderPressure(run.state && run.state.pressure_name
@@ -1192,7 +1224,7 @@ async function reloadChat() {
   const beats = await j(`/runs/${runId}/play`);
   beats.forEach(renderBeat);
   if (vnMode) {   // 🎀 rewind lands back in the window; crashes degrade to chat
-    try { await vnBootstrap(beats, run.state); }
+    try { await vnBootstrap(beats, run); }
     catch (e) { reportClientError(e.stack || e.message, "vnBootstrap"); vnShow(false); vnMode = false; }
   }
   applyRunUpdate(run);
@@ -1918,6 +1950,7 @@ function startHeart() {
 function stopHeart() { if (heartTimer) { clearInterval(heartTimer); heartTimer = null; } }
 function setDread(on) {
   if (on === dreadOn) return;
+  if (on) vnFlash();   // 🎬 惊吓演出: 猎手贴脸的那一瞬, 白闪一记
   dreadOn = on;
   document.body.classList.toggle("dread", on);
   if (on) startHeart(); else stopHeart();
@@ -2134,7 +2167,11 @@ function renderPlace(loc) {
   curLocData = loc || null;
   // track the current place so the background can use its AI-generated image
   const newLocId = (loc && loc.id) || null;
-  if (newLocId !== curLocId) { curLocId = newLocId; paintBackground(); }
+  if (newLocId !== curLocId) {
+    curLocId = newLocId; paintBackground();
+    // 🎬 转场卡: 换地方像 gal 换章 — 地名 + 此刻的钟, 一张压黑过场
+    vnChapCard(loc && loc.name, (curClock && curClock.label) || "");
+  }
   const el = document.getElementById("placebar");
   if ((!loc || !loc.name) && !clockChip()) { el.classList.add("hidden"); return; }
   if (!loc || !loc.name) { el.innerHTML = clockChip(); el.classList.remove("hidden"); return; }
@@ -2445,6 +2482,22 @@ function vnSprite(name) {
   vnRight = { name: name, cid: cid };
   _vnSet(R, cid);
 }
+// ── 🎬 导演 v1 (客户端规则): 引擎状态直接驱动演出, 不加模型调用不加延迟 ──
+let vnChapTimer = null;
+function vnChapCard(title, sub) {
+  if (!vnMode || !title) return;
+  const el = document.getElementById("vnchap");
+  el.querySelector(".t").textContent = title;
+  el.querySelector(".s").textContent = sub || "";
+  el.classList.add("on");
+  clearTimeout(vnChapTimer);
+  vnChapTimer = setTimeout(() => el.classList.remove("on"), 2300);
+}
+function vnFlash() {
+  if (!vnMode) return;
+  const el = document.getElementById("vnflash");
+  el.classList.remove("on"); void el.offsetWidth; el.classList.add("on");
+}
 // 🫥 隐藏界面 (gal 移植): 欣赏立绘, 点任意处恢复
 function vnHide() { document.body.classList.add("vnhide"); }
 // 📊 状态浮层: 收纳的头像栏+状态条按需查看
@@ -2455,7 +2508,7 @@ function vnUnhide() {
 }
 // 🎀 entering a VN run: the hidden chat holds the history, but the WINDOW must play —
 // a fresh run replays its opening beat-by-beat; a resumed run surfaces the last beat.
-async function vnBootstrap(beats, st) {
+async function vnBootstrap(beats, run) {
   const fresh = !(beats || []).some(b => b.author === "player");
   const list = fresh ? (beats || []) : (beats || []).slice(-1);
   vnBooting = true;   // 实弹(疗养院续档): 加载罩下等点击=死锁, 引导一律自动走
@@ -2464,7 +2517,9 @@ async function vnBootstrap(beats, st) {
   } finally {
     vnBooting = false;
   }
-  renderSuggest((st && st.suggestions) || []);
+  // 建议 chips 常驻 (竖屏 App 铁律): 新档在 state 里, 老档兜底挂在 run 顶层
+  const st = (run && run.state) || {};
+  renderSuggest(st.suggestions || (run && run.suggestions) || []);
 }
 async function playBeatVN(b, skipLog) {
   if (!skipLog) renderBeat(b);   // the hidden chat doubles as the 回想 backlog
@@ -2558,6 +2613,8 @@ function applyScene(scene) {
   if (!scene) return;
   curScene = scene;
   const mood = scene.mood || "daily";
+  // 🎬 夜色调: 夜里给整个舞台压一层青蓝 (只在 VN 演出层)
+  document.body.classList.toggle("vnnight", !!(vnMode && scene.night));
   paintBackground();
   if (mood !== curBgmMood) {
     curBgmMood = mood;
