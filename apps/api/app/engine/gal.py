@@ -616,6 +616,30 @@ def debg(png_bytes: bytes) -> bytes:
 
 
 # 图片必须瘦身 (实弹: 万相原图 0.9~1.7MB/张, 一本书 29MB, 跨洋一次换场 3MB+):
+def trim_alpha(png_bytes: bytes, margin: float = 0.02) -> bytes:
+    """裁掉透明边: 抠底后的立绘常常只占画面下 2/3, 上面一大块透明空白
+    会让人物在台上显小。裁到 alpha 包围盒 (留一点呼吸边), 失败原样返回."""
+    import io as _io
+
+    from PIL import Image
+    try:
+        im = Image.open(_io.BytesIO(png_bytes))
+        if im.mode != "RGBA":
+            return png_bytes
+        box = im.getchannel("A").getbbox()
+        if not box:
+            return png_bytes
+        mx = int(im.width * margin)
+        my = int(im.height * margin)
+        box = (max(0, box[0] - mx), max(0, box[1] - my),
+               min(im.width, box[2] + mx), min(im.height, box[3] + my))
+        buf = _io.BytesIO()
+        im.crop(box).save(buf, format="PNG")
+        return buf.getvalue()
+    except Exception:
+        return png_bytes
+
+
 def shrink_jpg(data: bytes, quality: int = 82, max_side: int = 0) -> bytes:
     """Recompress a generated image to web weight; keeps the original if smaller.
     max_side>0 also downsamples the long edge — 手机 App 优先, 服务器出口带宽小,

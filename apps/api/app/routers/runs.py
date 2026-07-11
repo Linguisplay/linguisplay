@@ -49,7 +49,7 @@ _TURN_GUARD = _imgthreading.Lock()
 
 
 def _img_worker():
-    from ..engine.gal import debg, shrink_jpg, to_webp
+    from ..engine.gal import debg, shrink_jpg, to_webp, trim_alpha
     from ..engine.qwen import generate_image
     while True:
         prompt, path, size = _IMG_Q.get()
@@ -66,7 +66,7 @@ def _img_worker():
                         # 🎭 透底立绘: 抠底出剪影上台; 源图留在旁边作改脸差分的底
                         path.with_name(path.stem + "_src.jpg").write_bytes(
                             shrink_jpg(img, quality=82, max_side=1280))
-                        path.write_bytes(to_webp(debg(img)))
+                        path.write_bytes(to_webp(trim_alpha(debg(img))))
                     else:
                         # 出生即瘦身: 原始生图 1-3MB, 小水管服务器上手机要下载几十秒
                         path.write_bytes(shrink_jpg(img, quality=80, max_side=1600))
@@ -447,7 +447,8 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
             "generated": True,
         })
     # 🖼 conjured cast (sandbox opening people, carried-in 旧识) get portraits rendering
-    _ensure_char_avatars(content, vn=bool((state.get("tuning") or {}).get("vn_mode")))
+    # (新档的 pinned content 自带现行 tuning, 函数内部自己识别 vn_mode)
+    _ensure_char_avatars(content)
     run = RunModel(
         owner_id=user.id,
         story_id=story.id,
@@ -757,9 +758,12 @@ def play(
                 # (or whose renders got throttled) pick their faces up here
                 av_changed = False
                 try:
-                    av_changed = _ensure_char_avatars(
-                        content,
-                        vn=bool(((final["state"] or {}).get("tuning") or {}).get("vn_mode")))
+                    # vn 旗以【现行 story】为准: 老档的 pinned content 钉在 vn_mode
+                    # 加进剧本之前, 只看 pinned 的话这些档永远长不出立绘 (疗养院实锤)
+                    _srow = db2.get(StoryModel, run.story_id)
+                    _vn = bool(((_srow.tuning if _srow is not None else {}) or {})
+                               .get("vn_mode"))
+                    av_changed = _ensure_char_avatars(content, vn=_vn)
                 except Exception:
                     pass
                 if final.get("content_mutated") or av_changed:

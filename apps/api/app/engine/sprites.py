@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .gal import debg, to_webp
+from .gal import debg, to_webp, trim_alpha
 from .qwen import edit_image
 
 _STATIC = Path(__file__).resolve().parents[1] / "static" / "scene"
@@ -63,7 +63,7 @@ def build_expr_pack(cids: list[str], exprs: list[str] | None = None,
             if not img:
                 report["failed"].append(out_path.name)
                 continue
-            # 🎭 差分同样上台前抠底 — 换表情不许换出一块背景板
-            out_path.write_bytes(to_webp(debg(img)))
+            # 🎭 差分同样上台前抠底+裁边 — 换表情不许换出背景板, 也不许缩一圈
+            out_path.write_bytes(to_webp(trim_alpha(debg(img))))
             report["done"].append(out_path.name)
     return report
