@@ -583,13 +583,18 @@ function probeBlink(cid) {
   im.src = `/scene/gal/${workId}/${cid}_眨.webp`;
 }
 setInterval(() => {
+  if (skipOn || typing) return;            // 快进/打字中不眨: 拍在飞速换, 别添乱
   stageSlots.forEach((s, i) => {
     if (!s || !blinkable[s.cid] || Math.random() > 0.16) return;
     const el = spEls()[i];
     if (el.classList.contains("off")) return;
-    const back = el.src;
     el.src = `/scene/gal/${workId}/${s.cid}_眨.webp`;
-    setTimeout(() => { if (stageSlots[i] && stageSlots[i].cid === s.cid) el.src = back; }, 140);
+    // 恢复从舞台账本实时取表情, 不用旧快照 (实弹: 140ms 里换了拍,
+    // 旧快照会把新表情拍回旧表情 → 表情乱闪)
+    setTimeout(() => {
+      const cur = stageSlots[i];
+      if (cur && cur.cid === s.cid) setSrc(el, cur.cid, cur.expr);
+    }, 140);
   });
 }, 700);
 
