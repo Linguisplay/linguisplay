@@ -650,6 +650,81 @@ def cover_prompt(gal: dict, title: str, world: str, art: str) -> str:
             "高细节，画面里没有任何文字")
 
 
+# ── ✍️ P2 创作者档位: B 智能拓写 / C 问卷 (blueprint §1) ─────────────────────────
+def outline_story(llm, idea: str, n: int = 4) -> dict[str, Any]:
+    """B档第一步: 梗概 → 章节大纲 (创作者确认/修改后才拓写 — 拓写跑偏整本报废,
+    大纲层把关是蓝图定死的强制环节)."""
+    out = llm.generate({"gal_outline": True, "idea": (idea or "")[:2000],
+                        "n": max(2, min(6, n))}) or {}
+    title = str(out.get("title") or "").strip()[:24]
+    ol = [str(x).strip()[:200] for x in (out.get("outline") or [])[:6]
+          if str(x).strip()]
+    if len(ol) < 2:
+        raise ValueError("大纲生成失败：换个更具体的想法试试")
+    return {"title": title, "outline": ol}
+
+
+def expand_work(story_id: str, session_factory) -> None:
+    """B档第二步: 按确认过的大纲逐章拓写全文, 然后无缝进 A 档建造管线。
+    拓写时每章的开头就是切片锚 (chapters_locked: parse 不再自行分章)."""
+    from sqlalchemy.orm.attributes import flag_modified
+
+    from ..models import Story
+    from .llm import get_llm
+    db = session_factory()
+    db.expire_on_commit = False
+    try:
+        s = db.get(Story, story_id)
+        if not s or not s.gal:
+            return
+        gal = s.gal
+        llm = get_llm()
+        idea = gal.get("idea") or ""
+        outline = gal.get("outline") or []
+        texts: list[str] = []
+        chapters: list[dict] = []
+        try:
+            for i, summ in enumerate(outline, 1):
+                gal["status"] = "expanding"
+                gal["progress"] = f"正在拓写第 {i}/{len(outline)} 章…"
+                s.gal = gal
+                flag_modified(s, "gal")
+                db.commit()
+                out = llm.generate({"gal_expand": True, "idea": idea[:2000],
+                                    "outline": outline, "index": i,
+                                    "prior_tail": (texts[-1][-300:] if texts else "")}) or {}
+                t = str(out.get("text") or "").strip()
+                if len(t) < 200:
+                    raise ValueError(f"第{i}章拓写失败（只有 {len(t)} 字）")
+                texts.append(t)
+                chapters.append({"i": i, "summary": str(summ)[:200], "from": t[:15]})
+            gal["source_text"] = "\n\n".join(texts)[:MAX_SOURCE_CHARS]
+            gal["chapters"] = chapters
+            gal["chapters_locked"] = True    # parse 只补角色/场景, 分章以拓写为准
+            gal["status"], gal["progress"] = "queued", "拓写完成，进入建造…"
+        except Exception as e:
+            gal["status"], gal["progress"] = "failed", f"拓写失败：{e}"
+            s.gal = gal
+            flag_modified(s, "gal")
+            db.commit()
+            return
+        s.gal = gal
+        flag_modified(s, "gal")
+        db.commit()
+    finally:
+        db.close()
+    build_work(story_id, session_factory)
+
+
+def survey_idea(llm, answers: dict) -> str:
+    """C档: 问卷 → 梗概 (并入 B 流程, 创作者可改梗概再生成大纲)."""
+    out = llm.generate({"gal_survey": True, "answers": answers or {}}) or {}
+    idea = str(out.get("idea") or "").strip()
+    if len(idea) < 50:
+        raise ValueError("梗概生成失败：问卷再填具体一点试试")
+    return idea[:1200]
+
+
 # ── 📋 剧本 linter: 机器能查的硬伤机器查 (零 LLM, 主线引擎逻辑严谨哲学的移植) ────
 def gal_lint(gal: dict[str, Any]) -> list[dict]:
     """Static findings over the compiled book. warn = worth a look in 修订台;
@@ -817,10 +892,13 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
                     gal["source_original"] = gal["source_text"]
                     gal["source_text"] = translate_source(llm, gal["source_text"])
                     _save(s)
-                # 1. 识别
+                # 1. 识别 (拓写档的分章以拓写为准, parse 只补角色/场景/主角)
                 gal["status"], gal["progress"] = "parsing", "正在识别角色与场景…"
                 _save(s)
+                locked = gal.get("chapters") if gal.get("chapters_locked") else None
                 gal.update(parse_story(llm, gal.get("source_text") or "", s.title or ""))
+                if locked:
+                    gal["chapters"] = locked
             mature = bool(gal.get("mature"))
             pov = gal["protagonist_id"]
             # 2. 编译: all chapters, 编译记忆 chained through per-chapter summaries

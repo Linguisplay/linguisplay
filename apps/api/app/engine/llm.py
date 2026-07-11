@@ -114,6 +114,19 @@ class MockLLM:
         if prompt.get("gal_translate"):
             # identity twin: mock sources are already Chinese
             return {"text": prompt.get("text") or ""}
+        if prompt.get("gal_outline"):
+            return {"title": "天台之约",
+                    "outline": ["天台初遇，约定明天。", "教室对峙，心意渐明。"]}
+        if prompt.get("gal_expand"):
+            i = prompt.get("index") or 1
+            opener = {1: "傍晚的天台，风把校服吹得猎猎作响。",
+                      2: "第二天的教室里，粉笔灰浮在光柱里。"}.get(i, f"第{i}日的黄昏。")
+            return {"text": opener + "林晚在天台遇见了沈刻。" * 30}
+        if prompt.get("gal_survey"):
+            return {"idea": "转学生林晚在放学后的天台遇见了总在喂猫的沈刻。"
+                            "两人因一把借出的伞越走越近，却在文化祭前因一个误会疏远。"
+                            "她必须在毕业前说出真心话，否则他将随家人搬去远方——"
+                            "结局取决于她敢不敢在天台再等一次。" * 2}
         if prompt.get("gal_endings"):
             s1 = ((prompt.get("scenes") or [{}])[0]).get("id", "s1")
             ts = prompt.get("targets") or ([prompt["target"]] if prompt.get("target") else [])

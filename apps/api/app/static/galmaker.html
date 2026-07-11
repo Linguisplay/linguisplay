@@ -34,10 +34,39 @@
   <div class="muted">贴进一个故事，我来做成一部手机 galgame：识别角色与场景、绘制立绘与背景、编成可点击的剧本。beta 期每人 1 本。</div>
 
   <div class="card" id="form">
+    <label>创作方式</label>
+    <div style="display:flex;gap:8px;margin-bottom:4px">
+      <button class="ghost" id="tabA" onclick="setMode('text')">📄 我有全文</button>
+      <button class="ghost" id="tabB" onclick="setMode('expand')">💡 我有想法</button>
+      <button class="ghost" id="tabC" onclick="setMode('survey')">🎲 帮我想一个</button>
+    </div>
     <label>作品标题</label>
     <input id="title" maxlength="24" placeholder="给你的 galgame 起个名字">
-    <label>故事文本（≥200 字；越具体，人物和画面越准）</label>
-    <textarea id="src" placeholder="把你的故事贴在这里——短篇小说、剧本、一段完整的情节都可以。"></textarea>
+    <div id="paneA">
+      <label>故事文本（≥200 字；越具体，人物和画面越准）</label>
+      <textarea id="src" placeholder="把你的故事贴在这里——短篇小说、剧本、一段完整的情节都可以。"></textarea>
+    </div>
+    <div id="paneC" style="display:none">
+      <label>题材</label>
+      <select id="qGenre"><option>校园恋爱</option><option>悬疑推理</option>
+        <option>奇幻冒险</option><option>科幻</option><option>恐怖</option></select>
+      <label>世界观一句话（可空）</label>
+      <input id="qWorld" placeholder="例：雨永远下不停的港口小城">
+      <label>主角与感情对象（可空）</label>
+      <input id="qWho" placeholder="例：转学生 × 图书馆里总在睡觉的学姐">
+      <label>口味</label>
+      <select id="qTone"><option>甜</option><option>甜中带虐</option><option>虐</option></select>
+      <button class="ghost" onclick="genIdea()">✨ 生成梗概</button>
+    </div>
+    <div id="paneB" style="display:none">
+      <label>想法 / 梗概（两三句话就够）</label>
+      <textarea id="idea" style="min-height:110px" placeholder="例：一个不会说谎的少女和一个只会说谎的少年，在广播社相遇……"></textarea>
+      <button class="ghost" onclick="genOutline()">📑 生成章节大纲</button>
+      <div id="outlineBox" style="display:none">
+        <label>章节大纲（可以直接改，改完再拓写——拓写跑偏整本报废，这一关值得把好）</label>
+        <div id="outlineList"></div>
+      </div>
+    </div>
     <label>画风</label>
     <select id="style">
       <option value="">默认（电影质感写实）</option>
@@ -65,23 +94,59 @@ async function j(path, opt = {}) {
   if (!r.ok) { let d = {}; try { d = await r.json(); } catch (e) {} throw new Error(d.detail || r.status); }
   return r.json();
 }
-let pollTimer = null;
+let pollTimer = null, MODE = "text";
+const $id = x => document.getElementById(x);
+function setMode(m) {
+  MODE = m;
+  $id("paneA").style.display = m === "text" ? "" : "none";
+  $id("paneB").style.display = (m === "expand" || m === "survey") ? "" : "none";
+  $id("paneC").style.display = m === "survey" ? "" : "none";
+  ["tabA", "tabB", "tabC"].forEach((t, i) =>
+    $id(t).style.borderColor = ["text", "expand", "survey"][i] === m ? "#ffd479" : "#45456a");
+}
+async function genIdea() {
+  try {
+    const r = await j("/gal/survey", { method: "POST", body: JSON.stringify({ answers: {
+      "题材": $id("qGenre").value, "世界观": $id("qWorld").value,
+      "主角与感情对象": $id("qWho").value, "口味": $id("qTone").value } }) });
+    $id("idea").value = r.idea;
+  } catch (e) { alert("⚠️ " + e.message); }
+}
+async function genOutline() {
+  const idea = $id("idea").value.trim();
+  if (idea.length < 20) { alert("想法再写两句——题材、主角、想要什么样的故事"); return; }
+  try {
+    const r = await j("/gal/outline", { method: "POST", body: JSON.stringify({ idea, n: 4 }) });
+    if (r.title && !$id("title").value.trim()) $id("title").value = r.title;
+    $id("outlineList").innerHTML = r.outline.map(x =>
+      `<input class="ol" style="margin-bottom:6px" value="${x.replace(/"/g, "&quot;")}">`).join("");
+    $id("outlineBox").style.display = "";
+  } catch (e) { alert("⚠️ " + e.message); }
+}
 async function build() {
   const go = document.getElementById("go");
+  const body = { title: $id("title").value.trim(),
+                 art_style: $id("style").value,
+                 mature: $id("mature").checked };
+  if (MODE === "text") body.source_text = $id("src").value;
+  else {
+    body.mode = "expand";
+    body.idea = $id("idea").value.trim();
+    body.outline = [...document.querySelectorAll("#outlineList .ol")]
+      .map(i => i.value.trim()).filter(Boolean);
+    if (body.outline.length < 2) { alert("先生成并确认章节大纲"); return; }
+  }
   go.disabled = true;
   try {
-    const w = await j("/gal", { method: "POST", body: JSON.stringify({
-      title: document.getElementById("title").value.trim(),
-      source_text: document.getElementById("src").value,
-      art_style: document.getElementById("style").value,
-      mature: document.getElementById("mature").checked }) });
+    const w = await j("/gal", { method: "POST", body: JSON.stringify(body) });
     poll(w.id);
   } catch (e) { alert("⚠️ " + e.message); go.disabled = false; }
 }
 // 建造进度页: the stage checklist — 识别 → 编剧 → 美术, live step under the active one
-const STAGES = [["parsing", "识别角色与场景"], ["compiling", "编写章节与结局"], ["art", "绘制立绘与背景"]];
+const STAGES = [["expanding", "按大纲拓写全文"], ["parsing", "识别角色与场景"],
+                ["compiling", "编写章节与结局"], ["art", "绘制立绘与背景"]];
 function stagesHTML(status, progress) {
-  const order = { queued: -1, parsing: 0, compiling: 1, art: 2 };
+  const order = { queued: -1, expanding: 0, parsing: 1, compiling: 2, art: 3 };
   const cur = (status in order) ? order[status] : -1;
   return STAGES.map(([k, label], i) =>
     `<div>${i < cur ? "✅" : i === cur ? "⏳" : "○"} ${label}` +

@@ -28,9 +28,21 @@ _BUILD_LOCK = threading.Lock()
 
 class GalCreate(BaseModel):
     title: str = ""
-    source_text: str
+    source_text: str = ""
     art_style: str = ""   # 画风预设文案 (P0: free text; preset menu later)
     mature: bool = False  # 🔞 成人拍编译许可 (adult beats render as bg+textbox)
+    mode: str = "text"    # "text"=A档全文 | "expand"=B档大纲拓写
+    idea: str = ""        # B档: 梗概/想法
+    outline: list = []    # B档: 创作者确认过的章节大纲
+
+
+class OutlineReq(BaseModel):
+    idea: str
+    n: int = 4
+
+
+class SurveyReq(BaseModel):
+    answers: dict
 
 
 def _spawn_build(work_id: str) -> bool:
@@ -50,18 +62,53 @@ def _spawn_build(work_id: str) -> bool:
     return True
 
 
+@router.post("/outline")
+def make_outline(body: OutlineReq, user: User = Depends(current_user)):
+    """B档: 梗概 → 大纲草案 (创作者在建造台上确认/修改后才拓写)."""
+    if len((body.idea or "").strip()) < 20:
+        raise HTTPException(400, "想法太短了——给我两句话，题材、主角、想要什么样的故事")
+    from ..engine.llm import get_llm
+    try:
+        return gal_mod.outline_story(get_llm(), body.idea, body.n)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
+@router.post("/survey")
+def make_survey_idea(body: SurveyReq, user: User = Depends(current_user)):
+    """C档: 问卷 → 梗概 (回填到 B 档想法框, 创作者可再改)."""
+    from ..engine.llm import get_llm
+    try:
+        return {"idea": gal_mod.survey_idea(get_llm(), body.answers)}
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
 @router.post("", status_code=201)
 def create_work(body: GalCreate, user: User = Depends(current_user),
                 db: Session = Depends(get_db)):
+    expand = body.mode == "expand"
     text = (body.source_text or "").strip()
-    if len(text) < 200:
+    idea = (body.idea or "").strip()
+    outline = [str(x).strip()[:200] for x in (body.outline or []) if str(x).strip()][:6]
+    if expand:
+        if len(idea) < 20 or len(outline) < 2:
+            raise HTTPException(400, "拓写档需要想法和至少两章确认过的大纲")
+    elif len(text) < 200:
         raise HTTPException(400, "故事文本太短了——至少给我两百字，我才画得出人和景")
     mine = db.query(Story).filter(Story.owner_id == user.id, Story.kind == "gal").all()
     if any((s.gal or {}).get("status") == "ready" for s in mine):
         raise HTTPException(403, "beta 期间每人限 1 本已完成的作品")
-    if any((s.gal or {}).get("status") in ("queued", "parsing", "compiling", "art")
-           for s in mine):
+    if any((s.gal or {}).get("status") in ("queued", "expanding", "parsing",
+                                           "compiling", "art") for s in mine):
         raise HTTPException(409, "你有一本正在建造中——等它完成或失败后再开新的")
+    gal = {"status": "expanding" if expand else "queued",
+           "progress": "排队拓写…" if expand else "排队中…",
+           "mature": bool(body.mature)}
+    if expand:
+        gal["idea"], gal["outline"] = idea[:2000], outline
+    else:
+        gal["source_text"] = text[:gal_mod.MAX_SOURCE_CHARS]
     s = Story(
         id=uuid.uuid4().hex,
         owner_id=user.id,
@@ -70,14 +117,25 @@ def create_work(body: GalCreate, user: User = Depends(current_user),
         visibility="private",
         status="draft",
         tuning=({"art_style": body.art_style.strip()[:200]} if body.art_style.strip() else {}),
-        gal={"status": "queued", "progress": "排队中…",
-             "mature": bool(body.mature),
-             "source_text": text[:gal_mod.MAX_SOURCE_CHARS]},
+        gal=gal,
     )
     db.add(s)
     db.commit()
-    _spawn_build(s.id)
-    return {"id": s.id, "status": "queued"}
+    if expand:
+        with _BUILD_LOCK:
+            _BUILDING.add(s.id)
+
+        def _run():
+            try:
+                gal_mod.expand_work(s.id, SessionLocal)   # chains into build_work
+            finally:
+                with _BUILD_LOCK:
+                    _BUILDING.discard(s.id)
+
+        threading.Thread(target=_run, daemon=True).start()
+    else:
+        _spawn_build(s.id)
+    return {"id": s.id, "status": gal["status"]}
 
 
 def _own_work(work_id: str, user: User, db: Session) -> Story:

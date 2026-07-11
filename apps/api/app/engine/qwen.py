@@ -2232,6 +2232,69 @@ class QwenLLM:
         except Exception:
             return {"memory": prior}
 
+    def _gal_outline(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """✍️ B档: 梗概 → 章节大纲 (创作者确认后才拓写)."""
+        n = prompt.get("n") or 4
+        sys = ("你是视觉小说（galgame）策划。把创作者的想法拓成一部可玩的恋爱向"
+               f"视觉小说的 {n} 章大纲，只输出严格JSON："
+               '{"title":"≤12字书名","outline":["第1章一句话概要（≤60字）","…"]}。'
+               "要求：起承转合完整；有明确的主角与感情对象；中段要有冲突或误会；"
+               "最后一章收在结局分岔的高潮处；全部用简体中文。")
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model,
+                               "messages": [{"role": "system", "content": sys},
+                                            {"role": "user",
+                                             "content": prompt.get("idea") or ""}],
+                               "max_tokens": 900, "temperature": 0.7,
+                               "response_format": {"type": "json_object"}},
+                              timeout=60, kind="gal_outline")
+            return _loads_lenient(resp.json()["choices"][0]["message"]["content"])
+        except Exception:
+            return {}
+
+    def _gal_expand(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """✍️ B档: 按大纲逐章拓写正文 (只输出正文, 承接前文)."""
+        i = prompt.get("index") or 1
+        ol = prompt.get("outline") or []
+        chtable = "\n".join(f"第{k + 1}章：{x}" for k, x in enumerate(ol))
+        pt = (prompt.get("prior_tail") or "").strip()
+        sys = ("你是小说家。按给定大纲写出【本章】的完整正文：简体中文，"
+               "900~1500字，对话与描写并重，人物言行具体可感；"
+               "只写本章大纲覆盖的剧情，收在能接下一章的地方；"
+               "不写章节标题、不写任何说明，只输出正文本身。")
+        u = (f"整体想法：{prompt.get('idea') or ''}\n全书大纲：\n{chtable}\n"
+             + (f"前一章的结尾（紧接着往下写）：…{pt}\n" if pt else "")
+             + f"现在写【第{i}章】：{ol[i - 1] if i - 1 < len(ol) else ''}")
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model,
+                               "messages": [{"role": "system", "content": sys},
+                                            {"role": "user", "content": u}],
+                               "max_tokens": 3000, "temperature": 0.8},
+                              timeout=180, kind="gal_expand")
+            return {"text": (resp.json()["choices"][0]["message"]["content"] or "").strip()}
+        except Exception:
+            return {}
+
+    def _gal_survey(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """✍️ C档: 问卷 → 梗概 (并入 B 流程)."""
+        a = prompt.get("answers") or {}
+        lines = "\n".join(f"{k}：{v}" for k, v in a.items() if str(v).strip())
+        sys = ("根据创作者填的问卷，写一段 200~300 字的故事梗概：有名字的主角、"
+               "有感情对象、有具体的冲突与走向、点出结局的分岔方向；"
+               "简体中文，只输出梗概本身，不加任何说明。")
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model,
+                               "messages": [{"role": "system", "content": sys},
+                                            {"role": "user", "content": lines or "随便来一个"}],
+                               "max_tokens": 600, "temperature": 0.9},
+                              timeout=60, kind="gal_survey")
+            return {"idea": (resp.json()["choices"][0]["message"]["content"] or "").strip()}
+        except Exception:
+            return {}
+
     def _gal_translate(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """🎀 转写拍: one chunk of a foreign-language source → faithful modern
         Chinese. Plain text out (no JSON); failure falls back to the original
@@ -3501,6 +3564,12 @@ class QwenLLM:
             return self._gal_endings(prompt)
         if prompt.get("gal_translate"):
             return self._gal_translate(prompt)
+        if prompt.get("gal_outline"):
+            return self._gal_outline(prompt)
+        if prompt.get("gal_expand"):
+            return self._gal_expand(prompt)
+        if prompt.get("gal_survey"):
+            return self._gal_survey(prompt)
         speaker = prompt.get("speaker_name") or "角色"
         channel = prompt.get("channel") or "say"
         observe = bool(prompt.get("observe"))

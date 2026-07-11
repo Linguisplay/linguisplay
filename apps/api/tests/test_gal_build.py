@@ -275,6 +275,20 @@ def test_set_beat_text_reaches_everywhere():
     assert texts.count("改过的字。") == 2              # main + branch
 
 
+def test_outline_and_survey():
+    out = gal.outline_story(MockLLM(), "天台上的恋爱故事，甜中带虐")
+    assert out["title"] and len(out["outline"]) == 2
+    idea = gal.survey_idea(MockLLM(), {"题材": "校园恋爱", "口味": "甜"})
+    assert len(idea) >= 50
+    with pytest.raises(ValueError):
+        class EmptyLLM(MockLLM):
+            def generate(self, prompt):
+                if prompt.get("gal_outline"):
+                    return {}
+                return super().generate(prompt)
+        gal.outline_story(EmptyLLM(), "x")
+
+
 def test_bad_parse_fails_loud():
     class EmptyLLM(MockLLM):
         def generate(self, prompt):
