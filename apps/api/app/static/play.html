@@ -2391,11 +2391,13 @@ function vnToggleFree() {
 function vnAdvance() {
   if (vnAdvanceResolve) { const r = vnAdvanceResolve; vnAdvanceResolve = null; r(); }
 }
+let vnBooting = false;   // 引导期: 加载罩还没撤, 绝不能等玩家点击 (互等=卡死)
 function vnWait(ms) {
   document.getElementById("vnnext").style.visibility = "visible";
   return new Promise(res => {
     vnAdvanceResolve = () => { document.getElementById("vnnext").style.visibility = "hidden"; res(); };
-    if (vnAutoOn || skipType) setTimeout(vnAdvance, skipType ? 150 : Math.min(6500, ms));
+    if (vnAutoOn || skipType || vnBooting)
+      setTimeout(vnAdvance, vnBooting ? 420 : (skipType ? 150 : Math.min(6500, ms)));
   });
 }
 document.addEventListener("keydown", (e) => {
@@ -2440,7 +2442,12 @@ function vnUnhide() {
 async function vnBootstrap(beats, st) {
   const fresh = !(beats || []).some(b => b.author === "player");
   const list = fresh ? (beats || []) : (beats || []).slice(-1);
-  for (const b of list) await playBeatVN(b, true);
+  vnBooting = true;   // 实弹(疗养院续档): 加载罩下等点击=死锁, 引导一律自动走
+  try {
+    for (const b of list) await playBeatVN(b, true);
+  } finally {
+    vnBooting = false;
+  }
   renderSuggest((st && st.suggestions) || []);
 }
 async function playBeatVN(b, skipLog) {
