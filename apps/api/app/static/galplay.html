@@ -128,6 +128,8 @@
     <span onclick="event.stopPropagation();openHearts()">💗</span>
     <span id="btnAuto" onclick="event.stopPropagation();toggleAuto()">▶ 自动</span>
     <span id="btnSkip" onclick="event.stopPropagation();toggleSkip()">⏩ 跳过</span>
+    <span onclick="event.stopPropagation();ffwd()" title="快进到下个选择">⏭</span>
+    <span onclick="event.stopPropagation();openSettings()">⚙</span>
     <span id="btnBgm" onclick="event.stopPropagation();bgmToggle()">🔊</span>
     <span onclick="event.stopPropagation();toggleLog()">📖</span>
     <span onclick="event.stopPropagation();location.href='/gal'">✕</span>
@@ -150,6 +152,15 @@
   </div>
   <div id="gdate"></div>
   <div id="gflash"></div>
+  <div id="gset" class="book" onclick="event.stopPropagation()">
+    <h3>⚙ 设置 <span style="float:right;cursor:pointer" onclick="this.closest('.book').style.display='none'">✕</span></h3>
+    <div class="e">文字速度<br>
+      <input id="cfgSpeed" type="range" min="0.5" max="3" step="0.25" style="width:100%" oninput="cfgChange()"></div>
+    <div class="e">背景音乐音量<br>
+      <input id="cfgBgm" type="range" min="0" max="0.6" step="0.05" style="width:100%" oninput="cfgChange()"></div>
+    <div class="e">音效音量<br>
+      <input id="cfgSfx" type="range" min="0" max="1" step="0.1" style="width:100%" oninput="cfgChange()"></div>
+  </div>
   <div id="ghearts" class="book" onclick="event.stopPropagation()">
     <h3>💗 心动记录 <span style="float:right;cursor:pointer" onclick="this.closest('.book').style.display='none'">✕</span></h3>
     <div id="gheartRows"></div>
@@ -179,10 +190,12 @@ const RKEY = () => "gal_read_" + workId;
 const chapters = () => ((W.script[W.protagonist_id] || {}).chapters) || [];
 
 // 🎵 BGM: 情绪标签 → 主站曲库; 渐入渐出, 音量压低 (突然炸响是大忌)
-const BGM_MAP = { "平静": "daily", "温馨": "warm", "浪漫": "romantic",
-                  "紧张": "tense", "悲伤": "sad", "寂寞": "lonely",
-                  "悬疑": "mystery", "激昂": "battle" };
-const BGM_VOL = 0.22;
+// 曲库: 甘茶の音楽工房 (amachamusic.chagasi.com, 免费商用无需署名) — gal_ 前缀;
+// 主站合成器旧曲留作兜底 (gal_ 文件缺失时 onerror 回退)
+const BGM_MAP = { "平静": "gal_daily", "温馨": "gal_warm", "浪漫": "gal_romantic",
+                  "紧张": "gal_tense", "悲伤": "gal_sad", "寂寞": "gal_lonely",
+                  "悬疑": "gal_mystery", "激昂": "gal_battle" };
+const BGM_VOL = () => CFG.bgm;   // 分轨音量走全局设置
 let bgm = null, bgmTrack = "", bgmOn = localStorage.getItem("gal_bgm") !== "off", fadeT = null;
 function bgmToggle() {
   bgmOn = !bgmOn;
@@ -199,12 +212,17 @@ function setBgm(mood) {
   if (!bgm) { bgm = new Audio(); bgm.loop = true; }
   clearInterval(fadeT);
   const start = () => {
+    // gal_ 曲子缺失时回退主站旧曲 (去掉 gal_ 前缀)
+    bgm.onerror = () => {
+      if (t.startsWith("gal_")) { bgm.src = `/scene/bgm/${t.slice(4)}.mp3`;
+                                  bgm.play().catch(() => { bgmTrack = ""; }); }
+    };
     bgm.src = `/scene/bgm/${t}.mp3`; bgm.volume = 0;
     // autoplay 被拦(定时器链里没有用户手势)时清掉曲目记账, 下一次点击重试
     bgm.play().catch(() => { bgmTrack = ""; });
     fadeT = setInterval(() => {
-      bgm.volume = Math.min(BGM_VOL, bgm.volume + 0.02);
-      if (bgm.volume >= BGM_VOL) clearInterval(fadeT);
+      bgm.volume = Math.min(BGM_VOL(), bgm.volume + 0.02);
+      if (bgm.volume >= BGM_VOL()) clearInterval(fadeT);
     }, 80);
   };
   if (bgm.src && !bgm.paused) {
@@ -228,6 +246,40 @@ function toggleSkip() {
   skipOn = !skipOn;
   $("btnSkip").classList.toggle("on", skipOn);
   if (skipOn && !typing && !choosing) next();
+}
+// ⏭ 快进到下个选择: 静默推进 (记既读+进回想), 在选择/CG/章界/结局处停下
+function ffwd() {
+  if (!sav || chapCardOn || choosing) return;
+  typing = false;
+  clearTimeout(autoT);
+  for (let guard = 0; guard < 600; guard++) {
+    if (sav.br) {
+      const c = curChoice(sav.br.q), opt = c && c.options[sav.br.o];
+      if (opt && sav.br.j + 1 < opt.beats.length) {
+        sav.br.j++;
+        const bb = opt.beats[sav.br.j];
+        markRead(bb.id); logAdd(bb);
+        if (bb.cg) { save(); showBeat(bb); return; }
+        continue;
+      }
+      sav.br = null;
+    }
+    sav.i++;
+    const list = listNow();
+    while (sav.i < list.length && list[sav.i].type !== "choice" && !flagOk(list[sav.i]))
+      sav.i++;
+    if (sav.i >= list.length) {
+      if (sav.end) { save(); finish(); return; }
+      if (sav.ch + 1 >= chapters().length) { save(); startEnding(); return; }
+      sav.ch++; sav.i = -1; save();
+      showChapCard(sav.ch, false); return;
+    }
+    const b = list[sav.i];
+    if (b.type === "choice") { save(); showChoice(b); return; }
+    markRead(b.id); logAdd(b);
+    if (b.cg) { save(); showBeat(b); return; }   // CG 是奖励, 不快进糊脸
+  }
+  save(); showCurrent();
 }
 function setCg(b) {
   const el = $("gcg");
@@ -364,16 +416,27 @@ function showCurrent() {
   showBeat(b);
 }
 
-function setBg(sid) {
+function setBg(sid, trans) {
   if (!sid) return;                       // synthetic cards keep the current bg
   const el = $("gbg");
   const want = `/scene/gal/${workId}/bg_${sid}.jpg`;
   if (el.dataset.sid === sid) return;
   clearCast();                            // 换场清台：人随新场景重新登场
   el.dataset.sid = sid;
-  el.style.opacity = 0;
-  setTimeout(() => { el.onerror = () => { el.removeAttribute("src"); el.style.opacity = 1; };
-                     el.src = want; el.onload = () => el.style.opacity = 1; }, 320);
+  const swap = () => { el.onerror = () => { el.removeAttribute("src"); el.style.opacity = 1; };
+                       el.src = want; el.onload = () => el.style.opacity = 1; };
+  // 🎬 转场库: 时间跳跃走黑场切, 白闪伴随走白场切, 普通换景走溶解
+  if (trans === "black" || trans === "white") {
+    const f = $("gflash");
+    f.style.background = trans === "white" ? "#fff" : "#000";
+    f.style.transition = "opacity .3s ease"; f.style.opacity = 1;
+    setTimeout(() => { el.style.opacity = 0; swap();
+                       setTimeout(() => { f.style.transition = "opacity .7s ease";
+                                          f.style.opacity = 0; }, 260); }, 320);
+  } else {
+    el.style.opacity = 0;
+    setTimeout(swap, 320);
+  }
 }
 // 🎭 舞台账本: 最近两个开口的非主角占左右槽（播放器侧从 who 序列推导——
 // 结构性要求不押在编译模型的自觉上）。槽位一经分定不再交换；第三人开口顶掉
@@ -387,6 +450,7 @@ function clearCast() {
   $("gcg").classList.add("off");
 }
 function setSrc(el, cid, expr) {
+  probeBlink(cid);
   const want = `/scene/gal/${workId}/${cid}_${expr || "常态"}.webp`;
   const fallback = `/scene/gal/${workId}/${cid}_常态.webp`;
   el.onerror = () => {   // a missing expression falls back to 常态, then hides
@@ -434,10 +498,44 @@ async function typeText(el, text) {
   for (const ch of (text || "")) {
     if (!typing) { el.textContent = text; break; }   // tap-to-complete
     el.textContent += ch;
-    await new Promise(r => setTimeout(r, "，。！？…、".includes(ch) ? 90 : 26));
+    await new Promise(r => setTimeout(r, ("，。！？…、".includes(ch) ? 90 : 26) / CFG.speed));
   }
   typing = false;
 }
+// ⚙ 全局设置: 文字速度 + 分轨音量 (localStorage 全局持久)
+let CFG = { speed: 1, bgm: 0.22, sfx: 0.5 };
+try { CFG = { ...CFG, ...JSON.parse(localStorage.getItem("gal_cfg") || "{}") }; } catch (e) {}
+function saveCfg() { localStorage.setItem("gal_cfg", JSON.stringify(CFG)); }
+function openSettings() {
+  $("gset").style.display = "block";
+  $("cfgSpeed").value = CFG.speed; $("cfgBgm").value = CFG.bgm; $("cfgSfx").value = CFG.sfx;
+}
+function cfgChange() {
+  CFG.speed = +$("cfgSpeed").value; CFG.bgm = +$("cfgBgm").value; CFG.sfx = +$("cfgSfx").value;
+  if (bgm && !bgm.paused) bgm.volume = CFG.bgm;
+  saveCfg();
+}
+
+// 👀 眨眼 (E-mote 丐版): 有闭眼帧的角色每隔几秒快速切一下
+const blinkable = {};
+function probeBlink(cid) {
+  if (cid in blinkable) return;
+  blinkable[cid] = false;
+  const im = new Image();
+  im.onload = () => { blinkable[cid] = true; };
+  im.src = `/scene/gal/${workId}/${cid}_眨.webp`;
+}
+setInterval(() => {
+  stageSlots.forEach((s, i) => {
+    if (!s || !blinkable[s.cid] || Math.random() > 0.16) return;
+    const el = spEls()[i];
+    if (el.classList.contains("off")) return;
+    const back = el.src;
+    el.src = `/scene/gal/${workId}/${s.cid}_眨.webp`;
+    setTimeout(() => { if (stageSlots[i] && stageSlots[i].cid === s.cid) el.src = back; }, 140);
+  });
+}, 700);
+
 // 🔉 拍级音效: 中文标签 → 主站音效库, 一次性播放
 const SFX_MAP = { "雷鸣": "thunder", "雨声": "rain", "风声": "wind", "海浪": "waves",
                   "脚步": "footsteps", "敲门": "knock", "开门": "door", "吱呀": "creak",
@@ -448,7 +546,7 @@ function playSfx(tag) {
   const f = SFX_MAP[tag];
   if (!f || !bgmOn) return;
   const a = new Audio(`/scene/sfx/${f}.mp3`);
-  a.volume = 0.5;
+  a.volume = CFG.sfx;
   a.play().catch(() => {});
 }
 // 🎬 演出小件
@@ -496,7 +594,7 @@ function showDate(d) {          // 📅 time-skip banner: fade in, hold, fade ou
   dateT = setTimeout(() => { el.style.opacity = 0; }, 2200);
 }
 async function showBeat(b) {
-  setBg(b.scene);
+  setBg(b.scene, b.date ? "black" : (b.fx === "白闪" ? "white" : ""));
   setStage(b);
   setCg(b);
   if (b.bgm) setBgm(b.bgm);

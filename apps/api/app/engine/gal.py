@@ -498,7 +498,10 @@ def compile_endings(llm, gal: dict[str, Any], full_summary: str = "",
 # riding the SAME seed with a prompt that differs only in the expression phrase,
 # keeps the face while making expression and framing per-image reliable.
 _EXPR_FACE = {"常态": "平静自然的神情", "喜": "开心微笑的神情",
-              "怒": "愤怒皱眉的神情", "哀": "悲伤低落的神情"}
+              "怒": "愤怒皱眉的神情", "哀": "悲伤低落的神情",
+              # E-mote 丐版: 一张闭眼帧, 播放器随机切换 ≈ 眨眼 (立绘活的最大单点)
+              "眨": "双眼轻轻闭合的瞬间的神情，除闭眼外与平静的神情完全一致"}
+BLINK = "眨"
 
 
 def portrait_prompt(char: dict, world: str, art: str, expr: str) -> str:
@@ -854,7 +857,7 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
                     continue   # 主角无立绘 — the "你" has no face on screen
                 seed = char_seed(story_id, c["id"])
                 got: list[str] = []
-                for expr in EXPRESSIONS:
+                for expr in EXPRESSIONS + (BLINK,):
                     p = wdir / f"{c['id']}_{expr}.webp"
                     if p.exists():
                         got.append(expr)

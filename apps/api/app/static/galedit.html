@@ -107,7 +107,7 @@ async function load() {
         `<div class="muted" style="font-size:13px">${icons[f.level] || "◽"} ${f.msg}</div>`).join("")
     : "";
   const pov = W.protagonist_id;
-  const exprs = ["常态", "喜", "怒", "哀"];
+  const exprs = ["常态", "喜", "怒", "哀", "眨"];
   $("sprites").classList.remove("muted");
   $("sprites").innerHTML = W.characters.filter(c => c.id !== pov).map(c =>
     exprs.map(e => cell(`/scene/gal/${workId}/${c.id}_${e}.webp`, `${c.name} · ${e}`,
