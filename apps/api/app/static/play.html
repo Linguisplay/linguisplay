@@ -298,6 +298,24 @@
   font-size: 21px; letter-spacing: 7px; color: #d8b57a; padding: 15px 30px;
   border-top: 1px solid rgba(216,181,122,.5); border-bottom: 1px solid rgba(216,181,122,.5); }
 #vnchap .s { margin-top: 12px; font-size: 12px; letter-spacing: 3px; color: rgba(236,233,226,.62); }
+/* 📸 CG 时刻 (gal 移植): 稀有时刻全屏亮相, 卡面=回忆册同款 (地点艺术图+关键台词) */
+#vncg { position: fixed; inset: 0; z-index: 72; background: #06070c; opacity: 0;
+  pointer-events: none; transition: opacity .6s ease; display: grid;
+  place-items: end center; cursor: pointer; }
+#vncg.on { opacity: 1; pointer-events: auto; }
+#vncg .cgbg { position: absolute; inset: 0; background-size: cover;
+  background-position: center; animation: cgdrift 16s ease-in-out infinite alternate; }
+@keyframes cgdrift { from { transform: scale(1); } to { transform: scale(1.07); } }
+#vncg .cgshade { position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(4,5,9,.30), rgba(4,5,9,.06) 42%, rgba(4,5,9,.90)); }
+#vncg .cgtxt { position: relative; padding: 0 8% calc(44px + env(safe-area-inset-bottom));
+  text-align: center; }
+#vncg .cgk { color: #d8b57a; font-size: 12px; letter-spacing: 4px; margin-bottom: 9px; }
+#vncg .cgt { font-family: "Source Han Serif SC","Noto Serif CJK SC","Songti SC",Georgia,serif;
+  font-size: 21px; letter-spacing: 2px; color: #f2ead8; margin-bottom: 10px; }
+#vncg .cgl { color: rgba(236,233,226,.85); font-size: 13.5px; line-height: 1.9;
+  max-width: 640px; margin: 0 auto 8px; }
+#vncg .cgm { color: rgba(216,181,122,.7); font-size: 11px; letter-spacing: 2px; }
 /* 🎀 VN window (galgame 演出) — gal 播放器同款设计语言: 淡金/渐变面板/幽灵按钮 */
 #vnui { position: fixed; inset: 0; z-index: 45; pointer-events: none; }
 /* 沙盒立绘是带背景的照片 (非透底人物): 统一裁成 3:4 竖构图人像卡, 杜绝横幅/拼贴感;
@@ -485,6 +503,9 @@ body.dread #dread { opacity:1; }
 <div id="vntint"></div>
 <div id="vnflash"></div>
 <div id="vnchap"><div class="w"><div class="t"></div><div class="s"></div></div></div>
+<div id="vncg" onclick="this.classList.remove('on')"><div class="cgbg"></div><div class="cgshade"></div>
+  <div class="cgtxt"><div class="cgk"></div><div class="cgt"></div><div class="cgl"></div>
+  <div class="cgm">✦ 已存入回忆册 · 点按继续</div></div></div>
 <!-- 🎀 VN window (galgame 演出): sprite + dialogue box + click-to-advance + choices -->
 <div id="vnui" class="hidden" onclick="vnUnhide()">
   <img id="vnsprite2" class="hidden" alt="">
@@ -2538,6 +2559,30 @@ function vnFlash() {
   const el = document.getElementById("vnflash");
   el.classList.remove("on"); void el.offsetWidth; el.classList.add("on");
 }
+// 📸 CG 时刻: 稀有时刻在 VN 里全屏亮相; 卡面取回忆册里刚落账的那张 (地点艺术图+摘句)
+const CG_KINDS = { golden: "✨ 金色瞬间", rel_up: "💗 心动时刻", date: "💞 约定之时",
+                   promise: "🤝 约定之时", breakthrough: "⚡ 突破", crit: "🎲 天命一掷",
+                   secret_full: "🧩 真相拼全" };
+async function vnShowCG(moments) {
+  const hit = (moments || []).find(m => CG_KINDS[m.kind]);
+  if (!hit || !runId) return;
+  let card = null;
+  try {
+    const jd = await j(`/runs/${runId}/journal`);
+    const alb = jd.album || [];   // newest first
+    card = alb.find(a => a.kind === hit.kind && (!hit.title || a.title === hit.title))
+        || (alb[0] && alb[0].kind === hit.kind ? alb[0] : null);
+  } catch (e) {}
+  const bgStem = (card && card.bg) || curLocId;
+  const el = document.getElementById("vncg");
+  el.querySelector(".cgbg").style.backgroundImage =
+    bgStem ? `url('/scene/bg/${encodeURIComponent(bgStem)}.jpg')` : "";
+  const stars = "★".repeat(Math.max(1, Math.min(3, (card && card.rarity) || 1)));
+  el.querySelector(".cgk").textContent = `${CG_KINDS[hit.kind]}　${stars}`;
+  el.querySelector(".cgt").textContent = (card && card.title) || hit.title || "";
+  el.querySelector(".cgl").textContent = (card && card.text) || "";
+  el.classList.add("on");
+}
 // 色调层: direct 事件说了算; 场景事件只做 night/none 兜底 (移动等非回合通路)
 function vnTint(kind) {
   const el = document.getElementById("vntint");
@@ -2825,7 +2870,7 @@ async function streamTurn(url, bodyObj) {
           if (m.mail) pushToast(B(`📮 ${escapeHtml(m.name || "")} 给你写了一封信：「${escapeHtml(((m.msgs || [])[0] || "").slice(0, 20))}」`, `📮 ${escapeHtml(m.name || "")} wrote you a letter: “${escapeHtml(((m.msgs || [])[0] || "").slice(0, 20))}”`), "t-rel", 400);
           else if (m.call) pushToast(B(`📞 ${escapeHtml(m.name || "")} 来电：「${escapeHtml(((m.msgs || [])[0] || "").slice(0, 24))}…」`, `📞 ${escapeHtml(m.name || "")} calling: “${escapeHtml(((m.msgs || [])[0] || "").slice(0, 24))}…”`), "t-rel", 400);
           else pushToast(`📱 ${escapeHtml(m.name || "")}：${escapeHtml(((m.msgs || [])[0] || "").slice(0, 24))}`, "t-rel", 400);
-          playSfx && playSfx(m.call ? "ringtone" : "knock");
+          playSfx && playSfx(m.call ? "ringtone" : "buzz");   // 📳 短信=震动, 不是敲门
         }
         else if (ev.event === "pressure") { renderPressure(ev.pressure); }
         else if (ev.event === "threat") { renderThreat(ev.threat); }
@@ -3018,6 +3063,8 @@ function finishTurn() {
   if (afterPlay) {
     if ((afterPlay.moments && afterPlay.moments.length) || (afterPlay.relDeltas && Object.keys(afterPlay.relDeltas).length))
       showMoments(afterPlay.moments || [], afterPlay.relDeltas || {});
+    if (vnMode && afterPlay.moments && afterPlay.moments.length)
+      vnShowCG(afterPlay.moments);   // 📸 稀有时刻全屏 CG (async, 不阻塞收尾)
     if (afterPlay.relDeltas) pulseCast(afterPlay.relDeltas);
     if (afterPlay.choice && !ended) renderChoiceAsk(afterPlay.choice);
     if (afterPlay.suggest && !ended) renderSuggest(afterPlay.suggest);
