@@ -200,7 +200,8 @@ function setBgm(mood) {
   clearInterval(fadeT);
   const start = () => {
     bgm.src = `/scene/bgm/${t}.mp3`; bgm.volume = 0;
-    bgm.play().catch(() => {});
+    // autoplay 被拦(定时器链里没有用户手势)时清掉曲目记账, 下一次点击重试
+    bgm.play().catch(() => { bgmTrack = ""; });
     fadeT = setInterval(() => {
       bgm.volume = Math.min(BGM_VOL, bgm.volume + 0.02);
       if (bgm.volume >= BGM_VOL) clearInterval(fadeT);
@@ -342,6 +343,10 @@ function startGame(cont) {
   sav = resumed ? saved : fresh();
   choosing = false;
   clearCast();
+  // 借「开始」这次点击的手势把第一首 BGM 拉起来 (过场卡的定时器链没有手势权限)
+  const ch0 = chapters()[sav.ch] || [];
+  const firstMood = (ch0.find(b => b.type !== "choice" && b.bgm) || {}).bgm;
+  if (firstMood) setBgm(firstMood);
   if (resumed) showCurrent();
   else showChapCard(0, false);   // 开卷也有过场: 第一章的章节卡
 }
@@ -629,6 +634,8 @@ function finishSimple(t) {
 }
 
 function tap() {
+  // 每次点击都是合法的用户手势: 顺手唤醒被 autoplay 策略拦下的 BGM
+  if (bgm && bgm.paused && bgmOn && bgm.src) bgm.play().catch(() => {});
   if ($("gtitle").style.display !== "none" || $("gend").style.display === "flex") return;
   if (chapCardOn) { hideChapCard(); return; }     // 过场卡: 点一下提前进章
   next();
