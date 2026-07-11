@@ -22,8 +22,42 @@ _FLASH_RE = re.compile(
 # 心理惊悚的底噪: 没有实体音效可插时, 心跳声顶上
 _HEARTBEAT_RE = re.compile(r"心跳|心脏(狂|猛|骤)|窒息|屏住呼吸|汗毛|脊背发凉|寒意|冷汗")
 
-# 压力压过场景 mood 的选曲阈值; battle/grimdark 本身够紧, 不夺
-_TENSE_OVERRIDE_SKIP = {"battle", "grimdark", "tense"}
+# 🎵 BGM 曲库标签 (Yi: 先给所有 bgm 打上情绪标签再调用) — key = /scene/bgm/ 里的
+# 文件名词干 (客户端 gal_{key}.mp3 优先、{key}.mp3 兜底)。energy 1安~4烈;
+# 加新曲 = 加一行数据, 选曲逻辑不用动。
+BGM_TRACKS: dict[str, dict] = {
+    "daily":    {"tags": {"日常", "平静", "闲适"}, "energy": 1},
+    "warm":     {"tags": {"温馨", "治愈", "陪伴"}, "energy": 1},
+    "romantic": {"tags": {"浪漫", "心动", "暧昧", "亲密"}, "energy": 1},
+    "sad":      {"tags": {"悲伤", "失去", "离别"}, "energy": 1},
+    "lonely":   {"tags": {"孤独", "空寂", "夜"}, "energy": 1},
+    "mystery":  {"tags": {"悬疑", "调查", "线索"}, "energy": 2},
+    "eerie":    {"tags": {"诡异", "阴森", "不安", "夜"}, "energy": 2},
+    "ancient":  {"tags": {"古风", "修行", "宗门"}, "energy": 2},
+    "grimdark": {"tags": {"黑暗", "宏大", "压抑"}, "energy": 3},
+    "tense":    {"tags": {"紧张", "恐惧", "追逐", "危机"}, "energy": 3},
+    "battle":   {"tags": {"战斗", "厮杀", "激烈"}, "energy": 4},
+}
+
+
+def pick_bgm(mood: str, pressure: int = 0, hot: bool = False, night: bool = False,
+             frail: bool = False, heat: int = 0) -> str:
+    """按当前情绪选曲 (确定性): 亲密 > 危机 > 阴燃 > 理智/夜的底色 > 场景 mood.
+    返回曲库 key; mood 不在库里就回 daily (缺曲客户端再静默降级)."""
+    mood = mood if mood in BGM_TRACKS else "daily"
+    if heat >= 2:
+        return "romantic"                     # 床笫之间, 天塌下来也是浪漫曲
+    if hot or pressure >= 70:
+        # 危机: 但 battle/grimdark 本身能量 ≥3, 不夺它们的戏
+        return mood if BGM_TRACKS[mood]["energy"] >= 3 else "tense"
+    if 40 <= pressure < 70 and BGM_TRACKS[mood]["energy"] <= 2 \
+            and mood not in ("romantic", "warm", "sad"):
+        return "eerie"                        # 阴燃: 压着但还没炸
+    if frail and BGM_TRACKS[mood]["energy"] <= 1:
+        return "lonely"                       # 理智见底, 世界发空
+    if night and mood == "daily":
+        return "lonely"                       # 深夜无事, 也不该是白日曲
+    return mood
 
 # 心象仪 mood (自由文本, ≤12字) → 表情差分四分类; 恐怖游戏里「惊」最常见, 先判
 _EXPR_MAP = [
@@ -74,14 +108,15 @@ class TurnStage:
 
 
 def stage_turn(final: dict[str, Any]) -> dict[str, Any]:
-    """回合演出单 {bgm?, tint} from the turn's final meta. tint 总是给 (none=复位):
-    danger (猎手贴脸/压力爆表) > frail (理智见底) > night (夜) > none."""
+    """回合演出单 {bgm, tint} from the turn's final meta. 都总是给:
+    bgm 走标签选曲 (导演每回合选, 客户端同曲不切), tint 阶梯 danger>frail>night>none."""
     out: dict[str, Any] = {}
     scene = final.get("scene") or {}
     mood = str(scene.get("mood") or "daily")
     pv = final.get("pressure_view") or {}
     tv = final.get("threat_view") or {}
     sv = final.get("sanity_view") or {}
+    st = final.get("state") or {}
     try:
         pressure = int(pv.get("value") or 0)
     except (TypeError, ValueError):
@@ -93,8 +128,14 @@ def stage_turn(final: dict[str, Any]) -> dict[str, Any]:
             frail = int(sv.get("value", 999)) <= int(sv.get("max", 100)) * 3 // 10
     except (TypeError, ValueError):
         pass
-    if hot and mood not in _TENSE_OVERRIDE_SKIP:
-        out["bgm"] = "tense"
+    heat = 0
+    if isinstance(st.get("heat"), dict):
+        try:
+            heat = int(st["heat"].get("stage") or 0)
+        except (TypeError, ValueError):
+            pass
+    out["bgm"] = pick_bgm(mood, pressure=pressure, hot=hot,
+                          night=bool(scene.get("night")), frail=frail, heat=heat)
     if hot:
         out["tint"] = "danger"
     elif frail:

@@ -68,7 +68,29 @@ def test_hunter_alert_tints_danger():
 def test_battle_mood_keeps_its_own_bgm():
     d = director.stage_turn({"scene": {"mood": "battle"},
                              "pressure_view": {"value": 90}})
-    assert "bgm" not in d
+    assert d["bgm"] == "battle"
+
+
+# ── pick_bgm (曲库标签选曲) ──────────────────────────────
+
+
+def test_bgm_intimacy_beats_everything():
+    assert director.pick_bgm("tense", pressure=90, hot=True, heat=2) == "romantic"
+
+
+def test_bgm_simmer_band_goes_eerie():
+    assert director.pick_bgm("daily", pressure=50) == "eerie"
+    assert director.pick_bgm("romantic", pressure=50) == "romantic", "阴燃不夺浪漫"
+
+
+def test_bgm_night_and_frailty_recolor_daily():
+    assert director.pick_bgm("daily", night=True) == "lonely"
+    assert director.pick_bgm("daily", frail=True) == "lonely"
+    assert director.pick_bgm("warm", night=True) == "warm", "夜里陪伴还是陪伴"
+
+
+def test_bgm_unknown_mood_falls_to_daily():
+    assert director.pick_bgm("弹幕未来贝斯") == "daily"
 
 
 def test_low_sanity_tints_frail():
