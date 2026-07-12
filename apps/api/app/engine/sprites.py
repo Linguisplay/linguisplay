@@ -41,7 +41,7 @@ def base_of(cid: str) -> Path | None:
     return None
 
 
-def ingest_upload(cid: str, data: bytes) -> dict[str, Any]:
+def ingest_upload(cid: str, data: bytes, keep_photo: bytes | None = None) -> dict[str, Any]:
     """🖼 玩家上传的人物图 → 智能裁剪三件套 (Yi 定):
     ① 透底立绘: rembg 找人抠底 + 裁 alpha 包围盒 → sprite/{cid}.webp
     ② 改脸源图: 原图瘦身留档 → sprite/{cid}_src.jpg (表情差分继续可做)
@@ -59,6 +59,11 @@ def ingest_upload(cid: str, data: bytes) -> dict[str, Any]:
     cut = debg(data)
     (SPRITE_DIR / f"{cid}.webp").write_bytes(to_webp(trim_alpha(cut)))
     (SPRITE_DIR / f"{cid}_src.jpg").write_bytes(shrink_jpg(data, quality=85, max_side=1280))
+    if keep_photo:
+        # 📷 原始照片永久留档: 换画风永远从真照片出发 — 在改绘结果上再改绘,
+        # 三轮就面目全非 (实弹: 四仔被叠加改绘改到变性)
+        (SPRITE_DIR / f"{cid}_photo.jpg").write_bytes(
+            shrink_jpg(keep_photo, quality=85, max_side=1280))
 
     box = None
     try:
@@ -161,7 +166,11 @@ def smart_cast(content: dict[str, Any], cids: list[str] | None = None) -> dict[s
         if c.get("generated") is False:   # 玩家亲选的脸不动
             report["skipped"].append(cid)
             continue
-        raw = _fetch_person_image(_tavily_images(f"{title} {name} 剧照 高清"))
+        # 换画风重刷优先用留档的原始照片, 没有才去搜
+        photo_file = SPRITE_DIR / f"{cid}_photo.jpg"
+        raw = photo_file.read_bytes() if photo_file.exists() else None
+        if raw is None:
+            raw = _fetch_person_image(_tavily_images(f"{title} {name} 剧照 高清"))
         if raw is None:
             raw = _fetch_person_image(_tavily_images(f"{name} {title} still photo"))
         if raw is None:
@@ -169,15 +178,17 @@ def smart_cast(content: dict[str, Any], cids: list[str] | None = None) -> dict[s
             continue
         img = raw
         if anime:
-            # 改绘吃剧本自己的美术圣经 — 全员一套 token, 不许各自发挥 (出戏元凶)
-            img = edit_image(raw, f"把这张照片改绘成这种画风的游戏立绘：{art[:220]}。"
-                                  "严格按这个画风执行，严格保持人物的发型、五官特征、"
-                                  "服装和姿势完全一致，只改画风",
+            # 改绘铁律 (实弹翻车教训): 保真条款放最前, 画风只给一句核心 —
+            # 整部圣经塞进编辑指令会把「保持人物」冲掉 (性别都能改没)
+            core = art.split("；")[0][:120]
+            img = edit_image(raw, "严格保持照片中人物的性别、体格、发型、五官特征、"
+                                  f"服装和姿势完全一致，只把画风改绘为：{core}。"
+                                  "不改变人物的任何特征，只改画风",
                              mime="image/jpeg") or None
             if not img:
                 report["convert_failed"].append(cid)
                 continue
-        ingest_upload(cid, img)
+        ingest_upload(cid, img, keep_photo=raw)
         report["done"].append(cid)
     return report
 
