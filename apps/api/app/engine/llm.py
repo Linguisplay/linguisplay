@@ -76,6 +76,13 @@ class MockLLM:
         if prompt.get("living_event"):
             return {"what": "去湖边走走", "slot": "夜", "day_offset": 1,
                     "invite": "明晚有空吗？想去湖边走走，你来。"}
+        # 🎬 galgame 开场孪生: 短环境 + 每角色小剧情 (与 intro_vignettes 合同同构)
+        if prompt.get("intro_vignettes"):
+            return {"scene": "暮色刚落，门厅的吊灯亮着一半。你放下行李，站在光和影的交界。",
+                    "cast": [{"name": (c or {}).get("name"),
+                              "action": f"{(c or {}).get('name')}正低头整理手边的东西，抬眼看见了你。",
+                              "line": "新来的？跟我来吧。"}
+                             for c in (prompt.get("chars") or [])]}
         # 🪞 玩家档案 twin: 只给见证名单内的角色写印象 (认知边界由引擎裁定)
         if prompt.get("player_profile"):
             wits = prompt.get("witnesses") or []

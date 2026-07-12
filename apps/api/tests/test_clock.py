@@ -180,7 +180,7 @@ def test_opening_aligns_to_act_one_anchor():
     llm = Spy()
     runtime.build_opening(content, st, llm=llm)
     assert st["clock"]["slot"] == 2
-    intro = next(p for p in llm.prompts if p.get("intro"))
+    intro = next(p for p in llm.prompts if p.get("intro_vignettes"))
     assert "第1天·夜" in (intro.get("clock") or "")
 
 

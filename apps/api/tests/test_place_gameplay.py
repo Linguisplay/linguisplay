@@ -335,15 +335,12 @@ def test_opening_never_writes_absent_characters():
             self.casts = []
 
         def generate(self, prompt):
-            if prompt.get("intro"):
-                self.casts.append(prompt.get("cast"))
-                if prompt.get("logic_correction"):
-                    return {"beats": [{"type": "description", "speaker_name": None,
-                                       "text": "门厅里只有竹清守着灯。"}],
-                            "affinity_delta": 0, "advance_act": False, "ending": None}
-                return {"beats": [{"type": "description", "speaker_name": None,
-                                   "text": "竹清站在灯下，沐白靠在墙边打盹。"}],
-                        "affinity_delta": 0, "advance_act": False, "ending": None}
+            if prompt.get("intro_vignettes"):
+                self.casts.append([c.get("name") for c in prompt.get("chars") or []])
+                # 模型试图把不在场的沐白也塞进 cast → 引擎白名单必须丢弃
+                return {"scene": "门厅的灯亮着一半。",
+                        "cast": [{"name": "竹清", "action": "竹清守着灯。", "line": "新来的？"},
+                                 {"name": "沐白", "action": "沐白靠在墙边打盹。", "line": "唔。"}]}
             return {}
 
     llm = IntroLLM()
@@ -351,7 +348,7 @@ def test_opening_never_writes_absent_characters():
     beats = runtime.build_opening(story, st, llm=llm)
     txt = " ".join(b.get("text", "") for b in beats)
     assert llm.casts[0] == ["竹清"]        # scene roster, not the act-1 cast
-    assert "沐白" not in txt               # the intruder was rewritten out
+    assert "沐白" not in txt               # the intruder never survives the whitelist
     assert "竹清" in txt
 
 

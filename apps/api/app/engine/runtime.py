@@ -1754,48 +1754,79 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
     align_clock_to_act(content, state, 1)
     # WHO IS ACTUALLY HERE: the scene roster at the pinned opening place — never the
     # whole act-1 cast (writing absent people into the opening was turn-zero 文与实分家)
-    present = [c.get("name") for c in scene_characters(content, state)
-               if c.get("name") and c.get("id") != pcid]
-    prompt = {
-        "intro": True,
-        "clock": (clock_view(content, state) or {}).get("label", ""),
-        "mode": mode,
-        "player_char": player_char,
-        "world": (content.get("story") or {}).get("world_long", "") or "",
-        "style": (content.get("story") or {}).get("style") or "",  # ✍️ 文风
-        "act": act1,
-        "goal": act1.get("goal", ""),
-        "cast": present,
-        "place": _physical_place(content, state),
-        "mature": bool(state.get("mature")),
-    }
-    directed = _lang_guard(llm, prompt, llm.generate(prompt), content)
-    beats = [b for b in directed.get("beats", []) if b.get("type") == "description"]
-    beats = beats or [{"type": "description", "speaker_name": None, "text": opening_narration(content)}]
-    # 🛡 开场人物越界守卫: a KNOWN character who isn't in the scene must not appear in
-    # the opening prose — one corrective rewrite, keyed to the exact intruders.
-    absent = [c.get("name") for c in _characters(content)
-              if c.get("name") and c.get("id") != pcid and c.get("name") not in present]
-
-    def _intruders(bts: list[dict[str, Any]]) -> list[str]:
-        txt = " ".join(b.get("text", "") for b in bts)
-        return [n for n in absent if n in txt]
-
-    bad = _intruders(beats)
-    if bad:
-        _audit(state, "intro.roster", False, "、".join(bad)[:40], "开场写入了不在场角色，已重写")
-        corr = (f"【重写·人物越界】此刻在场的只有：{('、'.join(present)) or '玩家自己一个人'}。"
-                f"你却把不在场的（{'、'.join(bad)}）写进了开场。重写整段开场，"
-                f"不在场的人一个字都不许提。")
-        retry = _lang_guard(llm, prompt,
-                            llm.generate({**prompt, "logic_correction": corr}), content)
-        rb = [b for b in retry.get("beats", []) if b.get("type") == "description"]
-        if rb and not _intruders(rb):
-            beats = rb
-    # ✨ 首局魔法时刻: within the first screen, someone SEES the player — one concrete
-    # gesture, one crack of something withheld, one line spoken straight at them. The
-    # "earned intimacy" promise made perceivable in 30 seconds.
-    beats += opening_hook_beats(content, state, player_char, llm)
+    present_chars = [c for c in scene_characters(content, state)
+                     if c.get("name") and c.get("id") != pcid][:4]
+    present = [c.get("name") for c in present_chars]
+    is_god = mode == "god"
+    # ✨ 首局魔法时刻的由头: 主角位那位有话没说 (只给秘密标题, 绝不点破内容)
+    lead = next((c for c in present_chars if c.get("is_lead")),
+                present_chars[0] if present_chars else None)
+    tease = None
+    if lead and not is_god:
+        tease = next((s.get("title") for s in content.get("secrets") or []
+                      if (s.get("title") or "").strip()
+                      and s.get("character_id") == lead.get("id")), None) \
+            or next((s.get("title") for s in content.get("secrets") or []
+                     if (s.get("title") or "").strip()), None)
+    # 🎬 galgame 开场 (Yi: 字太多 → 简短环境交代 + 每个角色一段小剧情):
+    # 一拍 ≤80 字的环境, 然后在场每人「你第一眼看到TA在干嘛」+「TA的第一句话」
+    out = {}
+    try:
+        out = llm.generate({
+            "intro_vignettes": True,
+            "clock": (clock_view(content, state) or {}).get("label", ""),
+            "player": {"name": (player_char or {}).get("name") or "你",
+                       "role": (player_char or {}).get("role") or "刚来到这里的人"},
+            "world": ((content.get("story") or {}).get("world_long") or "")[:300],
+            "style": ((content.get("story") or {}).get("style") or "")[:160],
+            "goal": act1.get("goal", ""),
+            "place": _physical_place(content, state),
+            "chars": [{"name": c.get("name"), "role": c.get("role") or "",
+                       "persona_text": (c.get("persona_text") or "")[:120],
+                       "is_lead": bool(c.get("is_lead")),
+                       "examples": [str(x)[:40] for x in (c.get("examples") or [])][:2]}
+                      for c in present_chars],
+            "tease": tease or "",
+            "god": is_god,
+            "mature": bool(state.get("mature")),
+        }) or {}
+    except Exception:
+        out = {}
+    beats: list[dict[str, Any]] = []
+    scene_txt = dedash(str(out.get("scene") or "").strip())[:110] \
+        or opening_narration(content)[:110]
+    beats.append({"type": "description", "speaker_name": None, "text": scene_txt})
+    by_name = {c.get("name"): c for c in present_chars}
+    seen = set()
+    for v in (out.get("cast") or []):
+        nm = str(v.get("name") or "").strip()
+        if nm not in by_name or nm in seen:   # 越界/重复的直接丢 — 名单引擎说了算
+            continue
+        seen.add(nm)
+        act_txt = dedash(str(v.get("action") or "").strip())[:80]
+        line_txt = dedash(str(v.get("line") or "").strip().strip("「」\"'"))[:60]
+        if act_txt:
+            beats.append({"type": "description", "speaker_name": None, "text": act_txt})
+        if line_txt:
+            beats.append({"type": "dialogue", "speaker_name": nm, "text": line_txt})
+    # 确定性兜底: 模型没交齐的人, 用人设和台词范例立住 (范例本来就是这张嘴);
+    # 主角位带欲言又止的裂缝 (只提秘密标题); 上帝位无人对玩家开口
+    for c in present_chars:
+        nm = c.get("name")
+        if nm in seen:
+            continue
+        if c is lead and tease:
+            beats.append({"type": "description", "speaker_name": None,
+                          "text": f"{nm}的目光在你身上多停了一瞬，像有什么关于"
+                                  f"「{tease}」的话到了嘴边，被咽了回去。"})
+        else:
+            beats.append({"type": "description", "speaker_name": None,
+                          "text": f"{nm}就在不远处，正忙着{(c.get('role') or '自己')[:12]}的事，"
+                                  "注意到了你。"})
+        if not is_god:
+            ex = [str(x) for x in (c.get("examples") or []) if str(x).strip()]
+            beats.append({"type": "dialogue", "speaker_name": nm,
+                          "text": (ex[0][:60] if ex else "新来的？")})
     return [dedash_beat(b) for b in beats]
 
 

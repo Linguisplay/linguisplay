@@ -3096,6 +3096,36 @@ class QwenLLM:
         except Exception:
             return {}
 
+    def _intro_vignettes(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🎬 galgame 开场 (Yi: 字太多 → 短环境 + 每角色小剧情). Degrades to {}
+        (引擎用人设+台词范例装配确定性开场)."""
+        sys = ("你为一部 galgame 写开场。只输出JSON："
+               '{"scene":"≤80字：此刻在哪、什么时辰、一个感官细节，玩家的处境一句带过",'
+               '"cast":[{"name":"在场角色名（照抄给定名单）",'
+               '"action":"≤55字：玩家第一眼看到TA时TA正在做的事，一眼立住人设",'
+               '"line":"≤45字：TA此刻的第一句话，贴人设口吻"}]}。'
+               "克制留白，口语，不堆形容词；cast 按给定顺序全员各一条；"
+               "is_lead 的那位的 line 必须对刚来的玩家开口，且若给了 tease，"
+               "TA的 action 里要藏一丝与之相关的欲言又止（绝不点破内容）；不用破折号。")
+        import json as _json
+        u = _json.dumps({"时刻": prompt.get("clock"), "地点": prompt.get("place"),
+                         "玩家": prompt.get("player"), "世界": prompt.get("world"),
+                         "文风": prompt.get("style"), "开局目标": prompt.get("goal"),
+                         "tease(主角有话没说的由头)": prompt.get("tease") or "",
+                         "在场角色": prompt.get("chars")}, ensure_ascii=False)
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model,
+                               "messages": [{"role": "system", "content": sys},
+                                            {"role": "user", "content": u}],
+                               "max_tokens": 700, "temperature": 0.9,
+                               "response_format": {"type": "json_object"}},
+                              timeout=40)
+            data = _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
     def _player_profile(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """🪞 玩家档案蒸馏: 近期对话 → 玩家习惯 facts + 每个在场角色眼中的印象.
         见证名单由引擎给定, 只许更新名单内的角色. Degrades to {} (下轮再蒸)."""
@@ -3666,6 +3696,8 @@ class QwenLLM:
             return self._absent_scene(prompt)
         if prompt.get("player_profile"):
             return self._player_profile(prompt)
+        if prompt.get("intro_vignettes"):
+            return self._intro_vignettes(prompt)
         if prompt.get("living_event"):
             return self._living_event(prompt)
         if prompt.get("parting"):

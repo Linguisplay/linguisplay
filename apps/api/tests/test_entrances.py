@@ -94,11 +94,14 @@ def test_opening_hook_plants_the_withheld_crack():
     beats = runtime.build_opening(content, st, llm=PlainLLM())
     hook = next(t for t in (b.get("text", "") for b in beats) if "地窖里的账本" in t)
     assert "咽" in hook and "LOCKED" not in str(beats)     # tease by title, never content
-    # an LLM-written hook carries both strokes, the line spoken by the lead
+    # an LLM-written vignette carries both strokes, the line spoken by the lead
     class HookLLM(PlainLLM):
         def generate(self, prompt):
-            if prompt.get("opening_hook"):
-                return {"narration": "（甲擦杯子的手停了半拍。）", "line": "新来的？坐。"}
+            if prompt.get("intro_vignettes"):
+                assert prompt.get("tease") == "地窖里的账本"   # 由头进了合同
+                return {"scene": "灯下。",
+                        "cast": [{"name": "甲", "action": "甲擦杯子的手停了半拍。",
+                                  "line": "新来的？坐。"}]}
             return super().generate(prompt)
     beats2 = runtime.build_opening(content, st, llm=HookLLM())
     d = next(b for b in beats2 if b.get("type") == "dialogue")
