@@ -275,6 +275,25 @@ def _tv(tuning: dict | None, key: str, default: int) -> int:
         return default
 
 
+def day_mood(cid: str, day: int) -> int:
+    """🎭 今日心气 (-1/0/+1)：每角色每天掷一次、当天稳定、跨天翻面 —
+    人有情绪日 (Yi: 好感要像真实的人一样忽高忽低)。约 20%差 / 40%平 / 40%好。"""
+    import zlib
+    r = zlib.crc32(f"{cid}|{int(day)}".encode("utf-8")) % 5
+    return -1 if r == 0 else (1 if r >= 3 else 0)
+
+
+def temper(cd: int, rd: int, mood: int) -> tuple[int, int]:
+    """情绪给增减上色：心气差 = 好话打折、坏话加倍；心气好 = 好话添一分、坏话减半。"""
+    if mood < 0:
+        cd = cd // 2 if cd > 0 else int(cd * 1.5)
+        rd = rd // 2 if rd > 0 else int(rd * 1.5)
+    elif mood > 0:
+        cd = cd + 1 if cd > 0 else -((-cd) // 2)
+        rd = rd + 1 if rd > 0 else -((-rd) // 2)
+    return cd, rd
+
+
 def apply_deltas(scores: dict[str, int], closeness_delta: int, romance_delta: int,
                  tuning: dict | None = None) -> dict[str, int]:
     """Apply per-turn deltas, clamped per-step and to range, so flow stays gradual.

@@ -24,7 +24,9 @@ class WarmLLM:
                 "affinity_delta": 5, "romance_delta": 0, "advance_act": True, "ending": None}
 
 
-def test_unlock_relup_and_act_moments_fire_with_deltas():
+def test_unlock_relup_and_act_moments_fire_with_deltas(monkeypatch):
+    from app.engine import relationships as _rel
+    monkeypatch.setattr(_rel, "day_mood", lambda cid, day: 0)  # 钉住中性心气, 期望值不被情绪日染色
     st = runtime.default_state()
     # probing unlocks f1 (asks_min=1) + warm delta crosses the tuned friend_t + model advances act
     out = runtime.run_turn(STORY, st, {"name": "我"}, "跟我说说那本账", channel="say",

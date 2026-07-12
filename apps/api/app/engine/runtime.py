@@ -5457,9 +5457,14 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
     if rel_active and sp_id and sp_id != pcid:
         old_scores = rel_all.get(sp_id) or relationships.new_scores()
         mode_before = relationships.derive_mode(sp, old_scores, tun)
-        rel_all[sp_id] = relationships.apply_deltas(
-            old_scores, this_delta, int(directed.get("romance_delta", 0) or 0), tun,
-        )
+        # 🎭 今日心气上色 (Yi: 好感要像真实的人一样忽高忽低): 心气差的日子
+        # 好话打折坏话加倍, 心气好反之 — 当天稳定, 跨天翻面
+        _mood_day = relationships.day_mood(sp_id, int((state.get("clock") or {}).get("day", 1) or 1))
+        _cd_in, _rd_in = relationships.temper(
+            this_delta, int(directed.get("romance_delta", 0) or 0), _mood_day)
+        if _mood_day and (_cd_in, _rd_in) != (this_delta, int(directed.get("romance_delta", 0) or 0)):
+            _audit(state, "rel.mood", True, f"{sp_name}:{'差' if _mood_day < 0 else '好'}")
+        rel_all[sp_id] = relationships.apply_deltas(old_scores, _cd_in, _rd_in, tun)
         mode_after = relationships.derive_mode(sp, rel_all[sp_id], tun)
         dc = int(rel_all[sp_id].get("closeness", 0)) - int(old_scores.get("closeness", 0))
         dr = int(rel_all[sp_id].get("romance", 0)) - int(old_scores.get("romance", 0))
@@ -7037,6 +7042,10 @@ def run_turn_stream(
             "player_read": profile_mod.impression_of(state, sp_id),
             # 🌌 跨存档残响: 前一段人生的回声 (仅上一档暖过的角色)
             "echo": echo_line(content, state, sp_id),
+            # 🎭 今日心气: 引擎掷的情绪日 — 台上的行为要和好感账本的算法一致
+            "day_temper": (relationships.day_mood(
+                sp_id, int((state.get("clock") or {}).get("day", 1) or 1))
+                if sp_id else 0),
             "player_emotion": state.get("player_emotion", ""),  # prior emotional read (continuity)
             "knowledge": sp.get("knowledge", ""),  # 智能增强: this character's background lore
             "mature": bool(state.get("mature")),   # 18+ run → adult content permitted

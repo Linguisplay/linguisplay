@@ -325,6 +325,24 @@ body.vn #choiceask, body.vn #moveask { position: fixed; z-index: 58; left: 50%;
   border-radius: 999px; padding: 10px 26px; font-size: 14px; letter-spacing: 2px; cursor: pointer; }
 body.vn #rebirth { position: fixed; z-index: 76; left: 50%; transform: translateX(-50%);
   bottom: calc(96px + env(safe-area-inset-bottom)); width: min(560px, 90vw); margin: 0; }
+/* 💗 好感面板 (Yi: 要有好感度): 全员关系一屏速览, 点行进档案卡 */
+#vnhearts { position: fixed; inset: 0; z-index: 74; background: rgba(0,0,0,.55);
+  display: grid; place-items: center; }
+#vnhearts .hcard { width: min(430px, 92vw); max-height: 78vh; overflow-y: auto;
+  background: #101018; border: 1px solid rgba(216,181,122,.3); border-radius: 16px;
+  padding: 14px; }
+#vnhearts .hbar { display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 10px; }
+#vnhearts .hrow { display: flex; gap: 10px; padding: 9px 6px;
+  border-bottom: 1px solid #22222c; cursor: pointer; align-items: center; }
+#vnhearts .hrow img { width: 46px; height: 46px; border-radius: 10px;
+  object-fit: cover; flex: 0 0 46px; }
+#vnhearts .hmid { flex: 1; min-width: 0; }
+#vnhearts .hname { font-size: 13.5px; margin-bottom: 4px; }
+#vnhearts .hmode { color: #d8b57a; font-size: 11px;
+  border: 1px solid rgba(216,181,122,.4); border-radius: 999px; padding: 1px 7px;
+  margin-left: 4px; }
+#vnhearts .hnext { color: #8b93a7; font-size: 11px; margin-left: 5px; }
 /* 📸 CG 时刻 (gal 移植): 稀有时刻全屏亮相, 卡面=回忆册同款 (地点艺术图+关键台词) */
 #vncg { position: fixed; inset: 0; z-index: 72; background: #06070c; opacity: 0;
   pointer-events: none; transition: opacity .6s ease; display: grid;
@@ -573,7 +591,7 @@ body.dread #dread { opacity:1; }
   <img id="vnsprite" class="hidden" alt="">
   <div id="vnbox" onclick="vnAdvance()">
     <div id="vnname" class="hidden"></div>
-    <div id="vnctl"><span onclick="event.stopPropagation();vnToggleStat()" title="目标/理智/警觉等状态">状态</span><span onclick="event.stopPropagation();vnHide()" title="隐藏界面看立绘">隐藏</span><span id="vnauto" onclick="event.stopPropagation();vnToggleAuto()" title="自动播放">自动</span><span onclick="event.stopPropagation();vnToggleLog()" title="回想">记录</span></div>
+    <div id="vnctl"><span onclick="event.stopPropagation();vnHearts()" title="好感度">好感</span><span onclick="event.stopPropagation();vnToggleStat()" title="目标/理智/警觉等状态">状态</span><span onclick="event.stopPropagation();vnHide()" title="隐藏界面看立绘">隐藏</span><span id="vnauto" onclick="event.stopPropagation();vnToggleAuto()" title="自动播放">自动</span><span onclick="event.stopPropagation();vnToggleLog()" title="回想">记录</span></div>
     <div id="vntext"></div>
     <!-- 选项住在对话面板内部: 文字和选项同一个流, 物理上不可能互相遮挡 -->
     <div id="vnchoices" class="hidden" onclick="event.stopPropagation()"></div>
@@ -2778,6 +2796,34 @@ function applyDirect(d) {
   if (!d) return;
   if (d.tint !== undefined) vnTint(d.tint);
   if (d.bgm && d.bgm !== curBgmMood) { curBgmMood = d.bgm; swapBgm(d.bgm); }
+}
+// 💗 好感面板 (Yi: 要有好感度): 全员关系一屏速览; 点行进档案卡看细账
+async function vnHearts() {
+  let ov = document.getElementById("vnhearts");
+  if (ov) { ov.remove(); return; }
+  ov = document.createElement("div"); ov.id = "vnhearts";
+  ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+  ov.innerHTML = `<div class="hcard"><div class="hbar"><b>💗 ${B("好感度", "Hearts")}</b>`
+    + `<button class="ghost" onclick="document.getElementById('vnhearts').remove()">${B("关闭", "Close")}</button></div>`
+    + `<div class="hrows">${B("加载中…", "Loading…")}</div></div>`;
+  document.body.appendChild(ov);
+  const ids = (cast || []).map(c => c.id).filter(Boolean).slice(0, 8);
+  const profs = (await Promise.all(ids.map(id =>
+    j(`/runs/${runId}/character/${id}`).catch(() => null)))).filter(Boolean);
+  profs.sort((a, b) => (b.closeness || 0) - (a.closeness || 0));
+  const rows = profs.map(p => {
+    const rel = p.relation || {};
+    const nxt = rel.next && rel.next.name
+      ? `<span class="hnext">${B(`差${rel.next.to_next}到「${rel.next.name}」`, `${rel.next.to_next} to ${rel.next.name}`)}</span>` : "";
+    const av = p.avatar_url ? `<img src="${p.avatar_url}${_sv(p.id)}" onerror="this.remove()">` : "";
+    return `<div class="hrow" onclick="document.getElementById('vnhearts').remove();openCharCard('${p.id}')">${av}`
+      + `<div class="hmid"><div class="hname">${escapeHtml(p.name)} <span class="hmode">${escapeHtml(rel.mode_name || "")}</span>${nxt}</div>`
+      + barHtml(B("亲近", "Close"), p.closeness || 0, -40, 100, "#8fe0a6")
+      + barHtml(B("心动", "Heart"), p.romance || 0, 0, 100, "#ff8fb3")
+      + `</div></div>`;
+  }).join("") || `<div class="jempty">${B("这座城还没人认识你。", "No one knows you yet.")}</div>`;
+  const wrap = ov.querySelector(".hrows");
+  if (wrap) wrap.innerHTML = rows;
 }
 // 🫥 隐藏界面 (gal 移植): 欣赏立绘, 点任意处恢复
 function vnHide() { document.body.classList.add("vnhide"); }

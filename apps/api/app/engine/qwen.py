@@ -432,6 +432,13 @@ def _build_system(prompt: dict[str, Any]) -> str:
     echo = (prompt.get("echo") or "").strip()
     if echo:
         lines.append(echo)
+    # 🎭 今日心气: 人有情绪日 — 账本按它打折/加倍, 台上的你也要带着它
+    _dt = int(prompt.get("day_temper") or 0)
+    if _dt < 0:
+        lines.append("你今天心气不顺（没有具体缘由，就是这样的日子）：耐心比平时短，"
+                     "好话只领半分情，被冒犯会更冲。不解释这份情绪，就带着它说话。")
+    elif _dt > 0:
+        lines.append("你今天心气正好：更容易被逗笑、被打动，小事也愿意多聊两句。")
 
     # group naturalness: the transcript of what others ALREADY said THIS turn (data; the
     # how-to-react rules live in the charter's 群戏 line)
@@ -860,10 +867,14 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
     props["affinity"] = {"type": "integer", "description":
                          ("本场人物关系更近(正)/更疏(负)" if observer else
                           "0(对方不知道你在想什么)" if is_think else
-                          "这一句对你们关系的影响(-3~5)：走心/戳中你→+2~3；正常聊得下去→+1；敷衍/冒犯→负；只有完全冷场才是0")}
+                          "这一句对你们关系的影响(-3~5)。像真实的人一样诚实起伏：走心/戳中你→+2~3；"
+                          "正常聊得下去→+1；敷衍/说教/自说自话/戳你痛处/冒犯→-1~-3，"
+                          "该扣就扣别客气，一直只涨不掉是假人；只有完全冷场才是0")}
     required.append("affinity")
     if not observer and not is_member and not is_think:
-        props["romance"] = {"type": "integer", "description": "默认0；仅当对方调情/示好/制造暧昧/情话且你被触动才给正分，范围-2~5，恋爱线"}
+        props["romance"] = {"type": "integer", "description":
+                            "默认0；对方调情/示好/情话且你真被触动才给正分；油腻、越界、"
+                            "廉价套路让你不适→-1~-2。范围-2~5，恋爱线"}
     props["advance"] = {"type": "boolean", "description": advance_hint}
     required.append("advance")
     # 📟 心象仪: the character's OWN true inner state after this line (UI gauge, Dead

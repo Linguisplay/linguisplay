@@ -146,3 +146,23 @@ def test_night_tint_and_calm_reset():
     assert director.stage_turn({"scene": {"night": True}})["tint"] == "night"
     assert director.stage_turn({"scene": {"night": False}})["tint"] == "none"
     assert director.stage_turn({})["tint"] == "none"
+
+
+# ── 今日心气 (relationships.day_mood / temper) ───────────
+
+
+def test_day_mood_stable_within_day_flips_across_days():
+    from app.engine import relationships as rel
+    assert rel.day_mood("a", 3) == rel.day_mood("a", 3), "当天稳定"
+    moods = {rel.day_mood("a", d) for d in range(1, 30)}
+    assert len(moods) >= 2, "跨天要翻面"
+    assert all(m in (-1, 0, 1) for m in moods)
+
+
+def test_temper_colors_deltas():
+    from app.engine import relationships as rel
+    assert rel.temper(4, 2, -1) == (2, 1), "心气差: 好话打折"
+    assert rel.temper(-2, 0, -1)[0] == -3, "心气差: 坏话加倍"
+    assert rel.temper(2, 1, 1) == (3, 2), "心气好: 好话添一分"
+    assert rel.temper(-2, -2, 1) == (-1, -1), "心气好: 坏话减半"
+    assert rel.temper(3, 1, 0) == (3, 1), "平常日不上色"
