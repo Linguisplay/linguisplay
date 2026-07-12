@@ -328,7 +328,7 @@ body.vn #rebirth { position: fixed; z-index: 76; left: 50%; transform: translate
 /* 📸 CG 时刻 (gal 移植): 稀有时刻全屏亮相, 卡面=回忆册同款 (地点艺术图+关键台词) */
 #vncg { position: fixed; inset: 0; z-index: 72; background: #06070c; opacity: 0;
   pointer-events: none; transition: opacity .6s ease; display: grid;
-  place-items: end center; cursor: pointer; }
+  place-items: end center; cursor: pointer; overflow: hidden; }
 #vncg.on { opacity: 1; pointer-events: auto; }
 #vncg .cgbg { position: absolute; inset: 0; background-size: cover;
   background-position: center; animation: cgdrift 16s ease-in-out infinite alternate; }
@@ -474,6 +474,13 @@ body.dread #dread { opacity:1; }
 @media (max-width: 640px) {
   header { padding: 8px 10px; }
   header b { font-size: 14px; }
+  /* 📱 顶栏防溢出 (Yi 报障: 好多东西在屏幕外面 — 🌍 上排后按钮串挤出屏):
+     右侧按钮串允许换行、账号邮箱在手机上不占地, ←剧本/退出 永远在屏内 */
+  header > span { flex-wrap: wrap; justify-content: flex-end; row-gap: 4px;
+    gap: 5px !important; min-width: 0; }
+  header .iconbtn { padding: 3px 5px; font-size: 15px; }
+  header #who { display: none; }
+  header #backBtn { padding: 4px 8px !important; }
   #cast { padding: 5px 8px; gap: 5px; }
   .castitem { min-width: 38px; }
   .castitem small { font-size: 10px; }
