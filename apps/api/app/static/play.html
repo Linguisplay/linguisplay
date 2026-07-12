@@ -2892,19 +2892,19 @@ async function playBeatVN(b, skipLog) {
     await vnWait(900 + page.length * 55);
   }
 }
-// 按句读切页 (Yi 铁律: 杜绝长文, 一定分批次): 句读/分号/换行后断, 页容 ≈ 两三行;
-// 单句超页容也硬切 — 任何一页都不许超过 cap
+// 一句一页 (Yi 铁律: 分批次出现, 一个句号一次点击 — 古典 ADV 的呼吸感):
+// 句读/分号/换行即翻页; 超长单句硬切; 只有 ≤6 字的碎屑并入上一页
 function paginate(text, cap = 66) {
   const segs = String(text || "").split(/(?<=[。！？…；;\n])/);
   const pages = [];
-  let buf = "";
-  const flush = () => { if (buf.trim()) pages.push(buf); buf = ""; };
   for (let s of segs) {
-    while (s.length > cap) { flush(); pages.push(s.slice(0, cap)); s = s.slice(cap); }
-    if (buf && (buf.length + s.length) > cap) flush();
-    buf += s;
+    s = s.replace(/\n/g, "");
+    if (!s.trim()) continue;
+    while (s.length > cap) { pages.push(s.slice(0, cap)); s = s.slice(cap); }
+    if (!s.trim()) continue;
+    if (s.trim().length <= 6 && pages.length) pages[pages.length - 1] += s;
+    else pages.push(s);
   }
-  flush();
   return pages.length ? pages : [""];
 }
 // play one engine beat with a "typing…" pause then a typewriter reveal
