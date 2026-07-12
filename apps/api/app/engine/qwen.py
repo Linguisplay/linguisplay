@@ -3109,7 +3109,9 @@ class QwenLLM:
                '"line":"≤55字：主角位亲口把这件差事交代出来，口吻贴人设，别客套"}}。'
                "克制留白，口语，不堆形容词；cast 按给定顺序全员各一条；"
                "is_lead 的那位的 line 必须对刚来的玩家开口，且若给了 tease，"
-               "TA的 action 里要藏一丝与之相关的欲言又止（绝不点破内容）；不用破折号。")
+               "TA的 action 里要藏一丝与之相关的欲言又止（绝不点破内容）；"
+               "标了 visiting 的角色不是本来就在这儿，是特意来找玩家打照面的，"
+               "action 要写出TA上门/出现的样子；不用破折号。")
         import json as _json
         u = _json.dumps({"时刻": prompt.get("clock"), "地点": prompt.get("place"),
                          "玩家": prompt.get("player"), "世界": prompt.get("world"),

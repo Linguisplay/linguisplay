@@ -1756,8 +1756,22 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
     # whole act-1 cast (writing absent people into the opening was turn-zero 文与实分家)
     present_chars = [c for c in scene_characters(content, state)
                      if c.get("name") and c.get("id") != pcid][:4]
-    present = [c.get("name") for c in present_chars]
     is_god = mode == "god"
+    # 🚪 起点无人的沙盒开场: 生地方不配空开场 — 关系档位最热的街坊亲自上门打照面。
+    # 这是真移动 (sim 位置改到起点), 文与实同拍; relation_default 就是「谁会来串门」
+    # 的作者信号 (peer=自来熟 > stranger)。授权剧本不碰: 空场可能是导演故意的 (恐怖片)。
+    if not present_chars and sandbox_on(content) and not is_god:
+        _rank = {"friend": 4, "peer": 3, "junior": 2, "elder": 1}
+        caller = max((c for c in present_characters(content, 1, _dead_ids(state))
+                      if c.get("id") and c.get("id") != pcid and c.get("name")),
+                     key=lambda c: _rank.get(c.get("relation_default") or "", 0),
+                     default=None)
+        if caller and start and start.get("id"):
+            _sim(state, caller["id"])["pos"] = start["id"]
+            caller = {**caller, "visiting": True}
+            present_chars = [caller]
+            _audit(state, "opening.visitor", True, str(caller.get("name"))[:12])
+    present = [c.get("name") for c in present_chars]
     # ✨ 首局魔法时刻的由头: 主角位那位有话没说 (只给秘密标题, 绝不点破内容)
     lead = next((c for c in present_chars if c.get("is_lead")),
                 present_chars[0] if present_chars else None)
@@ -1784,6 +1798,7 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
             "chars": [{"name": c.get("name"), "role": c.get("role") or "",
                        "persona_text": (c.get("persona_text") or "")[:120],
                        "is_lead": bool(c.get("is_lead")),
+                       **({"visiting": True} if c.get("visiting") else {}),
                        "examples": [str(x)[:40] for x in (c.get("examples") or [])][:2]}
                       for c in present_chars],
             "tease": tease or "",
@@ -1819,6 +1834,9 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
             beats.append({"type": "description", "speaker_name": None,
                           "text": f"{nm}的目光在你身上多停了一瞬，像有什么关于"
                                   f"「{tease}」的话到了嘴边，被咽了回去。"})
+        elif c.get("visiting"):
+            beats.append({"type": "description", "speaker_name": None,
+                          "text": f"{nm}不知什么时候到了这儿，显然是特意来看看你这张新面孔。"})
         else:
             beats.append({"type": "description", "speaker_name": None,
                           "text": f"{nm}就在不远处，正忙着{(c.get('role') or '自己')[:12]}的事，"

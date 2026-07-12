@@ -17,9 +17,12 @@ pytest/smoke 是部署门，不算验收；验收看的是台上的行为。
 2. **Playwright**（harness 在会话 scratchpad `pw/`，node + chromium 已装）：
    - context: `{ viewport: {width:390, height:844}, isMobile: true, hasTouch: true }`
    - cookie: `{ name:"lp_session", value:TOKEN, domain:"106.54.1.82", path:"/" }`
-   - 进游戏：goto /play → 等 3.5s → 若有「登录」按钮先点 → 点剧本卡（`text=剧本名`）→ 等 ~11s（世界加载）
-   - **新手引导必须真点掉**（`button:has-text("明白了，开始玩")`，可能迟到/复弹，循环点 3 次）——
-     删节点不写 localStorage 会复弹，挡住 elementFromPoint 断言（实弹教训）
+   - 进游戏：goto /play → 等 3.5s → 若有「登录」按钮先点 → 专用档用 `resumeRun(id)`
+     （全局函数；`openRun` 不存在）→ 等 ~11s（世界加载）
+   - **新手引导有两层，都要杀**：玩法卡 `closeHowto()` + 界面教程 `closeTutorial()`，
+     外加 `localStorage.setItem("lp_tut_v1","1")`；只点按钮会复弹，挡住一切点击
+     （实弹：`.tsec.tut-4` 吞了选项 click 30s 超时）
+   - VN 模式建议选项在 `#vnchoices`（`#chips` 是聊天模式的）；回想 backlog 是隐藏的 `#chat`
 3. **遥测**：页面 JS 崩溃会打到服务端日志：`journalctl -u linguisplay | grep CLIENT-JS`
 4. **纪律**：验证回合会真实写进存档（≤2 个回合/轮）；生图验证 ≤5 张/轮；
    重启后 3 秒内发请求会撞上服务未就绪的假故障（先 sleep 或重试）
