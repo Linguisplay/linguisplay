@@ -416,7 +416,12 @@ body.vn.vnstat #bars { display: block; position: fixed; z-index: 62;
 body.vn.vnfree footer { display: flex; position: fixed; left: 0; right: 0; bottom: 0;
   z-index: 60; background: rgba(6,7,12,.97); padding: 8px 10px
   calc(8px + env(safe-area-inset-bottom)); }
-body.vn.vnfree #vnbox { bottom: 86px; max-height: calc(100vh - 200px); overflow-y: auto; }
+/* 面板 = 正文区滚动 + 选项钉底 (Yi 报障: 长段落把选项压到折叠线下看不见) */
+body.vn.vnfree #vnbox { bottom: 86px; max-height: calc(100vh - 200px);
+  overflow: hidden; display: flex; flex-direction: column; }
+body.vn.vnfree #vntext { overflow-y: auto; min-height: 0; flex: 0 1 auto;
+  -webkit-overflow-scrolling: touch; }
+body.vn.vnfree #vnchoices { flex: 0 0 auto; }
 /* 🧠 理智条: watching the number slide IS the dread (CoC's oldest trick) */
 #sanitybar { flex:0 0 auto; margin:6px 16px 0; padding:7px 12px; border-radius:10px; background:#131022cc; border:1px solid #33285a; font-size:12.5px; display:flex; align-items:center; gap:10px; color:#c9c2e8; }
 #sanitybar .strack { flex:1; height:7px; border-radius:5px; background:#00000055; overflow:hidden; }
@@ -2547,17 +2552,21 @@ function cycleSpeed() {
 }
 async function typeInto(el, text, ms=22) {
   el.textContent = "";
-  if (skipType) { el.textContent = text || ""; chat.scrollTop = chat.scrollHeight; return; }
+  const follow = () => {   // 打字机跟屏: 目标自己可滚 (VN 正文区) 就滚自己, 否则滚聊天流
+    if (el.scrollHeight > el.clientHeight + 2) el.scrollTop = el.scrollHeight;
+    chat.scrollTop = chat.scrollHeight;
+  };
+  if (skipType) { el.textContent = text || ""; follow(); return; }
   // 🦇 dread mode: while it is close, the words come slower — anticipation IS the horror
   const f = SPEEDS[spdIdx].f / (dreadOn ? 1.5 : 1);
   for (const ch of (text||"")) {
     if (skipType) { el.textContent = text; break; }
     el.textContent += ch;
-    chat.scrollTop = chat.scrollHeight;
+    follow();
     // a touch of cadence: linger on punctuation so it reads like real typing
     await sleep(("，。！？…、—".includes(ch) ? ms*5 : ms) / f);
   }
-  chat.scrollTop = chat.scrollHeight;
+  follow();
 }
 // ── 🎀 VN window (galgame 演出): beats play into the dialogue box, click advances ──
 let vnMode = false, vnAutoOn = false, vnAdvanceResolve = null, spriteMap = {};
