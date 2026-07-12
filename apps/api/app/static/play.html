@@ -2837,7 +2837,7 @@ async function playBeat(b) {
 
 // ── immersive scene (background / bgm / sfx) ──────────
 // ── audio mixer: gentle levels, fades, ducking — nothing hard-cuts ──────────
-const BGM_VOL = 0.16, SFX_VOL = 0.3;   // soft bed: music stays UNDER the reading
+const BGM_VOL = 0.16, SFX_VOL = 0.16;  // soft bed: 音效和音乐同层, 不许跳脸 (Yi 报障太响)
 bgm.volume = BGM_VOL; sfx.volume = SFX_VOL;
 let fadeTimer = null, pendingSfx = null;
 function _ramp(el, to, ms, then) {
