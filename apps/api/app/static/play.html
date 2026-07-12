@@ -1457,9 +1457,8 @@ async function moveTo(name) {
     const who = following.length
       ? B(`（你带着同行的人来到了 ${name}。）`, `(You arrive at ${name}, your companions with you.)`)
       : B(`（你来到了 ${name}。）`, `(You arrive at ${name}.)`);
-    renderBeat({ author:"engine", type:"description", text: who });
-    renderDiscoveries(run.discoveries);
-    if (run.suggestions && run.suggestions.length) renderSuggest(run.suggestions);
+    vnPlayFlow([{ author: "engine", type: "description", text: who }],
+               run.discoveries, run.suggestions);
   } catch(e) { renderBeat({ author:"engine", type:"description", text:`（${e.message}）` }); }
 }
 async function toggleFollow(id, want) {
@@ -1489,7 +1488,7 @@ function renderMoveAsk(req) {
   const go = document.createElement("button"); go.className = "go"; go.textContent = req.seek ? B("去找 TA", "Go find them") : (req.self_go ? B("出发", "Set out") : B("跟 TA 去", "Go with them"));
   go.onclick = () => acceptMove(req);
   const stay = document.createElement("button"); stay.className = "stay"; stay.textContent = B("留下", "Stay");
-  stay.onclick = () => { renderMoveAsk(null); renderBeat({ author:"engine", type:"description", text: B("（你没有动，留在了原地。）", "(You don't move. You stay where you are.)") }); };
+  stay.onclick = () => { renderMoveAsk(null); vnPlayFlow([{ author: "engine", type: "description", text: B("（你没有动，留在了原地。）", "(You don't move. You stay where you are.)") }]); };
   el.append(t, go, stay); el.classList.remove("hidden");
 }
 async function acceptMove(req) {
@@ -1498,14 +1497,13 @@ async function acceptMove(req) {
   try {
     const run = await j(`/runs/${runId}/move`, { method:"POST", body: JSON.stringify({ location: req.to || req.to_name, with_character_id: req.seek ? null : req.by_id, generate: !!req.generate }) });
     applyRunUpdate(run);
-    renderBeat({ author:"engine", type:"description",
+    vnPlayFlow([{ author: "engine", type: "description",
       text: req.seek
         ? B(`（你来到 ${req.to_name}，找${req.by_name||"TA"}。）`,
             `(You head to ${req.to_name} to find ${req.by_name||"them"}.)`)
         : B(`（你跟着${req.by_name||"对方"}来到了 ${req.to_name}。）`,
-            `(You follow ${req.by_name||"them"} to ${req.to_name}.)`) });
-    renderDiscoveries(run.discoveries);
-    if (run.suggestions && run.suggestions.length) renderSuggest(run.suggestions);
+            `(You follow ${req.by_name||"them"} to ${req.to_name}.)`) }],
+      run.discoveries, run.suggestions);
   } catch(e) { renderBeat({ author:"engine", type:"description", text:`（${e.message}）` }); }
 }
 // 关键节点抉择 (VN choice): an authored decision card. Picking applies its effects
@@ -1949,6 +1947,25 @@ function renderDiscoveries(list) {
     renderBeat({ author:"engine", type:"description", text: d.text });
     if (d.title) showMoments([{ kind:"unlock", title: d.title }], {});
   }
+}
+// 🎬 非回合通路的台上播放 (Yi: 选项要在说完话之后): 移动/发现这些流程拍
+// 必须走播放队列在对话框里念完, 念完才轮到建议选项 — 不许旁白进暗渠、选项抢跑
+async function vnPlayFlow(beats, discoveries, suggestions) {
+  const all = [...(beats || [])];
+  for (const d of (discoveries || [])) {
+    if (d.title) showMoments([{ kind: "unlock", title: d.title }], {});
+    all.push({ author: "engine", type: "description", text: d.text });
+  }
+  if (!vnMode) {
+    all.forEach(renderBeat);
+    if (suggestions && suggestions.length) renderSuggest(suggestions);
+    return;
+  }
+  document.getElementById("vnchoices").classList.add("hidden");
+  all.forEach(b => playQ.push(b));
+  pump();
+  while (playing || playQ.length) await sleep(160);
+  if (suggestions && suggestions.length) renderSuggest(suggestions);
 }
 
 // 🗺 map panel: the discovered world — where you are, who's where, click to travel
