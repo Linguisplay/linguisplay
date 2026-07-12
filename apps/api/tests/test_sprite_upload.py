@@ -35,8 +35,8 @@ def _fake_debg(data):
 def test_ingest_upload_produces_smart_trio(tmp_path, monkeypatch):
     monkeypatch.setattr(sprites, "SPRITE_DIR", tmp_path / "sprite")
     monkeypatch.setattr(sprites, "AVATAR_DIR", tmp_path / "avatar")
-    import app.engine.gal as gal
-    monkeypatch.setattr(gal, "debg", _fake_debg)
+    import app.engine.sprites as _sp
+    monkeypatch.setattr(_sp, "debg", _fake_debg)
 
     # 旧表情差分该作废
     (tmp_path / "sprite").mkdir(parents=True)
@@ -59,8 +59,8 @@ def test_ingest_upload_produces_smart_trio(tmp_path, monkeypatch):
 def test_ingest_upload_center_crop_fallback(tmp_path, monkeypatch):
     monkeypatch.setattr(sprites, "SPRITE_DIR", tmp_path / "sprite")
     monkeypatch.setattr(sprites, "AVATAR_DIR", tmp_path / "avatar")
-    import app.engine.gal as gal
-    monkeypatch.setattr(gal, "debg", lambda d: d)   # 抠底失败 → 原样返回 (无 alpha)
+    import app.engine.sprites as _sp
+    monkeypatch.setattr(_sp, "debg", lambda d: d)   # 抠底失败 → 原样返回 (无 alpha)
 
     out = sprites.ingest_upload("c2", _photo())
     assert out["smart"] is False

@@ -51,7 +51,7 @@ def ingest_upload(cid: str, data: bytes, keep_photo: bytes | None = None) -> dic
 
     from PIL import Image
 
-    from .gal import debg, shrink_jpg, to_webp, trim_alpha
+    from .gal import shrink_jpg
     SPRITE_DIR.mkdir(parents=True, exist_ok=True)
     AVATAR_DIR.mkdir(parents=True, exist_ok=True)
     im = Image.open(_io.BytesIO(data)).convert("RGB")
@@ -153,11 +153,12 @@ def smart_cast(content: dict[str, Any], cids: list[str] | None = None) -> dict[s
     """🔍 主角智能搜图 (Yi: 主要角色都智能搜索一下): 每个角色按「故事名+角色名+剧照」
     搜真图 → 选图 → 按剧本画风改绘 (动漫店改绘成赛璐璐立绘, 写实店原样) →
     ingest 三件套。玩家亲选的脸 (generated=False) 不动。"""
+    from .gal import is_anime_style
     from .qwen import edit_image
     story = content.get("story") or {}
     title = (story.get("title") or "").strip()
     art = str((story.get("tuning") or {}).get("art_style") or "")
-    anime = any(k in art for k in ("动漫", "二次元", "赛璐璐", "水彩", "插画", "漫画", "国漫"))
+    anime = is_anime_style(art)
     report: dict[str, Any] = {"done": [], "no_image": [], "convert_failed": [], "skipped": []}
     for c in story.get("characters") or []:
         cid, name = c.get("id"), c.get("name")

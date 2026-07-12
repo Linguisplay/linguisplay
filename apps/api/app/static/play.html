@@ -2623,6 +2623,7 @@ function vnSprite(name, expr) {
   const R = document.getElementById("vnsprite");
   const L = document.getElementById("vnsprite2");
   if (!name) { R.classList.add("dim"); return; }        // narration: keep stage, dim
+  if (name === myName) { R.classList.add("dim"); return; }  // 玩家自己不占人影席位
   // 🕴 路人杂兵 (Yi 定): 没有立绘的说话者上一具黑灰人影 — 谁说话谁就得在台上
   const cid = spriteMap[name] || "_extra";
   R.classList.remove("dim");
@@ -2731,6 +2732,7 @@ const CG_KINDS = { golden: "✨ 金色瞬间", rel_up: "💗 心动时刻", date
 async function vnShowCG(moments) {
   const hit = (moments || []).find(m => CG_KINDS[m.kind]);
   if (!hit || !runId) return;
+  vnLock(2600);   // 拉卡面的网络窗口也要锁 (审查实锤: 网慢时有段无 CG 也无锁的裸窗)
   let card = null;
   try {
     const jd = await j(`/runs/${runId}/journal`);
@@ -2853,10 +2855,12 @@ function _ramp(el, to, ms, then) {
   requestAnimationFrame(step);
 }
 function swapBgm(mood) {           // crossfade instead of a hard src cut
+  const base = String(mood || "").replace(/\d+$/, "");
+  const tries = [...new Set([`gal_${mood}`, `gal_${base}`, base])];
+  // 同曲重复请求 = 不动 (审查实锤: scene 与 direct 各切一次, 整局 BGM 来回拉锯)
+  if (!bgm.paused && tries.some(t => bgm.src.endsWith(`/${t}.mp3`))) return;
   const start = () => {
     // 🎵 甘茶曲库优先, 变奏曲目 (daily2/daily3…) 缺失时回退基准曲, 再回退旧合成器曲
-    const base = String(mood || "").replace(/\d+$/, "");
-    const tries = [...new Set([`gal_${mood}`, `gal_${base}`, base])];
     let ti = 0;
     bgm.onerror = () => {
       ti++;
@@ -2891,9 +2895,9 @@ function applyScene(scene) {
   vnTint(scene.night ? "night" : "none");
   paintBackground();
   if (mood !== curBgmMood) {
-    // 🎵 VN 里选曲归导演 (direct 事件带情绪标签逻辑, 每回合必到);
-    // 场景通路只负责冷启动, 免得一回合里两次交叉淡入打架
-    if (!vnMode || !bgm.src || bgm.paused) { curBgmMood = mood; swapBgm(mood); }
+    // 🎵 选曲归导演 (direct 每回合必到, 聊天模式同理); 场景通路只负责冷启动
+    // (审查实锤: 聊天模式下 scene/direct 各切一次, 每回合 BGM 拉锯)
+    if (!bgm.src || bgm.paused) { curBgmMood = mood; swapBgm(mood); }
   }
   // one-shot sfx: HELD until the next beat starts typing, so the sound lands with the
   // words that describe it instead of firing the moment the stream ends (太生硬 fix)

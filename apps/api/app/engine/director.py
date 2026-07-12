@@ -145,9 +145,11 @@ def logic_audit(beats: list[dict[str, Any]], *, slot: str | None = None,
                 finds.append(f"此刻时段是「{slot}」，旁白却写出了相反的时辰景象")
                 break
     joined = " ".join((b.get("text") or "") for b in beats)[:1600]
-    if prev_text and len(joined) > 60:
+    prev = (prev_text or "")[:1600]
+    # 快筛先行: 长度差超 15% 不可能 ≥0.92 相似 — 别让 O(n·m) 的 difflib 上每回合的热路径
+    if prev and len(joined) > 60 and abs(len(prev) - len(joined)) < len(joined) * 0.15:
         import difflib
-        if difflib.SequenceMatcher(None, prev_text[:1600], joined).ratio() >= 0.92:
+        if difflib.SequenceMatcher(None, prev, joined).ratio() >= 0.92:
             finds.append("这一回合几乎在逐字复读上一回合")
     return finds
 

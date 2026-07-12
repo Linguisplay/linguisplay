@@ -563,6 +563,14 @@ def portrait_negative(art: str) -> str:
     return "动漫风格,卡通,二次元,3D渲染,手办,塑料质感," + _QUALITY_NEG
 
 
+ANIME_HINTS = ("动漫", "二次元", "赛璐璐", "水彩", "插画", "漫画", "国漫", "日漫", "卡通")
+
+
+def is_anime_style(art: str) -> bool:
+    """画风阵营判定的唯一词表 (审查实锤: 三处各一套且已分叉 = 同剧本两条管线反向)."""
+    return any(k in (art or "") for k in ANIME_HINTS)
+
+
 def char_seed(work_id: str, cid: str) -> int:
     """Stable per-character seed: same face across the four expression calls,
     different faces across characters and works."""

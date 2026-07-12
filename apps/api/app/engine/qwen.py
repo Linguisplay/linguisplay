@@ -3106,7 +3106,7 @@ class QwenLLM:
                                             {"role": "user", "content": u}],
                                "max_tokens": 300, "temperature": 0.6,
                                "response_format": {"type": "json_object"}},
-                              timeout=25)
+                              timeout=10)   # 蒸馏在回合关键路径上, 慢了宁可这轮不蒸 (审查实锤)
             import json as _json
             data = _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
             return data if isinstance(data, dict) else {}

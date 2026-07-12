@@ -94,9 +94,10 @@ def _enqueue_image(prompt: str, path, size: str,
 def _story_art(content: dict) -> tuple[str, str]:
     """🎨 一世界一画风 (Yi: 角色画风要统一): 统一的风格引导 (开头压阵, gal 实弹教训:
     风格词放尾巴会被人物描述带跑) + 反向词封另一头 (写实店禁二次元, 动漫店禁真人)."""
+    from ..engine.gal import is_anime_style
     art = runtime.art_style_of(content) \
         or "电影质感写实，柔和主光，胶片颗粒感，克制的调色，高细节"
-    anime = any(k in art for k in ("动漫", "二次元", "赛璐璐", "水彩", "插画", "漫画", "国漫"))
+    anime = is_anime_style(art)
     # 反向词把【邻近流派】也封死 — 出戏的元凶不是跨阵营(写实vs动漫),
     # 而是同阵营内的流派漂移 (厚涂/剧画/美漫混进赛璐璐, 七个角色五种画风)
     neg = (("写实照片,真人,3D渲染,照片质感,厚涂,油画质感,美漫,欧美卡通,剧画,水墨,儿童简笔画,"
@@ -106,10 +107,10 @@ def _story_art(content: dict) -> tuple[str, str]:
 
 
 def _char_seed(content: dict, cid: str) -> int:
-    """同一个角色每次重画都长同一张脸 (gal 的 char_seed 同款)."""
-    import zlib
-    sid = str(((content.get("story") or {}).get("id")) or "")
-    return zlib.crc32(f"{sid}|{cid}".encode("utf-8")) % (2 ** 31 - 1) + 1
+    """同一个角色每次重画都长同一张脸 — 直接用 gal.char_seed
+    (审查实锤: 自己再写一个 crc32 版 = 同角色两条管线两张脸)."""
+    from ..engine.gal import char_seed
+    return char_seed(str(((content.get("story") or {}).get("id")) or ""), cid)
 
 
 def _bg_prompt(content: dict, loc: dict) -> str:
@@ -782,10 +783,17 @@ def play(
                 av_changed = False
                 try:
                     # vn 旗以【现行 story】为准: 老档的 pinned content 钉在 vn_mode
-                    # 加进剧本之前, 只看 pinned 的话这些档永远长不出立绘 (疗养院实锤)
-                    _srow = db2.get(StoryModel, run.story_id)
-                    _vn = bool(((_srow.tuning if _srow is not None else {}) or {})
-                               .get("vn_mode"))
+                    # 加进剧本之前, 只看 pinned 的话这些档永远长不出立绘 (疗养院实锤)。
+                    # 五分钟小缓存 — 别为一个几乎不变的旗每回合取一次 Story 行 (审查实锤)
+                    _now_ts = _time_mod.time()
+                    _hit = _VN_FLAG_CACHE.get(run.story_id)
+                    if _hit and _now_ts - _hit[1] < 300:
+                        _vn = _hit[0]
+                    else:
+                        _srow = db2.get(StoryModel, run.story_id)
+                        _vn = bool(((_srow.tuning if _srow is not None else {}) or {})
+                                   .get("vn_mode"))
+                        _VN_FLAG_CACHE[run.story_id] = (_vn, _now_ts)
                     av_changed = _ensure_char_avatars(content, vn=_vn)
                 except Exception:
                     pass
@@ -1356,9 +1364,9 @@ def living_tick_now(run_id: str, user: User = Depends(current_user),
 
 
 @router.post("/{run_id}/character/{char_id}/image")
-async def upload_character_image(run_id: str, char_id: str, file: UploadFile = File(...),
-                                 user: User = Depends(current_user),
-                                 db: Session = Depends(get_db)):
+def upload_character_image(run_id: str, char_id: str, file: UploadFile = File(...),
+                           user: User = Depends(current_user),
+                           db: Session = Depends(get_db)):
     """🖼 玩家给角色换形象 (Yi: 玩家也可以自己上传人物图, 智能裁剪):
     一张图进来, rembg 找人 → 透底立绘 + 方形头像 + 改脸源图三件套;
     旧表情差分作废 (可再跑 /sprites/exprs 按新脸重做)。"""
@@ -1370,7 +1378,8 @@ async def upload_character_image(run_id: str, char_id: str, file: UploadFile = F
               if x.get("id") == char_id), None)
     if not c:
         raise HTTPException(404, "这个剧本里没有该角色")
-    data = await file.read()
+    # 同步处理器 = FastAPI 丢进线程池跑 — rembg/PIL 这几秒不冻事件循环 (审查实锤)
+    data = file.file.read()
     if len(data) > 5 * 1024 * 1024:
         raise HTTPException(413, "图片太大（上限 5MB）")
     if not _sniff_image(data):
@@ -1413,6 +1422,7 @@ def smart_cast_sprites(run_id: str, body: dict = Body(default={}),
 
 
 _EXPR_BUILDING: set = set()
+_VN_FLAG_CACHE: dict = {}   # story_id → (vn_mode, ts) — 旗几乎不变, 五分钟一取
 
 
 @router.post("/{run_id}/sprites/exprs")
@@ -1453,8 +1463,11 @@ def build_expr_sprites(run_id: str, body: dict = Body(default={}),
 
 def _push_heartbeat_news(db, run, tick_out: dict) -> None:
     """🔔 一次心跳至多敲一次窗: 邀约优先 (角色亲笔的那句), 其次缺席留言."""
+    if not tick_out or not (tick_out.get("anniv") or tick_out.get("event")
+                            or tick_out.get("absent")):
+        return   # 心跳空转不碰推送层也不查库 (审查实锤: 全架扫描 × 每 run 一查)
     from .. import webpush
-    if not tick_out or webpush.quiet_now():
+    if webpush.quiet_now():
         return
     tag = f"lp-{run.id[:8]}"
     an = tick_out.get("anniv")
