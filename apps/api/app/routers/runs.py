@@ -828,6 +828,9 @@ def play(
                     yield _event({"event": "direct", "direct": director.stage_turn(final)})
                 except Exception:
                     pass
+                if final.get("new_day"):
+                    # 🌅 新的一天: 过场卡+输入锁+自由活动菜单 (菜单已在 suggestions 里)
+                    yield _event({"event": "newday", "day": final["new_day"]})
                 yield _event({"event": "promises", "promises": final.get("promises", [])})
                 yield _event({"event": "verdict", "verdict": final.get("verdict")})
                 if final.get("pending_choice"):

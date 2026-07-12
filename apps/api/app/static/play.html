@@ -552,7 +552,7 @@ body.dread #dread { opacity:1; }
 <div id="vnchap"><div class="w"><div class="t"></div><div class="s"></div></div></div>
 <div id="vndice"></div>
 <div id="vnend"><div class="w"><div class="k"></div><h2></h2><p></p><button onclick="backToPick()"></button></div></div>
-<div id="vncg" onclick="this.classList.remove('on')"><div class="cgbg"></div><div class="cgshade"></div>
+<div id="vncg" onclick="if(!vnLocked())this.classList.remove('on')"><div class="cgbg"></div><div class="cgshade"></div>
   <div class="cgtxt"><div class="cgk"></div><div class="cgt"></div><div class="cgl"></div>
   <div class="cgm">✦ 已存入回忆册 · 点按继续</div></div></div>
 <!-- 🎀 VN window (galgame 演出): sprite + dialogue box + click-to-advance + choices -->
@@ -2444,6 +2444,7 @@ function renderSuggest(items) {
       if (i === 0) btn.className = "prime";
       btn.textContent = t; btn.title = t;
       btn.onclick = () => {
+        if (vnLocked()) return;   // 🔒 过场在放, 选项也不许点
         box.classList.add("hidden");
         const isAct = t.startsWith("用「做」") || t.startsWith("Use “Do”");
         if (isAct) { channel.value = "do"; msg.focus(); return; }
@@ -2579,6 +2580,7 @@ function vnCue(mode) {
                         : B("轮到你了：打字行动…", "Your move: type an action…");
 }
 function vnAdvance() {
+  if (vnLocked()) return;   // 🔒 过场在放: 乱点不许把台下的剧情点跑
   if (vnAdvanceResolve) { const r = vnAdvanceResolve; vnAdvanceResolve = null; r(); }
 }
 let vnBooting = false;   // 引导期: 加载罩还没撤, 绝不能等玩家点击 (互等=卡死)
@@ -2702,6 +2704,10 @@ if ("serviceWorker" in navigator) {
   }).catch(() => {});
 }
 // ── 🎬 导演 v1 (客户端规则): 引擎状态直接驱动演出, 不加模型调用不加延迟 ──
+// 🔒 过场保护 (Yi: 过场的时候不能乱点): 卡在放, 点击/空格一律吞掉
+let vnLockedUntil = 0;
+const vnLocked = () => Date.now() < vnLockedUntil;
+function vnLock(ms) { vnLockedUntil = Math.max(vnLockedUntil, Date.now() + ms); }
 let vnChapTimer = null;
 function vnChapCard(title, sub) {
   if (!vnMode || !title) return;
@@ -2709,6 +2715,7 @@ function vnChapCard(title, sub) {
   el.querySelector(".t").textContent = title;
   el.querySelector(".s").textContent = sub || "";
   el.classList.add("on");
+  vnLock(2300);
   clearTimeout(vnChapTimer);
   vnChapTimer = setTimeout(() => el.classList.remove("on"), 2300);
 }
@@ -2739,6 +2746,7 @@ async function vnShowCG(moments) {
   el.querySelector(".cgk").textContent = `${CG_KINDS[hit.kind]}　${stars}`;
   el.querySelector(".cgt").textContent = (card && card.title) || hit.title || "";
   el.querySelector(".cgl").textContent = (card && card.text) || "";
+  vnLock(1300);   // CG 至少亮 1.3 秒才许点掉 — 名场面不能被手快划没
   el.classList.add("on");
 }
 // 色调层: direct 事件说了算; 场景事件只做 night/none 兜底 (移动等非回合通路)
@@ -2971,7 +2979,7 @@ async function driveTurn() {
 async function send(chOverride) {
   const ch = (typeof chOverride === "string" && chOverride) || channel.value;
   const text = ch === "drive" ? "" : msg.value.trim();
-  if (!runId || ended) return;
+  if (!runId || ended || (vnMode && vnLocked())) return;
   const canEmpty = playMode === "god" || ch === "think" || ch === "drive";
   if (!text && !canEmpty) return;
   msg.value = ""; sendBtn.disabled = true; suggest.innerHTML = "";
@@ -3019,6 +3027,11 @@ async function streamTurn(url, bodyObj) {
         else if (ev.event === "state") { renderState(ev.state); }
         else if (ev.event === "scene") { applyScene(ev.scene); }
         else if (ev.event === "direct") { applyDirect(ev.direct); }
+        else if (ev.event === "newday") {
+          // 🌅 新的一天: 过场卡 (锁输入) + 这一轮的建议就是自由活动菜单
+          if (vnMode) vnChapCard(B(`第${ev.day}天`, `Day ${ev.day}`),
+                                 B("新的一天 · 自由活动", "A new day · free time"));
+        }
         else if (ev.event === "cast") { updateCast(ev.cast); }
         else if (ev.event === "here") { relations = ev.relations || {}; following = ev.following || []; updateCast(ev.here || []); }
         else if (ev.event === "goal") { renderGoal(ev.goal); }

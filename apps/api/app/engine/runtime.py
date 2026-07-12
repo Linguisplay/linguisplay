@@ -4850,6 +4850,37 @@ def mint_sought_character(content: dict[str, Any], state: dict[str, Any], name: 
     return {"char": char, "loc": loc}
 
 
+def free_day_suggestions(content: dict[str, Any], state: dict[str, Any]) -> list[str]:
+    """🌅 新的一天的自由活动菜单: 确定性, 从作息+关系温度里长出来 —
+    最暖的两个人「此刻在哪、去找TA」+ 一个独处去处。剧情这一刻不抢戏。"""
+    dead = _dead_ids(state)
+    met = set(state.get("met_ids") or [])
+    pcid = state.get("player_character_id")
+    cands = [c for c in _characters(content)
+             if c.get("id") and c.get("id") in met
+             and c.get("id") not in dead and c.get("id") != pcid]
+
+    def _warm(c):
+        sc = (state.get("rel") or {}).get(c.get("id")) or {}
+        return int(sc.get("closeness", 0) or 0) + int(sc.get("romance", 0) or 0)
+
+    cands.sort(key=_warm, reverse=True)
+    out: list[str] = []
+    for c in cands[:2]:
+        pos = char_position(content, state, c)
+        loc = _location_by_id(content, pos) if (pos and pos != AWAY) else None
+        where = (loc.get("name") if loc and location_available(content, state, loc)
+                 else None)
+        out.append(f"去{where}找{c.get('name')}" if where
+                   else f"去找{c.get('name')}，看TA今天在忙什么")
+    spots = [l for l in _locations(content)
+             if l.get("name") and location_available(content, state, l)
+             and l.get("id") != state.get("location_id")]
+    if spots:
+        out.append(f"一个人去{random.choice(spots).get('name')}转转")
+    return [dedash(s) for s in out if s][:3]
+
+
 def echo_line(content: dict[str, Any], state: dict[str, Any], sp_id: str | None) -> str:
     """🌌 跨存档残响 (活世界 P4): 上一段人生里暖过的角色, 新时间线里对玩家有一种
     说不清的既视感 — 一瞬恍惚级别, 绝不解释, 绝不复述前尘 (TA并不真的记得)."""
@@ -5996,6 +6027,8 @@ def run_turn_stream(
     llm = lang_llm(llm or get_llm(), content)
     state = {**default_state(), **(state or {})}
     old_act = int(state.get("act", 1))
+    # 🌅 日翻页哨兵 (Yi: 每天要给玩家自由活动的时间) — 回合末对账, 翻了天就发自由活动菜单
+    _day0 = int((state.get("clock") or {}).get("day", 1) or 1)
     # normalize the player's position to the EFFECTIVE location (unset → first authored)
     # so the location gating dimension always sees where they truly stand
     state["location_id"] = (current_location(content, state) or {}).get("id")
@@ -7892,6 +7925,16 @@ def run_turn_stream(
                     state["fate_next"] = random.randint(_lo, _hi)
                     _audit(state, "fate.offered", True, _fc["prompt"][:30])
 
+    # 🌅 新的一天 = 自由活动时段: 建议换成「去哪找谁」的菜单 (作息+关系温度长出来的),
+    # 剧情不抢戏 — 客户端配过场卡与输入锁
+    _day1 = int((state.get("clock") or {}).get("day", 1) or 1)
+    new_day = _day1 if _day1 > _day0 and not (fired and fired.get("terminal")) else None
+    if new_day:
+        _free = free_day_suggestions(content, state)
+        if _free:
+            suggestions = _free
+        _audit(state, "day.free", True, f"day{_day1} menu:{len(_free)}")
+
     # 🪞 玩家档案 (活世界 P2): 记回合, 到节拍就蒸馏一次; 见证名单=此刻在场的角色
     if player_input and channel in ("say", "do") and not observer:
         if profile_mod.note_turn(state):
@@ -7915,6 +7958,8 @@ def run_turn_stream(
         "newly_unlocked": newly,
         # only suppress suggestions on a terminal (death) ending; milestones keep playing
         "suggestions": suggestions,
+        "new_day": new_day,   # 🌅 这一回合翻了天 → 客户端出「新的一天·自由活动」过场
+
         "scene": scene,
         "ending": fired,
         # who's addressable now (a new act may have brought someone onstage); in character
