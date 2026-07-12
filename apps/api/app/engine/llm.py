@@ -82,7 +82,9 @@ class MockLLM:
                     "cast": [{"name": (c or {}).get("name"),
                               "action": f"{(c or {}).get('name')}正低头整理手边的东西，抬眼看见了你。",
                               "line": "新来的？跟我来吧。"}
-                             for c in (prompt.get("chars") or [])]}
+                             for c in (prompt.get("chars") or [])],
+                    "hook": {"task": "去后院把晾着的灯笼收进来",
+                             "line": "正好，后院晾着的灯笼帮我收进来，快下雨了。"}}
         # 🪞 玩家档案 twin: 只给见证名单内的角色写印象 (认知边界由引擎裁定)
         if prompt.get("player_profile"):
             wits = prompt.get("witnesses") or []

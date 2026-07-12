@@ -1827,6 +1827,30 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
             ex = [str(x) for x in (c.get("examples") or []) if str(x).strip()]
             beats.append({"type": "dialogue", "speaker_name": nm,
                           "text": (ex[0][:60] if ex else "新来的？")})
+    # 🎯 开局由头 (Yi: 一开始要给玩家一件具体的事): 主角位亲口交代第一件差事
+    # (最好把玩家引向不在场的角色/地点 = 探索钩子); 目标条与首批建议都指向它
+    hk = out.get("hook") or {}
+    task = dedash(str(hk.get("task") or "").strip())[:30]
+    hline = dedash(str(hk.get("line") or "").strip().strip("「」\"'"))[:70]
+    if not task and lead and not is_god:
+        _pids = {x.get("id") for x in present_chars}
+        other = next((c for c in _characters(content)
+                      if c.get("id") and c.get("id") not in _pids
+                      and c.get("id") != pcid and c.get("name")), None)
+        if other:
+            _w = (_location_by_id(content, other.get("home_location_id")) or {}) \
+                .get("name") or "TA常待的地方"
+            task = f"替{lead.get('name')}给{other.get('name')}捎样东西"[:30]
+            hline = (f"对了，帮我把这个捎给{other.get('name')}，TA这会儿多半在{_w}。"
+                     "就当认认路了。")
+    if task and lead and not is_god:
+        if hline:
+            beats.append({"type": "dialogue", "speaker_name": lead.get("name"),
+                          "text": hline})
+        state["goal"] = task
+        state["suggestions"] = [dedash(f"答应下来：{task}"),
+                                "先问清楚是怎么回事", "婉拒，想先自己四处转转"]
+        _audit(state, "opening.hook", True, task[:24])
     return [dedash_beat(b) for b in beats]
 
 
@@ -4091,6 +4115,26 @@ def _bad_place_name(n: str) -> bool:
     return not n or len(n) < 2 or len(n) > 12 or n in _DEICTIC or bool(_BAD_PLACE_RE.search(n))
 
 
+# 🗺 地名准入门 (Yi 实锤: 「去求老爹把秘方卖了」被解析成去处「求老爹把秘方卖」):
+# 已知地点走注册库 (resolve_location); 要铸造【新】去处的名字必须长得像个地方 —
+# 带地名后缀直接放行, 无后缀只许 ≤6 字的干净名词; 含动词/介词/请求字的句子碎片免谈
+_PLACE_SUFFIX = ("街", "巷", "店", "馆", "楼", "房", "台", "山", "海", "湖", "河", "桥",
+                 "寺", "庙", "院", "校", "厅", "室", "城", "村", "镇", "园", "场", "铺",
+                 "摊", "口", "道", "路", "堤", "塔", "所", "局", "吧", "厂", "港", "站",
+                 "门", "洞", "林", "岛", "阁", "殿", "坊", "市", "区", "顶", "库", "仓",
+                 "崖", "滩", "谷", "峰", "田", "井", "亭")
+_PLACE_VERBY = re.compile(r"[求把被让请帮跟对给说问买卖借还偷抢救杀骂嫁娶想愿肯敢趟]")
+
+
+def _placey(n: str) -> bool:
+    n = (n or "").strip()
+    if _bad_place_name(n):
+        return False
+    if any(n.endswith(s) for s in _PLACE_SUFFIX):
+        return True
+    return len(n) <= 6 and not _PLACE_VERBY.search(n)
+
+
 # deictics that name a direction, not a place — never a generatable destination
 _DEICTIC = ("哪里", "哪儿", "那里", "这里", "那边", "这边", "前面", "后面",
             "里面", "外面", "附近", "别处", "远处")
@@ -4196,8 +4240,8 @@ def player_move_emergent(content: dict[str, Any], state: dict[str, Any], player_
             continue
         if ref[0] in "找见寻接等约":
             continue                      # 「去找X」「去见X」 are seeks, not places
-        if _bad_place_name(ref):
-            continue                      # pronouns/gaze/question tails are never places
+        if not _placey(ref):
+            continue                      # 🗺 地名准入门: 不像地方的碎片不许铸造去处
         if resolve_location(content, ref):
             continue                      # known place → player_move's business, not ours
         if any(n == ref or n in ref for n in names):

@@ -348,7 +348,10 @@ def test_opening_never_writes_absent_characters():
     beats = runtime.build_opening(story, st, llm=llm)
     txt = " ".join(b.get("text", "") for b in beats)
     assert llm.casts[0] == ["竹清"]        # scene roster, not the act-1 cast
-    assert "沐白" not in txt               # the intruder never survives the whitelist
+    # 不在场 ≠ 不可提及: 开局差事可以把玩家引向沐白 (探索钩子),
+    # 但他绝不开口、他的小剧情绝不上台 (白名单丢弃)
+    assert all(b.get("speaker_name") != "沐白" for b in beats)
+    assert "打盹" not in txt               # 他的 vignette 被白名单丢掉了
     assert "竹清" in txt
 
 
@@ -739,3 +742,22 @@ def test_pov_break_catches_third_person_player():
     assert runtime._pov_break(dlg, "萧薰儿") is False
     # no embodied name → falls back to 我-hijack only
     assert runtime._pov_break(third, "") is False
+
+
+def test_place_gate_rejects_sentence_fragments():
+    """🗺 地名准入门 (Yi 实锤): 「去求老爹把秘方卖了」不是一个去处."""
+    assert runtime._placey("后台") is True
+    assert runtime._placey("老爹的杂货铺") is True
+    assert runtime._placey("坂顶展望台") is True
+    assert runtime._placey("求老爹把秘方卖") is False
+    assert runtime._placey("跟他谈谈条件") is False
+    assert runtime._placey("把货送过去") is False
+    story = {"story": {"id": "s", "sandbox": {"enabled": True},
+                       "characters": [{"id": "a", "name": "老爹"}],
+                       "acts": [{"index": 1, "title": "一"}],
+                       "locations": [{"id": "hall", "name": "门厅", "exits": []}]},
+             "secrets": []}
+    st = runtime.default_state()
+    st["location_id"] = "hall"
+    assert runtime.player_move_emergent(story, st, "去求老爹把秘方卖了", "do") is None
+    assert runtime.player_move_emergent(story, st, "去后山的旧灯塔看看吧", "do") in ("后山的旧灯塔", "旧灯塔")

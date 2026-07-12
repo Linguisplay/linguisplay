@@ -2886,8 +2886,26 @@ async function playBeatVN(b, skipLog) {
   nameEl.classList.toggle("hidden", isNarr);
   vnSprite(isNarr ? null : b.speaker_name, isNarr ? undefined : b.expr);
   box.className = isNarr ? "narr" : "";
-  await typeInto(box, b.text, isNarr ? 16 : 22);
-  await vnWait(900 + (b.text || "").length * 55);
+  // 📖 分页 (Yi: 一页字太多): 长拍按句读切成 ≤76 字的页, 逐页点击翻
+  for (const page of paginate(b.text)) {
+    await typeInto(box, page, isNarr ? 16 : 22);
+    await vnWait(900 + page.length * 55);
+  }
+}
+// 按句读切页 (Yi 铁律: 杜绝长文, 一定分批次): 句读/分号/换行后断, 页容 ≈ 两三行;
+// 单句超页容也硬切 — 任何一页都不许超过 cap
+function paginate(text, cap = 66) {
+  const segs = String(text || "").split(/(?<=[。！？…；;\n])/);
+  const pages = [];
+  let buf = "";
+  const flush = () => { if (buf.trim()) pages.push(buf); buf = ""; };
+  for (let s of segs) {
+    while (s.length > cap) { flush(); pages.push(s.slice(0, cap)); s = s.slice(cap); }
+    if (buf && (buf.length + s.length) > cap) flush();
+    buf += s;
+  }
+  flush();
+  return pages.length ? pages : [""];
 }
 // play one engine beat with a "typing…" pause then a typewriter reveal
 async function playBeat(b) {
