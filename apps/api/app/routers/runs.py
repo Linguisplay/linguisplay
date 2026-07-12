@@ -1379,6 +1379,34 @@ async def upload_character_image(run_id: str, char_id: str, file: UploadFile = F
     return out
 
 
+@router.post("/{run_id}/sprites/smart")
+def smart_cast_sprites(run_id: str, body: dict = Body(default={}),
+                       user: User = Depends(current_user),
+                       db: Session = Depends(get_db)):
+    """🔍 主角智能搜图 (Yi): 全员按「故事+角色」搜真实剧照 → 按剧本画风改绘 →
+    立绘/头像/差分底三件套。后台线程; 玩家亲选的脸不动。"""
+    from ..engine import sprites as sprites_mod
+    r = _own_run(run_id, user, db)
+    content = copy.deepcopy(r.pinned_content or {})
+    cids = [str(x) for x in (body.get("chars") or [])] or None
+    with _IMG_LOCK:
+        if run_id in _EXPR_BUILDING:
+            return {"queued": False, "busy": True}
+        _EXPR_BUILDING.add(run_id)
+
+    def _work():
+        try:
+            sprites_mod.smart_cast(content, cids)
+        finally:
+            with _IMG_LOCK:
+                _EXPR_BUILDING.discard(run_id)
+
+    _imgthreading.Thread(target=_work, daemon=True).start()
+    return {"queued": True,
+            "chars": cids or [c.get("id") for c in
+                              (content.get("story") or {}).get("characters", [])]}
+
+
 _EXPR_BUILDING: set = set()
 
 

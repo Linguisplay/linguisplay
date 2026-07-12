@@ -93,6 +93,94 @@ def ingest_upload(cid: str, data: bytes) -> dict[str, Any]:
             "smart": bool(box), "stale_exprs_removed": removed}
 
 
+def _tavily_images(query: str, cap: int = 6) -> list[str]:
+    """Tavily 图搜: 返回候选图片 URL (无 key / 失败 = 空)."""
+    import httpx
+
+    from ..config import get_settings
+    s = get_settings()
+    if not s.tavily_api_key:
+        return []
+    try:
+        r = httpx.post("https://api.tavily.com/search",
+                       json={"api_key": s.tavily_api_key, "query": query,
+                             "include_images": True, "max_results": 5},
+                       timeout=25)
+        return [u for u in (r.json().get("images") or []) if isinstance(u, str)][:cap]
+    except Exception:
+        return []
+
+
+def _fetch_person_image(urls: list[str]) -> bytes | None:
+    """候选里选第一张「站得住」的: 能下载、够大、rembg 能找出一个像样的人形."""
+    import io as _io
+
+    import httpx
+    from PIL import Image
+
+    from .gal import debg
+    for u in urls:
+        try:
+            r = httpx.get(u, timeout=20, follow_redirects=True,
+                          headers={"User-Agent": "Mozilla/5.0"})
+            data = r.content
+            if r.status_code != 200 or not data or len(data) > 8 * 1024 * 1024:
+                continue
+            im = Image.open(_io.BytesIO(data))
+            if min(im.size) < 420:
+                continue
+            cut = Image.open(_io.BytesIO(debg(data)))
+            if cut.mode != "RGBA":
+                continue
+            box = cut.getchannel("A").getbbox()
+            if not box:
+                continue
+            bh, bw = box[3] - box[1], box[2] - box[0]
+            if bh < im.height * 0.4 or bw < 60:   # 人形太小/太碎 = 海报文字或群像远景
+                continue
+            return data
+        except Exception:
+            continue
+    return None
+
+
+def smart_cast(content: dict[str, Any], cids: list[str] | None = None) -> dict[str, Any]:
+    """🔍 主角智能搜图 (Yi: 主要角色都智能搜索一下): 每个角色按「故事名+角色名+剧照」
+    搜真图 → 选图 → 按剧本画风改绘 (动漫店改绘成赛璐璐立绘, 写实店原样) →
+    ingest 三件套。玩家亲选的脸 (generated=False) 不动。"""
+    from .qwen import edit_image
+    story = content.get("story") or {}
+    title = (story.get("title") or "").strip()
+    art = str((story.get("tuning") or {}).get("art_style") or "")
+    anime = any(k in art for k in ("动漫", "二次元", "赛璐璐", "水彩", "插画", "漫画", "国漫"))
+    report: dict[str, Any] = {"done": [], "no_image": [], "convert_failed": [], "skipped": []}
+    for c in story.get("characters") or []:
+        cid, name = c.get("id"), c.get("name")
+        if not cid or not name or (cids and cid not in cids):
+            continue
+        if c.get("generated") is False:   # 玩家亲选的脸不动
+            report["skipped"].append(cid)
+            continue
+        raw = _fetch_person_image(_tavily_images(f"{title} {name} 剧照 高清"))
+        if raw is None:
+            raw = _fetch_person_image(_tavily_images(f"{name} {title} still photo"))
+        if raw is None:
+            report["no_image"].append(cid)
+            continue
+        img = raw
+        if anime:
+            img = edit_image(raw, "把这张照片改绘成经典日式galgame动漫立绘：赛璐璐上色，"
+                                  "干净利落的线稿，柔和的高光与阴影。严格保持人物的发型、"
+                                  "五官特征、服装和姿势完全一致，只改画风",
+                             mime="image/jpeg") or None
+            if not img:
+                report["convert_failed"].append(cid)
+                continue
+        ingest_upload(cid, img)
+        report["done"].append(cid)
+    return report
+
+
 def build_expr_pack(cids: list[str], exprs: list[str] | None = None,
                     force: bool = False) -> dict[str, Any]:
     """Edit-generate the expression diffs for these characters. Sequential and
