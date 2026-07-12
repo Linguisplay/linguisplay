@@ -3240,7 +3240,10 @@ function finishTurn() {
     afterPlay = null;
   }
   maybeAddRetryChip();   // a bad beat's exit lives right next to the suggestions
-  sendBtn.disabled = false; msg.focus();
+  sendBtn.disabled = false;
+  // 📵 手机铁律 (Yi 报障): 键盘只属于用户亲手点输入框的那一刻 —
+  // 回合末自动 focus 在触屏上 = 点屏幕过剧情时输入法弹脸
+  if (!vnMode && !("ontouchstart" in window)) msg.focus();
 }
 // tap the story area while a turn plays out → skip the typewriter, show it all
 chat.addEventListener("click", () => { if (playing || !streamDone) skipType = true; });
