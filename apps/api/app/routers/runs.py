@@ -1383,10 +1383,12 @@ _EXPR_BUILDING: set = set()
 
 
 @router.post("/{run_id}/sprites/exprs")
-def build_expr_sprites(run_id: str, user: User = Depends(current_user),
+def build_expr_sprites(run_id: str, body: dict = Body(default={}),
+                       user: User = Depends(current_user),
                        db: Session = Depends(get_db)):
     """🎭 表情差分包: 给这局已登场的角色生成 喜/怒/哀/惊 改脸差分 (后台线程,
-    编辑既有底图不重画, 幂等可重跑补齐). 客户端按 beat.expr 换脸."""
+    编辑既有底图不重画, 幂等可重跑补齐). body.force=true 全部重做
+    (调整表情幅度标准后重刷用). 客户端按 beat.expr 换脸."""
     r = _own_run(run_id, user, db)
     content = r.pinned_content or {}
     st = r.state or {}
@@ -1403,9 +1405,11 @@ def build_expr_sprites(run_id: str, user: User = Depends(current_user),
             return {"queued": [], "busy": True}
         _EXPR_BUILDING.add(run_id)
 
+    _force = bool(body.get("force"))
+
     def _work():
         try:
-            sprites_mod.build_expr_pack(cids)
+            sprites_mod.build_expr_pack(cids, force=_force)
         finally:
             with _IMG_LOCK:
                 _EXPR_BUILDING.discard(run_id)
