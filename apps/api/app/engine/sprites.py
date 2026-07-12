@@ -169,9 +169,10 @@ def smart_cast(content: dict[str, Any], cids: list[str] | None = None) -> dict[s
             continue
         img = raw
         if anime:
-            img = edit_image(raw, "把这张照片改绘成经典日式galgame动漫立绘：赛璐璐上色，"
-                                  "干净利落的线稿，柔和的高光与阴影。严格保持人物的发型、"
-                                  "五官特征、服装和姿势完全一致，只改画风",
+            # 改绘吃剧本自己的美术圣经 — 全员一套 token, 不许各自发挥 (出戏元凶)
+            img = edit_image(raw, f"把这张照片改绘成这种画风的游戏立绘：{art[:220]}。"
+                                  "严格按这个画风执行，严格保持人物的发型、五官特征、"
+                                  "服装和姿势完全一致，只改画风",
                              mime="image/jpeg") or None
             if not img:
                 report["convert_failed"].append(cid)
