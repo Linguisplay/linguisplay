@@ -5758,19 +5758,23 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
     Extracted verbatim from run_turn_stream (管线刀1)."""
     this_delta = int(directed.get("affinity_delta", 0) or 0)
     flags["affinity_delta"] += this_delta
-    # ✍️ 编剧拍落账 (剧组 P2): 情绪申报 / 伏笔埋收 / 人生目标推进 — 主答者一人申报
+    # ✍️ 编剧拍落账 (剧组 P2): 情绪申报 / 伏笔埋收 / 人生目标推进 — 主答者一人申报。
+    # 申报消毒 (实弹: 模型把 schema 碎片回显进 setup_plant): 带结构符号的值一律驳回
+    def _claim(v: Any, cap: int) -> str:
+        t = dedash(str(v or "").strip())[:cap]
+        return "" if any(ch in t for ch in "{}[]\"':`") else t
     if is_primary:
         _mood_claim = str(directed.get("mood") or "").strip()
         if _mood_claim:
             flags["mood_claim"] = _mood_claim[:6]
         _day_now = int((state.get("clock") or {}).get("day", 1) or 1)
         stps = state.setdefault("setups", [])
-        _plant = dedash(str(directed.get("setup_plant") or "").strip())[:24]
+        _plant = _claim(directed.get("setup_plant"), 24)
         if _plant and all(_plant != s.get("text") for s in stps):
             stps.append({"text": _plant, "day": _day_now, "due": _day_now + 2, "paid": False})
             del stps[:-6]
             _audit(state, "setup.plant", True, _plant[:20])
-        _pay = str(directed.get("setup_pay") or "").strip()
+        _pay = _claim(directed.get("setup_pay"), 30)
         if _pay:
             _hit = next((s for s in stps if not s.get("paid")
                          and (str(s.get("text")) in _pay or _pay in str(s.get("text")))), None)
@@ -5784,12 +5788,12 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
                 s["paid"] = "expired"
                 _audit(state, "setup.expired", True, str(s.get("text"))[:20])
         _ag = directed.get("agenda_step")
-        if isinstance(_ag, dict) and str(_ag.get("who") or "").strip():
+        if isinstance(_ag, dict) and _claim(_ag.get("who"), 12):
             _who = next((c for c in scene_characters(content, state)
-                         if c.get("name") == str(_ag.get("who")).strip()), None)
+                         if c.get("name") == _claim(_ag.get("who"), 12)), None)
             if _who:
-                agenda_advance(state, _who, stage=str(_ag.get("stage") or ""),
-                               step=str(_ag.get("step") or ""))
+                agenda_advance(state, _who, stage=_claim(_ag.get("stage"), 16),
+                               step=_claim(_ag.get("step"), 20))
             else:
                 _audit(state, "agenda.step", False, f"{_ag.get('who')}不在场")
     # per-character relationship FLOW: apply this speaker's own closeness (=好感) and
