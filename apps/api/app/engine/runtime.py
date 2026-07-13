@@ -2497,8 +2497,10 @@ def _smart_suggestions(llm, all_beats, player_input, primary, content, state, lo
     reply = "；".join(
         f"{b.get('speaker_name') or '旁白'}：{(b.get('text') or '')[:60]}" for b in tail)
     pcid = state.get("player_character_id")
+    # 现场事实账本: 在场名单含主答者本人 (实弹: 排除主答者后名单为空,
+    # 模型顺理成章编出「补习社没人」— 文清明明正抬头看着玩家)
     present = [c.get("name") for c in scene_characters(content, state)
-               if c.get("name") and c.get("id") != pcid and c.get("id") != primary.get("id")]
+               if c.get("name") and c.get("id") != pcid]
     exits = (location or {}).get("exits") or []
     rels = state.get("rel") or {}
     rel_name = relationships.name_of(relationships.derive_mode(primary, rels.get(primary.get("id")) or relationships.new_scores(), tuning_for(content)))
@@ -2568,9 +2570,57 @@ def _smart_suggestions(llm, all_beats, player_input, primary, content, state, lo
         # (drop it — the deterministic English fallback covers the gap)
         if lang_of(content) == "en":
             outs = [s for s in outs if not has_cjk(s)]
-        return outs
+        return suggestion_gate(content, state, outs)
     except Exception:
         return []
+
+
+def suggestion_gate(content: dict[str, Any], state: dict[str, Any],
+                    items: list[str]) -> list[str]:
+    """🚪 建议出口的确定性验账 (Yi: 建议胡说要根除 — 模型申报, 引擎验账):
+    与引擎账本矛盾的建议直接毙 (审计留痕), 缺口由模板兜底补足。
+    毙: ①现场有人却说「没人」 ②建议前往此刻已在的地点 ③提到已死的人
+    ④「去L…N」而位置账本明确 N 不在 L。账本不知道的不毙 (宁缺勿枉)。"""
+    import re as _re
+    pcid = state.get("player_character_id")
+    here = [c for c in scene_characters(content, state) if c.get("id") != pcid]
+    cur = current_location(content, state) or {}
+    cur_name = (cur.get("name") or "").strip()
+    dead = _dead_ids(state)
+    chars_by_name = {c.get("name"): c for c in _characters(content) if c.get("name")}
+    locs_by_name = {l.get("name"): l for l in _locations(content)
+                    if l.get("name") and len(l.get("name")) >= 3}
+    ok: list[str] = []
+    for s in items or []:
+        t = str(s or "")
+        why = ""
+        if here and _re.search(r"(没人|没有人|无人|空无一人|一个人都没|一个人也没)", t):
+            why = "现场有人却说没人"
+        elif cur_name and _re.search(r"(去|绕去|赶去|前往|回)" + _re.escape(cur_name), t):
+            why = f"已在{cur_name}还建议前往"
+        else:
+            for nm, c in chars_by_name.items():
+                if nm and nm in t and c.get("id") in dead:
+                    why = f"{nm}已不在人世"
+                    break
+            if not why:
+                for lnm, loc in locs_by_name.items():
+                    if lnm == cur_name or lnm not in t:
+                        continue
+                    for nm, c in chars_by_name.items():
+                        if not nm or nm not in t or t.find(lnm) > t.find(nm):
+                            continue
+                        pos = char_position(content, state, c)
+                        if pos and pos != AWAY and pos != loc.get("id"):
+                            why = f"{nm}不在{lnm}"
+                            break
+                    if why:
+                        break
+        if why:
+            _audit(state, "sugg.gate", False, t[:24], why)
+        else:
+            ok.append(s)
+    return ok
 
 
 def ensure_three_suggestions(primary: list[str], backup: list[str],

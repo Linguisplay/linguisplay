@@ -40,7 +40,8 @@ def test_arrival_chips_ground_in_the_new_scene():
     # the model was anchored to THIS place and THIS cast — not the old scene's
     assert llm.sugg_ctx["place"] == "后巷"
     assert "刚走进" in llm.sugg_ctx["player_input"]
-    assert llm.sugg_ctx["speaker"] == "乙" and llm.sugg_ctx["present"] == []
+    # 主答者本人也在名单里 (实弹: 排除主答者后模型编出「这里没人」)
+    assert llm.sugg_ctx["speaker"] == "乙" and llm.sugg_ctx["present"] == ["乙"]
 
 
 def test_arrival_falls_back_deterministically():
