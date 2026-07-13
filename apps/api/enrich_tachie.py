@@ -36,9 +36,9 @@ from app.db import SessionLocal  # noqa: E402
 from app.engine.gal import char_seed, portrait_negative  # noqa: E402
 from app.engine.qwen import edit_image, generate_image  # noqa: E402
 
-# 立绘底模: qwen-image (Yi: 画风太粗糙 — wanx2.1 的下限撑不起商品级)。
-# 同一 image-synthesis 端点, 928*1664 高分辨率, char_seed 同脸体系照旧。
-TACHIE_MODEL = "qwen-image"
+# 立绘底模: Seedream 4.0 走火山方舟 (Yi 2026-07-13 定; 阿里欠费 + 阿彩对照实验完胜)。
+# 928*1664 高分辨率, char_seed 同脸体系照旧 (Ark 支持 seed)。
+TACHIE_MODEL = "doubao-seedream-4-0-250828"
 TACHIE_SIZE = "928*1664"
 from app.engine.sprites import SPRITE_DIR, build_expr_pack, ingest_upload  # noqa: E402
 from app.models import Story, StorySnapshot  # noqa: E402
@@ -63,14 +63,19 @@ LOOKS: dict[str, str] = {
                 "也不是直发），大眼睛亮晶晶，笑起来露出小虎牙，彩色塑料圆片耳环，"
                 "桃红色短袖衬衫外罩浅蓝色开襟背心，高腰牛仔裤，白色帆布鞋，"
                 "八十年代香港发廊小妹",
-    "kf_saifai": "二十岁的成年男性，市井后生的痞气，清瘦，寸头，眉眼带笑，"
+    # 细辉 v1 (seedream) 裁掉了鞋 — 阿彩同款的全身条款是解药 (返工必须改词)
+    "kf_saifai": "二十岁的成年男性全身站姿像（从头顶到鞋完整入画，人物只占画面中间"
+                 "三分之二高度也可以），市井后生的痞气，清瘦，寸头，眉眼带笑，"
                  "嘴角叼着一根没点的烟，花衬衫敞着最上面两颗扣子，里面是白背心，"
-                 "深色长裤，站姿松松垮垮",
+                 "深色长裤配黑色皮鞋，站姿松松垮垮",
 }
 
 
 def tachie_prompt(name: str, looks: str, art: str) -> str:
     # style anchor rides FIRST (art bible doctrine: 画风是 token 体系, 前置才压得住)
+    # Seedream 铁律: 圣经按「；舞台」拆分, 立绘只喂画风段 — 舞台段入词必画整条街
+    # (阿彩 v1 存证), qwen-image 从前只是碰巧没接住它
+    art = art.split("；舞台")[0]
     return (f"{art}。单人全身立绘：{name}，{looks}。平静自然的神情，正面站姿微侧，"
             "双脚站在地上，人物完整（从头顶到鞋都在画面内，头顶上方留出空间），"
             "画面里只有这一个人。纯色浅灰背景，柔和顶光，高细节，画面里没有任何文字或水印")

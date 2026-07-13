@@ -2135,14 +2135,60 @@ def edit_image(image_bytes: bytes, prompt: str, model: str = "qwen-image-edit",
         return None
 
 
+ARK_IMAGES_URL = "https://ark.cn-beijing.volces.com/api/v3/images/generations"
+
+
+def _generate_image_ark(prompt: str, size: str, model: str, timeout_s: int,
+                        seed: int | None, negative: str) -> bytes | None:
+    """字节 Seedream via 火山方舟 (synchronous). Ark has no negative_prompt
+    param — negatives fold into the prompt as a 不要 clause (Seedream follows
+    natural-language exclusions well). Failures print the API's raw error
+    (排障铁律: 生图失败先拿任务原始错误码, 静默吞错骗过我们三轮)."""
+    s = get_settings()
+    if not s.ark_api_key:
+        print("[ark] image gen skipped: no ARK_API_KEY")
+        return None
+    full = prompt[:780]
+    if negative:
+        full += f"。画面中绝不要出现：{negative[:300]}"
+    try:
+        resp = httpx.post(
+            ARK_IMAGES_URL,
+            headers={"Authorization": f"Bearer {s.ark_api_key}",
+                     "Content-Type": "application/json"},
+            json={"model": model, "prompt": full,
+                  "size": size.replace("*", "x"),
+                  "response_format": "url", "watermark": False,
+                  **({"seed": seed} if seed is not None else {})},
+            timeout=timeout_s,
+        )
+        if resp.status_code != 200:
+            print(f"[ark] image gen failed: {resp.status_code} {resp.text[:300]}")
+            return None
+        data = resp.json().get("data") or []
+        url = data[0].get("url") if data else None
+        if not url:
+            print(f"[ark] image gen returned no url: {resp.text[:300]}")
+            return None
+        img = httpx.get(url, timeout=60)
+        img.raise_for_status()
+        return img.content
+    except Exception as e:
+        print(f"[ark] image gen error: {e}")
+        return None
+
+
 def generate_image(prompt: str, size: str = "1280*720",
                    model: str = "wanx2.1-t2i-turbo", timeout_s: int = 120,
                    seed: int | None = None, negative: str = "") -> bytes | None:
     """Text-to-image via DashScope 通义万相 (async): submit a task, poll until it finishes,
     then download the image bytes. Returns None on any failure. Runs OFFLINE (background
-    enrichment), never in the play request path — generation takes ~10-30s per image."""
+    enrichment), never in the play request path — generation takes ~10-30s per image.
+    Seedream models ("doubao-seedream-*") route to 火山方舟 instead."""
     import time
 
+    if "seedream" in model:
+        return _generate_image_ark(prompt, size, model, timeout_s, seed, negative)
     s = get_settings()
     if not s.dashscope_api_key:
         return None

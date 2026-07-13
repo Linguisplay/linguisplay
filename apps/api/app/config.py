@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     # (Tavily) instead of the model's own knowledge.
     tavily_api_key: str = ""
 
+    # 火山方舟 (Volcengine Ark): unlocks 字节 Seedream image models — pass a
+    # "doubao-seedream-*" model name to generate_image and it routes here.
+    ark_api_key: str = ""
+
     # 🔔 Web Push (活世界 P3): keys unset = the whole layer degrades silently.
     # Quiet hours are Asia/Shanghai wall-clock; pushes are a knock on the window,
     # the message itself always lands in the 小手机 regardless.
