@@ -669,8 +669,11 @@ function renderMedia(){
   const el = document.getElementById("media");
   if (!el) return;
   if (!story.id){ el.innerHTML = '<div class="muted">保存草稿后即可上传。</div>'; return; }
-  let h = "<h3 style='margin:8px 0 2px'>角色照片</h3>";
+  let h = "<h3 style='margin:8px 0 2px'>角色照片（头像）</h3>";
   h += (story.characters||[]).filter(c=>c.id).map(c=>mediaRow("avatar", c.id, esc(c.name), c.avatar_url)).join("")
+       || '<div class="muted">先添加角色。</div>';
+  h += "<h3 style='margin:12px 0 2px'>角色立绘（全身/半身图，自动抠底上台，头像一并生成）</h3>";
+  h += (story.characters||[]).filter(c=>c.id).map(c=>mediaRow("sprite", c.id, esc(c.name), `/scene/sprite/${c.id}.webp`)).join("")
        || '<div class="muted">先添加角色。</div>';
   h += "<h3 style='margin:12px 0 2px'>地点背景</h3>";
   h += (story.locations||[]).filter(l=>l.id).map(l=>mediaRow("bg", l.id, esc(l.name), `/scene/bg/${l.id}.jpg`)).join("")
@@ -689,6 +692,7 @@ async function uploadMedia(kind, id, input){
     const out = await r.json();
     if (!r.ok) throw new Error(out.detail || "失败");
     if (kind === "avatar") { const c = (story.characters||[]).find(x=>x.id===id); if (c) c.avatar_url = out.url; }
+    if (kind === "sprite") { const c = (story.characters||[]).find(x=>x.id===id); if (c && out.avatar) c.avatar_url = out.avatar; }
     msg.textContent = "✓ 已上传";
     renderMedia();
   } catch(e) { msg.textContent = "✗ " + e.message; }

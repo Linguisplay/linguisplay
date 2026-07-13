@@ -489,14 +489,14 @@ async def upload_media(
     already loads; a character upload also writes avatar_url into the story AND its
     latest snapshot so live discovery/new runs show it immediately."""
     s = _own_story(story_id, user, db)
-    if kind not in ("avatar", "bg"):
-        raise HTTPException(400, "kind 只能是 avatar 或 bg")
+    if kind not in ("avatar", "bg", "sprite"):
+        raise HTTPException(400, "kind 只能是 avatar / bg / sprite")
     data = await file.read()
     if len(data) > 5 * 1024 * 1024:
         raise HTTPException(413, "图片太大（上限 5MB）")
     if not _sniff_image(data):
         raise HTTPException(415, "只支持 JPG / PNG / WebP 图片")
-    if kind == "avatar":
+    if kind in ("avatar", "sprite"):
         chars = list(s.characters or [])
         c = next((x for x in chars if x.get("id") == target_id), None)
         if not c:
@@ -504,6 +504,24 @@ async def upload_media(
     else:
         if not any((l.get("id") == target_id) for l in (s.locations or [])):
             raise HTTPException(404, "这个剧本里没有该地点")
+    if kind == "sprite":
+        # 🎭 作者上传立绘 (Yi: 建剧本时可以上传立绘): 走玩家上传同一条 ingest 三件套 —
+        # 透底立绘 + 改脸源图 + 方形头像一次全得, 原图留档以后换画风不糊脸
+        from ..engine.sprites import ingest_upload
+        out = ingest_upload(target_id, data, keep_photo=data)
+        url = out["avatar"]
+        c["avatar_url"] = url
+        s.characters = chars
+        flag_modified(s, "characters")
+        snap = (db.query(StorySnapshot).filter(StorySnapshot.story_id == s.id)
+                .order_by(StorySnapshot.version.desc()).first())
+        if snap and (snap.content or {}).get("story"):
+            for sc in snap.content["story"].get("characters", []):
+                if sc.get("id") == target_id:
+                    sc["avatar_url"] = url
+            flag_modified(snap, "content")
+        db.commit()
+        return {"url": out["sprite"], "avatar": out["avatar"]}
     # the play UI loads bg by the fixed `{id}.jpg` convention → always save as .jpg;
     # shrink_jpg also converts real PNG/WebP bytes into true JPEG at web weight
     from ..engine.gal import shrink_jpg

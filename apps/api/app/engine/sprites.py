@@ -149,6 +149,29 @@ def _fetch_person_image(urls: list[str]) -> bytes | None:
     return None
 
 
+def char_importance(c: dict[str, Any]) -> int:
+    """🏅 人物重要性 (Yi: 智能检索要给人物重要性排名): 主角位/恋爱位/有人生目标/
+    有人物网/作者亲写的角色排前面 — 美术预算和生成顺序都按这个来, 限流时
+    重要的脸先落地。分数越大越重要。"""
+    score = 0
+    if c.get("is_lead"):
+        score += 4
+    if c.get("love_style"):
+        score += 2
+    if (str((c.get("life_goal") or {}).get("text") or "") or c.get("wants")
+            or c.get("agenda") or "").strip():
+        score += 1
+    score += min(2, len(c.get("ties") or []))
+    if not c.get("generated"):
+        score += 1
+    return score
+
+
+def rank_cast(chars: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Importance-ordered cast (stable within equal scores — authored order breaks ties)."""
+    return sorted(chars, key=char_importance, reverse=True)
+
+
 def smart_cast(content: dict[str, Any], cids: list[str] | None = None) -> dict[str, Any]:
     """🔍 主角智能搜图 (Yi: 主要角色都智能搜索一下): 每个角色按「故事名+角色名+剧照」
     搜真图 → 选图 → 按剧本画风改绘 (动漫店改绘成赛璐璐立绘, 写实店原样) →
@@ -159,8 +182,12 @@ def smart_cast(content: dict[str, Any], cids: list[str] | None = None) -> dict[s
     title = (story.get("title") or "").strip()
     art = str((story.get("tuning") or {}).get("art_style") or "")
     anime = is_anime_style(art)
-    report: dict[str, Any] = {"done": [], "no_image": [], "convert_failed": [], "skipped": []}
-    for c in story.get("characters") or []:
+    report: dict[str, Any] = {"done": [], "no_image": [], "convert_failed": [], "skipped": [],
+                              # 🏅 重要性排名随报告下发: 谁先被检索/花预算一目了然
+                              "ranking": [{"id": c.get("id"), "name": c.get("name"),
+                                           "importance": char_importance(c)}
+                                          for c in rank_cast(story.get("characters") or [])]}
+    for c in rank_cast(story.get("characters") or []):
         cid, name = c.get("id"), c.get("name")
         if not cid or not name or (cids and cid not in cids):
             continue

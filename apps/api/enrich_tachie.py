@@ -44,7 +44,7 @@ from app.engine.sprites import SPRITE_DIR, build_expr_pack, ingest_upload  # noq
 from app.models import Story, StorySnapshot  # noqa: E402
 
 # cids whose art is OWNED by another story (shared face) — never regenerate here
-HARD_SKIP = {"cyclone"}
+HARD_SKIP = {"cyclone", "shin", "twelfth", "sei"}   # 龙头共享脸, 永不在浮生重画
 
 # 生成专用外貌 (八十年代港风): per-cid, story-agnostic engine stays clean
 LOOKS: dict[str, str] = {

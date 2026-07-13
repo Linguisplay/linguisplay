@@ -150,10 +150,13 @@ def _ensure_char_avatars(content: dict, vn: bool = False) -> bool:
     keeps whatever art its author set — only empty faces are filled (寂声 shipped an
     all-authored cast and played faceless for a day). Returns True when an avatar_url
     was newly written (caller persists)."""
+    from ..engine.sprites import rank_cast
     story = content.get("story") or {}
     world = ((story.get("world_long") or "").strip().replace("\n", " "))[:120]
     changed = False
-    for c in story.get("characters") or []:
+    # 🏅 重要性排序 (Yi: 智能检索要给人物重要性排名): 限流/排队时主角位、恋爱位
+    # 的脸先落地; 重要角色哪怕此刻不在场, 立绘也在这条每回合补漏的队里
+    for c in rank_cast(story.get("characters") or []):
         cid, name = c.get("id"), c.get("name")
         if not cid or not name:
             continue
@@ -180,7 +183,7 @@ def _ensure_char_avatars(content: dict, vn: bool = False) -> bool:
     if vn or (story.get("tuning") or {}).get("vn_mode"):
         art, neg = _story_art(content)
         world = ((story.get("world_long") or "").strip().replace("\n", " "))[:120]
-        for c in story.get("characters") or []:
+        for c in rank_cast(story.get("characters") or []):
             cid, name = c.get("id"), c.get("name")
             if not cid or not name:
                 continue
