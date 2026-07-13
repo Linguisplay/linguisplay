@@ -108,6 +108,29 @@ def lint_story(content: dict[str, Any]) -> list[Issue]:
         warn("no_playable", "characters",
              "没有任何角色标记 playable —— 引擎会回退到「任选在场角色」，可能让玩家扮演会破坏剧情的角色。")
 
+    # — 🎭 班底多样性守卫 (角色卡 v2, Yi: 要注重多样性) — 只对 3 人以上的 authored 班底说话
+    npc = [c for c in chars if not c.get("playable")]
+    if len(npc) >= 3:
+        no_gender = [c.get("name") for c in npc if not (c.get("gender") or "").strip()]
+        if no_gender:
+            warn("no_gender", "characters",
+                 f"这些角色没有性别字段（称呼/代词会靠模型猜）：{'、'.join(str(n) for n in no_gender[:6])}")
+        genders = {(c.get("gender") or "").strip() for c in npc if (c.get("gender") or "").strip()}
+        if len(genders) == 1:
+            warn("gender_uniform", "characters",
+                 f"班底性别清一色（全是「{next(iter(genders))}」）——群像要有多样性。")
+        bands = {(c.get("age_band") or "").strip() for c in npc if (c.get("age_band") or "").strip()}
+        if bands and len(bands) == 1 and len(npc) >= 4:
+            warn("age_uniform", "characters",
+                 f"班底年龄段清一色（全是「{next(iter(bands))}」）——加一点年龄跨度（长辈位/少年位）。")
+        no_goal = [c.get("name") for c in npc
+                   if not (str((c.get('life_goal') or {}).get('text') or '')
+                           or c.get("wants") or c.get("agenda") or "").strip()]
+        if no_goal:
+            warn("no_life_goal", "characters",
+                 f"这些角色没有人生目标（wants/life_goal 都空，导演排不了冲突）："
+                 f"{'、'.join(str(n) for n in no_goal[:6])}")
+
     # — duplicate ids (would make refs ambiguous) —
     for label, ids in (("character", [c.get("id") for c in chars]),
                        ("location", [l.get("id") for l in locs]),

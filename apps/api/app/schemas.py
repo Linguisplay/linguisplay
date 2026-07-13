@@ -75,6 +75,18 @@ class Character(BaseModel):
     avatar_url: Optional[str] = None
     persona_text: Optional[str] = None
     background: Optional[str] = None
+    # ── 🎭 角色卡 v2 (剧组重建 P0, docs/troupe-design.md) ──
+    # 性别: 称呼与代词（他/她、哥/姐）从卡上走，不再让模型从名字猜。
+    # 班底多样性由 linter 守卫（性别混合/年龄跨度），生成合同同规。
+    gender: Optional[str] = None          # 男 | 女 | 其他
+    age_band: Optional[str] = None        # 少年 | 青年 | 中年 | 老年
+    # 性格三轴 (1~5, 3=中): 给导演排冲突/排主动权用的可推理量; 散文人设仍是主体
+    traits: dict[str, int] = {}           # {外向, 温度, 主导}
+    fear: Optional[str] = None            # 软肋一句 (冲突的抓手)
+    line: Optional[str] = None            # 底线一句 (一推就破的角色不可信)
+    # 人生当前目标的授权起点: {text, stage?, obstacle?} — 运行时在 char_sim.agenda
+    # 长成活台账 (stage/obstacle/log 由引擎推进); 缺省时回落 wants/agenda
+    life_goal: dict[str, Any] = {}
     # how THIS character reads & expresses emotion (their EQ style) — so empathy stays
     # in-character (a gruff character shows care differently than a warm one). Optional.
     eq_style: Optional[str] = None

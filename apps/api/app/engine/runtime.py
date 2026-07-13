@@ -1065,24 +1065,54 @@ def set_char_hp(state: dict[str, Any], cid: str, hp: str | None) -> None:
 
 def char_agenda(content: dict[str, Any], state: dict[str, Any],
                 c: dict[str, Any]) -> dict[str, Any]:
-    """🎯 the character's ENGINE-OWNED agenda: what they're trying to get done (`goal`,
-    seeded from the authored wants/agenda field) and what they're doing about it right
-    now (`step`, advanced by the offscreen tick). The world runs on rules, not vibes:
-    an NPC's behavior between scenes is this record, not a fresh dice roll."""
+    """🎯 the character's ENGINE-OWNED living goal ledger (角色卡 v2): what they're
+    trying to get done (`goal`, seeded from authored life_goal/wants), which `stage`
+    of it they're at, the current `obstacle`, the latest `step`, and a short `log` of
+    stage turns. The world runs on rules, not vibes: an NPC's life between scenes is
+    this record, not a fresh dice roll. 「人生当前目标」是活的 — stage 会走, 目标会办成."""
     sim = _sim(state, c.get("id"))
     ag = sim.get("agenda")
     if not isinstance(ag, dict):
-        ag = {"goal": (c.get("wants") or c.get("agenda") or "").strip(), "step": ""}
+        lg = c.get("life_goal") if isinstance(c.get("life_goal"), dict) else {}
+        ag = {"goal": str(lg.get("text") or c.get("wants") or c.get("agenda") or "").strip(),
+              "stage": str(lg.get("stage") or "").strip(),
+              "obstacle": str(lg.get("obstacle") or "").strip(),
+              "step": "", "log": []}
         sim["agenda"] = ag
+    ag.setdefault("stage", "")
+    ag.setdefault("obstacle", "")
+    ag.setdefault("log", [])
     return ag
 
 
+def agenda_advance(state: dict[str, Any], c: dict[str, Any],
+                   stage: str = "", obstacle: str = "", step: str = "") -> None:
+    """Book progress on a character's life goal (模型申报/心跳推进 → 引擎落账).
+    A changed stage lands in the log — 办成一件事是这个世界真发生过的历史."""
+    ag = char_agenda({}, state, c)
+    ti = _time_index(state)
+    if step:
+        ag["step"], ag["at"] = str(step)[:60], ti
+    if obstacle:
+        ag["obstacle"] = str(obstacle)[:40]
+    ns = str(stage or "").strip()[:40]
+    if ns and ns != ag.get("stage"):
+        log = list(ag.get("log") or [])
+        log.append({"t": ti, "stage": ns})
+        ag["stage"], ag["log"] = ns, log[-8:]
+        _audit(state, "agenda.stage", True, f"{c.get('name','')}→{ns[:20]}")
+
+
 def _agenda_prompt(content: dict[str, Any], state: dict[str, Any], c: dict[str, Any]) -> str:
-    """The agenda as one prompt line: authored goal + the engine-tracked latest step."""
+    """The agenda as one prompt line: goal + stage + obstacle + the latest step."""
     ag = char_agenda(content, state, c)
     bits = []
     if ag.get("goal"):
         bits.append(ag["goal"])
+    if ag.get("stage"):
+        bits.append(f"进行到：{ag['stage']}")
+    if ag.get("obstacle"):
+        bits.append(f"卡在：{ag['obstacle']}")
     if ag.get("step"):
         bits.append(f"最近的动静：{ag['step']}")
     return "；".join(bits)
@@ -1154,7 +1184,10 @@ def _physical_roster(content: dict[str, Any], state: dict[str, Any], persona: di
         if not c.get("name") or c.get("id") == pcid:
             continue
         tag = hp_label.get(char_hp(state, c.get("id")))
-        living.append(c["name"] + ((f" ({tag})" if en else f"（{tag}）") if tag else ""))
+        # 🎭 卡 v2: 性别随名单走 — 他/她、哥/姐从卡上来, 不再让模型从名字猜
+        g = (c.get("gender") or "").strip()
+        living.append(c["name"] + (f"（{g}）" if g and not en else "")
+                      + ((f" ({tag})" if en else f"（{tag}）") if tag else ""))
     # the player is a body in the scene (except in god/observer mode)
     if mode == "god":
         player_label = None
@@ -1632,6 +1665,98 @@ def goal_for(content: dict[str, Any], state: dict[str, Any],
                         else int(state.get("act", 1) or 1))
 
 
+# ── 🎯 目标栈 (剧组重建 P0, 治「goal 单槽四写手」) ────────────────────────────
+# 幕目标/差事/玩家自立目标各归各层, UI 目标条读栈顶; state["goal"] 只是栈顶镜像
+# (客户端零改动)。差事两天不办自动过期 (免得目标条钉着一件旧事)。
+_GOAL_RANK = {"errand": 3, "self": 2, "act": 1}
+_ERRAND_TTL = 6            # time_index 单位 (一天 3 时段 → 两天)
+
+
+def player_card(content: dict[str, Any], state: dict[str, Any],
+                persona: dict[str, Any] | None) -> dict[str, Any]:
+    """🪪 玩家也是一张卡 (剧组 P0, 治「玩家四散」): persona + 五维 + 金手指 +
+    档案 facts + 目标栈, 一处归拢 — 导演读玩家和读 NPC 同一姿势。"""
+    pc = _char_by_id(content, state.get("player_character_id"))
+    return {
+        "name": (pc or {}).get("name") or (persona or {}).get("name") or "玩家",
+        "gender": (pc or {}).get("gender") or "",
+        "persona": ((pc or {}).get("persona_text")
+                    or (persona or {}).get("background") or "")[:160],
+        "attrs": dict(state.get("attrs") or {}),
+        "powers": list(state.get("powers") or [])[:3],
+        "facts": profile_mod.facts_of(state),
+        "goals": [{"kind": g.get("kind"), "text": g.get("text")}
+                  for g in goals_of(state) if g.get("status") == "open"][:3],
+        "hp": state.get("player_hp") or "healthy",
+    }
+
+
+def set_suggestions(state: dict[str, Any], items: list[str],
+                    content: dict[str, Any] | None = None) -> list[str]:
+    """建议的单一落账口 (治「七个产地各写各的规矩」): 所有产地必须走这里 —
+    去破折号、去重、掐长、限三条。措辞规矩改这里 = 改所有产地。"""
+    out: list[str] = []
+    for s in items or []:
+        t = dedash(str(s or "").strip())
+        if t and t not in out:
+            out.append(t[:60])
+        if len(out) >= 3:
+            break
+    state["suggestions"] = out
+    return out
+
+
+def goals_of(state: dict[str, Any]) -> list[dict[str, Any]]:
+    g = state.get("goals")
+    if not isinstance(g, list):
+        g = []
+        state["goals"] = g
+    return g
+
+
+def goal_push(state: dict[str, Any], kind: str, text: str, src: str = "") -> None:
+    """Book a goal onto its layer. Same-layer open goal is REPLACED (一层只挂一件事);
+    the retired one lands in the audit, never silently vanishes."""
+    text = dedash(str(text or "").strip())[:40]
+    if not text or kind not in _GOAL_RANK:
+        return
+    gs = goals_of(state)
+    for g in gs:
+        if g.get("kind") == kind and g.get("status") == "open":
+            if g.get("text") == text:
+                return
+            g["status"] = "replaced"
+    gs.append({"kind": kind, "text": text, "from": str(src)[:20],
+               "status": "open", "at": _time_index(state)})
+    del gs[:-8]
+    _audit(state, f"goal.{kind}", True, text[:24])
+
+
+def goal_settle(state: dict[str, Any], kind: str, status: str = "done") -> None:
+    for g in goals_of(state):
+        if g.get("kind") == kind and g.get("status") == "open":
+            g["status"] = status
+            _audit(state, f"goal.{status}", True, str(g.get('text'))[:24])
+
+
+def goal_top(content: dict[str, Any], state: dict[str, Any]) -> str:
+    """The goal bar's text: highest-rank OPEN goal; act layer derives live (幕目标
+    不落栈, 它由幕推导, 永远兜底)。顺手清过期差事。"""
+    ti = _time_index(state)
+    best_rank, best_text = 0, ""
+    for g in goals_of(state):
+        if g.get("status") != "open":
+            continue
+        if g.get("kind") == "errand" and ti - int(g.get("at") or 0) > _ERRAND_TTL:
+            g["status"] = "expired"
+            _audit(state, "goal.expired", True, str(g.get('text'))[:24])
+            continue
+        r = _GOAL_RANK.get(g.get("kind") or "", 0)
+        if r > best_rank:
+            best_rank, best_text = r, str(g.get("text") or "")
+    return best_text or goal_for(content, state)
+
+
 def _frag_title_map(content: dict[str, Any]) -> dict[str, str]:
     """fragment_id → its secret's title (a sanitized topic label, never the body)."""
     out: dict[str, str] = {}
@@ -1867,9 +1992,11 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
         if hline:
             beats.append({"type": "dialogue", "speaker_name": lead.get("name"),
                           "text": hline})
-        state["goal"] = task
-        state["suggestions"] = [dedash(f"答应下来：{task}"),
-                                "先问清楚是怎么回事", "婉拒，想先自己四处转转"]
+        # 🎯 目标栈: 由头压差事层 (幕目标兜底不受扰); 镜像给 UI
+        goal_push(state, "errand", task, src="opening")
+        state["goal"] = goal_top(content, state)
+        set_suggestions(state, [f"答应下来：{task}",
+                                "先问清楚是怎么回事", "婉拒，想先自己四处转转"], content)
         _audit(state, "opening.hook", True, task[:24])
     return [dedash_beat(b) for b in beats]
 
@@ -5488,7 +5615,8 @@ def _confront_gen(content, state, persona, secret, frag, next_locked, target, ll
         nc = choice_for_act(content, state, new_act)
         if nc:
             state["pending_choice"] = nc
-    state["goal"] = goal_for(content, state, new_act)
+    # 🎯 新幕只换幕层兜底, 差事/自立目标不被幕推进冲掉 (目标栈)
+    state["goal"] = goal_top(content, state)
     yield ("final", {
         "state": state,
         "newly_unlocked": [forced_id] if forced_id else [],
@@ -6371,7 +6499,7 @@ def run_turn_stream(
         _audit(state, "seek", True, f"{c_s.get('name')}@{l_s.get('name')}")
         pcid_s = state.get("player_character_id")
         mode_s = state.get("mode") or "character"
-        state["goal"] = goal_for(content, state, old_act)
+        state["goal"] = goal_top(content, state)
         yield ("beat", dedash_beat({
             "type": "description", "speaker_name": None,
             "text": _t(content, f"（你打听了一圈：{c_s.get('name')}这会儿就在{l_s.get('name')}。）",
@@ -7117,6 +7245,11 @@ def run_turn_stream(
         prompt = {
             "speaker_name": sp_name,
             "speaker_persona": sp.get("persona_text", ""),
+            # 🎭 卡 v2: 性别/年龄/软肋/底线随卡进后台 — 称呼代词有法可依,
+            # 底线是「一推就破的角色不可信」的最后一道闸
+            "speaker_card": {k: v for k, v in (
+                ("gender", sp.get("gender")), ("age_band", sp.get("age_band")),
+                ("fear", sp.get("fear")), ("line", sp.get("line"))) if v},
             "persona": persona_for_prompt,
             "player_input": player_input,
             "channel": channel,
@@ -7962,7 +8095,8 @@ def run_turn_stream(
         " ".join(b.get("text", "") for b in all_beats), default_bg=story_default_bg(content)
     )
     state["scene"] = scene
-    state["goal"] = goal_for(content, state)  # objective re-centered on who the player IS
+    # 🎯 目标栈镜像 (治单槽盖写: 开场由头曾只活一回合就被这行用幕目标顶掉)
+    state["goal"] = goal_top(content, state)
     progress = act_progress(content, state, state["act"])  # clue checklist for the (new) act
     location = location_view(content, state)  # current place w/ exits filtered to unlocked ones
 
@@ -8057,7 +8191,7 @@ def run_turn_stream(
     state["_last_text"] = " ".join((b.get("text") or "") for b in all_beats)[:1600]
 
     # 建议随档持久化: 重开 App 恢复存档时, 上一轮的下一步 chips 原样还在 (竖屏 App 常驻件)
-    state["suggestions"] = suggestions
+    suggestions = set_suggestions(state, suggestions, content)
 
     yield ("final", {
         "state": state,

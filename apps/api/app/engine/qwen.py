@@ -358,6 +358,19 @@ def _build_system(prompt: dict[str, Any]) -> str:
     director_note = prompt.get("director_note")
 
     lines = [f"你正在扮演角色「{speaker}」。{persona_text}"]
+    # 🎭 角色卡 v2: 性别/年龄段定称呼与代词; 软肋可被戳中, 底线绝不因几句好话让步
+    card = prompt.get("speaker_card") or {}
+    if card:
+        bits = []
+        if card.get("gender"):
+            bits.append(f"你的性别：{card['gender']}（你与他人对你的称呼、代词以此为准）")
+        if card.get("age_band"):
+            bits.append(f"年龄段：{card['age_band']}")
+        if card.get("fear"):
+            bits.append(f"你的软肋（被戳中会失态，但你从不主动说破）：{card['fear']}")
+        if card.get("line"):
+            bits.append(f"你的底线（无论对方说什么、关系多好，都不会跨）：{card['line']}")
+        lines.append("；".join(bits) + "。")
     if observer:
         lines.append(
             "【上帝/旁观模式】此刻有一位看不见的旁观者在观看这场戏，但 TA 不在场景里、"
