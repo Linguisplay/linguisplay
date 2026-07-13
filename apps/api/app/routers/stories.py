@@ -9,7 +9,10 @@ from ..models import Fragment as FragmentModel
 from ..models import Secret as SecretModel
 from ..models import Story as StoryModel
 from ..models import StoryMeta, StorySnapshot, User
+from pydantic import BaseModel
+
 from ..schemas import (
+    Character,
     PublishResult,
     Secret,
     SecretInput,
@@ -138,6 +141,44 @@ def discover(
                   .group_by(SecretModel.story_id).all()) if rows else {}
     return StoryCardPage(items=[_to_card(s, counts.get(s.id, 0)) for s in rows],
                          next_cursor=None)
+
+
+class CharBlobInput(BaseModel):
+    text: str = ""
+    world: str = ""    # 剧本世界观随行, 解析出的卡贴世界的年代与口吻
+    style: str = ""
+
+
+@router.post("/parse_characters")
+def parse_characters(body: CharBlobInput, user: User = Depends(current_user)):
+    """🪄 一大段文字 → 角色卡 (Yi: 制作角色时能直接扔一大段文字自动处理)。
+    小说片段/wiki/作者笔记整段进来, LLM 解析成卡 v2 全字段 (一段几个人就几张卡),
+    每张卡再过 schema 消毒 — 模型编的野字段进不了剧本。
+    注意: 本路由必须注册在 /{story_id} 之前, 否则路径被当剧本 id 吞掉。"""
+    from ..engine.llm import get_llm
+    text = (body.text or "").strip()[:6000]
+    if len(text) < 20:
+        raise HTTPException(400, "文字太短，至少给一两句描述")
+    try:
+        out = get_llm().generate({"char_from_text": True, "text": text,
+                                  "world": (body.world or "")[:400],
+                                  "style": (body.style or "")[:160]}) or {}
+    except Exception:
+        out = {}
+    cards = []
+    for c in (out.get("characters") or [])[:6]:
+        if not isinstance(c, dict) or not str(c.get("name") or "").strip():
+            continue
+        c.pop("id", None)          # id 由编辑器现场铸造
+        c["generated"] = False     # 作者亲写的卡: 智能搜图不会乱动它的脸
+        try:
+            cards.append(Character(**c).model_dump(exclude_none=True))
+        except Exception:
+            # 单张卡的野字段/坏类型不拖累整批 — 丢弃并继续
+            continue
+    if not cards:
+        raise HTTPException(502, "没解析出角色，换一段更具体的文字试试")
+    return {"characters": cards}
 
 
 @router.post("", status_code=201, response_model=Story)

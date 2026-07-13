@@ -76,6 +76,16 @@ class MockLLM:
         if prompt.get("living_event"):
             return {"what": "去湖边走走", "slot": "夜", "day_offset": 1,
                     "invite": "明晚有空吗？想去湖边走走，你来。"}
+        # 🪄 文字→角色卡孪生: 路由消毒逻辑可测 (含一张带野字段的坏卡)
+        if prompt.get("char_from_text"):
+            return {"characters": [
+                {"name": "码头老陈", "gender": "男", "age_band": "中年",
+                 "role": "码头账房 · 算盘比人心准", "persona_text": "在码头管了二十年账。",
+                 "traits": {"外向": 2, "温度": 3, "主导": 3},
+                 "fear": "怕账对不上", "line": "假账不做",
+                 "wants": "攒钱回乡下盖房", "life_goal": {"text": "攒钱回乡下盖房"},
+                 "examples": ["账就是账，情面是情面。"], "bogus_field": "should be dropped"},
+                {"name": "", "note": "nameless — dropped by the route"}]}
         # 🎬 导演场次单孪生 (剧组 P1): 确定性戏眼/心事/主动权 — 引擎裁剪逻辑可测
         if prompt.get("director_brief"):
             cast = [c for c in (prompt.get("cast") or []) if (c or {}).get("name")]

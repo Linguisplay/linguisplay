@@ -3148,6 +3148,41 @@ class QwenLLM:
         except Exception:
             return {}
 
+    def _char_from_text(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🪄 一大段文字 → 角色卡 v2 (Yi: 制作角色能直接扔一大段文字自动处理)。
+        Degrades to {} (路由层报「没解析出角色」)."""
+        sys = ("你把作者扔进来的一大段文字解析成游戏角色卡。只输出JSON："
+               '{"characters":[{"name":"名字","gender":"男|女|其他","age_band":"少年|青年|中年|老年",'
+               '"role":"≤20字 身份·一句话记忆点","persona_text":"120~200字人设散文：为人、习惯、'
+               '说话方式、藏着的心事","eq_style":"≤60字 TA怎么表达关心与情绪",'
+               '"traits":{"外向":3,"温度":3,"主导":3},'
+               '"fear":"≤24字 软肋一句","line":"≤24字 底线一句",'
+               '"love_style":"傲娇|冷感慢热|回避型|占有欲|直球|留空",'
+               '"wants":"≤50字 TA的人生目标","life_goal":{"text":"同wants","stage":"≤16字 当前进展",'
+               '"obstacle":"≤16字 眼下的阻碍"},'
+               '"examples":["3~5句只有这张嘴会说的台词"],'
+               '"items":[{"name":"≤10字 随身物","detail":"≤30字"}],'
+               '"bio_layers":[{"closeness_min":25,"text":"≤80字 熟了才知道的过往"}]}]}。'
+               "规矩：只从文字里来+贴文字口吻的合理推断，拿不准的字段留空或省略，绝不硬编；"
+               "文字里有几个人就出几张卡（最多6张）；traits 三轴 1~5 分（3=常人）；"
+               "台词范例要能一句认出是谁，不许互相撞腔调；不用破折号。")
+        import json as _json
+        u = _json.dumps({"世界观(贴年代与口吻)": prompt.get("world") or "",
+                         "文风": prompt.get("style") or "",
+                         "作者的文字": (prompt.get("text") or "")[:6000]}, ensure_ascii=False)
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model,
+                               "messages": [{"role": "system", "content": sys},
+                                            {"role": "user", "content": u}],
+                               "max_tokens": 2400, "temperature": 0.7,
+                               "response_format": {"type": "json_object"}},
+                              timeout=60)
+            data = _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
     def _scene_brief(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """🎬 导演场次单 (剧组 P1): 每场一次的戏剧判断 — 引擎备好全部卡 (含玩家卡)
         与冲突矩阵, 导演只回答「这场戏该怎么活」。Degrades to {} (一切照旧)."""
@@ -3785,6 +3820,8 @@ class QwenLLM:
             return self._intro_vignettes(prompt)
         if prompt.get("director_brief"):
             return self._scene_brief(prompt)
+        if prompt.get("char_from_text"):
+            return self._char_from_text(prompt)
         if prompt.get("living_event"):
             return self._living_event(prompt)
         if prompt.get("parting"):

@@ -124,6 +124,12 @@
     <h2>角色 <button class="sm" onclick="addChar()">+ 加角色</button>
       <button class="sm ghost" onclick="openCardLib(true)">📚 从角色卡库导入</button></h2>
     <div class="muted">主角（is_lead）是默认开口的人。每个角色可挂秘密、作息表、随身物品、与他人的旧关系。卡库里的角色跨剧本复用（导入=复制，之后改卡不影响已导入的剧本）。</div>
+    <details style="margin:8px 0">
+      <summary style="cursor:pointer">🪄 扔一大段文字，自动生成角色卡（小说片段/wiki/你自己的笔记都行）</summary>
+      <textarea id="charBlob" rows="6" placeholder="把描述角色的文字整段粘进来——一段里有几个人就出几张卡：名字、性别、性格、口癖台词、人生目标都会自动填好，生成后可再手改。" style="width:100%;margin:6px 0"></textarea>
+      <button class="sm" onclick="parseCharBlob()">🪄 解析成角色卡</button>
+      <span class="muted" id="charBlobMsg"></span>
+    </details>
     <div id="chars"></div>
 
     <h2>幕 / 剧情事件 <button class="sm" onclick="addAct()">+ 加一幕</button></h2>
@@ -321,6 +327,27 @@ function renderLocs(){
 
 // ── characters ──
 function addChar(){ story.characters.push({id:gid("c_"),name:"",role:"",is_lead:story.characters.length===0,persona_text:"",background:"",avatar_url:"",presence:"present",appears_from_act:0,playable:false,relation_default:"",agenda:"",eq_style:"",home_location_id:null,schedule:[],ties:[],items:[],bio_layers:[]}); renderAll(); }
+// 🪄 一大段文字 → 角色卡 (Yi 定): 后端 LLM 解析成卡 v2 全字段, 生成后照常手改
+async function parseCharBlob(){
+  const ta = document.getElementById("charBlob"), msg = document.getElementById("charBlobMsg");
+  const text = (ta.value||"").trim();
+  if (!text) { msg.textContent = "先粘一段文字进来"; return; }
+  if (text.length < 20) { msg.textContent = "太短了，至少给一两句描述"; return; }
+  msg.textContent = "🪄 解析中（十几秒）…";
+  try {
+    const out = await j(`/stories/parse_characters`, { method:"POST",
+      body: JSON.stringify({ text, world: story.world_long||"", style: story.style||"" }) });
+    const got = out.characters || [];
+    if (!got.length) { msg.textContent = "没解析出角色，换段更具体的文字试试"; return; }
+    for (const c of got) {
+      c.id = gid("c_");
+      if (!story.characters.some(x=>x.name && x.name===c.name)) story.characters.push(c);
+    }
+    msg.textContent = `✓ 生成了 ${got.length} 张卡（记得保存）`;
+    ta.value = "";
+    renderAll();
+  } catch(e) { msg.textContent = "✗ " + e.message; }
+}
 function delChar(i){ story.characters.splice(i,1); renderAll(); }
 function setChar(i,k,v){ story.characters[i][k]=v; }
 function setCharNum(i,k,v){ story.characters[i][k]=parseInt(v||0); }
