@@ -21,7 +21,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///./dev.db")
 os.environ.setdefault("JWT_SECRET", "dev")
 
 from app.db import SessionLocal  # noqa: E402
-from app.engine.gal import is_anime_style  # noqa: E402
+from app.engine.gal import is_anime_style, shrink_jpg  # noqa: E402
 from app.engine.qwen import generate_image  # noqa: E402
 from app.models import Story, StorySnapshot  # noqa: E402
 
@@ -104,6 +104,7 @@ def main() -> None:
             data = generate_image(build_prompt(loc, world, art), size=BG_SIZE,
                                   model=BG_MODEL, negative=bg_negative(art))
             if data:
+                data = shrink_jpg(data, max_side=1600)   # 出生即瘦 (36s 加载实弹教训)
                 out.write_bytes(data)
                 print(f"OK ({len(data)//1024} KB)")
             else:
