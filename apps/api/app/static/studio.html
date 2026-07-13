@@ -335,8 +335,18 @@ async function parseCharBlob(){
   if (text.length < 20) { msg.textContent = "太短了，至少给一两句描述"; return; }
   msg.textContent = "🪄 解析中（十几秒）…";
   try {
-    const out = await j(`/stories/parse_characters`, { method:"POST",
+    // 提交秒回任务号 + 短轮询 (长连接会被手机网络/webview 掐断 — 实弹)
+    const sub = await j(`/stories/parse_characters`, { method:"POST",
       body: JSON.stringify({ text, world: story.world_long||"", style: story.style||"" }) });
+    let out = null;
+    for (let i = 0; i < 36; i++) {
+      await new Promise(r => setTimeout(r, 2500));
+      msg.textContent = "🪄 解析中" + ".".repeat(1 + i % 3);
+      const st = await j(`/stories/parse_characters/${sub.job}`);
+      if (st.status === "done") { out = st; break; }
+      if (st.status === "error") throw new Error(st.error || "解析失败");
+    }
+    if (!out) throw new Error("解析超时，再点一次试试");
     const got = out.characters || [];
     if (!got.length) { msg.textContent = "没解析出角色，换段更具体的文字试试"; return; }
     for (const c of got) {

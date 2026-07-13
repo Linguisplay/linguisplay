@@ -149,22 +149,7 @@ class CharBlobInput(BaseModel):
     style: str = ""
 
 
-@router.post("/parse_characters")
-def parse_characters(body: CharBlobInput, user: User = Depends(current_user)):
-    """🪄 一大段文字 → 角色卡 (Yi: 制作角色时能直接扔一大段文字自动处理)。
-    小说片段/wiki/作者笔记整段进来, LLM 解析成卡 v2 全字段 (一段几个人就几张卡),
-    每张卡再过 schema 消毒 — 模型编的野字段进不了剧本。
-    注意: 本路由必须注册在 /{story_id} 之前, 否则路径被当剧本 id 吞掉。"""
-    from ..engine.llm import get_llm
-    text = (body.text or "").strip()[:6000]
-    if len(text) < 20:
-        raise HTTPException(400, "文字太短，至少给一两句描述")
-    try:
-        out = get_llm().generate({"char_from_text": True, "text": text,
-                                  "world": (body.world or "")[:400],
-                                  "style": (body.style or "")[:160]}) or {}
-    except Exception:
-        out = {}
+def _sanitize_cards(out: dict) -> list[dict]:
     cards = []
     for c in (out.get("characters") or [])[:6]:
         if not isinstance(c, dict) or not str(c.get("name") or "").strip():
@@ -176,9 +161,62 @@ def parse_characters(body: CharBlobInput, user: User = Depends(current_user)):
         except Exception:
             # 单张卡的野字段/坏类型不拖累整批 — 丢弃并继续
             continue
-    if not cards:
-        raise HTTPException(502, "没解析出角色，换一段更具体的文字试试")
-    return {"characters": cards}
+    return cards
+
+
+# 🪄 解析任务台账: 解析要等模型 10~60 秒, 手机网络/webview 会掐长连接
+# (实弹: Yi 的 POST 压根没到服务器) — 改成 提交秒回任务号 + 短轮询取结果
+_PARSE_JOBS: dict = {}
+_PARSE_CAP = 40
+
+
+@router.post("/parse_characters")
+def parse_characters(body: CharBlobInput, user: User = Depends(current_user)):
+    """🪄 一大段文字 → 角色卡 (Yi: 制作角色时能直接扔一大段文字自动处理)。
+    立即返回 {job}; 客户端轮询 GET /stories/parse_characters/{job} 取结果。
+    注意: 本路由必须注册在 /{story_id} 之前, 否则路径被当剧本 id 吞掉。"""
+    import threading
+    import time as _t
+    import uuid as _uuid
+    text = (body.text or "").strip()[:6000]
+    if len(text) < 20:
+        raise HTTPException(400, "文字太短，至少给一两句描述")
+    jid = _uuid.uuid4().hex[:12]
+    _PARSE_JOBS[jid] = {"status": "working", "at": _t.time(), "uid": user.id}
+    while len(_PARSE_JOBS) > _PARSE_CAP:   # 台账限容: 最老的先走
+        _PARSE_JOBS.pop(next(iter(_PARSE_JOBS)), None)
+    world, style = (body.world or "")[:400], (body.style or "")[:160]
+
+    def _work():
+        from ..engine.llm import get_llm
+        try:
+            out = get_llm().generate({"char_from_text": True, "text": text,
+                                      "world": world, "style": style}) or {}
+        except Exception:
+            out = {}
+        cards = _sanitize_cards(out)
+        job = _PARSE_JOBS.get(jid)
+        if job is not None:
+            if cards:
+                job.update({"status": "done", "characters": cards})
+            else:
+                job.update({"status": "error",
+                            "error": "没解析出角色，换一段更具体的文字试试"})
+
+    threading.Thread(target=_work, daemon=True).start()
+    return {"job": jid}
+
+
+@router.get("/parse_characters/{job_id}")
+def parse_characters_result(job_id: str, user: User = Depends(current_user)):
+    job = _PARSE_JOBS.get(job_id)
+    if not job or job.get("uid") != user.id:
+        raise HTTPException(404, "任务不存在或已过期")
+    if job.get("status") == "working":
+        return {"status": "working"}
+    if job.get("status") == "error":
+        return {"status": "error", "error": job.get("error")}
+    return {"status": "done", "characters": job.get("characters") or []}
 
 
 @router.post("", status_code=201, response_model=Story)
