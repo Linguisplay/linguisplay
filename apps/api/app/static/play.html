@@ -2079,8 +2079,8 @@ async function openMap() {
   // 归一化到画布 (留出节点半径的边距)
   const xs = nodes.map(n => pos[n.id].x), ys = nodes.map(n => pos[n.id].y);
   const mnx = Math.min(...xs), mxx = Math.max(...xs), mny = Math.min(...ys), mxy = Math.max(...ys);
-  const nx = v => 9 + 82 * ((v - mnx) / Math.max(0.0001, mxx - mnx));
-  const ny = v => 12 + 74 * ((v - mny) / Math.max(0.0001, mxy - mny));
+  const nx = v => 15 + 70 * ((v - mnx) / Math.max(0.0001, mxx - mnx));
+  const ny = v => 12 + 62 * ((v - mny) / Math.max(0.0001, mxy - mny));
   const lines = edges.map(([a, b]) => {
     const live = curNode && (a === curNode.id || b === curNode.id)
       && (reachable.has(a) || reachable.has(b));
