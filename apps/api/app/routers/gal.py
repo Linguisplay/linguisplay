@@ -308,11 +308,16 @@ def redraw(body: Redraw, work_id: str, user: User = Depends(current_user),
     g = dict(s.gal or {})
     if g.get("status") != "ready":
         raise HTTPException(409, "还在建造中")
-    from ..engine.gal import GAL_DIR
+    from ..engine.gal import GAL_DIR, safe_asset_key
     wdir = GAL_DIR / work_id
-    files = {"sprite": [wdir / f"{body.key}.webp"],
-             "bg": [wdir / f"bg_{body.key}.jpg"],
-             "cg": [wdir / f"cg_{body.key}.jpg"],
+    # 🔒 P0: cover 无需 key; 其余 key 必须消毒后才拼进路径 (否则 ../ 删他人的图)
+    try:
+        k = "" if body.kind == "cover" else safe_asset_key(body.key)
+    except ValueError:
+        raise HTTPException(400, "非法的 key")
+    files = {"sprite": [wdir / f"{k}.webp"],
+             "bg": [wdir / f"bg_{k}.jpg"],
+             "cg": [wdir / f"cg_{k}.jpg"],
              "cover": [wdir / "cover.jpg"]}.get(body.kind)
     if not files:
         raise HTTPException(400, "unknown kind")

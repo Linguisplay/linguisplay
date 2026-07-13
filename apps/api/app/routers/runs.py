@@ -870,7 +870,21 @@ def play(
                             audit=",".join(sorted({(e.get("e") or "") + ("" if e.get("ok") else "!")
                                                    for e in (final.get("audit") or [])})))
             yield _event({"event": "done"})
-        except Exception as e:  # never leave the client hanging
+        except (Exception, GeneratorExit) as e:  # never leave the client hanging
+            # 🔒 P0 文实分家兜底 (审计实弹: 回合中途异常/客户端断流时, 已入库的
+            # 移动/收物/死亡旁白, 其 state 变更全丢 → 恢复档时文与实永久分家)。
+            # 引擎就地改 state0, 崩前的账本变更都在它上面 — 无论如何都落库, 与已
+            # commit 的 beats 对齐。GeneratorExit (客户端断开) 也走这条, 保住半程账本。
+            try:
+                run = db2.get(RunModel, run_id)
+                if run is not None and isinstance(state0, dict):
+                    run.state = state0
+                    flag_modified(run, "state")
+                    db2.commit()
+            except Exception:
+                pass
+            if isinstance(e, GeneratorExit):
+                raise
             yield _event({"event": "beat", "beat": {"id": "", "type": "description",
                           "speaker_name": None, "text": f"[出错] {type(e).__name__}", "author": "engine"}})
             yield _event({"event": "done"})
@@ -1494,6 +1508,16 @@ def _push_heartbeat_news(db, run, tick_out: dict) -> None:
                              "你没来。TA给你留了话。", url="/play", tag=tag)
 
 
+def _state_fingerprint(st: dict) -> tuple:
+    """轻量指纹: 检测玩家在心跳的 LLM 窗口内是否动过档 (回合数/时钟/历史长度)。
+    只用于乐观并发比对, 不求密码学强度。"""
+    clock = st.get("clock") or {}
+    # _last_text 每回合结束都会重写, turns_in_act 每回合自增 — 玩家动过档必变
+    return (str(st.get("_last_text") or "")[:80], int(st.get("turns_in_act", 0) or 0),
+            int(st.get("act", 0) or 0), int(clock.get("day", 0) or 0),
+            str(clock.get("slot", "")))
+
+
 def living_heartbeat_pass() -> int:
     """Scheduler entry (main.py lifespan): one pass over the shelf, tick what's due.
     Own session, per-run commit — one bad run never stalls the others."""
@@ -1506,10 +1530,21 @@ def living_heartbeat_pass() -> int:
             if not living.is_on(st0) or not living.due(st0):
                 continue
             st = copy.deepcopy(st0)
+            rid = r.id
             try:
+                # world_tick 内含多次 LLM 调用, 可跑一分钟以上; 玩家恰在此窗口内玩了
+                # 一回合, 提交的 state 会被心跳的陈旧副本整档覆盖 (审计实弹: 丢档级)。
+                # LLM 全程不持锁, 写回前重读并比对指纹, 变了就丢弃本次 tick (下轮重排)。
+                fp0 = _state_fingerprint(st0)
                 out = living.world_tick(r.pinned_content or {}, st, get_llm())
-                r.state = st
+                db.expire_all()
+                fresh = db.get(RunModel, rid)
+                if fresh is None or _state_fingerprint(fresh.state or {}) != fp0:
+                    continue   # 玩家在 tick 期间动过档 — 放弃这次心跳, 不覆盖
+                fresh.state = st
+                flag_modified(fresh, "state")
                 db.commit()
+                r = fresh
                 ticked += 1
                 try:   # 🔔 P3 破壁: 心跳产出敲到现实; 静默时段不敲窗 (消息本体在小手机)
                     _push_heartbeat_news(db, r, out)

@@ -571,6 +571,18 @@ def is_anime_style(art: str) -> bool:
     return any(k in (art or "") for k in ANIME_HINTS)
 
 
+def safe_asset_key(key: str) -> str:
+    """🔒 资产文件名消毒 (P0 路径穿越): 生成图落盘的 key/target_id 只许 中日文字、
+    字母数字、下划线、连字符 — 挡掉 ../、斜杠、绝对路径。空/非法 → ValueError。
+    (实弹审计: redraw/upload 用未消毒的 key 拼路径, 认证用户可删/覆盖他人的图,
+    进程还跑在 root。) 保留中文因为表情后缀是「c2_喜」这种。"""
+    import re
+    k = str(key or "").strip()
+    if not k or not re.fullmatch(r"[\w一-鿿-]+", k) or ".." in k:
+        raise ValueError(f"非法资产名: {key!r}")
+    return k
+
+
 def char_seed(work_id: str, cid: str) -> int:
     """Stable per-character seed: same face across the four expression calls,
     different faces across characters and works."""

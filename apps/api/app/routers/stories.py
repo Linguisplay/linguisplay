@@ -570,6 +570,12 @@ async def upload_media(
     s = _own_story(story_id, user, db)
     if kind not in ("avatar", "bg", "sprite"):
         raise HTTPException(400, "kind 只能是 avatar / bg / sprite")
+    # 🔒 P0 路径穿越: target_id 是作者可控的角色/地点 id, 未消毒会拼出 ../ 覆盖他人的图
+    from ..engine.gal import safe_asset_key
+    try:
+        target_id = safe_asset_key(target_id)
+    except ValueError:
+        raise HTTPException(400, "非法的 target_id")
     data = await file.read()
     if len(data) > 5 * 1024 * 1024:
         raise HTTPException(413, "图片太大（上限 5MB）")

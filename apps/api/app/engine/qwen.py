@@ -935,6 +935,20 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                                     "默认空字符串。仅当这一轮剧情改变了【玩家本人】的身体姿态或"
                                     "屋内位置（被拉起来、被按在墙上、坐到了桌边）才填新的姿态短语"
                                     "（12字内）；没变不填"}
+    # ✍️ 编剧拍扩展 (剧组 P2): 主答者申报场面情绪 + 伏笔埋收 + 在场角色人生目标推进。
+    # 只给主答通路 (member/think 不背这些); 空则省略 → 引擎按空处理, 不打扰快乐路径。
+    if not is_member and not is_think:
+        props["mood"] = {"type": "string", "description":
+                         "本拍场面情绪，从：日常/温馨/浪漫/悲伤/孤独/悬疑/诡异/紧张/战斗 里选一个；没有明显变化就填空字符串"}
+        props["setup_plant"] = {"type": "string", "description":
+                                "默认空字符串。这一拍若埋下钩子（有话没说完/一件反常的小事）就写它（≤20字），引擎记账两天内须兑现"}
+        props["setup_pay"] = {"type": "string", "description":
+                              "默认空字符串。这一拍若兑现了【未收的伏笔】里某条，照抄那条原文"}
+        props["agenda_step"] = {"type": "object", "description":
+                                "默认省略。仅当某位在场角色的人生目标这一拍真往前走了一步才填",
+                                "properties": {"who": {"type": "string", "description": "角色名"},
+                                               "step": {"type": "string", "description": "≤20字这一步"},
+                                               "stage": {"type": "string", "description": "≤16字新阶段(没变省略)"}}}
 
     if has_map and not is_member and not is_think:
         props["move_invite"] = {"type": "string", "description": "若你这轮提出或答应带玩家去某处，填那个地点名（可以是【可去通路】里的，也可以是对话里自然浮现的新地点；旁白只写到起身相邀为止）；否则填空字符串"}
@@ -1103,7 +1117,9 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
 # plan/render 双拍合同 (docs/plan-render.md): the plan beat judges, the render beat writes.
 # Prose fields leave the plan tool; every judgment field keeps its render_turn name and
 # semantics, so _parse_tool_args and the settle cascade serve both contracts unchanged.
-_PLAN_DROPS = ("inner_read", "narration", "speech")
+# 编剧扩展字段只在 render 拍落账 (settle 读 render 输出); plan 拍不背, 省 TTFT
+_PLAN_DROPS = ("inner_read", "narration", "speech",
+               "mood", "setup_plant", "setup_pay", "agenda_step")
 
 
 def _plan_tool(prompt: dict[str, Any], speaker: str, observer: bool,
@@ -1498,19 +1514,13 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
         ending = {"kind": "bad", "reason": narration or speech}
     out = {
         "beats": beats,
-        # ✍️ 编剧扩展字段 (剧组 P2, 双合同同名不漂移): 情绪申报 + 伏笔账本 + 目标推进
-            "mood": {"type": "string", "description":
-                     "本拍场面情绪，从：日常/温馨/浪漫/悲伤/孤独/悬疑/诡异/紧张/战斗 里选一个。没有明显变化就省略。"},
-            "setup_plant": {"type": "string", "description":
-                            "≤20字：这一拍埋下的钩子（有话没说完/一件反常的小事）。没有就省略。埋了引擎会记账，两天内必须兑现。"},
-            "setup_pay": {"type": "string", "description":
-                          "这一拍兑现了哪个未收伏笔：照抄【未收的伏笔】里那条原文。没有就省略。"},
-            "agenda_step": {"type": "object", "description":
-                            "某位在场角色的人生目标这一拍真往前走了一步才填。",
-                            "properties": {"who": {"type": "string", "description": "角色名"},
-                                           "step": {"type": "string", "description": "≤20字这一步"},
-                                           "stage": {"type": "string", "description": "≤16字新阶段(没变就省略)"}}},
-            "affinity_delta": 0 if is_think else _i(d.get("affinity"), -3, 8),
+        # ✍️ 编剧扩展字段 (剧组 P2): 从模型输出 d 读值 (schema 定义在 _render_tool props)。
+        # 修复实弹: 这里曾误贴 schema 碎片, 导致字段每回合被覆盖成 {'type':...}, P2 全空转
+        "mood": str(d.get("mood") or "").strip(),
+        "setup_plant": str(d.get("setup_plant") or "").strip(),
+        "setup_pay": str(d.get("setup_pay") or "").strip(),
+        "agenda_step": d.get("agenda_step") if isinstance(d.get("agenda_step"), dict) else None,
+        "affinity_delta": 0 if is_think else _i(d.get("affinity"), -3, 8),
         "romance_delta": 0 if is_think else _i(d.get("romance"), -3, 6),
         "advance_act": bool(d.get("advance")),
         "ending": ending,

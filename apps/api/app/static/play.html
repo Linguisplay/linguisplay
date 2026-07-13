@@ -3394,14 +3394,16 @@ function stopBgm(){ try { bgm.pause(); bgm.removeAttribute("src"); curBgmMood=nu
 
 // ── send turn (SSE) ───────────────────────────────────
 async function driveTurn() {
-  if (!runId || ended) return;
+  if (!runId || ended || turnInFlight) return;   // 🔒 在途门闩: 双击 ▶ 不叠流
   renderBeat({ author:"player", type:"think", text: B("▶（你静静看着，让故事自己往前走）", "▶ (You watch — the story moves on its own)") });
   await send("drive");
 }
 async function send(chOverride) {
   const ch = (typeof chOverride === "string" && chOverride) || channel.value;
   const text = ch === "drive" ? "" : msg.value.trim();
-  if (!runId || ended || (vnMode && vnLocked())) return;
+  // 🔒 在途门闩 (P0 实弹: 回车/▶/双击绕过 sendBtn.disabled → 两条 SSE 流互踩,
+  // 未播完的正式拍被清、两个打字机交错、afterPlay 被覆盖): 一回合未落定不开第二回合
+  if (!runId || ended || turnInFlight || (vnMode && vnLocked())) return;
   const canEmpty = playMode === "god" || ch === "think" || ch === "drive";
   if (!text && !canEmpty) return;
   msg.value = ""; sendBtn.disabled = true; suggest.innerHTML = "";
@@ -3420,6 +3422,7 @@ async function send(chOverride) {
 // shared SSE turn pipeline: beats stream in AS the server computes each responder → play
 // them one-by-one (typed) the moment they arrive. Used by normal turns AND confrontations.
 async function streamTurn(url, bodyObj) {
+  turnInFlight = true;   // 🔒 在途门闩置起, finishTurn 落定后才释放
   playQ = []; playing = false; streamDone = false; firstBeat = true;
   clearLive(); liveText = ""; vnLiveBuf = ""; skipType = false;
   if (url.endsWith("/play") && bodyObj && (bodyObj.input || "").trim()) lastTurnBody = bodyObj;
@@ -3509,6 +3512,7 @@ async function confrontClue(fragId, charId) {
 }
 // ── streaming beat queue: play arrivals one-by-one while more stream in ──
 let playQ = [], playing = false, streamDone = false, firstBeat = true, afterPlay = null;
+let turnInFlight = false;   // 🔒 一回合从发起到落定期间为 true — 挡住 Enter/▶/双击叠流
 // 双拍渲染的逐字直出 (docs/plan-render.md): the server splits the prose stream on 「」,
 // so narration pours into a desc block and speech pours into a NAMED dialogue bubble
 // the moment each is written (旁白与台词分家，从第一个字就分). The canonical beats then
@@ -3693,6 +3697,7 @@ function finishTurn() {
     afterPlay = null;
   }
   maybeAddRetryChip();   // a bad beat's exit lives right next to the suggestions
+  turnInFlight = false;   // 🔒 回合彻底落定, 放行下一回合
   sendBtn.disabled = false;
   // 📵 手机铁律 (Yi 报障): 键盘只属于用户亲手点输入框的那一刻 —
   // 回合末自动 focus 在触屏上 = 点屏幕过剧情时输入法弹脸
