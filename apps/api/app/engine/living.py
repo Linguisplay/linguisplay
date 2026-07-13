@@ -105,6 +105,7 @@ def _heartbeat_event(content, state, llm: LLM) -> dict[str, Any] | None:
     cands = [c for c in runtime._characters(content)
              if c.get("id") and c.get("id") in met and c.get("id") not in dead
              and c.get("id") not in open_ids
+             and runtime.has_contact(state, c.get("id"))   # 📇 没交换过联系方式, TA联系不上你
              and c.get("id") != state.get("player_character_id")]
     if not cands:
         return None

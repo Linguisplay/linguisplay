@@ -40,6 +40,10 @@ def _st(loc="hall", met=("a", "b", "c")):
 
 def test_contacts_are_met_people_only():
     st = _st(met=("b",))          # only 乙 has been met
+    # 📇 新法 (Yi): 联系方式要靠剧情挣 — 只见过面还进不了通讯录
+    view0 = runtime.phone_threads_view(STORY, st)
+    assert [c["char_id"] for c in view0["contacts"]] == []
+    st["contact_ids"] = ["b"]     # 交换过之后才出现
     view = runtime.phone_threads_view(STORY, st)
     ids = [c["char_id"] for c in view["contacts"]]
     assert ids == ["b"]           # 丙 exists in the story but is INVISIBLE here

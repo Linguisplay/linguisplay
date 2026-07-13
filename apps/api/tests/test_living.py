@@ -72,6 +72,10 @@ def test_tick_generates_heartbeat_invite():
     st = _state()
     living.set_living(st, True)
     st["clock"] = {"day": 1, "slot": 0, "turns_in_slot": 0}
+    # 📇 新法: 没交换过联系方式的人联系不上你 — 心跳一个约也发不出
+    cold = living.world_tick(STORY, {**st, "living": dict(st["living"])}, MockLLM())
+    assert cold["event"] is None
+    st["contact_ids"] = list(st.get("met_ids") or [])
     out = living.world_tick(STORY, st, MockLLM())
     ev = out["event"]
     assert ev and ev["what"] == "去湖边走走"

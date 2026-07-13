@@ -448,6 +448,9 @@ def _build_system(prompt: dict[str, Any]) -> str:
         if sb.get("spark"):
             _sb_bits.append(f"在场的暗流：{sb['spark']}（可以蹭到它，不点破）")
         lines.append("【这一场】" + "；".join(_sb_bits) + "。")
+    _cn = (prompt.get("contact_note") or "").strip()
+    if _cn:
+        lines.append("【联系方式】" + _cn)
     _sdue = prompt.get("setups_due") or []
     if _sdue:
         lines.append("【未收的伏笔·埋下的必须兑现】" + "；".join(str(x) for x in _sdue)
@@ -2645,6 +2648,19 @@ class QwenLLM:
                 f"你和{ctx.get('speaker','对方')}此刻的关系：{ctx.get('relation','普通')}"
                 + (f"\n你当前的目标：{ctx['goal']}" if ctx.get("goal") else "")
                 + (f"\n你正要去见的人：{ctx['pursuit']}" if ctx.get("pursuit") else "")
+                # 🌐 全局账本 (Yi: 了解全局再给建议): 建议要对得起整个处境, 不只眼前一拍
+                + (f"\n【全局·此刻】{ctx['clock']}" if ctx.get("clock") else "")
+                + (f"\n【全局·你手上的事】{'；'.join(ctx['goals_open'])}" if ctx.get("goals_open") else "")
+                + (f"\n【全局·已定的约】{'；'.join(ctx['promises'])}" if ctx.get("promises") else "")
+                + (f"\n【全局·没说完的话头】{'；'.join(ctx['setups'])}" if ctx.get("setups") else "")
+                + (f"\n【全局·这场戏的暗流】{ctx.get('crux','')}"
+                   f"{('；' + ctx['spark']) if ctx.get('spark') else ''}"
+                   if (ctx.get("crux") or ctx.get("spark")) else "")
+                + (f"\n【全局·你惦记的人在哪】{'；'.join(ctx['warm_away'])}" if ctx.get("warm_away") else "")
+                + (f"\n【全局·身上的钱】{ctx['money']}" if ctx.get("money") else "")
+                + "\n★两条建议合起来要对得起上面的全局：第1条仍然顺着你刚才的意图接住收尾；"
+                  "第2条优先服务全局里最要紧的一件（快到期的约、没说完的话头、手上的事、"
+                  "惦记的人），而不是凭空的新念头。"
             )
         try:
             resp = _post_chat(self._url, self._key,

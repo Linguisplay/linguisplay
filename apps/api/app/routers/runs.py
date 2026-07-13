@@ -1062,6 +1062,9 @@ def send_phone(run_id: str, char_id: str, body: PhoneSendIn,
     if (r.state or {}).get("ended"):
         raise HTTPException(409, "这局已经结束了")
     st = dict(r.state or {})
+    # 📇 联系方式要靠剧情挣 (Yi): 没交换过, 你压根拨不通TA
+    if not runtime.has_contact(st, char_id):
+        raise HTTPException(403, "你还没有TA的联系方式。见面聊出交情，或者直接开口要一个。")
     persona = db.get(PersonaModel, r.persona_id)
     try:
         view = runtime.phone_send(r.pinned_content or {}, st, _persona_dict(persona) if persona else {},

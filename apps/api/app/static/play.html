@@ -275,6 +275,27 @@
 #mapov .mnode.here { border-color:#8fe0a6; background:#16241c; box-shadow:0 0 0 1px #8fe0a655; }
 #mapov .mnode.cango { cursor:pointer; }
 #mapov .mnode.cango:hover { border-color:#5b8a6c; background:#1a2a20; }
+/* 🗺 图与线 (Yi 定): 地点=缩略图节点, 连通=连线; 你在=绿圈, 可去=亮圈可点 */
+#mapov .mstage { position:relative; width:100%; height:58vh; min-height:340px;
+  background:#0d1115; border-radius:12px; border:1px solid #1d242b; overflow:hidden; }
+#mapov .mstage svg { position:absolute; inset:0; width:100%; height:100%; }
+#mapov .medge { stroke:#2c3a44; stroke-width:2; }
+#mapov .medge.live { stroke:#d8b57a; stroke-width:2.5; stroke-dasharray:none;
+  filter:drop-shadow(0 0 3px #d8b57a66); }
+#mapov .mpnode { position:absolute; transform:translate(-50%,-50%); width:88px;
+  text-align:center; pointer-events:auto; }
+#mapov .mthumb { width:64px; height:64px; margin:0 auto; border-radius:50%;
+  background-size:cover; background-position:center; background-color:#1b232b;
+  border:2px solid #2c3a44; box-shadow:0 2px 10px rgba(0,0,0,.5); }
+#mapov .mpnode.here .mthumb { border-color:#8fe0a6; box-shadow:0 0 0 3px #8fe0a640, 0 2px 10px rgba(0,0,0,.5); }
+#mapov .mpnode.cango { cursor:pointer; }
+#mapov .mpnode.cango .mthumb { border-color:#d8b57a; box-shadow:0 0 0 3px #d8b57a33, 0 2px 10px rgba(0,0,0,.5); }
+#mapov .mpnode.cango:hover .mthumb { box-shadow:0 0 0 4px #d8b57a66, 0 2px 12px rgba(0,0,0,.6); }
+#mapov .mpnode.far { opacity:.55; }
+#mapov .mplabel { margin-top:4px; font-size:11.5px; color:#e6e9f2; line-height:1.35;
+  text-shadow:0 1px 3px rgba(0,0,0,.9); }
+#mapov .mplabel .sub { display:block; color:#9aa6b8; font-size:10px; }
+#mapov .mpin { font-size:11px; color:#8fe0a6; }
 #mapov .mname { font-size:13.5px; font-weight:700; color:#d7e8dc; }
 #mapov .mhere { font-size:10.5px; color:#8fe0a6; font-weight:400; }
 #mapov .mgo { font-size:10.5px; color:#7fb08e; font-weight:400; border:1px solid #3a5a45; border-radius:6px; padding:0 5px; }
@@ -2021,22 +2042,67 @@ async function openMap() {
     ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
     document.body.appendChild(ov);
   }
-  const curNode = (mp.nodes || []).find(n => n.here);
+  const nodes = mp.nodes || [];
+  const curNode = nodes.find(n => n.here);
   const reachable = new Set(((curNode || {}).exits || []).map(x => x.id));
-  const cards = (mp.nodes || []).map(n => {
-    const chars = n.chars.length ? `<div class="mchars">👤 ${n.chars.map(escapeHtml).join("、")}</div>` : "";
-    const exits = n.exits.length ? `<div class="mexits">→ ${n.exits.map(x => escapeHtml(x.name)).join("、")}</div>` : "";
-    const canGo = !n.here && reachable.has(n.id);
-    const cls = "mnode" + (n.here ? " here" : "") + (canGo ? " cango" : "");
-    const go = canGo ? `data-go="${escapeHtml(n.name)}"` : "";
-    const tag = n.here ? `<span class="mhere">${B("📍 你在这里", "📍 You are here")}</span>` : (canGo ? `<span class="mgo">${B("可前往", "Can go")}</span>` : "");
-    const regen = n.here ? `<button class="ghost" data-regen="1" style="margin-top:6px; font-size:12px; padding:3px 8px">🖼 ${B("重画这里的背景", "Redraw this background")}</button>` : "";
-    return `<div class="${cls}" ${go}><div class="mname">${escapeHtml(n.name)} ${tag}</div>${chars}${exits}${regen}</div>`;
+  // 🗺 图与线 (Yi 定): 小型力导向布局 — 种子按 id 定死, 同一张图永远同一个样子
+  const hash = s => { let h = 0; for (const ch of String(s)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; };
+  const pos = {};
+  nodes.forEach((n, i) => {
+    const a = (hash(n.id) % 360) * Math.PI / 180, r = 0.32 + (hash(n.id + "r") % 100) / 400;
+    pos[n.id] = { x: 0.5 + r * Math.cos(a), y: 0.5 + r * Math.sin(a) };
+  });
+  const edges = [];
+  const seen = new Set();
+  nodes.forEach(n => (n.exits || []).forEach(x => {
+    if (!pos[x.id]) return;
+    const k = [n.id, x.id].sort().join("|");
+    if (!seen.has(k)) { seen.add(k); edges.push([n.id, x.id]); }
+  }));
+  for (let it = 0; it < 160; it++) {           // 斥力 + 弹簧 + 回中, 收敛即布局
+    nodes.forEach(a => nodes.forEach(b => {
+      if (a.id >= b.id) return;
+      const pa = pos[a.id], pb = pos[b.id];
+      let dx = pa.x - pb.x, dy = pa.y - pb.y;
+      const d2 = Math.max(0.002, dx * dx + dy * dy), f = 0.012 / d2;
+      dx *= f; dy *= f;
+      pa.x += dx; pa.y += dy; pb.x -= dx; pb.y -= dy;
+    }));
+    edges.forEach(([a, b]) => {
+      const pa = pos[a], pb = pos[b];
+      const dx = pb.x - pa.x, dy = pb.y - pa.y;
+      const d = Math.sqrt(dx * dx + dy * dy) || 1, pull = (d - 0.34) * 0.06 / d;
+      pa.x += dx * pull; pa.y += dy * pull; pb.x -= dx * pull; pb.y -= dy * pull;
+    });
+    nodes.forEach(n => { const p = pos[n.id]; p.x += (0.5 - p.x) * 0.012; p.y += (0.5 - p.y) * 0.012; });
+  }
+  // 归一化到画布 (留出节点半径的边距)
+  const xs = nodes.map(n => pos[n.id].x), ys = nodes.map(n => pos[n.id].y);
+  const mnx = Math.min(...xs), mxx = Math.max(...xs), mny = Math.min(...ys), mxy = Math.max(...ys);
+  const nx = v => 9 + 82 * ((v - mnx) / Math.max(0.0001, mxx - mnx));
+  const ny = v => 12 + 74 * ((v - mny) / Math.max(0.0001, mxy - mny));
+  const lines = edges.map(([a, b]) => {
+    const live = curNode && (a === curNode.id || b === curNode.id)
+      && (reachable.has(a) || reachable.has(b));
+    return `<line class="medge${live ? " live" : ""}" x1="${nx(pos[a].x)}%" y1="${ny(pos[a].y)}%" x2="${nx(pos[b].x)}%" y2="${ny(pos[b].y)}%"/>`;
   }).join("");
+  const dots = nodes.map(n => {
+    const canGo = !n.here && reachable.has(n.id);
+    const cls = "mpnode" + (n.here ? " here" : "") + (canGo ? " cango" : "") + (!n.here && !canGo ? " far" : "");
+    const go = canGo ? `data-go="${escapeHtml(n.name)}"` : "";
+    const sub = n.chars && n.chars.length
+      ? `<span class="sub">👤 ${n.chars.slice(0, 3).map(escapeHtml).join("、")}${n.chars.length > 3 ? "…" : ""}</span>` : "";
+    const pin = n.here ? `<span class="mpin">📍 ${B("你在这里", "you are here")}</span>` : "";
+    return `<div class="${cls}" ${go} style="left:${nx(pos[n.id].x)}%;top:${ny(pos[n.id].y)}%">
+      <div class="mthumb" style="background-image:url('/scene/bg/${encodeURIComponent(n.id)}.jpg')"></div>
+      <div class="mplabel">${escapeHtml(n.name)} ${pin}${sub}</div></div>`;
+  }).join("");
+  const regen = curNode ? `<button class="ghost" data-regen="1" style="margin:8px 0 0; font-size:12px; padding:3px 8px">🖼 ${B("重画当前地点的背景", "Redraw this background")}</button>` : "";
   const hidden = mp.hidden > 0 ? `<div class="mhidden">${B(`还有 ${mp.hidden} 处地方，你尚未打听到…`, `${mp.hidden} more place(s) you haven't heard of yet…`)}</div>` : "";
   ov.innerHTML = `<div class="mcard" onclick="event.stopPropagation()">
     <div class="jbar"><b>${B("🗺 地图", "🗺 Map")}</b><button class="ghost" onclick="document.getElementById('mapov').remove()">${B("关闭", "Close")}</button></div>
-    <div class="mgrid">${cards || `<div class="jempty">${B("这个故事没有标注地图。", "This story has no map.")}</div>`}</div>${hidden}
+    ${nodes.length ? `<div class="mstage"><svg>${lines}</svg>${dots}</div>` : `<div class="jempty">${B("这个故事没有标注地图。", "This story has no map.")}</div>`}
+    ${regen}${hidden}
   </div>`;
   ov.querySelectorAll("[data-go]").forEach(el => {
     el.onclick = async () => { ov.remove(); await moveTo(el.getAttribute("data-go")); };

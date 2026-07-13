@@ -2472,6 +2472,36 @@ def _smart_suggestions(llm, all_beats, player_input, primary, content, state, lo
     pins = state.get("char_pins") or {}
     pursuit = "、".join(n for n in ((_char_by_id(content, cid) or {}).get("name")
                                    for cid in pins) if n)[:30]
+    # 🌐 全局账本随行 (Yi: 要了解全局数据后再给建议): 目标栈/约定/伏笔/钱/关系热度/
+    # 不在场但重要的人此刻在哪 — 建议不再只看眼前一拍
+    open_goals = [f"{g.get('text')}" for g in goals_of(state)
+                  if g.get("status") == "open"][:3]
+    open_promises = [f"{promise_when_label(content, p, state)}和"
+                     f"{(_char_by_id(content, p.get('char_id')) or {}).get('name', '')}"
+                     f"约了{p.get('what', '')}"
+                     for p in (state.get("promises") or [])
+                     if p.get("status") == "open"][:2]
+    setups_open = [str(s.get("text")) for s in (state.get("setups") or [])
+                   if not s.get("paid")][:2]
+    sb = state.get("scene_brief") if isinstance(state.get("scene_brief"), dict) else {}
+    # 最暖的两位不在场的人此刻在哪 (作息推位): 建议能指路「去找谁」
+    rels_all = state.get("rel") or {}
+    warm_away = []
+    _here_ids = {c.get("id") for c in scene_characters(content, state)}
+    for c in sorted(_characters(content),
+                    key=lambda c: -(int((rels_all.get(c.get("id")) or {}).get("closeness", 0) or 0)
+                                    + int((rels_all.get(c.get("id")) or {}).get("romance", 0) or 0))):
+        cid = c.get("id")
+        if not cid or cid == pcid or cid in _here_ids or cid in _dead_ids(state):
+            continue
+        if int((rels_all.get(cid) or {}).get("closeness", 0) or 0) <= 0:
+            continue
+        _pos = char_position(content, state, c)
+        _loc = _location_by_id(content, _pos) if _pos and _pos != AWAY else None
+        if _loc:
+            warm_away.append(f"{c.get('name')}这会儿在{_loc.get('name')}")
+        if len(warm_away) >= 2:
+            break
     try:
         out = llm.generate({"suggest": True, "sugg": {
             "speaker": primary_name, "player_input": player_input, "reply": reply[:220],
@@ -2479,6 +2509,15 @@ def _smart_suggestions(llm, all_beats, player_input, primary, content, state, lo
             "player_name": player_name, "player_desc": player_desc,
             "place": (location or {}).get("name") or "",
             "goal": (state.get("goal") or "")[:60], "pursuit": pursuit,
+            "goals_open": open_goals,          # 🎯 目标栈全览 (不只栈顶)
+            "promises": open_promises,         # 🤝 已定的约 (建议别撞车、可赴约)
+            "setups": setups_open,             # 📌 未收的钩子 (可以追问)
+            "crux": str(sb.get("crux") or "")[:30],    # 🎬 导演戏眼
+            "spark": str(sb.get("spark") or "")[:36],  # 在场暗流
+            "warm_away": warm_away,            # 💗 惦记的人此刻在哪
+            "money": (f"{int(state.get('money') or 0)}{currency_of(content)}"
+                      if economy_on(state) else ""),
+            "clock": (clock_view(content, state) or {}).get("label", ""),
             # 🎀 VN mode: choices ARE the interaction — one of them should carry teeth
             "vn": bool(tuning_for(content).get("vn_mode")),
             # 📜 文风/方言禁令随行 (实弹: 浮生的建议冒出「得唔得/真系」— 建议也是台词)
@@ -3502,6 +3541,34 @@ def phone_enabled(content: dict[str, Any]) -> bool:
     return phone_cfg(content).get("enabled", True) is not False
 
 
+# ── 📇 联系方式 (Yi 定): 通讯录要靠剧情挣, 不是见过面就有 ────────────────────
+# 三条路: 玩家开口要 (好感够就给, 不够按性格婉拒) / 好感过阈值 TA 主动给 /
+# 没要过的人在 TA 心情好的日子随缘塞给你。老档大赦: 已有短信往来 = 已交换。
+_CONTACT_RE = re.compile(
+    r"联系方式|联络方式|(呼机|传呼|电话|手机)号|号码留|留个号|怎么联系你|怎么找你"
+    r"|留个联系|加个联系|把号(给|留)")
+CONTACT_ASK_T = 10     # 玩家开口要: 好感 ≥ 这个数就给
+CONTACT_OFFER_T = 20   # 好感涨到这, TA 自己就把号塞过来了
+
+
+def has_contact(state: dict[str, Any], cid: str | None) -> bool:
+    if not cid:
+        return False
+    if cid in ((state.get("phone") or {}).get("threads") or {}):
+        return True   # 老档大赦: 聊过天的人不没收
+    return cid in (state.get("contact_ids") or [])
+
+
+def grant_contact(content: dict[str, Any], state: dict[str, Any],
+                  char: dict[str, Any], how: str) -> str:
+    ids = state.setdefault("contact_ids", [])
+    cid = char.get("id")
+    if cid and cid not in ids:
+        ids.append(cid)
+        _audit(state, "contact.grant", True, f"{char.get('name', '')}·{how}"[:30])
+    return f"（{char.get('name', '')}的{phone_device(content)}号，进了你的通讯录。）"
+
+
 def phone_device(content: dict[str, Any]) -> str:
     return (phone_cfg(content).get("device") or "").strip() or "手机"
 
@@ -3712,6 +3779,8 @@ def phone_threads_view(content: dict[str, Any], state: dict[str, Any]) -> dict[s
         c = _char_by_id(content, cid)
         if not c or cid == pcid:
             continue
+        if not has_contact(state, cid):
+            continue   # 📇 联系方式要靠剧情挣 (Yi): 没交换过的人不在通讯录里
         contacts.append({"char_id": cid, "name": c.get("name") or "",
                          "role": (c.get("role") or "")[:24],
                          "avatar_url": c.get("avatar_url"),
@@ -7255,6 +7324,23 @@ def run_turn_stream(
     if channel != "think":
         state["last_speaker_id"] = primary_id
 
+    # 📇 玩家在要联系方式? 主答者按好感给或婉拒 (台词这里对齐, 账在 P8 落)
+    _contact_ask = bool(player_input) and channel in ("say", "do") \
+        and bool(_CONTACT_RE.search(player_input))
+    _contact_will = False
+    _contact_note = ""
+    if _contact_ask and primary and not observer:
+        if has_contact(state, primary.get("id")):
+            _contact_note = "TA其实已经有你的联系方式了，自然地提醒一句就好。"
+        else:
+            _clo0 = int(((state.get("rel") or {}).get(primary.get("id")) or {})
+                        .get("closeness", 0) or 0)
+            _contact_will = _clo0 >= CONTACT_ASK_T
+            _contact_note = ("玩家在向你要联系方式。以你们现在的交情你愿意给："
+                             "自然地把号报给TA或写给TA。" if _contact_will else
+                             "玩家在向你要联系方式，但你们还没熟到那份上："
+                             "按你的性格自然地婉拒或岔开，话别说死。")
+
     # In character mode the player speaks AS their chosen character — give the model that
     # identity instead of the generic persona name, so NPCs address the right person.
     player_char = _char_by_id(content, pcid) if (mode == "character" and pcid) else None
@@ -7438,6 +7524,8 @@ def run_turn_stream(
             # 📌 未收的伏笔 (剧组 P2): 编剧埋的钩子到点必须收线或明书作废
             "setups_due": ([str(s.get("text")) for s in (state.get("setups") or [])
                             if not s.get("paid")][:2] if is_primary else []),
+            # 📇 联系方式 (Yi): 要靠剧情挣 — 玩家开口要时按好感给或婉拒
+            "contact_note": _contact_note if is_primary else "",
             "relationship_playbook": rel_playbook,  # current relationship mode toward player
             # 🪞 玩家档案: 这个角色自己相处出来的印象 (认知边界: 只有见证过的才有)
             "player_read": profile_mod.impression_of(state, sp_id),
@@ -7691,6 +7779,36 @@ def run_turn_stream(
     gen_count = flags["gen_count"]
 
     # ━━━━━━━━━━ 管线 P8 · 场后结算（相册/金色瞬间/观察/世界自转/幕推进） ━━━━━━━━━━
+    # 📇 联系方式结算 (Yi): 开口要的按好感给/婉拒 (台词已演过, 这里落账);
+    # 没开口的走两条主动线: 好感过阈值 TA 必给 / 心情好的日子随缘塞 (每人每天掷一次)
+    if not observer and primary and channel in ("say", "do") and not ghost:
+        _pcid_c = primary.get("id")
+        if _pcid_c and _pcid_c != pcid and _pcid_c not in _dead_ids(state)                 and not has_contact(state, _pcid_c):
+            _clo_c = int(((state.get("rel") or {}).get(_pcid_c) or {})
+                         .get("closeness", 0) or 0)
+            _day_c = int((state.get("clock") or {}).get("day", 1) or 1)
+            _gave = ""
+            if _contact_ask:
+                if _contact_will:
+                    _gave = "你开口要的"
+                else:
+                    _audit(state, "contact.refuse", False,
+                           f"{primary.get('name', '')} 交情{_clo_c}<{CONTACT_ASK_T}")
+            elif _clo_c >= CONTACT_OFFER_T:
+                _gave = "熟到了这份上，TA自己给的"
+            else:
+                _rolls = state.setdefault("contact_rolls", {})
+                if _clo_c >= 12 and relationships.day_mood(_pcid_c, _day_c) > 0                         and str(_rolls.get(_pcid_c)) != str(_day_c):
+                    _rolls[_pcid_c] = _day_c
+                    import zlib as _zlib
+                    if _zlib.crc32(f"{_pcid_c}|{_day_c}".encode("utf-8")) % 10 < 3:
+                        _gave = "TA今天心情好，主动塞给你的"
+            if _gave:
+                _cbeat = dedash_beat({"type": "description", "speaker_name": None,
+                                      "text": grant_contact(content, state, primary, _gave)})
+                all_beats.append(_cbeat)
+                yield ("beat", _cbeat)
+
     # 🤝 a kept promise is a scene worth keeping: the date goes into the album with the
     # character's own best line from it as the caption.
     if promise_kept:
