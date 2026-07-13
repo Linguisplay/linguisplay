@@ -2097,15 +2097,98 @@ DASHSCOPE_TASK_URL = "https://dashscope.aliyuncs.com/api/v1/tasks/"
 
 DASHSCOPE_MM_URL = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
 
+ARK_IMAGES_URL = "https://ark.cn-beijing.volces.com/api/v3/images/generations"
 
-def edit_image(image_bytes: bytes, prompt: str, model: str = "qwen-image-edit",
-               mime: str = "image/webp", timeout_s: int = 120) -> bytes | None:
-    """Instruction-based image editing (qwen-image-edit): base image bytes in
-    (Base64 data URI — DashScope 的审查器拉不动我们非 443 端口的 URL), edited
-    image bytes out. 差分正解: expressions edit the 常态 base so body/framing
-    stay pixel-consistent — fresh generations never were (实弹: 老师的眨眼帧
-    连西装都换了一套). Returns None on any failure."""
+# 2026-07-13 Yi 定: 全站生图默认 Seedream (火山已充值; 阿里欠费期它是唯一活口)
+SEEDREAM_MODEL = "doubao-seedream-4-0-250828"
+
+_ARK_MIN_PX = 1280 * 720
+_ARK_MAX_SIDE = 4096
+
+
+def _ark_size(size: str) -> str:
+    """Ark 尺寸区间夹逼: 万相时代的小尺寸 (768*768 头像等) 低于 Seedream 的
+    像素下限, 等比放大越过下限; 超上限同理收缩。W*H / WxH → 'WxH'。"""
+    try:
+        w, h = (int(x) for x in size.replace("x", "*").split("*"))
+    except Exception:
+        return size.replace("*", "x")
+    if w * h < _ARK_MIN_PX:
+        k = (_ARK_MIN_PX / (w * h)) ** 0.5 * 1.02
+        w, h = int(w * k), int(h * k)
+    if max(w, h) > _ARK_MAX_SIDE:
+        k = _ARK_MAX_SIDE / max(w, h)
+        w, h = int(w * k), int(h * k)
+    return f"{w}x{h}"
+
+
+def _edit_image_ark(image_bytes: bytes, prompt: str, model: str,
+                    mime: str, timeout_s: int) -> bytes | None:
+    """Seedream 图生图改绘 (火山方舟, 同 /images/generations 端点带 image 入参)。
+    尺寸跟底图走并夹逼进 Ark 区间, 出图若尺寸漂移则归一回底图尺寸 —
+    差分/眨眼/呼吸全以像素级同框为前提。失败打原始错误码。"""
     import base64
+    import io as _io
+
+    s = get_settings()
+    if not s.ark_api_key or not image_bytes:
+        print("[ark] edit skipped: no ARK_API_KEY")
+        return None
+    w = h = 0
+    try:
+        from PIL import Image
+        w, h = Image.open(_io.BytesIO(image_bytes)).size
+    except Exception:
+        pass
+    data_uri = f"data:{mime};base64," + base64.b64encode(image_bytes).decode()
+    body = {"model": model, "prompt": prompt[:600], "image": data_uri,
+            "response_format": "url", "watermark": False,
+            **({"size": _ark_size(f"{w}*{h}")} if w and h else {})}
+    try:
+        resp = httpx.post(
+            ARK_IMAGES_URL,
+            headers={"Authorization": f"Bearer {s.ark_api_key}",
+                     "Content-Type": "application/json"},
+            json=body, timeout=timeout_s)
+        if resp.status_code != 200:
+            print(f"[ark] edit failed: {resp.status_code} {resp.text[:300]}")
+            return None
+        data = resp.json().get("data") or []
+        url = data[0].get("url") if data else None
+        if not url:
+            print(f"[ark] edit returned no url: {resp.text[:300]}")
+            return None
+        img = httpx.get(url, timeout=60)
+        img.raise_for_status()
+        out = img.content
+        if w and h:
+            try:
+                from PIL import Image
+                oi = Image.open(_io.BytesIO(out))
+                if oi.size != (w, h):
+                    oi = oi.convert("RGB").resize((w, h), Image.LANCZOS)
+                    buf = _io.BytesIO()
+                    oi.save(buf, "JPEG", quality=92)
+                    out = buf.getvalue()
+            except Exception:
+                pass
+        return out
+    except Exception as e:
+        print(f"[ark] edit error: {e}")
+        return None
+
+
+def edit_image(image_bytes: bytes, prompt: str, model: str = SEEDREAM_MODEL,
+               mime: str = "image/webp", timeout_s: int = 120) -> bytes | None:
+    """Instruction-based image editing: base image bytes in (Base64 data URI —
+    DashScope 的审查器拉不动我们非 443 端口的 URL), edited image bytes out.
+    差分正解: expressions edit the 常态 base so body/framing stay
+    pixel-consistent — fresh generations never were (实弹: 老师的眨眼帧
+    连西装都换了一套). Seedream 模型走火山方舟 (2026-07-13 起默认);
+    传 qwen-image-edit 仍走 DashScope。Returns None on any failure."""
+    import base64
+    if "seedream" in model:
+        return _edit_image_ark(image_bytes, prompt, model, mime, timeout_s)
     s = get_settings()
     if not s.dashscope_api_key or not image_bytes:
         return None
@@ -2135,9 +2218,6 @@ def edit_image(image_bytes: bytes, prompt: str, model: str = "qwen-image-edit",
         return None
 
 
-ARK_IMAGES_URL = "https://ark.cn-beijing.volces.com/api/v3/images/generations"
-
-
 def _generate_image_ark(prompt: str, size: str, model: str, timeout_s: int,
                         seed: int | None, negative: str) -> bytes | None:
     """字节 Seedream via 火山方舟 (synchronous). Ark has no negative_prompt
@@ -2157,7 +2237,7 @@ def _generate_image_ark(prompt: str, size: str, model: str, timeout_s: int,
             headers={"Authorization": f"Bearer {s.ark_api_key}",
                      "Content-Type": "application/json"},
             json={"model": model, "prompt": full,
-                  "size": size.replace("*", "x"),
+                  "size": _ark_size(size),
                   "response_format": "url", "watermark": False,
                   **({"seed": seed} if seed is not None else {})},
             timeout=timeout_s,
@@ -2179,12 +2259,12 @@ def _generate_image_ark(prompt: str, size: str, model: str, timeout_s: int,
 
 
 def generate_image(prompt: str, size: str = "1280*720",
-                   model: str = "wanx2.1-t2i-turbo", timeout_s: int = 120,
+                   model: str = SEEDREAM_MODEL, timeout_s: int = 120,
                    seed: int | None = None, negative: str = "") -> bytes | None:
-    """Text-to-image via DashScope 通义万相 (async): submit a task, poll until it finishes,
-    then download the image bytes. Returns None on any failure. Runs OFFLINE (background
-    enrichment), never in the play request path — generation takes ~10-30s per image.
-    Seedream models ("doubao-seedream-*") route to 火山方舟 instead."""
+    """Text-to-image. Default = Seedream via 火山方舟 (2026-07-13 Yi 定, 全站生图
+    先用它); 传 wanx/qwen-image 系模型名则走 DashScope 通义万相 (async task,
+    submit→poll→download). Returns None on any failure. Runs OFFLINE (background
+    enrichment), never in the play request path — generation takes ~10-30s per image."""
     import time
 
     if "seedream" in model:

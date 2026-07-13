@@ -45,11 +45,11 @@ GAL_DIR = Path(__file__).resolve().parents[1] / "static" / "scene" / "gal"
 # P0 规格 (blueprint §1): keeps build cost and play length predictable
 # (40k: 中篇经典整本可入 — 野菊の墓 34k; per-chapter slices keep compile prompts small)
 MAX_SOURCE_CHARS = 40000
-# 🖼 模型分工 (2026-07 烤面包机实测): qwen-image-plus 场景细节高一档(剥落墙皮/
-# 光瀑/道具叙事)但会把「手机竖屏」画成手机壳——场景/CG 用它(措辞已避雷);
-# 立绘/封面留 wanx2.1-plus(同脸 seed 体系已验证, 不轻动).
-SCENE_MODEL = "qwen-image-plus"
-FIGURE_MODEL = "wanx2.1-t2i-plus"
+# 🖼 2026-07-13 Yi 定: 全站生图先用 Seedream (火山已充值; 阿里欠费 qwen-image/
+# wanx 全瘫)。旧分工留档: qwen-image-plus 场景细节高一档但有手机壳陷阱(措辞
+# 已避雷), wanx2.1-plus 立绘同脸 seed 体系——若阿里复活要回切, 只动这两行。
+SCENE_MODEL = "doubao-seedream-4-0-250828"
+FIGURE_MODEL = "doubao-seedream-4-0-250828"
 _FRAME_NEG = ",手机,相框,画框,边框"   # qwen-image 的相框陷阱
 TARGET_BEATS_PER_CHAPTER = (40, 60)
 
