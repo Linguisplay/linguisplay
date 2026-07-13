@@ -626,15 +626,15 @@ def test_arrival_pan_seeds_the_ledger():
     assert st["char_sim"]["c1"]["pos"] == {"text": "站在吊灯下擦拭烛台", "at": "hall"}
 
 
-def test_suggestions_always_three():
-    # smart partial + weak template → padded to exactly 3, de-duped
+def test_suggestions_always_two():
+    # Yi 定: 选项固定两条 — smart partial + weak template → padded to exactly 2, de-duped
     out = runtime.ensure_three_suggestions(["只有一条"], [], MAP)
-    assert len(out) == 3 and out[0] == "只有一条"
+    assert len(out) == 2 and out[0] == "只有一条"
     out2 = runtime.ensure_three_suggestions([], ["A", "A", "B"], MAP)
-    assert len(out2) == 3 and out2[:2] == ["A", "B"]
-    # already three smart → untouched order, still three
+    assert out2 == ["A", "B"]
+    # more smart than fit → truncated to the first two, order kept
     out3 = runtime.ensure_three_suggestions(["一", "二", "三"], ["模板"], MAP)
-    assert out3 == ["一", "二", "三"]
+    assert out3 == ["一", "二"]
 
 
 # ── 🎥 场记: extraction updates the ledger, validates names, flags conflicts ──

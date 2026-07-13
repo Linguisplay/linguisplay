@@ -1800,13 +1800,13 @@ def ensure_scene_brief(content: dict[str, Any], state: dict[str, Any],
 def set_suggestions(state: dict[str, Any], items: list[str],
                     content: dict[str, Any] | None = None) -> list[str]:
     """建议的单一落账口 (治「七个产地各写各的规矩」): 所有产地必须走这里 —
-    去破折号、去重、掐长、限三条。措辞规矩改这里 = 改所有产地。"""
+    去破折号、去重、掐长、限两条 (Yi 定: 选项两个, 少即是多)。措辞规矩改这里 = 改所有产地。"""
     out: list[str] = []
     for s in items or []:
         t = dedash(str(s or "").strip())
         if t and t not in out:
             out.append(t[:60])
-        if len(out) >= 3:
+        if len(out) >= 2:
             break
     state["suggestions"] = out
     return out
@@ -2102,7 +2102,7 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
         goal_push(state, "errand", task, src="opening")
         state["goal"] = goal_top(content, state)
         set_suggestions(state, [f"答应下来：{task}",
-                                "先问清楚是怎么回事", "婉拒，想先自己四处转转"], content)
+                                "婉拒，想先自己四处转转"], content)
         _audit(state, "opening.hook", True, task[:24])
     return [dedash_beat(b) for b in beats]
 
@@ -2496,8 +2496,8 @@ def _smart_suggestions(llm, all_beats, player_input, primary, content, state, lo
 
 def ensure_three_suggestions(primary: list[str], backup: list[str],
                              content: dict[str, Any]) -> list[str]:
-    """The chip row must ALWAYS hold exactly 3: smart hints first, template hints next,
-    player-voice generic pads last. De-duped, trimmed, never fewer."""
+    """The chip row must ALWAYS hold exactly 2 (Yi 定; 名字里的 three 是历史):
+    smart hints first, template hints next, player-voice pads last. Never fewer."""
     en = lang_of(content) == "en"
     pads = (["I take a careful look around.",
              "I steer the talk toward what I care about.",
@@ -2510,7 +2510,7 @@ def ensure_three_suggestions(primary: list[str], backup: list[str],
         if x and x not in seen:
             seen.add(x)
             out.append(x)
-        if len(out) == 3:
+        if len(out) == 2:
             break
     return out
 
