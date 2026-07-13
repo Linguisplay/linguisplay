@@ -76,6 +76,13 @@ class MockLLM:
         if prompt.get("living_event"):
             return {"what": "去湖边走走", "slot": "夜", "day_offset": 1,
                     "invite": "明晚有空吗？想去湖边走走，你来。"}
+        # 🎬 导演场次单孪生 (剧组 P1): 确定性戏眼/心事/主动权 — 引擎裁剪逻辑可测
+        if prompt.get("director_brief"):
+            cast = [c for c in (prompt.get("cast") or []) if (c or {}).get("name")]
+            return {"crux": "有人欲言又止的一件小事",
+                    "minds": {c["name"]: "惦记着自己手上的那件事" for c in cast},
+                    "initiative": cast[0]["name"] if cast else "",
+                    "spark": ""}
         # 🎬 galgame 开场孪生: 短环境 + 每角色小剧情 (与 intro_vignettes 合同同构)
         if prompt.get("intro_vignettes"):
             return {"scene": "暮色刚落，门厅的吊灯亮着一半。你放下行李，站在光和影的交界。",

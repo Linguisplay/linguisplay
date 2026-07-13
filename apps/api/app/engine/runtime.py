@@ -204,6 +204,7 @@ DEFAULT_TUNING = {
     "key_choice_max": 12,       #    [min, max] so the fork is never predictable (min 0 = off)
     "world_event_every": 4,     # 🌊 after this many quiet turns an authored act event fires itself (0 = off)
     "turns_per_slot": 6,        # ⏳ turns per 时段 (晨/午/夜); a day = 3 slots. 0 = clock off
+    "troupe": 0,                # 🎬 剧组 (导演场次单+编剧扩展): 灰度旗, 剧本级试点 (照 plan_render 前例)
     "confront_base": 55,        # 🃏 evidence-confrontation base success %, + closeness//2
     "confront_cost": 3,         # 🃏 closeness cost of a successful confrontation (fail ×2, 大失败 ×3)
     "mind_reader": 1,           # 📟 心象仪: characters' true inner state shown on bubbles (0 = off)
@@ -1689,6 +1690,87 @@ def player_card(content: dict[str, Any], state: dict[str, Any],
                   for g in goals_of(state) if g.get("status") == "open"][:3],
         "hp": state.get("player_hp") or "healthy",
     }
+
+
+# ── 🎬 导演层 (剧组重建 P1): 冲突矩阵 + 场次单 ────────────────────────────────
+# 导演每「场」(地点×时段×在场名单) 开一次工, 结果缓存; 引擎备料 (冲突矩阵是
+# ties×人生目标的确定性交叉), 模型只做戏剧判断; 没有场次单 = 今天的行为原样。
+def conflict_pairs(content: dict[str, Any], state: dict[str, Any]) -> list[dict[str, Any]]:
+    """带电的关系 × 双方的人生目标 = 可上演的摩擦/共谋清单 (确定性, 引擎算)。"""
+    chars = {c.get("id"): c for c in _characters(content) if c.get("id")}
+    dead = _dead_ids(state)
+    out = []
+    for key, e in (state.get("npc_rel") or {}).items():
+        try:
+            a_id, b_id = key.split("|", 1)
+        except ValueError:
+            continue
+        if a_id in dead or b_id in dead or a_id not in chars or b_id not in chars:
+            continue
+        if not int(e.get("stance") or 0) and not e.get("label"):
+            continue
+        a, b = chars[a_id], chars[b_id]
+        ga = char_agenda(content, state, a).get("goal") or ""
+        gb = char_agenda(content, state, b).get("goal") or ""
+        if not (ga and gb):
+            continue
+        out.append({"a": a.get("name"), "b": b.get("name"),
+                    "a_id": a_id, "b_id": b_id,
+                    "label": e.get("label") or "", "stance": int(e.get("stance") or 0),
+                    "a_goal": ga[:30], "b_goal": gb[:30]})
+    out.sort(key=lambda p: -abs(p["stance"]))
+    return out
+
+
+def ensure_scene_brief(content: dict[str, Any], state: dict[str, Any],
+                       persona: dict[str, Any], llm: LLM) -> dict[str, Any]:
+    """场次单: 每场一次 (缓存按 地点|时段|在场 键), 导演读全部卡 (含玩家卡) 后给出
+    {戏眼, 每人心事, 主动权, 暗流}。降级为空 = 一切照旧, 绝不挡回合。"""
+    roster = [c for c in scene_characters(content, state)
+              if c.get("id") and c.get("id") != state.get("player_character_id")
+              and c.get("name")]
+    if not roster:
+        state.pop("scene_brief", None)
+        return {}
+    key = "|".join([str(state.get("location_id") or ""),
+                    active_slot(content, state) or "",
+                    ",".join(sorted(c["id"] for c in roster))])
+    sb = state.get("scene_brief")
+    if isinstance(sb, dict) and sb.get("key") == key:
+        return sb
+    ids_here = {c["id"] for c in roster}
+    spark = next((p for p in conflict_pairs(content, state)
+                  if p["a_id"] in ids_here or p["b_id"] in ids_here), None)
+    due = [s.get("text") for s in (state.get("setups") or [])
+           if not s.get("paid")][:2]   # 📌 未收的伏笔提给导演
+    try:
+        out = llm.generate({"director_brief": True,
+                            "place": (current_location(content, state) or {}).get("name") or "",
+                            "slot": (clock_view(content, state) or {}).get("label", ""),
+                            "cast": [{"name": c.get("name"), "gender": c.get("gender") or "",
+                                      "traits": c.get("traits") or {},
+                                      "persona": (c.get("persona_text") or "")[:80],
+                                      "goal": _agenda_prompt(content, state, c)[:80]}
+                                     for c in roster[:4]],
+                            "player": player_card(content, state, persona),
+                            "spark": (f"{spark['a']}×{spark['b']}（{spark['label']}）："
+                                      f"{spark['a_goal']} 撞上 {spark['b_goal']}" if spark else ""),
+                            "setups": due}) or {}
+    except Exception:
+        out = {}
+    minds = out.get("minds") if isinstance(out.get("minds"), dict) else {}
+    names = {c.get("name") for c in roster}
+    brief = {"key": key,
+             "crux": dedash(str(out.get("crux") or "").strip())[:30],
+             "minds": {n: dedash(str(t).strip())[:24]
+                       for n, t in minds.items() if n in names and str(t).strip()},
+             "initiative": (str(out.get("initiative") or "").strip()
+                            if str(out.get("initiative") or "").strip() in names else ""),
+             "spark": dedash(str(out.get("spark") or "").strip())[:36]}
+    state["scene_brief"] = brief
+    _audit(state, "director.brief", bool(brief["crux"]),
+           (brief["crux"] or "degrade")[:24])
+    return brief
 
 
 def set_suggestions(state: dict[str, Any], items: list[str],
@@ -5676,6 +5758,40 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
     Extracted verbatim from run_turn_stream (管线刀1)."""
     this_delta = int(directed.get("affinity_delta", 0) or 0)
     flags["affinity_delta"] += this_delta
+    # ✍️ 编剧拍落账 (剧组 P2): 情绪申报 / 伏笔埋收 / 人生目标推进 — 主答者一人申报
+    if is_primary:
+        _mood_claim = str(directed.get("mood") or "").strip()
+        if _mood_claim:
+            flags["mood_claim"] = _mood_claim[:6]
+        _day_now = int((state.get("clock") or {}).get("day", 1) or 1)
+        stps = state.setdefault("setups", [])
+        _plant = dedash(str(directed.get("setup_plant") or "").strip())[:24]
+        if _plant and all(_plant != s.get("text") for s in stps):
+            stps.append({"text": _plant, "day": _day_now, "due": _day_now + 2, "paid": False})
+            del stps[:-6]
+            _audit(state, "setup.plant", True, _plant[:20])
+        _pay = str(directed.get("setup_pay") or "").strip()
+        if _pay:
+            _hit = next((s for s in stps if not s.get("paid")
+                         and (str(s.get("text")) in _pay or _pay in str(s.get("text")))), None)
+            if _hit:
+                _hit["paid"] = True
+                _audit(state, "setup.pay", True, str(_hit["text"])[:20])
+            else:
+                _audit(state, "setup.pay", False, "没有对得上的伏笔")
+        for s in stps:   # 过期的钩子明书作废 — 说了不算要留痕, 不许悄悄蒸发
+            if not s.get("paid") and _day_now > int(s.get("due") or 0):
+                s["paid"] = "expired"
+                _audit(state, "setup.expired", True, str(s.get("text"))[:20])
+        _ag = directed.get("agenda_step")
+        if isinstance(_ag, dict) and str(_ag.get("who") or "").strip():
+            _who = next((c for c in scene_characters(content, state)
+                         if c.get("name") == str(_ag.get("who")).strip()), None)
+            if _who:
+                agenda_advance(state, _who, stage=str(_ag.get("stage") or ""),
+                               step=str(_ag.get("step") or ""))
+            else:
+                _audit(state, "agenda.step", False, f"{_ag.get('who')}不在场")
     # per-character relationship FLOW: apply this speaker's own closeness (=好感) and
     # 心动 deltas to their relationship-toward-player scores; the derived mode shifts
     # gradually (clamped) so next turn this character treats the player accordingly.
@@ -7073,7 +7189,23 @@ def run_turn_stream(
         responders = [primary] if primary else []
     else:
         observer = False
-        primary = pick_responder(content, state, player_input, target_character_id, probed_char_ids, all_chars)
+        # 🎬 导演场次单 (每场一次, 缓存): 戏眼/心事/主动权; 降级为空 = 行为原样。
+        # troupe 灰度旗 (剧本级试点, plan_render 前例): 关 = 零额外调用零行为差
+        _brief = (ensure_scene_brief(content, state, persona, llm)
+                  if tun.get("troupe") else {})
+        # 选角接管: 玩家没点名、没提名、没在试探谁时, 导演点的「该主动的人」接话
+        _init_id = None
+        if _brief.get("initiative") and not target_character_id \
+                and not any((c.get("name") or "") in (player_input or "")
+                            for c in all_chars if c.get("name")) \
+                and not probed_char_ids:
+            _init_id = next((c.get("id") for c in all_chars
+                             if c.get("name") == _brief["initiative"]), None)
+            if _init_id:
+                _audit(state, "director.cast", True, _brief["initiative"])
+        primary = pick_responder(content, state, player_input,
+                                 _init_id or target_character_id,
+                                 probed_char_ids, all_chars)
         primary_id = primary.get("id") if primary else None
         broadcast = bool(primary) and channel != "think" and not target_character_id and len(all_chars) > 1
         if primary is None or channel == "think" or threat_caught:
@@ -7267,6 +7399,17 @@ def run_turn_stream(
             "examples": [str(x) for x in (sp.get("examples") or [])][:5],
             # 🎯 this character's OWN goal/will: authored wants + the engine-tracked step
             "agenda": _agenda_prompt(content, state, sp),
+            # 🎬 导演场次单切片: 本场戏眼 + 这个角色自己的心事 + 是否该主动 (P1)
+            "scene_brief": ({"crux": (state.get("scene_brief") or {}).get("crux", ""),
+                             "mind": ((state.get("scene_brief") or {}).get("minds") or {})
+                             .get(sp_name, ""),
+                             "initiative": (state.get("scene_brief") or {})
+                             .get("initiative") == sp_name,
+                             "spark": (state.get("scene_brief") or {}).get("spark", "")}
+                            if isinstance(state.get("scene_brief"), dict) else None),
+            # 📌 未收的伏笔 (剧组 P2): 编剧埋的钩子到点必须收线或明书作废
+            "setups_due": ([str(s.get("text")) for s in (state.get("setups") or [])
+                            if not s.get("paid")][:2] if is_primary else []),
             "relationship_playbook": rel_playbook,  # current relationship mode toward player
             # 🪞 玩家档案: 这个角色自己相处出来的印象 (认知边界: 只有见证过的才有)
             "player_read": profile_mod.impression_of(state, sp_id),
@@ -8094,6 +8237,14 @@ def run_turn_stream(
     scene = scene_mod.classify_scene(
         " ".join(b.get("text", "") for b in all_beats), default_bg=story_default_bg(content)
     )
+    # ✍️ 编剧申报的情绪压过关键词猜 (剧组 P2: mood 两套推导收敛, 猜是兜底)
+    _MOOD_ZH = {"日常": "daily", "温馨": "warm", "浪漫": "romantic", "悲伤": "sad",
+                "孤独": "lonely", "悬疑": "mystery", "诡异": "eerie",
+                "紧张": "tense", "战斗": "battle"}
+    _mc = _MOOD_ZH.get(str(flags.get("mood_claim") or "").strip())
+    if _mc:
+        scene["mood"] = _mc
+        _audit(state, "scene.mood", True, f"编剧:{_mc}")
     state["scene"] = scene
     # 🎯 目标栈镜像 (治单槽盖写: 开场由头曾只活一回合就被这行用幕目标顶掉)
     state["goal"] = goal_top(content, state)

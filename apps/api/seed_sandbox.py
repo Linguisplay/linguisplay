@@ -382,7 +382,8 @@ SANDBOXES = [
                                           "ranks": ["生面孔", "脸熟", "巷里熟客", "人情在册",
                                                     "半个街坊", "城寨自己人"]}},
         "tuning": {"world_event_every": 0, "max_new_characters": 12,
-                   "vn_mode": 1, "plan_render": 1, "art_style": FUSHENG_ART},
+                   "vn_mode": 1, "plan_render": 1, "troupe": 1,   # 🎬 剧组试点剧本
+                   "art_style": FUSHENG_ART},
     },
     {
         "title": "转生异世界·后宫物语",

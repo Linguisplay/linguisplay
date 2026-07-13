@@ -435,6 +435,25 @@ def _build_system(prompt: dict[str, Any]) -> str:
         charter.append(f"· 对方此前的情绪基调：{prior_emotion}——留意它的延续与变化，接住这条线。")
     lines += charter
 
+    # 🎬 导演场次单切片 (剧组 P1): 本场戏眼 + 这个角色自己的心事 + 主动权
+    sb = prompt.get("scene_brief") or {}
+    if isinstance(sb, dict) and (sb.get("crux") or sb.get("mind")):
+        _sb_bits = []
+        if sb.get("crux"):
+            _sb_bits.append(f"导演给这一场定的戏眼：{sb['crux']}（顺着演，别硬掰到它）")
+        if sb.get("mind"):
+            _sb_bits.append(f"你此刻心里压着的一步：{sb['mind']}（它会从你的神色和话缝里漏出来）")
+        if sb.get("initiative"):
+            _sb_bits.append("这一场你有理由主动把话头递出去，不等对方先开口")
+        if sb.get("spark"):
+            _sb_bits.append(f"在场的暗流：{sb['spark']}（可以蹭到它，不点破）")
+        lines.append("【这一场】" + "；".join(_sb_bits) + "。")
+    _sdue = prompt.get("setups_due") or []
+    if _sdue:
+        lines.append("【未收的伏笔·埋下的必须兑现】" + "；".join(str(x) for x in _sdue)
+                     + "。时机合适就在这一拍收线（setup_pay 照抄原文），"
+                       "或让角色亲口把它了结，不许悄悄当没发生过。")
+
     # current relationship MODE toward the player (flows over time; shapes how you treat them)
     rel_pb = (prompt.get("relationship_playbook") or "").strip()
     if rel_pb:
@@ -1103,7 +1122,9 @@ def _plan_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                     "items": {"type": "string"},
                     "description": "这一拍的分镜：按顺序1~4条、每条≤20字，写谁做什么/透露什么/"
                                    "情绪怎么转；开口说话只概括用意，不写台词原文。"
-                                   "只排当下这一拍，不预支后续剧情。"},
+                                   "只排当下这一拍，不预支后续剧情。"
+                                   "场上有两名以上角色且给了【这一场】的暗流时，"
+                                   "可以排一条角色对角色的互戏（他们自己的交流，不必都对着玩家）。"},
     }
     fn["parameters"]["properties"] = {**head, **props}
     fn["parameters"]["required"] = ["grounding", "outline"] + required
@@ -1474,7 +1495,19 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
         ending = {"kind": "bad", "reason": narration or speech}
     out = {
         "beats": beats,
-        "affinity_delta": 0 if is_think else _i(d.get("affinity"), -3, 8),
+        # ✍️ 编剧扩展字段 (剧组 P2, 双合同同名不漂移): 情绪申报 + 伏笔账本 + 目标推进
+            "mood": {"type": "string", "description":
+                     "本拍场面情绪，从：日常/温馨/浪漫/悲伤/孤独/悬疑/诡异/紧张/战斗 里选一个。没有明显变化就省略。"},
+            "setup_plant": {"type": "string", "description":
+                            "≤20字：这一拍埋下的钩子（有话没说完/一件反常的小事）。没有就省略。埋了引擎会记账，两天内必须兑现。"},
+            "setup_pay": {"type": "string", "description":
+                          "这一拍兑现了哪个未收伏笔：照抄【未收的伏笔】里那条原文。没有就省略。"},
+            "agenda_step": {"type": "object", "description":
+                            "某位在场角色的人生目标这一拍真往前走了一步才填。",
+                            "properties": {"who": {"type": "string", "description": "角色名"},
+                                           "step": {"type": "string", "description": "≤20字这一步"},
+                                           "stage": {"type": "string", "description": "≤16字新阶段(没变就省略)"}}},
+            "affinity_delta": 0 if is_think else _i(d.get("affinity"), -3, 8),
         "romance_delta": 0 if is_think else _i(d.get("romance"), -3, 6),
         "advance_act": bool(d.get("advance")),
         "ending": ending,
@@ -3115,6 +3148,33 @@ class QwenLLM:
         except Exception:
             return {}
 
+    def _scene_brief(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🎬 导演场次单 (剧组 P1): 每场一次的戏剧判断 — 引擎备好全部卡 (含玩家卡)
+        与冲突矩阵, 导演只回答「这场戏该怎么活」。Degrades to {} (一切照旧)."""
+        sys = ("你是这部戏的导演。读完在场角色卡与玩家卡，只输出JSON："
+               '{"crux":"≤24字：这一场最值得发生的一件事（从在场者的目标与关系里长出来，不是给玩家派任务）",'
+               '"minds":{"角色名":"≤20字：TA此刻心里最挂着的一步（从TA的人生目标推）"},'
+               '"initiative":"角色名：这场最有理由主动开口的人（性格外向/主导高的、或心里压着事的）",'
+               '"spark":"≤30字：在场的暗流一句（有冲突素材才写，没有就空字符串）"}。'
+               "克制：不剧透、不替玩家决定、不编造卡上没有的事实；不用破折号。")
+        import json as _json
+        u = _json.dumps({"地点": prompt.get("place"), "时刻": prompt.get("slot"),
+                         "在场角色": prompt.get("cast"), "玩家": prompt.get("player"),
+                         "冲突素材": prompt.get("spark") or "",
+                         "未收的伏笔": prompt.get("setups") or []}, ensure_ascii=False)
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model,
+                               "messages": [{"role": "system", "content": sys},
+                                            {"role": "user", "content": u}],
+                               "max_tokens": 300, "temperature": 0.7,
+                               "response_format": {"type": "json_object"}},
+                              timeout=12)   # 场次单在回合关键路径上, 慢了宁可这场没导演
+            data = _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
     def _intro_vignettes(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """🎬 galgame 开场 (Yi: 字太多 → 短环境 + 每角色小剧情). Degrades to {}
         (引擎用人设+台词范例装配确定性开场)."""
@@ -3723,6 +3783,8 @@ class QwenLLM:
             return self._player_profile(prompt)
         if prompt.get("intro_vignettes"):
             return self._intro_vignettes(prompt)
+        if prompt.get("director_brief"):
+            return self._scene_brief(prompt)
         if prompt.get("living_event"):
             return self._living_event(prompt)
         if prompt.get("parting"):
