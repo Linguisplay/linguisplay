@@ -86,6 +86,10 @@ FUSHENG_CHARACTERS = [
         "relation_default": "stranger",
         "relation_allowed": ["stranger", "peer", "friend", "flirt", "lover", "enemy"],
         "home_location_id": "kf_hongkee",
+        # 作息表 (Yi 报障: 根本没有多人同场 — 一人守一铺的地图天然单人戏):
+        # 排班让人真正过日子, 每个时段都有至少一处两人同场
+        "schedule": [{"from_act": 1, "location_id": "kf_hongkee",
+                      "slots": ["晨", "午", "夜"]}],
     },
     {
         "id": "kf_manching", "name": "苏文清", "is_lead": False,
@@ -118,6 +122,9 @@ FUSHENG_CHARACTERS = [
         "relation_default": "stranger",
         "relation_allowed": ["stranger", "peer", "friend", "flirt", "lover"],
         "home_location_id": "kf_mingtak",
+        # 晨午在补习社教书, 收工去祥记吃一碗净面 (夜里和阿娣同场)
+        "schedule": [{"from_act": 1, "location_id": "kf_mingtak", "slots": ["晨", "午"]},
+                     {"from_act": 1, "location_id": "kf_hongkee", "slots": ["夜"]}],
     },
     {
         "id": "kf_achoi", "name": "阿彩", "is_lead": False,
@@ -152,6 +159,10 @@ FUSHENG_CHARACTERS = [
         "relation_default": "stranger",
         "relation_allowed": ["stranger", "peer", "friend", "flirt", "lover", "enemy"],
         "home_location_id": "kf_ngancoi",
+        # 晨在发廊开档, 午去祥记吃饭收风 (和阿娣同场), 夜上天台收衣乘凉 (玩家家门口)
+        "schedule": [{"from_act": 1, "location_id": "kf_ngancoi", "slots": ["晨"]},
+                     {"from_act": 1, "location_id": "kf_hongkee", "slots": ["午"]},
+                     {"from_act": 1, "location_id": "kf_tintoi", "slots": ["夜"]}],
     },
     {
         "id": "kf_saifai", "name": "细辉", "is_lead": False,
@@ -185,6 +196,9 @@ FUSHENG_CHARACTERS = [
         "relation_default": "peer",
         "relation_allowed": ["peer", "friend", "enemy"],
         "home_location_id": "kf_wolok",
+        # 晨去祥记吃早面 (和阿娣同场, 他欠她的), 午夜都在麻雀馆看场 (夜里话事人也来)
+        "schedule": [{"from_act": 1, "location_id": "kf_hongkee", "slots": ["晨"]},
+                     {"from_act": 1, "location_id": "kf_wolok", "slots": ["午", "夜"]}],
     },
     {
         # 客串: 与《九龙城寨·龙头》同一个 cid — 同脸同立绘, 美术零成本
@@ -216,6 +230,9 @@ FUSHENG_CHARACTERS = [
         "relation_default": "elder",
         "relation_allowed": ["elder", "friend"],
         "home_location_id": "kf_lungkee",
+        # 晨午守着理发店, 夜里去麻雀馆巡场 (和细辉同场, 敬畏的人就在身后)
+        "schedule": [{"from_act": 1, "location_id": "kf_lungkee", "slots": ["晨", "午"]},
+                     {"from_act": 1, "location_id": "kf_wolok", "slots": ["夜"]}],
     },
 ]
 

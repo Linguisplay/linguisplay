@@ -3050,7 +3050,11 @@ function vnUnhide() {
 async function vnBootstrap(beats, run) {
   const fresh = !(beats || []).some(b => b.author === "player");
   const list = fresh ? (beats || []) : (beats || []).slice(-1);
-  vnBooting = true;   // 实弹(疗养院续档): 加载罩下等点击=死锁, 引导一律自动走
+  // 🎬 揭幕再开口 (Yi: 对话不能在过场的时候进行): 世界已经就位, 先撤加载罩,
+  // 开场白等玩家的手指一页页翻 — 在幕布后面自动烧掉开场是演出事故。
+  // 续档只是回显最后一拍旧闻, 仍自动走 (疗养院实弹: 罩下等点击=死锁的原发场景)
+  hideLoading();
+  vnBooting = !fresh;
   try {
     for (const b of list) await playBeatVN(b, true);
   } finally {
@@ -3071,6 +3075,10 @@ async function playBeatVN(b, skipLog) {
     return;   // your own line flows straight into their reply
   }
   const isNarr = b.type === "description";
+  // 🎠 过场优先 (Yi 定): 转场卡/CG/加载罩还在放时, 对话一个字也不许上屏 —
+  // 幕布落下前不开口 (锁自清、CG 可点掉、罩会撤, 不会死等)
+  while (vnLocked() || document.getElementById("loadov") ||
+         document.querySelector("#vncg.on")) await sleep(160);
   // 播放中面板只属于正文 — 上一轮的选项此刻已是旧闻
   document.getElementById("vnchoices").classList.add("hidden");
   // 🎬 导演注记: 白闪与音效跟着这一拍的字一起落 (VN 此前从不消费 pendingSfx)

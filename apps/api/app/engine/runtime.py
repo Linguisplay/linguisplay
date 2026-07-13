@@ -1767,7 +1767,9 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
                      key=lambda c: _rank.get(c.get("relation_default") or "", 0),
                      default=None)
         if caller and start and start.get("id"):
-            _sim(state, caller["id"])["pos"] = start["id"]
+            # 用 char_pins 落位 (不是 sim pos): 作息表的优先级压过 sim, 排了班的访客
+            # 会被自己的班表瞬移走; pin 压过作息, 且玩家一离开就自动放人回作息
+            state.setdefault("char_pins", {})[caller["id"]] = start["id"]
             caller = {**caller, "visiting": True}
             present_chars = [caller]
             _audit(state, "opening.visitor", True, str(caller.get("name"))[:12])
