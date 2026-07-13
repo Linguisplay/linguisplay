@@ -27,6 +27,10 @@ from app.models import Story, StorySnapshot  # noqa: E402
 
 BG_DIR = Path(__file__).parent / "app" / "static" / "scene" / "bg"
 
+# 底模: Seedream (火山方舟) — 阿里欠费后万相全瘫 (2026-07-13); 横构图 2K 档
+BG_MODEL = "doubao-seedream-4-0-250828"
+BG_SIZE = "1664*928"
+
 
 def build_prompt(loc: dict, world: str, art: str) -> str:
     """A people-free establishing shot of the place, grounded in its authored fixtures +
@@ -97,7 +101,8 @@ def main() -> None:
                 print(f"  skip {lid} ({loc.get('name')}) — already exists")
                 continue
             print(f"  generating {lid} ({loc.get('name')})… ", end="", flush=True)
-            data = generate_image(build_prompt(loc, world, art), negative=bg_negative(art))
+            data = generate_image(build_prompt(loc, world, art), size=BG_SIZE,
+                                  model=BG_MODEL, negative=bg_negative(art))
             if data:
                 out.write_bytes(data)
                 print(f"OK ({len(data)//1024} KB)")

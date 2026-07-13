@@ -33,7 +33,7 @@ os.environ.setdefault("JWT_SECRET", "dev")
 from sqlalchemy.orm.attributes import flag_modified  # noqa: E402
 
 from app.db import SessionLocal  # noqa: E402
-from app.engine.gal import char_seed, portrait_negative  # noqa: E402
+from app.engine.gal import char_seed, is_anime_style, portrait_negative  # noqa: E402
 from app.engine.qwen import edit_image, generate_image  # noqa: E402
 
 # 立绘底模: Seedream 4.0 走火山方舟 (Yi 2026-07-13 定; 阿里欠费 + 阿彩对照实验完胜)。
@@ -82,8 +82,14 @@ def tachie_prompt(name: str, looks: str, art: str) -> str:
 
 
 # 统一画风的负词 (实弹: v1 四个人四种画风 — 文清跑成现代萌系、阿彩跑成 2010s 厚涂):
-# portrait_negative 只挡写实阵营, 这里再把动漫阵营内部的邻居风格全钉死
+# portrait_negative 只挡对面阵营, 这里再钉死本阵营内部的邻居风格。写实圣经用
+# _REAL_NEG (实弹: 文清两跑掉进 3D 玩偶脸引力井 — 皮克斯/玩偶要点名)
 _STYLE_NEG = ",厚涂,现代插画,韩系插画,渐变高光,萌系,Q版,大头,3D渲染,半身像,特写,腿部裁切"
+_REAL_NEG = ",CG,玩偶,皮克斯,塑料质感,光滑假皮肤,大头,半身像,特写,腿部裁切"
+
+# 换风格后个别 seed 会掉进坏引力井且改词拽不出 (文清: 3D 玩偶脸两连) —
+# 给该 cid 挪一个确定性盐位, 从此就是它的正史 seed
+SEED_SALT = {"kf_manching": "kf_manching-film2"}
 
 
 def main() -> None:
@@ -134,9 +140,11 @@ def main() -> None:
                                  mime="image/jpeg")
             else:
                 print(f"  t2i {name} ({cid})…", end=" ", flush=True)
+                camp_neg = _STYLE_NEG if is_anime_style(art) else _REAL_NEG
                 img = generate_image(tachie_prompt(name, looks, art), size=TACHIE_SIZE,
-                                     model=TACHIE_MODEL, seed=char_seed(s.id, cid),
-                                     negative=portrait_negative(art) + _STYLE_NEG)
+                                     model=TACHIE_MODEL,
+                                     seed=char_seed(s.id, SEED_SALT.get(cid, cid)),
+                                     negative=portrait_negative(art) + camp_neg)
             if not img:
                 print("FAILED")
                 continue
