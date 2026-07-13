@@ -392,6 +392,8 @@ body.vn { touch-action: pan-y; }
 .standee .shade { position: absolute; left: 50%; bottom: -2px; transform: translateX(-50%);
   width: 72%; height: 16px; border-radius: 50%;
   background: radial-gradient(ellipse at center, rgba(0,0,0,.5), transparent 68%); }
+.standee.bust img { height: 46vh !important; }
+.standee.bust.lit img { height: 50vh !important; }
 @keyframes vnbreathe { 50% { scale: 1 1.006; } }
 /* 🧭 场景 HUD (Yi 定): 这是哪 · 几个人在 · 有谁 — 点开名单, 点名字滑过去看TA;
    住在 #vnui 里 (可点), 位置让开顶栏和状态条 */
@@ -402,7 +404,7 @@ body.vn { touch-action: pan-y; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   text-shadow: 0 1px 2px rgba(0,0,0,.8); }
 #scenehud b { color: #d8b57a; font-weight: 600; }
-#scenehudlist { position: absolute; top: 140px; left: 12px; z-index: 5; min-width: 150px;
+#scenehudlist { position: absolute; top: 140px; left: 12px; z-index: 5; min-width: 210px;
   background: rgba(6,7,12,.9); border: 1px solid rgba(216,181,122,.28); border-radius: 12px;
   padding: 6px 4px; pointer-events: auto; }
 #scenehudlist .srow { display: flex; align-items: center; gap: 8px; padding: 6px 10px;
@@ -998,7 +1000,9 @@ async function afterAuth() {
       stories.appendChild(h2);
     }
   } catch (e) {}
-  if (!page.items.length) { stories.innerHTML += `<p class='muted'>${t("还没有已发布的剧本。")}</p>`; show("pick"); return; }
+  // 竞速守卫: 书架列表是异步的 — 玩家手快已经进档时, 慢返回的列表绝不许把书架
+  // 糊回运行中的游戏上 (实弹: 冷启动后 show("pick") 盖住了整局)
+  if (!page.items.length) { stories.innerHTML += `<p class='muted'>${t("还没有已发布的剧本。")}</p>`; if (!runId) show("pick"); return; }
   page.items.forEach(s => {
     const div = document.createElement("div");
     div.className = "card"; div.style.margin = "10px 0"; div.style.cursor = "pointer";
@@ -1022,7 +1026,7 @@ async function afterAuth() {
     div.onclick = () => chooseRole(s.id);
     stories.appendChild(div);
   });
-  show("pick");
+  if (!runId) show("pick");
 }
 
 // ── role / mode selection ─────────────────────────────
@@ -2697,7 +2701,12 @@ function _vnSet(img, cid, expr) {
       else if (img.dataset.stage === "base" && cid !== "_extra") { img.dataset.stage = "extra"; img.src = "/scene/sprite/_extra.webp"; }
       else img.style.visibility = "hidden";
     };
-    img.onload = () => { img.style.visibility = ""; };
+    img.onload = () => {
+      img.style.visibility = "";
+      // 🧍 半身图(胸像)不许和全身立牌同高 — 那是巨人 (实弹: 龙卷风胸像); 按长宽比降档
+      const st = img.closest(".standee");
+      if (st) st.classList.toggle("bust", img.naturalHeight / Math.max(1, img.naturalWidth) < 1.5);
+    };
     img.dataset.stage = expr ? "expr" : "base";
     img.src = (expr ? `/scene/sprite/${cid}_${encodeURIComponent(expr)}.webp`
                     : `/scene/sprite/${cid}.webp`) + _sv(cid);
@@ -2859,6 +2868,17 @@ function vnHudList() {
     im.onerror = () => im.remove();
     const nm = document.createElement("span"); nm.textContent = c.name;
     row.append(im, nm);
+    // 🚶 邀同行 (Yi 报障: VN 里没了入口) — 聊天模式角色条的同款开关搬进名单
+    const on = (following || []).includes(c.id);
+    const canFollow = on || c.can_follow !== false;
+    const fb = document.createElement("span");
+    fb.className = "follow" + (on ? " on" : "") + (canFollow ? "" : " locked");
+    fb.style.marginLeft = "auto";
+    fb.textContent = on ? B("🚶同行中", "🚶Together")
+                        : (canFollow ? B("邀同行", "Invite") : B("🔒邀同行", "🔒Invite"));
+    if (!canFollow) fb.title = B("关系还不够近，多聊聊再请 TA 同行", "Not close enough yet");
+    fb.onclick = (e) => { e.stopPropagation(); if (canFollow) toggleFollow(c.id, !on); };
+    row.appendChild(fb);
     row.onclick = (e) => { e.stopPropagation(); vnStagePanTo(_standeeOf(c.name)); };
     list.appendChild(row);
   });

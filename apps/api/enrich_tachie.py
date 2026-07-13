@@ -33,8 +33,13 @@ os.environ.setdefault("JWT_SECRET", "dev")
 from sqlalchemy.orm.attributes import flag_modified  # noqa: E402
 
 from app.db import SessionLocal  # noqa: E402
-from app.engine.gal import FIGURE_MODEL, char_seed, portrait_negative  # noqa: E402
+from app.engine.gal import char_seed, portrait_negative  # noqa: E402
 from app.engine.qwen import edit_image, generate_image  # noqa: E402
+
+# 立绘底模: qwen-image (Yi: 画风太粗糙 — wanx2.1 的下限撑不起商品级)。
+# 同一 image-synthesis 端点, 928*1664 高分辨率, char_seed 同脸体系照旧。
+TACHIE_MODEL = "qwen-image"
+TACHIE_SIZE = "928*1664"
 from app.engine.sprites import SPRITE_DIR, build_expr_pack, ingest_upload  # noqa: E402
 from app.models import Story, StorySnapshot  # noqa: E402
 
@@ -43,16 +48,21 @@ HARD_SKIP = {"cyclone"}
 
 # 生成专用外貌 (八十年代港风): per-cid, story-agnostic engine stays clean
 LOOKS: dict[str, str] = {
-    "kf_adai": "二十二岁的少女，利落的高马尾，圆眼睛，眉毛英气，脸颊带一点健康的红，"
-               "白色汗衫外系着深蓝围裙，围裙口袋鼓鼓的，袖口挽到手肘，手腕上一条红绳",
+    # 阿娣/阿彩的措辞版本: 同 seed 同词会复现同一次失败 — 返工必须改词 (马尾围裙前置,
+    # 全身+鞋写死; 实弹: v5 阿娣丢了马尾围裙、阿彩连续三版半身)
+    "kf_adai": "二十二岁的少女全身站姿，扎着利落的高马尾（红色发绳），圆眼睛，眉毛英气，"
+               "白色短袖汗衫外系着一条深蓝色长围裙（从胸前罩到膝盖，口袋鼓鼓的），"
+               "袖口挽到手肘，手腕上一条红绳，下身长裤，脚上一双黑色布鞋，双脚站在地上",
     # 生成陷阱备忘: 「抱着书」会在书封上长出乱码字, 「脖子搭毛巾」会画成耳机 —
     # 道具描述要挑图像模型不会自作聪明的 (实弹: 文清 v1 书封乱码, 阿彩 v1 戴上了耳机)
     "kf_manching": "二十四岁的温柔女教师，齐肩黑发别着一枚素色发夹，细框圆眼镜，"
                    "杏眼低垂含笑，白衬衫配过膝的米色长裙，双手轻轻交叠在身前，"
                    "气质安静斯文，八十年代香港",
-    "kf_achoi": "十九岁的活泼少女，蓬松的棕色烫卷短发，大眼睛亮晶晶，"
-                "笑起来露出小虎牙，耳朵上一对彩色塑料圆片耳环，桃红色短袖衬衫，"
-                "外面罩一件浅蓝色开襟罩衫，八十年代香港发廊小妹的打扮",
+    "kf_achoi": "十九岁的活泼少女站立全身像（从头发到帆布鞋完整入画，人物只占画面中间"
+                "三分之一高度也可以）：满头蓬松细密的泡面卷短发（烫过的小卷，绝不是辫子"
+                "也不是直发），大眼睛亮晶晶，笑起来露出小虎牙，彩色塑料圆片耳环，"
+                "桃红色短袖衬衫外罩浅蓝色开襟背心，高腰牛仔裤，白色帆布鞋，"
+                "八十年代香港发廊小妹",
     "kf_saifai": "二十岁的成年男性，市井后生的痞气，清瘦，寸头，眉眼带笑，"
                  "嘴角叼着一根没点的烟，花衬衫敞着最上面两颗扣子，里面是白背心，"
                  "深色长裤，站姿松松垮垮",
@@ -119,8 +129,8 @@ def main() -> None:
                                  mime="image/jpeg")
             else:
                 print(f"  t2i {name} ({cid})…", end=" ", flush=True)
-                img = generate_image(tachie_prompt(name, looks, art), size="720*1280",
-                                     model=FIGURE_MODEL, seed=char_seed(s.id, cid),
+                img = generate_image(tachie_prompt(name, looks, art), size=TACHIE_SIZE,
+                                     model=TACHIE_MODEL, seed=char_seed(s.id, cid),
                                      negative=portrait_negative(art) + _STYLE_NEG)
             if not img:
                 print("FAILED")
