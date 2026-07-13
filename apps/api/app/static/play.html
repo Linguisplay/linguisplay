@@ -364,9 +364,12 @@ body.vn #rebirth { position: fixed; z-index: 76; left: 50%; transform: translate
 /* 🎀 VN window (galgame 演出) — gal 播放器同款设计语言: 淡金/渐变面板/幽灵按钮 */
 #vnui { position: fixed; inset: 0; z-index: 45; pointer-events: none; }
 /* 🎪 弹丸论破式立牌舞台: 画布比屏幕宽, 背景与立牌同层横滑; 面板照旧点击推进 —
-   看场景(滑舞台)和推剧情(点面板)分区, 互不打架 */
-#vnworld { position: absolute; inset: 0; z-index: 1; overflow: hidden;
-  pointer-events: auto; touch-action: pan-y; }
+   看场景(滑舞台)和推剧情(点面板)分区, 互不打架。舞台在 z:-1 (背景层, #bg 之上、
+   一切 UI 之下), 拖拽手势在 document 层接 (舞台自己不吃指针, 绝不挡按钮) */
+#vnworld { position: fixed; inset: 0; z-index: -1; overflow: hidden;
+  pointer-events: none; display: none; }
+body.vn #vnworld { display: block; }
+body.vn { touch-action: pan-y; }
 #vnpan { position: absolute; top: 0; bottom: 0; left: 0; width: 100%;
   transition: transform .6s cubic-bezier(.22,.8,.3,1); will-change: transform; }
 #vnpan.dragging { transition: none; }
@@ -390,15 +393,16 @@ body.vn #rebirth { position: fixed; z-index: 76; left: 50%; transform: translate
   width: 72%; height: 16px; border-radius: 50%;
   background: radial-gradient(ellipse at center, rgba(0,0,0,.5), transparent 68%); }
 @keyframes vnbreathe { 50% { scale: 1 1.006; } }
-/* 🧭 场景 HUD (Yi 定): 这是哪 · 几个人在 · 有谁 — 点开名单, 点名字滑过去看TA */
-#scenehud { position: absolute; top: 10px; left: 12px; z-index: 5; max-width: 78vw;
+/* 🧭 场景 HUD (Yi 定): 这是哪 · 几个人在 · 有谁 — 点开名单, 点名字滑过去看TA;
+   住在 #vnui 里 (可点), 位置让开顶栏和状态条 */
+#scenehud { position: absolute; top: 104px; left: 12px; z-index: 5; max-width: 78vw;
   background: rgba(6,7,12,.72); border: 1px solid rgba(216,181,122,.28);
   border-radius: 999px; padding: 6px 13px; font-size: 12px; color: #e6dfd0;
   letter-spacing: .5px; cursor: pointer; pointer-events: auto;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   text-shadow: 0 1px 2px rgba(0,0,0,.8); }
 #scenehud b { color: #d8b57a; font-weight: 600; }
-#scenehudlist { position: absolute; top: 44px; left: 12px; z-index: 5; min-width: 150px;
+#scenehudlist { position: absolute; top: 140px; left: 12px; z-index: 5; min-width: 150px;
   background: rgba(6,7,12,.9); border: 1px solid rgba(216,181,122,.28); border-radius: 12px;
   padding: 6px 4px; pointer-events: auto; }
 #scenehudlist .srow { display: flex; align-items: center; gap: 8px; padding: 6px 10px;
@@ -504,7 +508,7 @@ body.dread #dread { opacity:1; }
   body.vn { --sw: min(100vw, 47vh); --sx: max(0px, calc((100vw - var(--sw)) / 2));
     background: #000; }
   body.vn #bg, body.vn #dread, body.vn #vntint, body.vn #vnflash,
-  body.vn #vnchap, body.vn #vncg, body.vn #vnui { left: var(--sx); right: var(--sx); }
+  body.vn #vnchap, body.vn #vncg, body.vn #vnui, body.vn #vnworld { left: var(--sx); right: var(--sx); }
   body.vn #app { margin: 0 var(--sx); }
   body.vn.vnfree footer { left: var(--sx); right: var(--sx); }
   /* 竖版画框里的立牌略高挑 (宽屏下舞台窄, 人要顶得住画面) */
@@ -607,15 +611,16 @@ body.dread #dread { opacity:1; }
 <div id="vncg" onclick="if(!vnLocked())this.classList.remove('on')"><div class="cgbg"></div><div class="cgshade"></div>
   <div class="cgtxt"><div class="cgk"></div><div class="cgt"></div><div class="cgl"></div>
   <div class="cgm">✦ 已存入回忆册 · 点按继续</div></div></div>
-<!-- 🎀 VN window (galgame 演出): 立牌舞台 + dialogue box + click-to-advance + choices -->
+<!-- 🎪 弹丸论破式立牌舞台 (Yi 定): 在场的人是站在场景里的立牌, 横滑画布看全场;
+     台上站谁 = 引擎在场名单 (state.here) 说了算, 不在场的人绝不上台。
+     舞台是【背景层】(z:-1): 顶栏/面板/按钮全部浮在场景上面 — 盖住顶栏是层级事故 (实弹) -->
+<div id="vnworld">
+  <div id="vnpan"><div id="vnwbg"></div></div>
+</div>
+<!-- 🎀 VN window (galgame 演出): 场景HUD + dialogue box + click-to-advance + choices -->
 <div id="vnui" class="hidden" onclick="vnUnhide()">
-  <!-- 🎪 弹丸论破式立牌舞台 (Yi 定): 在场的人是站在场景里的立牌, 横滑画布看全场;
-       台上站谁 = 引擎在场名单 (state.here) 说了算, 不在场的人绝不上台 -->
-  <div id="vnworld">
-    <div id="vnpan"><div id="vnwbg"></div></div>
-    <div id="scenehud" onclick="event.stopPropagation();vnHudToggle()"></div>
-    <div id="scenehudlist" class="hidden"></div>
-  </div>
+  <div id="scenehud" onclick="event.stopPropagation();vnHudToggle()"></div>
+  <div id="scenehudlist" class="hidden"></div>
   <div id="vnbox" onclick="vnAdvance()">
     <div id="vnname" class="hidden"></div>
     <div id="vnctl"><span onclick="event.stopPropagation();vnHearts()" title="好感度">好感</span><span onclick="event.stopPropagation();vnToggleStat()" title="目标/理智/警觉等状态">状态</span><span onclick="event.stopPropagation();vnHide()" title="隐藏界面看立绘">隐藏</span><span id="vnauto" onclick="event.stopPropagation();vnToggleAuto()" title="自动播放">自动</span><span onclick="event.stopPropagation();vnToggleLog()" title="回想">记录</span></div>
@@ -2740,17 +2745,24 @@ function _standeeOf(name) {
   const pan = document.getElementById("vnpan");
   return pan ? [...pan.querySelectorAll(".standee")].find(e => e.dataset.name === name) : null;
 }
+function _stageWidths() {
+  const world = document.getElementById("vnworld");
+  const pan = document.getElementById("vnpan");
+  return { world: world ? world.clientWidth : window.innerWidth,
+           pan: pan ? pan.getBoundingClientRect().width : 0 };
+}
 function vnStageClamp() {
-  const min = Math.min(0, (100 - stagePan.w));   // vw
+  const w = _stageWidths();
+  const min = Math.min(0, w.world - w.pan);   // px
   stagePan.x = Math.max(min, Math.min(0, stagePan.x));
   const pan = document.getElementById("vnpan");
-  if (pan) pan.style.transform = `translateX(${stagePan.x}vw)`;
+  if (pan) pan.style.transform = `translateX(${stagePan.x}px)`;
 }
 function vnStagePanTo(el) {
   // 把这具立牌平移到画面中央 (说话者永远被看见)
   if (!el) return;
-  const left = parseFloat(el.style.left || "50");
-  stagePan.x = 50 - left;
+  const leftPx = parseFloat(el.style.left || "50") / 100 * window.innerWidth;
+  stagePan.x = _stageWidths().world / 2 - leftPx;
   document.getElementById("vnpan").classList.remove("dragging");
   vnStageClamp();
 }
@@ -2778,11 +2790,11 @@ function vnSprite(name, expr) {
   if (expr !== undefined) _vnSet(el.querySelector("img"), el.dataset.cid, expr || null);
   vnStagePanTo(el);
 }
-// 横滑看全场 (触屏拖 + 桌面拖); 宽画布背景永远镜像 #bg (背景改哪都不用改两处)
+// 横滑看全场: 舞台在背景层不吃指针, 手势在 document 层接 — 避开一切可点的 UI
+// (按钮/输入/面板/HUD), 空白舞台区域怎么拖都行; 宽画布背景永远镜像 #bg
 (function () {
-  const world = document.getElementById("vnworld");
   const pan = document.getElementById("vnpan");
-  if (!world || !pan) return;
+  if (!pan) return;
   const wbg = document.getElementById("vnwbg");
   const bgEl = document.getElementById("bg");
   const mirror = () => {
@@ -2792,22 +2804,23 @@ function vnSprite(name, expr) {
   };
   new MutationObserver(mirror).observe(bgEl, { attributes: true, attributeFilter: ["style"] });
   mirror();
-  const px2vw = (px) => px / window.innerWidth * 100;
-  world.addEventListener("pointerdown", (e) => {
-    if (stagePan.w <= 100) return;
-    stagePan.drag = { x0: e.clientX, panX0: stagePan.x, moved: false };
+  const UI = "header, footer, button, input, select, a, #vnbox, #vnchoices, #scenehud, " +
+    "#scenehudlist, #moveask, #choiceask, #bars, #barsToggle, #cast, #tutov, #howto, " +
+    "#vncg, #vnchap, #vndice, #vnend, #mapov, #journal, #phoneov, #charcard";
+  document.addEventListener("pointerdown", (e) => {
+    if (!vnMode || stagePan.w <= 100) return;
+    if (e.target.closest && e.target.closest(UI)) return;
+    stagePan.drag = { x0: e.clientX, panX0: stagePan.x };
     pan.classList.add("dragging");
   });
-  world.addEventListener("pointermove", (e) => {
+  document.addEventListener("pointermove", (e) => {
     if (!stagePan.drag) return;
-    const dx = e.clientX - stagePan.drag.x0;
-    if (Math.abs(dx) > 6) stagePan.drag.moved = true;
-    stagePan.x = stagePan.drag.panX0 + px2vw(dx);
+    stagePan.x = stagePan.drag.panX0 + (e.clientX - stagePan.drag.x0);
     vnStageClamp();
   });
   const end = () => { stagePan.drag = null; pan.classList.remove("dragging"); };
-  world.addEventListener("pointerup", end);
-  world.addEventListener("pointercancel", end);
+  document.addEventListener("pointerup", end);
+  document.addEventListener("pointercancel", end);
 })();
 // 🧭 场景 HUD: 这是哪 · 几个人在 · 有谁 (点开名单, 点名字滑过去看TA)
 function vnHudRender() {
