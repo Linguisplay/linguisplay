@@ -15,6 +15,11 @@ except HARD_SKIP: cids shared with another story's finished art, e.g. cyclone).
 Extra args after the title narrow the run to those cids (targeted redo):
     enrich_tachie.py "九龙城寨·浮生" kf_achoi --force
 
+--restyle: instead of a fresh t2i (which rolls the style dice every time — 实弹:
+v3 一批四个人跑出四种画风), EDIT the archived {cid}_photo.jpg into the bible's core
+style. Edit preserves identity/pose; the instruction anchors the style — the
+smart_cast conversion doctrine applied to our own best historical renders.
+
 Run ON THE SERVER (needs DASHSCOPE_API_KEY in .env):
     cd /opt/linguisplay/apps/api && set -a && . .env && set +a && \
         ./.venv/bin/python enrich_tachie.py "九龙城寨·浮生"
@@ -29,7 +34,7 @@ from sqlalchemy.orm.attributes import flag_modified  # noqa: E402
 
 from app.db import SessionLocal  # noqa: E402
 from app.engine.gal import FIGURE_MODEL, char_seed, portrait_negative  # noqa: E402
-from app.engine.qwen import generate_image  # noqa: E402
+from app.engine.qwen import edit_image, generate_image  # noqa: E402
 from app.engine.sprites import SPRITE_DIR, build_expr_pack, ingest_upload  # noqa: E402
 from app.models import Story, StorySnapshot  # noqa: E402
 
@@ -57,13 +62,19 @@ LOOKS: dict[str, str] = {
 def tachie_prompt(name: str, looks: str, art: str) -> str:
     # style anchor rides FIRST (art bible doctrine: 画风是 token 体系, 前置才压得住)
     return (f"{art}。单人全身立绘：{name}，{looks}。平静自然的神情，正面站姿微侧，"
-            "人物完整（从头顶到脚都在画面内，头顶上方留出空间），画面里只有这一个人。"
-            "纯色浅灰背景，柔和顶光，高细节，画面里没有任何文字或水印")
+            "双脚站在地上，人物完整（从头顶到鞋都在画面内，头顶上方留出空间），"
+            "画面里只有这一个人。纯色浅灰背景，柔和顶光，高细节，画面里没有任何文字或水印")
+
+
+# 统一画风的负词 (实弹: v1 四个人四种画风 — 文清跑成现代萌系、阿彩跑成 2010s 厚涂):
+# portrait_negative 只挡写实阵营, 这里再把动漫阵营内部的邻居风格全钉死
+_STYLE_NEG = ",厚涂,现代插画,韩系插画,渐变高光,萌系,Q版,大头,3D渲染,半身像,特写,腿部裁切"
 
 
 def main() -> None:
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     force = "--force" in sys.argv
+    restyle = "--restyle" in sys.argv
     title = args[0] if args else "九龙城寨·浮生"
     only = set(args[1:])   # targeted redo: limit to these cids
     db = SessionLocal()
@@ -96,10 +107,21 @@ def main() -> None:
                 print(f"  skip {name} ({cid}) — sprite exists")
                 continue
             looks = LOOKS.get(cid) or (c.get("persona_text") or "")[:120]
-            print(f"  t2i {name} ({cid})…", end=" ", flush=True)
-            img = generate_image(tachie_prompt(name, looks, art), size="720*1280",
-                                 model=FIGURE_MODEL, seed=char_seed(s.id, cid),
-                                 negative=portrait_negative(art))
+            photo = SPRITE_DIR / f"{cid}_photo.jpg"
+            if restyle and photo.exists():
+                # 改绘铁律 (smart_cast 同款): 保真条款放最前, 画风只给一句核心
+                core = art.split("；")[0][:140]
+                print(f"  restyle {name} ({cid})…", end=" ", flush=True)
+                img = edit_image(photo.read_bytes(),
+                                 "严格保持画面中人物的性别、体格、发型、五官特征、服装、"
+                                 f"姿势和构图完全一致，只把画风改绘为：{core}。"
+                                 "不改变人物的任何特征，只改画风",
+                                 mime="image/jpeg")
+            else:
+                print(f"  t2i {name} ({cid})…", end=" ", flush=True)
+                img = generate_image(tachie_prompt(name, looks, art), size="720*1280",
+                                     model=FIGURE_MODEL, seed=char_seed(s.id, cid),
+                                     negative=portrait_negative(art) + _STYLE_NEG)
             if not img:
                 print("FAILED")
                 continue

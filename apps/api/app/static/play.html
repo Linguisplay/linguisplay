@@ -363,25 +363,49 @@ body.vn #rebirth { position: fixed; z-index: 76; left: 50%; transform: translate
 #vncg .cgm { color: rgba(216,181,122,.7); font-size: 11px; letter-spacing: 2px; }
 /* 🎀 VN window (galgame 演出) — gal 播放器同款设计语言: 淡金/渐变面板/幽灵按钮 */
 #vnui { position: fixed; inset: 0; z-index: 45; pointer-events: none; }
-/* 沙盒立绘是带背景的照片 (非透底人物): 统一裁成 3:4 竖构图人像卡, 杜绝横幅/拼贴感;
-   真立绘差分管线上线后再回归 gal 式站姿 */
-#vnsprite, #vnsprite2 { position: absolute; bottom: 0; object-fit: cover;
-  object-position: top; aspect-ratio: 3/4;
-  border-radius: 14px 14px 0 0; border: 1px solid rgba(216,181,122,.22); border-bottom: 0;
-  -webkit-mask-image: linear-gradient(to top, transparent 0, #000 12%);
-  mask-image: linear-gradient(to top, transparent 0, #000 12%);
-  filter: drop-shadow(0 0 26px rgba(0,0,0,.65));
-  transform-origin: 50% 100%; animation: vnbreathe 5.2s ease-in-out infinite;
-  transition: filter .3s ease, height .3s ease, opacity .35s ease; }
-#vnsprite  { right: 3vw; height: 64vh; max-width: 42vw; z-index: 2; }
-#vnsprite2 { left: 3vw; height: 55vh; max-width: 36vw; z-index: 1;
-  filter: brightness(.45) drop-shadow(0 0 26px rgba(0,0,0,.65));
-  animation-duration: 6.6s; }
-/* 🎭 透底剪影 (gal 同款, Yi: 无背景+说话的人亮): 不装相框, 站姿贴地 */
-#vnsprite.cut, #vnsprite2.cut { aspect-ratio: auto; border: 0; border-radius: 0;
-  object-fit: contain; object-position: bottom; }
-#vnsprite.dim { filter: brightness(.72) drop-shadow(0 0 26px rgba(0,0,0,.65)); }
+/* 🎪 弹丸论破式立牌舞台: 画布比屏幕宽, 背景与立牌同层横滑; 面板照旧点击推进 —
+   看场景(滑舞台)和推剧情(点面板)分区, 互不打架 */
+#vnworld { position: absolute; inset: 0; z-index: 1; overflow: hidden;
+  pointer-events: auto; touch-action: pan-y; }
+#vnpan { position: absolute; top: 0; bottom: 0; left: 0; width: 100%;
+  transition: transform .6s cubic-bezier(.22,.8,.3,1); will-change: transform; }
+#vnpan.dragging { transition: none; }
+#vnwbg { position: absolute; inset: 0; background: linear-gradient(135deg,#15151c,#0d0d12);
+  background-size: cover; background-position: center bottom;
+  transition: background-image .6s ease; }
+#vnwbg::after { content: ""; position: absolute; inset: 0;
+  background: radial-gradient(ellipse at center, rgba(0,0,0,.1), rgba(0,0,0,.55)); }
+/* 立牌: 站在地上的透底人形, 说话点亮, 其余压暗; 脚下一枚接地影 (立牌感的关键) */
+.standee { position: absolute; bottom: 0; transform: translateX(-50%);
+  transition: opacity .4s ease; }
+.standee img { display: block; height: 60vh; max-width: 74vw;
+  object-fit: contain; object-position: bottom;
+  filter: brightness(.62) saturate(.85) drop-shadow(0 0 22px rgba(0,0,0,.6));
+  transform-origin: 50% 100%; animation: vnbreathe 5.6s ease-in-out infinite;
+  transition: filter .35s ease, height .35s ease; }
+.standee.lit img { height: 66vh;
+  filter: brightness(1.02) drop-shadow(0 0 2px rgba(255,244,214,.35))
+          drop-shadow(0 0 26px rgba(0,0,0,.65)); }
+.standee .shade { position: absolute; left: 50%; bottom: -2px; transform: translateX(-50%);
+  width: 72%; height: 16px; border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(0,0,0,.5), transparent 68%); }
 @keyframes vnbreathe { 50% { scale: 1 1.006; } }
+/* 🧭 场景 HUD (Yi 定): 这是哪 · 几个人在 · 有谁 — 点开名单, 点名字滑过去看TA */
+#scenehud { position: absolute; top: 10px; left: 12px; z-index: 5; max-width: 78vw;
+  background: rgba(6,7,12,.72); border: 1px solid rgba(216,181,122,.28);
+  border-radius: 999px; padding: 6px 13px; font-size: 12px; color: #e6dfd0;
+  letter-spacing: .5px; cursor: pointer; pointer-events: auto;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  text-shadow: 0 1px 2px rgba(0,0,0,.8); }
+#scenehud b { color: #d8b57a; font-weight: 600; }
+#scenehudlist { position: absolute; top: 44px; left: 12px; z-index: 5; min-width: 150px;
+  background: rgba(6,7,12,.9); border: 1px solid rgba(216,181,122,.28); border-radius: 12px;
+  padding: 6px 4px; pointer-events: auto; }
+#scenehudlist .srow { display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+  border-radius: 8px; font-size: 13px; color: #ece9e2; cursor: pointer; }
+#scenehudlist .srow:hover { background: rgba(216,181,122,.12); }
+#scenehudlist .srow img { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; }
+#scenehudlist .srow .off { color: #8a93a8; font-size: 11px; }
 #vnbox { position: absolute; left: 0; right: 0; bottom: 0; min-height: 148px; z-index: 4;
   background: linear-gradient(180deg, rgba(4,5,10,0), rgba(4,5,10,.62) 26%, rgba(4,5,10,.95) 62%);
   padding: 44px 8% 18px; pointer-events: auto; cursor: pointer; }
@@ -483,10 +507,9 @@ body.dread #dread { opacity:1; }
   body.vn #vnchap, body.vn #vncg, body.vn #vnui { left: var(--sx); right: var(--sx); }
   body.vn #app { margin: 0 var(--sx); }
   body.vn.vnfree footer { left: var(--sx); right: var(--sx); }
-  /* 竖版舞台摆不下对手戏: 说话者单立绘居中、站在地上 (同手机端) */
-  body.vn #vnsprite { right: 50%; transform: translateX(50%); bottom: 0;
-    height: 78vh; max-width: calc(var(--sw) * .84); }
-  body.vn #vnsprite2 { display: none; }
+  /* 竖版画框里的立牌略高挑 (宽屏下舞台窄, 人要顶得住画面) */
+  body.vn .standee img { height: 64vh; max-width: calc(var(--sw) * .8); }
+  body.vn .standee.lit img { height: 70vh; }
   body.vn.vnfree #vnbox { max-height: 48vh; }
   body.vn #vntext { max-width: calc(var(--sw) * .9); }
   body.vn.vnstat #cast, body.vn.vnstat #bars { width: min(720px, var(--sw)); }
@@ -538,11 +561,10 @@ body.dread #dread { opacity:1; }
   #state { display: none; }
   #suggest { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .chip { flex: 0 0 auto; }
-  /* VN 竖屏: 人要【站在地上】— 立绘锚屏底拉高个头, 头胸露在面板上方,
+  /* VN 竖屏: 立牌要【站在地上】— 锚屏底拉高个头, 头胸露在面板上方,
      腿脚藏在面板后面 (gal 正统排法; 悬浮半空和被整个吞掉都是错) */
-  #vnsprite { right: 50%; transform: translateX(50%); bottom: 0;
-    height: 74vh; max-width: 86vw; }
-  #vnsprite2 { display: none !important; }
+  .standee img { height: 60vh; max-width: 84vw; }
+  .standee.lit img { height: 66vh; }
   body.vn.vnfree #vnbox { max-height: 50vh; }
   #vnctl { top: -40px; right: 10px; gap: 7px; }
   #vnctl span { background: rgba(6,7,12,.74); border-radius: 999px; padding: 7px 11px; }
@@ -585,10 +607,15 @@ body.dread #dread { opacity:1; }
 <div id="vncg" onclick="if(!vnLocked())this.classList.remove('on')"><div class="cgbg"></div><div class="cgshade"></div>
   <div class="cgtxt"><div class="cgk"></div><div class="cgt"></div><div class="cgl"></div>
   <div class="cgm">✦ 已存入回忆册 · 点按继续</div></div></div>
-<!-- 🎀 VN window (galgame 演出): sprite + dialogue box + click-to-advance + choices -->
+<!-- 🎀 VN window (galgame 演出): 立牌舞台 + dialogue box + click-to-advance + choices -->
 <div id="vnui" class="hidden" onclick="vnUnhide()">
-  <img id="vnsprite2" class="hidden" alt="">
-  <img id="vnsprite" class="hidden" alt="">
+  <!-- 🎪 弹丸论破式立牌舞台 (Yi 定): 在场的人是站在场景里的立牌, 横滑画布看全场;
+       台上站谁 = 引擎在场名单 (state.here) 说了算, 不在场的人绝不上台 -->
+  <div id="vnworld">
+    <div id="vnpan"><div id="vnwbg"></div></div>
+    <div id="scenehud" onclick="event.stopPropagation();vnHudToggle()"></div>
+    <div id="scenehudlist" class="hidden"></div>
+  </div>
   <div id="vnbox" onclick="vnAdvance()">
     <div id="vnname" class="hidden"></div>
     <div id="vnctl"><span onclick="event.stopPropagation();vnHearts()" title="好感度">好感</span><span onclick="event.stopPropagation();vnToggleStat()" title="目标/理智/警觉等状态">状态</span><span onclick="event.stopPropagation();vnHide()" title="隐藏界面看立绘">隐藏</span><span id="vnauto" onclick="event.stopPropagation();vnToggleAuto()" title="自动播放">自动</span><span onclick="event.stopPropagation();vnToggleLog()" title="回想">记录</span></div>
@@ -1187,7 +1214,12 @@ async function enterRun(run) {
   // 🎀 VN 演出: story-driven (tuning.vn_mode); sprites keyed by character id
   vnMode = !!(st0 && st0.tuning && +(st0.tuning.vn_mode || 0));
   spriteMap = {};
-  ((st0 && st0.characters) || []).forEach(c => { if (c.name && c.id) spriteMap[c.name] = c.id; });
+  // 立绘按天带版本戳: 服务端换图后老玩家至多一天内就能看到新脸 (客户端触发的
+  // 重画仍走 Date.now() 即时失效)
+  const dayv = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  ((st0 && st0.characters) || []).forEach(c => {
+    if (c.name && c.id) { spriteMap[c.name] = c.id; spriteVer[c.id] = spriteVer[c.id] || dayv; }
+  });
   vnShow(vnMode);
   playMode = (run.state && run.state.mode) || "character";
   myName = (playMode === "character" && run.state && run.state.player_character_name) || B("我", "Me");
@@ -1361,6 +1393,7 @@ function makeRow(side, name, text, withWho, spoken) {
 const MODE_CLASS = { "陌生人":"stranger","同级":"peer","朋友":"friend","暧昧对象":"flirt","恋人":"lover","敌人":"enemy","长辈":"elder","小辈":"junior",
   "Stranger":"stranger","Peer":"peer","Friend":"friend","Something More":"flirt","Lover":"lover","Enemy":"enemy","Elder":"elder","Junior":"junior" };
 function renderCast() {
+  vnStageSync();   // 🎪 立牌舞台与在场名单同拍 (台上站谁 = state.here 说了算)
   const el = document.getElementById("cast");
   if (!cast.length && playMode !== "god") { el.classList.add("hidden"); return; }
   el.classList.remove("hidden"); el.innerHTML = "";
@@ -2335,6 +2368,7 @@ function renderPlace(loc) {
     // 🎬 转场卡: 换地方像 gal 换章 — 地名 + 此刻的钟, 一张压黑过场
     vnChapCard(loc && loc.name, (curClock && curClock.label) || "");
   }
+  vnHudRender();   // 🧭 场景 HUD: 地名变了立刻跟上
   const el = document.getElementById("placebar");
   if ((!loc || !loc.name) && !clockChip()) { el.classList.add("hidden"); return; }
   if (!loc || !loc.name) { el.innerHTML = clockChip(); el.classList.remove("hidden"); return; }
@@ -2652,41 +2686,169 @@ function _vnSet(img, cid, expr) {
   const key = cid + "|" + (expr || "") + "|" + (spriteVer[cid] || 0);
   if (img.dataset.key !== key) {
     img.dataset.key = key;
-    // 🎭 回落链: 表情差分(透底) → 常态剪影(透底) → 旧版jpg人像卡 → 头像 → 隐藏
+    // 🎭 回落链: 表情差分(透底) → 常态剪影(透底) → 黑灰人影 (谁在场谁就有个影)
     img.onerror = () => {
       if (img.dataset.stage === "expr") { img.dataset.stage = "base"; img.src = `/scene/sprite/${cid}.webp` + _sv(cid); }
-      else if (img.dataset.stage === "base") { img.dataset.stage = "legacy"; img.src = `/scene/sprite/${cid}.jpg`; }
-      else if (img.dataset.stage === "legacy") { img.dataset.stage = "avatar"; img.src = `/scene/avatar/${cid}.jpg` + _sv(cid); }
-      else img.classList.add("hidden");
+      else if (img.dataset.stage === "base" && cid !== "_extra") { img.dataset.stage = "extra"; img.src = "/scene/sprite/_extra.webp"; }
+      else img.style.visibility = "hidden";
     };
-    // 剪影不装相框: 透底 webp 撤掉 3:4 裁切/描边, 站姿贴地
-    img.onload = () => img.classList.toggle("cut", img.src.includes(".webp"));
+    img.onload = () => { img.style.visibility = ""; };
     img.dataset.stage = expr ? "expr" : "base";
     img.src = (expr ? `/scene/sprite/${cid}_${encodeURIComponent(expr)}.webp`
                     : `/scene/sprite/${cid}.webp`) + _sv(cid);
   }
-  img.classList.remove("hidden");
 }
-// 🎭 双立绘对手戏 (gal 播放器移植): 说话者右位点亮, 上一位发言的对手左位压暗;
-// 旁白时右位轻压一档 (都在听). ADV 掛け合い惯例: 新speaker上右位, 原右位让到左.
-let vnRight = null;   // {name, cid, expr}
+// ── 🎪 弹丸论破式立牌舞台: 台上站谁 = 引擎在场名单 (state.here) 说了算 ──
+// 说话者点亮 + 画布自动平移过去; 不在名单的说话者不上台 (声音从画外来 — 文与实不分家)。
+// 玩家横滑画布随时看全场; 场景 HUD 报地名/人数/名单。
+let stagePan = { x: 0, w: 0, drag: null };
+function _stageCast() {
+  // 台上的人: 在场名单里除了玩家自己 (第一人称, 你没有自己的立牌)
+  return (cast || []).filter(c => c.id && c.name && c.name !== myName);
+}
+function vnStageSync() {
+  const pan = document.getElementById("vnpan");
+  if (!pan) return;
+  const roster = vnMode ? _stageCast() : [];
+  const keep = new Set(roster.map(c => c.id));
+  pan.querySelectorAll(".standee").forEach(el => {
+    if (!keep.has(el.dataset.cid)) el.remove();
+  });
+  // 画布宽度: 一人不滑, 人多变宽 (每人 52vw 一格, Danganronpa 的房间感)
+  const n = roster.length;
+  const w = n <= 1 ? 100 : (n * 52 + 26);
+  stagePan.w = w;
+  pan.style.width = w + "vw";
+  roster.forEach((c, i) => {
+    let el = pan.querySelector(`.standee[data-cid="${c.id}"]`);
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "standee"; el.dataset.cid = c.id; el.dataset.name = c.name;
+      const img = document.createElement("img"); img.alt = c.name;
+      const sh = document.createElement("i"); sh.className = "shade";
+      el.append(img, sh);
+      pan.appendChild(el);
+      _vnSet(img, c.id, null);
+    }
+    el.style.left = (n <= 1 ? 50 : (26 + i * 52)) + "vw";
+    el.style.zIndex = String(2 + i);
+  });
+  vnStageClamp();
+  vnHudRender();
+}
+function _standeeOf(name) {
+  const pan = document.getElementById("vnpan");
+  return pan ? [...pan.querySelectorAll(".standee")].find(e => e.dataset.name === name) : null;
+}
+function vnStageClamp() {
+  const min = Math.min(0, (100 - stagePan.w));   // vw
+  stagePan.x = Math.max(min, Math.min(0, stagePan.x));
+  const pan = document.getElementById("vnpan");
+  if (pan) pan.style.transform = `translateX(${stagePan.x}vw)`;
+}
+function vnStagePanTo(el) {
+  // 把这具立牌平移到画面中央 (说话者永远被看见)
+  if (!el) return;
+  const left = parseFloat(el.style.left || "50");
+  stagePan.x = 50 - left;
+  document.getElementById("vnpan").classList.remove("dragging");
+  vnStageClamp();
+}
 function vnSprite(name, expr) {
-  const R = document.getElementById("vnsprite");
-  const L = document.getElementById("vnsprite2");
-  if (!name) { R.classList.add("dim"); return; }        // narration: keep stage, dim
-  if (name === myName) { R.classList.add("dim"); return; }  // 玩家自己不占人影席位
-  // 🕴 路人杂兵 (Yi 定): 没有立绘的说话者上一具黑灰人影 — 谁说话谁就得在台上
-  const cid = spriteMap[name] || "_extra";
-  R.classList.remove("dim");
-  if (vnRight && vnRight.name === name) {
-    if (expr !== undefined) vnRight.expr = expr || null;   // 同人续说: 表情可更新
-    _vnSet(R, cid, vnRight.expr); return;
+  const pan = document.getElementById("vnpan");
+  if (!pan) return;
+  const all = pan.querySelectorAll(".standee");
+  if (!name || name === myName) {           // 旁白/玩家开口: 无人点亮, 全场都在听
+    all.forEach(e => e.classList.remove("lit"));
+    return;
   }
-  // 让位到左侧时带着自己最后的表情走 (表情是状态, 不是闪灯)
-  if (vnRight && spriteMap[vnRight.name]) _vnSet(L, spriteMap[vnRight.name], vnRight.expr);
-  else L.classList.add("hidden");
-  vnRight = { name: name, cid: cid, expr: expr || null };
-  _vnSet(R, cid, vnRight.expr);
+  let el = _standeeOf(name);
+  if (!el && spriteMap[name]) {
+    // 回合中途进场的人: 引擎只让在场者开口, 而 here 名单回合末才到 — 信拍子先上台,
+    // 名单一到 vnStageSync 自然对拍 (多退少补)
+    cast.push({ id: spriteMap[name], name: name });
+    vnStageSync();
+    el = _standeeOf(name);
+  }
+  if (!el) {                                 // 真不在场就不上台: 声音从画外来
+    all.forEach(e => e.classList.remove("lit"));
+    return;
+  }
+  all.forEach(e => e.classList.toggle("lit", e === el));
+  if (expr !== undefined) _vnSet(el.querySelector("img"), el.dataset.cid, expr || null);
+  vnStagePanTo(el);
+}
+// 横滑看全场 (触屏拖 + 桌面拖); 宽画布背景永远镜像 #bg (背景改哪都不用改两处)
+(function () {
+  const world = document.getElementById("vnworld");
+  const pan = document.getElementById("vnpan");
+  if (!world || !pan) return;
+  const wbg = document.getElementById("vnwbg");
+  const bgEl = document.getElementById("bg");
+  const mirror = () => {
+    wbg.style.cssText = bgEl.style.cssText;
+    wbg.style.backgroundPosition = "center bottom";
+    wbg.style.backgroundSize = "cover";
+  };
+  new MutationObserver(mirror).observe(bgEl, { attributes: true, attributeFilter: ["style"] });
+  mirror();
+  const px2vw = (px) => px / window.innerWidth * 100;
+  world.addEventListener("pointerdown", (e) => {
+    if (stagePan.w <= 100) return;
+    stagePan.drag = { x0: e.clientX, panX0: stagePan.x, moved: false };
+    pan.classList.add("dragging");
+  });
+  world.addEventListener("pointermove", (e) => {
+    if (!stagePan.drag) return;
+    const dx = e.clientX - stagePan.drag.x0;
+    if (Math.abs(dx) > 6) stagePan.drag.moved = true;
+    stagePan.x = stagePan.drag.panX0 + px2vw(dx);
+    vnStageClamp();
+  });
+  const end = () => { stagePan.drag = null; pan.classList.remove("dragging"); };
+  world.addEventListener("pointerup", end);
+  world.addEventListener("pointercancel", end);
+})();
+// 🧭 场景 HUD: 这是哪 · 几个人在 · 有谁 (点开名单, 点名字滑过去看TA)
+function vnHudRender() {
+  const hud = document.getElementById("scenehud");
+  if (!hud) return;
+  const roster = _stageCast();
+  const place = (curLocData && curLocData.name) || "";
+  if (!vnMode || (!place && !roster.length)) { hud.classList.add("hidden"); return; }
+  const names = roster.map(c => c.name).join("、");
+  hud.innerHTML = `📍 <b>${escapeHtml(place || B("此处", "here"))}</b> · ` +
+    (roster.length ? B(`在场 ${roster.length} 人`, `${roster.length} here`)
+                   : B("这里只有你", "just you")) +
+    (names ? ` <span style="opacity:.75">${escapeHtml(names)}</span>` : "");
+  hud.classList.remove("hidden");
+  const list = document.getElementById("scenehudlist");
+  if (list && !list.classList.contains("hidden")) vnHudList();
+}
+function vnHudToggle() {
+  const list = document.getElementById("scenehudlist");
+  if (!list) return;
+  if (list.classList.contains("hidden")) { vnHudList(); list.classList.remove("hidden"); }
+  else list.classList.add("hidden");
+}
+function vnHudList() {
+  const list = document.getElementById("scenehudlist");
+  const roster = _stageCast();
+  list.innerHTML = "";
+  if (!roster.length) {
+    list.innerHTML = `<div class="srow"><span class="off">${B("这里现在没有别人。", "Nobody else is here.")}</span></div>`;
+    return;
+  }
+  roster.forEach(c => {
+    const row = document.createElement("div"); row.className = "srow";
+    const im = document.createElement("img");
+    im.src = (avatarMap[c.name]) || `/scene/avatar/${c.id}.jpg` + _sv(c.id);
+    im.onerror = () => im.remove();
+    const nm = document.createElement("span"); nm.textContent = c.name;
+    row.append(im, nm);
+    row.onclick = (e) => { e.stopPropagation(); vnStagePanTo(_standeeOf(c.name)); };
+    list.appendChild(row);
+  });
 }
 // ── 🌍 活世界: 你不在的时候, 世界照样往前走 (心跳/缺席因果在服务端) ──
 let livingCfg = null;

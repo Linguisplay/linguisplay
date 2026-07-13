@@ -2246,6 +2246,8 @@ def _smart_suggestions(llm, all_beats, player_input, primary, content, state, lo
             "goal": (state.get("goal") or "")[:60], "pursuit": pursuit,
             # 🎀 VN mode: choices ARE the interaction — one of them should carry teeth
             "vn": bool(tuning_for(content).get("vn_mode")),
+            # 📜 文风/方言禁令随行 (实弹: 浮生的建议冒出「得唔得/真系」— 建议也是台词)
+            "style": ((content.get("story") or {}).get("style") or "")[:200],
         }})
         outs = [dedash(s) for s in (out.get("suggestions") or []) if s][:3]
         # en story hard backstop: a chip that came back in Chinese never reaches the UI
