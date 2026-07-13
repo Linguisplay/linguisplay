@@ -182,6 +182,7 @@
 const API = "/api/v1";
 let story = blankStory();
 let secrets = [];
+let secretsSnapshot = "[]";   // ⚡ 保存提速: 秘密没动过就不重写 (曾经每次保存都全删全建)
 const SLOT_NAMES = ["晨","午","夜"];
 const REL_MODES = [["","（默认：陌生人）"],["stranger","陌生人"],["elder","长辈"],["junior","小辈"],["peer","同级"],["friend","朋友"],["flirt","暧昧对象"],["lover","恋人"],["enemy","敌人"]];
 const TUNING_KNOBS = [
@@ -254,6 +255,7 @@ async function editStory(id){
   story.endings.forEach(e=>{ e.condition=e.condition||{affinity_min:0,act_min:0,required_fragment_ids:[],required_flags:{}};
     e.condition.required_fragment_ids=e.condition.required_fragment_ids||[]; e.condition.required_flags=e.condition.required_flags||{}; });
   secrets = await j(`/stories/${id}/secrets`);
+  secretsSnapshot = JSON.stringify(secrets);
   secrets.forEach(s=>(s.fragments||[]).forEach(f=>{ f.unlock=f.unlock||{}; f.unlock.trigger_event_ids=f.unlock.trigger_event_ids||[]; }));
   openEditor();
 }
@@ -790,12 +792,16 @@ async function save(publish){
       tuning:story.tuning||{}, ...sys };
     if (!story.id){ const res=await j("/stories",{method:"POST",body:JSON.stringify(payload)}); story.id=res.id; }
     else { await j(`/stories/${story.id}`,{method:"PATCH",body:JSON.stringify(payload)}); }
-    // rewrite secrets: delete existing, recreate from the form (fragment ids are pinned
-    // client-side so act gates / props / endings keep pointing at the right fragments)
-    const existing = await j(`/stories/${story.id}/secrets`);
-    for (const e of existing) await j(`/stories/${story.id}/secrets/${e.id}`,{method:"DELETE"});
-    for (const s of secrets) await j(`/stories/${story.id}/secrets`,{method:"POST",body:JSON.stringify(s)});
-    if (publish){ const r=await j(`/stories/${story.id}/publish`,{method:"POST"}); saveMsg.textContent=`已发布 v${r.version} ✓`; }
+    // ⚡ 秘密只在真改动时重写 (曾经每次保存全删全建 = 一串串行往返, 保存显得很久);
+    // 重写时删除并行、重建保序 (fragment ids 客户端钉死, 门控引用不受影响)
+    if (JSON.stringify(secrets) !== secretsSnapshot) {
+      saveMsg.textContent="保存中：同步秘密…";
+      const existing = await j(`/stories/${story.id}/secrets`);
+      await Promise.all(existing.map(e=>j(`/stories/${story.id}/secrets/${e.id}`,{method:"DELETE"})));
+      for (const s of secrets) await j(`/stories/${story.id}/secrets`,{method:"POST",body:JSON.stringify(s)});
+      secretsSnapshot = JSON.stringify(secrets);
+    }
+    if (publish){ saveMsg.textContent="发布中…"; const r=await j(`/stories/${story.id}/publish`,{method:"POST"}); saveMsg.textContent=`已发布 v${r.version} ✓`; }
     else saveMsg.textContent="已保存草稿 ✓";
     renderMedia();
   }catch(e){ saveMsg.textContent="出错: "+e.message; }
