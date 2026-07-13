@@ -1375,6 +1375,46 @@ def _drop_pins_on_leave(state: dict[str, Any], old_lid: str | None) -> None:
             state["char_pins"] = kept
 
 
+def settle_prose_arrival(content: dict[str, Any], state: dict[str, Any],
+                         all_beats: list[dict[str, Any]], loc0_id: str | None,
+                         sp_id: str | None = None) -> bool:
+    """🧭 文实合一的确定性兜底 (实弹: 细辉带你下楼进了祥记, 旁白全写完了,
+    位置账本却钉在天台): 模型忘了申报 moved_to, 但旁白把人写到了另一处【已知】
+    地点门口 — 回合末扫描收账。规矩: 只认唯一命中 + 落地动词 + 可达路线;
+    歧义/不可达只记审计不动账。带路的说话者一起挪 (pin, 玩家离开自动释放)。"""
+    import re as _re
+    if not loc0_id or state.get("location_id") != loc0_id:
+        return False       # 本回合已有真移动 (硬移动/moved_to), 不重复记账
+    txt = "。".join((b.get("text") or "") for b in all_beats
+                    if b.get("type") == "description")
+    if not txt:
+        return False
+    hits = []
+    for loc in _locations(content):
+        nm = (loc.get("name") or "").strip()
+        if len(nm) < 3 or loc.get("id") == loc0_id or nm not in txt:
+            continue
+        i = txt.find(nm)
+        around = txt[max(0, i - 10): i + len(nm) + 10]
+        if _re.search(r"(到了|来到|进了|走进|踏进|拐进|停在|刹住|站定)", around)                 or _re.search(_re.escape(nm) + r"(门前|门口|档口|里|内)", around):
+            hits.append(loc)
+    if len(hits) != 1:
+        if hits:
+            _audit(state, "move.prose", False, "多地点歧义")
+        return False
+    dest = hits[0]
+    if not (location_available(content, state, dest)
+            and _route_exists(content, state, loc0_id, dest.get("id"))):
+        _audit(state, "move.prose", False, str(dest.get("name")), "不可达或未解锁")
+        return False
+    _drop_pins_on_leave(state, loc0_id)
+    state["location_id"] = dest["id"]
+    if sp_id:   # 带路的人不能留在原地 — 旁白写的是「他领着你走」
+        state.setdefault("char_pins", {})[sp_id] = dest["id"]
+    _audit(state, "move.prose", True, str(dest.get("name")))
+    return True
+
+
 def apply_move(content: dict[str, Any], state: dict[str, Any], dest_ref: str) -> dict[str, Any]:
     """Move the player to an authored location reachable from where they are — directly
     connected, or a few hops away through unlocked exits (the walk is implied). Characters
@@ -5977,6 +6017,9 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
                     and _route_exists(content, state, (cur_l or {}).get("id"), dest_l["id"]):
                 _drop_pins_on_leave(state, (cur_l or {}).get("id"))
                 state["location_id"] = dest_l["id"]
+                if sp_id and sp_id != pcid:
+                    # 带路的人一起走 (pin, 玩家离开自动释放) — 不然人留在原地话在新地
+                    state.setdefault("char_pins", {})[sp_id] = dest_l["id"]
                 _audit(state, "move.narrated", True, mv_to)
             elif not dest_l and sandbox_on(content) and not _bad_place_name(mv_to):
                 try:
@@ -6472,6 +6515,7 @@ def run_turn_stream(
     old_act = int(state.get("act", 1))
     # 🌅 日翻页哨兵 (Yi: 每天要给玩家自由活动的时间) — 回合末对账, 翻了天就发自由活动菜单
     _day0 = int((state.get("clock") or {}).get("day", 1) or 1)
+    _loc0 = state.get("location_id")   # 🧭 回合起点位置 (文实合一兜底的比对基准)
     # normalize the player's position to the EFFECTIVE location (unset → first authored)
     # so the location gating dimension always sees where they truly stand
     state["location_id"] = (current_location(content, state) or {}).get("id")
@@ -8380,6 +8424,10 @@ def run_turn_stream(
     # 7. immersive scene (background / mood / sfx) from this turn's text
     # 🎣 pending environmental takes: prose ratified → booked into the pocket
     settle_pending_takes(state, all_beats)
+    # 🧭 文实合一兜底: 旁白把人写到了别的已知地点而账本没动 → 确定性收账
+    if not observer and settle_prose_arrival(content, state, all_beats, _loc0,
+                                             sp_id=state.get("last_speaker_id")):
+        pass
     scene = scene_mod.classify_scene(
         " ".join(b.get("text", "") for b in all_beats), default_bg=story_default_bg(content)
     )

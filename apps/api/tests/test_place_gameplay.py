@@ -761,3 +761,23 @@ def test_place_gate_rejects_sentence_fragments():
     st["location_id"] = "hall"
     assert runtime.player_move_emergent(story, st, "去求老爹把秘方卖了", "do") is None
     assert runtime.player_move_emergent(story, st, "去后山的旧灯塔看看吧", "do") in ("后山的旧灯塔", "旧灯塔")
+
+
+def test_prose_arrival_backstop():
+    """文与实不许分家 (实弹: 细辉嘴上带路+旁白全程走完, 位置账本钉在天台):
+    moved_to 没申报但旁白落地在唯一已知地点 → 回合末确定性收账, 带路者一起挪。"""
+    content = {"story": {"locations": [
+        {"id": "l1", "name": "天台屋", "exits": ["祥记面档"], "unlock": {}},
+        {"id": "l2", "name": "祥记面档", "exits": ["天台屋"], "unlock": {}}]}}
+    state = {"location_id": "l1"}
+    beats = [{"type": "description",
+              "text": "他在祥记面档门前刹住脚，掀开透明塑料门帘，朝里头灶台边喊了一声。"}]
+    assert runtime.settle_prose_arrival(content, state, beats, "l1", sp_id="c9")
+    assert state["location_id"] == "l2"
+    assert state["char_pins"]["c9"] == "l2"          # 带路的人跟着到场
+    # 本回合已有真移动 → 不重复收账; 纯对话提及地名(无落地动词) → 不动账
+    assert not runtime.settle_prose_arrival(content, state, beats, "l1")
+    state2 = {"location_id": "l1"}
+    talk = [{"type": "description", "text": "他说祥记面档的云吞面不错，改天请你。"}]
+    assert not runtime.settle_prose_arrival(content, state2, talk, "l1")
+    assert state2["location_id"] == "l1"
