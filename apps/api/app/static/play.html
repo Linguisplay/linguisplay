@@ -388,31 +388,57 @@ body.vn #rebirth { position: fixed; z-index: 76; left: 50%; transform: translate
    看场景(滑舞台)和推剧情(点面板)分区, 互不打架。舞台在 z:-1 (背景层, #bg 之上、
    一切 UI 之下), 拖拽手势在 document 层接 (舞台自己不吃指针, 绝不挡按钮) */
 #vnworld { position: fixed; inset: 0; z-index: -1; overflow: hidden;
-  pointer-events: none; display: none; }
+  pointer-events: none; display: none;
+  /* 🎥 伪3D相机 (Yi 定: 弹丸论破的距离感): 透视投影, 视点略高于画面中心 */
+  perspective: 1000px; perspective-origin: 50% 42%; }
 body.vn #vnworld { display: block; }
 body.vn { touch-action: pan-y; }
+/* 地面暗角: 立牌脚下的地板渐暗, 人是「站在房间里」而不是贴在图上 */
+#vnworld::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0;
+  height: 24vh; z-index: 3; background: linear-gradient(transparent, rgba(0,0,0,.38)); }
 #vnpan { position: absolute; top: 0; bottom: 0; left: 0; width: 100%;
-  transition: transform .6s cubic-bezier(.22,.8,.3,1); will-change: transform; }
+  transition: transform .6s cubic-bezier(.22,.8,.3,1); will-change: transform;
+  transform-style: preserve-3d; z-index: 2; }
 #vnpan.dragging { transition: none; }
-#vnwbg { position: absolute; inset: 0; background: linear-gradient(135deg,#15151c,#0d0d12);
+/* 背景独立成层, 比屏宽 24%: 横滑时以 0.35x 速度视差跟随 — 深度感的第一要素 */
+#vnwbg { position: absolute; top: 0; bottom: 0; left: -12%; width: 124%;
+  background: linear-gradient(135deg,#15151c,#0d0d12);
   background-size: cover; background-position: center bottom;
-  transition: background-image .6s ease; }
+  transition: background-image .6s ease, transform .6s cubic-bezier(.22,.8,.3,1);
+  will-change: transform; z-index: 1; }
+#vnwbg.dragging { transition: background-image .6s ease; }
 #vnwbg::after { content: ""; position: absolute; inset: 0;
-  background: radial-gradient(ellipse at center, rgba(0,0,0,.1), rgba(0,0,0,.55)); }
-/* 立牌: 站在地上的透底人形, 说话点亮, 其余压暗; 脚下一枚接地影 (立牌感的关键) */
-.standee { position: absolute; bottom: 0; transform: translateX(-50%);
-  transition: opacity .4s ease; }
+  background: radial-gradient(ellipse at center, rgba(0,0,0,.08), rgba(0,0,0,.58)); }
+/* 立牌: 精致纸板 (Yi 定) — 微侧角 rotateY 像斜插在场景里的立牌, 说话者推近
+   (translateZ)、其余退后; 纸板侧缘一道窄影出「厚度」; 脚下接地影随深度缩放 */
+.standee { position: absolute; bottom: 0; --z: -70px; --ty: 0deg;
+  transform: translateX(-50%) translateZ(var(--z)) rotateY(var(--ty));
+  transition: transform .55s cubic-bezier(.22,.8,.3,1), opacity .4s ease;
+  transform-style: preserve-3d; }
+.standee[data-tilt="l"] { --ty: 6deg; }
+.standee[data-tilt="r"] { --ty: -6deg; }
+.standee.lit { --z: 55px; --ty: 0deg; }
+.standee.enter { animation: standeeIn .7s cubic-bezier(.22,.8,.3,1); }
+@keyframes standeeIn {
+  from { opacity: 0; transform: translateX(-50%) translateZ(-190px) rotateY(26deg); } }
 .standee img { display: block; height: 60vh; max-width: 74vw;
   object-fit: contain; object-position: bottom;
-  filter: brightness(.62) saturate(.85) drop-shadow(0 0 22px rgba(0,0,0,.6));
+  filter: brightness(.6) saturate(.82)
+          drop-shadow(-3px 2px 2px rgba(0,0,0,.34))
+          drop-shadow(0 0 22px rgba(0,0,0,.6));
   transform-origin: 50% 100%; animation: vnbreathe 5.6s ease-in-out infinite;
   transition: filter .35s ease, height .35s ease; }
 .standee.lit img { height: 66vh;
-  filter: brightness(1.02) drop-shadow(0 0 2px rgba(255,244,214,.35))
-          drop-shadow(0 0 26px rgba(0,0,0,.65)); }
-.standee .shade { position: absolute; left: 50%; bottom: -2px; transform: translateX(-50%);
+  filter: brightness(1.03) saturate(1)
+          drop-shadow(-3px 2px 2px rgba(0,0,0,.3))
+          drop-shadow(0 0 2px rgba(255,244,214,.32))
+          drop-shadow(0 12px 30px rgba(0,0,0,.6)); }
+.standee .shade { position: absolute; left: 50%; bottom: -2px;
+  transform: translateX(-50%) scaleX(var(--sh,1));
   width: 72%; height: 16px; border-radius: 50%;
+  transition: transform .55s ease, opacity .55s ease;
   background: radial-gradient(ellipse at center, rgba(0,0,0,.5), transparent 68%); }
+.standee.lit .shade { --sh: 1.18; opacity: .95; }
 .standee.bust img { height: 46vh !important; }
 .standee.bust.lit img { height: 50vh !important; }
 @keyframes vnbreathe { 50% { scale: 1 1.006; } }
@@ -644,7 +670,8 @@ body.dread #dread { opacity:1; }
      舞台是【背景层】(z:-1): 顶栏/面板/按钮全部浮在场景上面 — 盖住顶栏是层级事故 (实弹) -->
 <button id="vnlogClose" onclick="vnToggleLog()">← 返回</button>
 <div id="vnworld">
-  <div id="vnpan"><div id="vnwbg"></div></div>
+  <div id="vnwbg"></div>
+  <div id="vnpan"></div>
 </div>
 <!-- 🎀 VN window (galgame 演出): 场景HUD + dialogue box + click-to-advance + choices -->
 <div id="vnui" class="hidden" onclick="vnUnhide()">
@@ -2809,15 +2836,18 @@ function vnStageSync() {
     let el = pan.querySelector(`.standee[data-cid="${c.id}"]`);
     if (!el) {
       el = document.createElement("div");
-      el.className = "standee"; el.dataset.cid = c.id; el.dataset.name = c.name;
+      el.className = "standee enter"; el.dataset.cid = c.id; el.dataset.name = c.name;
       const img = document.createElement("img"); img.alt = c.name;
       const sh = document.createElement("i"); sh.className = "shade";
       el.append(img, sh);
       pan.appendChild(el);
       _vnSet(img, c.id, null);
+      setTimeout(() => el.classList.remove("enter"), 800);
     }
     el.style.left = (n <= 1 ? 50 : (26 + i * 52)) + "vw";
     el.style.zIndex = String(2 + i);
+    // 🃏 纸板斜角: 左右交替微侧 (弹丸论破的立牌不是正贴的), 说话者回正
+    el.dataset.tilt = n <= 1 ? "" : (i % 2 ? "r" : "l");
   });
   vnStageClamp();
   vnHudRender();
@@ -2838,6 +2868,12 @@ function vnStageClamp() {
   stagePan.x = Math.max(min, Math.min(0, stagePan.x));
   const pan = document.getElementById("vnpan");
   if (pan) pan.style.transform = `translateX(${stagePan.x}px)`;
+  // 🎥 视差: 背景以 0.35x 跟随 — 立牌与房间分层, 距离感的第一要素
+  const wbg = document.getElementById("vnwbg");
+  if (wbg) {
+    wbg.style.transform = `translateX(${stagePan.x * 0.35}px)`;
+    wbg.classList.toggle("dragging", !!(pan && pan.classList.contains("dragging")));
+  }
 }
 function vnStagePanTo(el) {
   // 把这具立牌平移到画面中央 (说话者永远被看见)
@@ -2879,9 +2915,12 @@ function vnSprite(name, expr) {
   const wbg = document.getElementById("vnwbg");
   const bgEl = document.getElementById("bg");
   const mirror = () => {
-    wbg.style.cssText = bgEl.style.cssText;
-    wbg.style.backgroundPosition = "center bottom";
+    // 只镜像背景绘制属性 — 几何 (视差加宽/位移) 归 CSS 与 clamp 管
+    wbg.style.background = bgEl.style.background;
+    wbg.style.backgroundImage = bgEl.style.backgroundImage;
     wbg.style.backgroundSize = "cover";
+    wbg.style.backgroundPosition = "center bottom";
+    wbg.style.backgroundRepeat = "no-repeat";
   };
   new MutationObserver(mirror).observe(bgEl, { attributes: true, attributeFilter: ["style"] });
   mirror();
