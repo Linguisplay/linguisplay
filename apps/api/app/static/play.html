@@ -1225,7 +1225,7 @@ async function enterRun(run) {
   spriteMap = {};
   // 立绘按天带版本戳: 服务端换图后老玩家至多一天内就能看到新脸 (客户端触发的
   // 重画仍走 Date.now() 即时失效)
-  const dayv = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const dayv = new Date().toISOString().slice(0, 13).replace(/[-T]/g, "");
   ((st0 && st0.characters) || []).forEach(c => {
     if (c.name && c.id) { spriteMap[c.name] = c.id; spriteVer[c.id] = spriteVer[c.id] || dayv; }
   });
@@ -3091,8 +3091,15 @@ async function playBeatVN(b, skipLog) {
   box.className = isNarr ? "narr" : "";
   // 📖 分页 (Yi: 一页字太多): 长拍按句读切成 ≤76 字的页, 逐页点击翻
   for (const page of paginate(b.text)) {
-    await typeInto(box, page, isNarr ? 16 : 22);
-    await vnWait(900 + page.length * 55);
+    if (vnLiveBuf && vnLiveBuf.includes(page)) {
+      // 这一页流式时已经读过 — 秒出 + 短驻留, 不再逐字重打
+      box.textContent = page;
+      if (box.scrollHeight > box.clientHeight + 2) box.scrollTop = box.scrollHeight;
+      await vnWait(500 + page.length * 22);
+    } else {
+      await typeInto(box, page, isNarr ? 16 : 22);
+      await vnWait(900 + page.length * 55);
+    }
   }
 }
 // 一句一页 (Yi 铁律: 分批次出现, 一个句号一次点击 — 古典 ADV 的呼吸感):
@@ -3303,7 +3310,7 @@ async function send(chOverride) {
 // them one-by-one (typed) the moment they arrive. Used by normal turns AND confrontations.
 async function streamTurn(url, bodyObj) {
   playQ = []; playing = false; streamDone = false; firstBeat = true;
-  clearLive(); liveText = ""; skipType = false;
+  clearLive(); liveText = ""; vnLiveBuf = ""; skipType = false;
   if (url.endsWith("/play") && bodyObj && (bodyObj.input || "").trim()) lastTurnBody = bodyObj;
   afterPlay = { suggest: null, ending: undefined, moveReq: null, moments: null, relDeltas: null, choice: null };
   renderMoveAsk(null);  // clear any prior pending move prompt
@@ -3395,7 +3402,7 @@ let playQ = [], playing = false, streamDone = false, firstBeat = true, afterPlay
 // so narration pours into a desc block and speech pours into a NAMED dialogue bubble
 // the moment each is written (旁白与台词分家，从第一个字就分). The canonical beats then
 // replace the live draft (matched → instant, so nothing reads twice).
-let liveEls = [], liveCur = null, liveKind = null, liveText = "";
+let liveEls = [], liveCur = null, liveKind = null, liveText = "", vnLiveBuf = "";
 const _normLive = s => (s || "").replace(/[「」『』——…—，。！？；：、\s]/g, "");
 function clearLive() {
   liveEls.forEach(el => el.remove());
@@ -3404,6 +3411,8 @@ function clearLive() {
 function onToken(t) {
   if (!t || !t.text) return;
   if (firstBeat) { hideTyping(); firstBeat = false; }
+  // 🎀 VN 也吃流式 (Yi: 等待太长): 正在生成的句子实时上屏, 正式拍到了已读页秒出
+  if (vnMode) { vnToken(t); return; }
   liveText += t.text;
   const kind = t.kind === "speech" ? "speech" : "narration";
   if (!liveCur || kind !== liveKind) {
@@ -3419,6 +3428,22 @@ function onToken(t) {
   }
   liveCur.textContent += t.text;
   chat.scrollTop = chat.scrollHeight;
+}
+// VN 流式实况: 只演「正在成形的最后一句」— 完整回放交给正式拍 (已读的不重打)
+function vnToken(t) {
+  vnLiveBuf += t.text;
+  if (vnLocked() || document.getElementById("loadov")) return;   // 幕布后面不上屏
+  if (playing || (typeof playQ !== "undefined" && playQ.length)) return; // 正式拍在台上, 不抢
+  const box = document.getElementById("vntext");
+  const nameEl = document.getElementById("vnname");
+  if (!box) return;
+  const isSpeech = t.kind === "speech";
+  if (isSpeech && t.speaker) { nameEl.textContent = t.speaker; nameEl.classList.remove("hidden"); }
+  else if (!isSpeech) nameEl.classList.add("hidden");
+  box.className = isSpeech ? "" : "narr";
+  const segs = paginate(vnLiveBuf);
+  box.textContent = segs[segs.length - 1] || "";
+  if (box.scrollHeight > box.clientHeight + 2) box.scrollTop = box.scrollHeight;
 }
 async function pump() {
   if (playing) return; playing = true;

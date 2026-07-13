@@ -1722,55 +1722,79 @@ def conflict_pairs(content: dict[str, Any], state: dict[str, Any]) -> list[dict[
     return out
 
 
+_BRIEF_CACHE: dict = {}      # 场次键 → brief (主线程读+写入 state; 后台线程只写这里)
+_BRIEF_INFLIGHT: set = set()
+_BRIEF_CAP = 60
+
+
 def ensure_scene_brief(content: dict[str, Any], state: dict[str, Any],
                        persona: dict[str, Any], llm: LLM) -> dict[str, Any]:
-    """场次单: 每场一次 (缓存按 地点|时段|在场 键), 导演读全部卡 (含玩家卡) 后给出
-    {戏眼, 每人心事, 主动权, 暗流}。降级为空 = 一切照旧, 绝不挡回合。"""
+    """场次单: 每场一次 (缓存按 剧本|地点|时段|在场 键), 导演读全部卡 (含玩家卡) 给出
+    {戏眼, 每人心事, 主动权, 暗流}。⚡ 不占关键路径 (实弹: 换场回合 12s 顶在首字前):
+    主线程只备料 + 查缓存, 模型调用在后台线程, 算好了下一回合才用。降级为空 = 一切照旧。"""
     roster = [c for c in scene_characters(content, state)
               if c.get("id") and c.get("id") != state.get("player_character_id")
               and c.get("name")]
     if not roster:
         state.pop("scene_brief", None)
         return {}
-    key = "|".join([str(state.get("location_id") or ""),
+    key = "|".join([str(((content.get("story") or {}).get("id")) or ""),
+                    str(state.get("location_id") or ""),
                     active_slot(content, state) or "",
                     ",".join(sorted(c["id"] for c in roster))])
     sb = state.get("scene_brief")
     if isinstance(sb, dict) and sb.get("key") == key:
         return sb
+    state.pop("scene_brief", None)   # 旧场的单子不许指挥新场
+    hit = _BRIEF_CACHE.get(key)
+    if isinstance(hit, dict):
+        state["scene_brief"] = dict(hit)
+        _audit(state, "director.brief", bool(hit.get("crux")),
+               (hit.get("crux") or "degrade")[:24])
+        return hit
+    if key in _BRIEF_INFLIGHT:
+        return {}
+    # ── 备料全在主线程 (线程碰 state 会脏账本: char_agenda 会写 char_sim) ──
+    names = {c.get("name") for c in roster}
     ids_here = {c["id"] for c in roster}
     spark = next((p for p in conflict_pairs(content, state)
                   if p["a_id"] in ids_here or p["b_id"] in ids_here), None)
-    due = [s.get("text") for s in (state.get("setups") or [])
-           if not s.get("paid")][:2]   # 📌 未收的伏笔提给导演
-    try:
-        out = llm.generate({"director_brief": True,
-                            "place": (current_location(content, state) or {}).get("name") or "",
-                            "slot": (clock_view(content, state) or {}).get("label", ""),
-                            "cast": [{"name": c.get("name"), "gender": c.get("gender") or "",
-                                      "traits": c.get("traits") or {},
-                                      "persona": (c.get("persona_text") or "")[:80],
-                                      "goal": _agenda_prompt(content, state, c)[:80]}
-                                     for c in roster[:4]],
-                            "player": player_card(content, state, persona),
-                            "spark": (f"{spark['a']}×{spark['b']}（{spark['label']}）："
-                                      f"{spark['a_goal']} 撞上 {spark['b_goal']}" if spark else ""),
-                            "setups": due}) or {}
-    except Exception:
-        out = {}
-    minds = out.get("minds") if isinstance(out.get("minds"), dict) else {}
-    names = {c.get("name") for c in roster}
-    brief = {"key": key,
-             "crux": dedash(str(out.get("crux") or "").strip())[:30],
-             "minds": {n: dedash(str(t).strip())[:24]
-                       for n, t in minds.items() if n in names and str(t).strip()},
-             "initiative": (str(out.get("initiative") or "").strip()
-                            if str(out.get("initiative") or "").strip() in names else ""),
-             "spark": dedash(str(out.get("spark") or "").strip())[:36]}
-    state["scene_brief"] = brief
-    _audit(state, "director.brief", bool(brief["crux"]),
-           (brief["crux"] or "degrade")[:24])
-    return brief
+    payload = {"director_brief": True,
+               "place": (current_location(content, state) or {}).get("name") or "",
+               "slot": (clock_view(content, state) or {}).get("label", ""),
+               "cast": [{"name": c.get("name"), "gender": c.get("gender") or "",
+                         "traits": c.get("traits") or {},
+                         "persona": (c.get("persona_text") or "")[:80],
+                         "goal": _agenda_prompt(content, state, c)[:80]}
+                        for c in roster[:4]],
+               "player": player_card(content, state, persona),
+               "spark": (f"{spark['a']}×{spark['b']}（{spark['label']}）："
+                         f"{spark['a_goal']} 撞上 {spark['b_goal']}" if spark else ""),
+               "setups": [s.get("text") for s in (state.get("setups") or [])
+                          if not s.get("paid")][:2]}
+    _BRIEF_INFLIGHT.add(key)
+
+    def _work():
+        try:
+            out = llm.generate(payload) or {}
+        except Exception:
+            out = {}
+        minds = out.get("minds") if isinstance(out.get("minds"), dict) else {}
+        brief = {"key": key,
+                 "crux": dedash(str(out.get("crux") or "").strip())[:30],
+                 "minds": {n: dedash(str(t).strip())[:24]
+                           for n, t in minds.items() if n in names and str(t).strip()},
+                 "initiative": (str(out.get("initiative") or "").strip()
+                                if str(out.get("initiative") or "").strip() in names else ""),
+                 "spark": dedash(str(out.get("spark") or "").strip())[:36]}
+        while len(_BRIEF_CACHE) >= _BRIEF_CAP:
+            _BRIEF_CACHE.pop(next(iter(_BRIEF_CACHE)), None)
+        _BRIEF_CACHE[key] = brief
+        _BRIEF_INFLIGHT.discard(key)
+
+    import threading
+    threading.Thread(target=_work, daemon=True).start()
+    return {}
 
 
 def set_suggestions(state: dict[str, Any], items: list[str],
@@ -8330,7 +8354,10 @@ def run_turn_stream(
             suggestions = _free
         _audit(state, "day.free", True, f"day{_day1} menu:{len(_free)}")
 
-    # 🪞 玩家档案 (活世界 P2): 记回合, 到节拍就蒸馏一次; 见证名单=此刻在场的角色
+    # 🪞 玩家档案 (活世界 P2): 记回合, 到节拍就蒸馏一次; 见证名单=此刻在场的角色。
+    # ⚡ 蒸馏在后台线程 (Yi: 等待太长 — 曾最多顶 10s), 结果下一回合 apply_pending 合账
+    if profile_mod.apply_pending(state):
+        _audit(state, "profile.merged", True, "后台蒸馏入账")
     if player_input and channel in ("say", "do") and not observer:
         if profile_mod.note_turn(state):
             _wit = [{"id": c.get("id"), "name": c.get("name")}
@@ -8339,8 +8366,8 @@ def run_turn_stream(
             _rec = [f"玩家：{player_input}"] + [
                 f"{b.get('speaker_name') or '旁白'}：{(b.get('text') or '')[:100]}"
                 for b in all_beats[-12:]]
-            _ok = profile_mod.distill(content, state, _rec, _wit, llm)
-            _audit(state, "profile.distill", _ok, f"wit={len(_wit)}")
+            profile_mod.distill_async(content, state, _rec, _wit, llm)
+            _audit(state, "profile.distill", True, f"后台 wit={len(_wit)}")
 
     # 🔎 导演审稿的比对底稿: 本回合正文留档, 下回合据此识破「整局复读」
     state["_last_text"] = " ".join((b.get("text") or "") for b in all_beats)[:1600]

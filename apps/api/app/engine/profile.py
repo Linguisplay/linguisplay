@@ -46,27 +46,12 @@ def note_turn(state: dict[str, Any]) -> bool:
     return p["turns"] % DISTILL_EVERY == 0
 
 
-def distill(content: dict[str, Any], state: dict[str, Any],
-            recent_lines: list[str], witnesses: list[dict[str, Any]],
-            llm: Any) -> bool:
-    """一次蒸馏: 近期对话 → facts 增量合并 + 在场角色的印象更新.
-    witnesses = [{id, name}] — 引擎裁定的见证名单, 模型无权越界."""
-    if not witnesses and not recent_lines:
-        return False
-    p = _prof(state)
-    prior = {"facts": facts_of(state),
-             "impressions": {w["id"]: impression_of(state, w["id"])
-                             for w in witnesses if w.get("id")}}
-    try:
-        out = llm.generate({"player_profile": True,
-                            "recent": [str(x)[:120] for x in recent_lines[-16:]],
-                            "prior": prior,
-                            "witnesses": [{"id": w.get("id"), "name": w.get("name")}
-                                          for w in witnesses if w.get("id")]}) or {}
-    except Exception:
-        return False
+def _merge(state: dict[str, Any], out: Any,
+           witnesses: list[dict[str, Any]]) -> bool:
+    """把一次蒸馏的模型输出合进档案 (只在主线程调用 — 线程绝不碰 state)."""
     if not isinstance(out, dict):
         return False
+    p = _prof(state)
     facts = [str(f).strip()[:40] for f in (out.get("facts") or []) if str(f).strip()]
     if facts:
         p["facts"] = facts[:FACTS_CAP]
@@ -78,4 +63,73 @@ def distill(content: dict[str, Any], state: dict[str, Any],
             t = str(txt or "").strip()[:IMPRESSION_CAP]
             if cid in allowed and t:   # 认知边界: 没见证过的角色不许有印象
                 p.setdefault("by_char", {})[cid] = {"text": t, "day": day}
-    return True
+    return bool(facts or imps)
+
+
+def distill(content: dict[str, Any], state: dict[str, Any],
+            recent_lines: list[str], witnesses: list[dict[str, Any]],
+            llm: Any) -> bool:
+    """一次蒸馏: 近期对话 → facts 增量合并 + 在场角色的印象更新.
+    witnesses = [{id, name}] — 引擎裁定的见证名单, 模型无权越界."""
+    if not witnesses and not recent_lines:
+        return False
+    prior = {"facts": facts_of(state),
+             "impressions": {w["id"]: impression_of(state, w["id"])
+                             for w in witnesses if w.get("id")}}
+    try:
+        out = llm.generate({"player_profile": True,
+                            "recent": [str(x)[:120] for x in recent_lines[-16:]],
+                            "prior": prior,
+                            "witnesses": [{"id": w.get("id"), "name": w.get("name")}
+                                          for w in witnesses if w.get("id")]}) or {}
+    except Exception:
+        return False
+    return _merge(state, out, witnesses)
+
+
+# ── ⚡ 后台蒸馏 (Yi: 聊天等待太长 — 蒸馏最多顶 10s 在回合尾): 主线程备料,
+# 线程只跑模型, 结果下一回合 apply_pending 合账 (线程绝不碰 state) ──
+_PENDING: dict = {}
+_PENDING_CAP = 30
+
+
+def distill_async(content: dict[str, Any], state: dict[str, Any],
+                  recent_lines: list[str], witnesses: list[dict[str, Any]],
+                  llm: Any) -> None:
+    if not witnesses and not recent_lines:
+        return
+    import threading
+    import uuid
+    prior = {"facts": facts_of(state),
+             "impressions": {w["id"]: impression_of(state, w["id"])
+                             for w in witnesses if w.get("id")}}
+    payload = {"player_profile": True,
+               "recent": [str(x)[:120] for x in recent_lines[-16:]],
+               "prior": prior,
+               "witnesses": [{"id": w.get("id"), "name": w.get("name")}
+                             for w in witnesses if w.get("id")]}
+    tok = uuid.uuid4().hex[:12]
+    state["profile_pending"] = tok
+
+    def _work():
+        try:
+            out = llm.generate(payload) or {}
+        except Exception:
+            out = {}
+        while len(_PENDING) >= _PENDING_CAP:
+            _PENDING.pop(next(iter(_PENDING)), None)
+        _PENDING[tok] = {"out": out, "witnesses": witnesses}
+
+    threading.Thread(target=_work, daemon=True).start()
+
+
+def apply_pending(state: dict[str, Any]) -> bool:
+    """回合开头收上一轮的后台蒸馏 (没好就留着下回合再收)."""
+    tok = state.get("profile_pending")
+    if not tok:
+        return False
+    ent = _PENDING.pop(tok, None)
+    if ent is None:
+        return False
+    state.pop("profile_pending", None)
+    return _merge(state, ent.get("out"), ent.get("witnesses") or [])

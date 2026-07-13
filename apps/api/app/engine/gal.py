@@ -613,12 +613,34 @@ def cg_beats(gal: dict[str, Any]) -> list[dict]:
     return out
 
 
+def edge_polish(png_bytes: bytes) -> bytes:
+    """🪒 立牌边缘工艺 (Yi: 裁剪明显粗糙): rembg 的生边有 1px 光晕圈和锯齿 —
+    alpha 收一圈 (MinFilter 3) 杀掉背景色镶边, 再轻羽化 (0.8px 高斯) 磨掉锯齿。
+    Degrades to input on any failure."""
+    import io as _io
+    try:
+        from PIL import Image, ImageFilter
+        im = Image.open(_io.BytesIO(png_bytes))
+        if im.mode != "RGBA":
+            return png_bytes
+        a = im.getchannel("A")
+        a = a.filter(ImageFilter.MinFilter(3))
+        a = a.filter(ImageFilter.GaussianBlur(0.8))
+        im.putalpha(a)
+        buf = _io.BytesIO()
+        im.save(buf, format="PNG")
+        return buf.getvalue()
+    except Exception:
+        return png_bytes
+
+
 def debg(png_bytes: bytes) -> bytes:
-    """rembg 抠底 → transparent PNG. Degrades to the original on any failure —
-    a sprite with a dark backdrop still masks acceptably client-side."""
+    """rembg 抠底 → transparent PNG (边缘过一道 edge_polish 工艺).
+    Degrades to the original on any failure — a sprite with a dark backdrop
+    still masks acceptably client-side."""
     try:
         from rembg import remove
-        return remove(png_bytes)
+        return edge_polish(remove(png_bytes))
     except Exception:
         return png_bytes
 
