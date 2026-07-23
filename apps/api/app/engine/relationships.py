@@ -114,13 +114,28 @@ def allowed_modes(char: dict[str, Any]) -> list[str]:
 
 # Charm craft for 暧昧/恋人 — distilled from romance-genre guides. Always on (rating-agnostic):
 # how to flirt/love WELL — tension over bluntness, body language over cheesy lines, never油腻.
+# 🪝 期待感手艺 (Yi 2026-07-22: 撩玩家要制造期待感) — 网研沉淀: 蔡格尼克效应
+# (话说一半最挂心) + 恋与制作人「拧开的瓶盖」(心动是具体小动作) + 落差萌。
+# 钩子要具体到时间/地点 — 模型落成约定后, 引擎的约定账本会真的记账并催赴约。
+_HOOK_CRAFT = ("离场的手艺（期待感）：每次道别或聊到兴头，给下一次留一个具体的钩子——"
+               "话说一半（「这事下回见面才告诉你」）、一个小约定（明晚、老地方）、"
+               "或一件没做完的事。钩子要具体，让对方带着惦记走——比说满更勾人的，是刚好差一口。")
 _CHARM_PLAYBOOK = {
+    "friend": "（将撩未撩）朋友的皮还披着，心思可以开始漏：玩笑说到一半忽然认真半秒，再若无其事笑开；"
+    "对TA的小事上心得超出普通朋友半分（记得TA顺口提过的、顺手带一份TA提过想要的），被点破就不认；"
+    "偶尔给一次落差——平时怎样的你，忽然一次不一样（冷的人的一次柔软、闹的人的一次安静），"
+    "一次落差胜过十句甜话。分寸铁律：不表白、不越界，让「只是朋友」四个字微微发烫就够。"
+    + _HOOK_CRAFT,
     "flirt": "（撩拨手艺）你勾人靠的是【张力】，不是直白：进一步、退半步，欲言又止，话里带钩子让对方自己去品；"
     "多用眼神、停顿、不经意的靠近与触碰、忽然的安静，而不是满嘴情话。可以反撩、接梗、戳破对方的小心思又偏不说透。"
-    "切忌油腻土味情话，切忌交浅就掏心、一上来就表白——暧昧的全部妙处，就在那层还没捅破的窗户纸上。",
+    "推拉有度：损里要垫着喜欢（「你这人真烦…怎么还挺让人惦记的」），推一句就要拉一句，绝不真伤人；"
+    "心动落在具体小动作上（递过去的水先拧松瓶盖、记得TA的忌口），不落在情话里。"
+    "切忌油腻土味情话，切忌交浅就掏心、一上来就表白——暧昧的全部妙处，就在那层还没捅破的窗户纸上。"
+    + _HOOK_CRAFT,
     "lover": "（亲密手艺）你的爱意要落在具体的小事和身体语言上，不是空喊「我爱你」：一个眼神、记得对方的习惯、"
     "忽然的吃醋、护短、在 TA 面前卸下防备露出的脆弱。情话也得是只对 TA 说得出口、带着你性格烙印的那种，"
-    "绝不要通用的甜腻台词。爱意越具体、越有你的样子，越动人。",
+    "绝不要通用的甜腻台词。爱意越具体、越有你的样子，越动人。老夫老妻不等于没火花：偶尔重新撩一次自己人。"
+    + _HOOK_CRAFT,
 }
 
 # 18+ ONLY: stage-by-stage craft for a mature run — attraction simmers before it names
@@ -223,14 +238,54 @@ def style_block(style_id: str | None, retreat: bool = False) -> str:
     return out
 
 
-def playbook_block(mode_id: str, mature: bool = False) -> str:
+# ── 🎯 主动接近手段库 (Yi: 干活维持剧情太扁平 — 不同初始关系用不同手段) ──────
+# 引擎按关系模式选战术, 模型只管把战术演成贴人设的具体行为。全部通用描述 (引擎无
+# 专名法); 差事只属于上下级/长辈的自然往来 — 陌生人阶段的心动线走追求阶梯。
+_TACTICS = {
+    "stranger": "找由头搭话、互相摸底、不轻易交底；想再见面就留一个口实（东西没给完、话没说完）",
+    "peer": "拉伙搭把手、交换消息、约着吃口东西喝一杯；有难处直说，讲究有来有往",
+    "friend": "分享点私事、真心邀约、把要紧的事托付给对方；关心要落在具体处",
+    "elder": "考校、提点、吩咐点小差事（这是你们之间自然的往来）；赏识要摆在事上",
+    "junior": "跑腿献殷勤、请教讨主意、抢着把小事办了；亲近要靠勤快挣",
+    "enemy": "试探底线、警告划界、当面挑明；愿意缓和就从一件小的让步开始",
+    "flirt": "制造独处的由头、记住对方随口提过的喜好、半真半假地逗、送点小东西",
+    "lover": "日常的惦记（带样东西、一句没头没尾的话）、正经的约会、吃醋要说出口不憋着",
+}
+_COURT_LADDER = (
+    "【追求阶梯】你对对方有心思但交情未到（按火候来，一次只走一步）：先【刷存在感】——"
+    "故意反复出现在对方的路线上混个眼熟；搭上话后【小恩小惠】——请对方尝点小东西、"
+    "顺手帮个不求回报的小忙；再【借景生情】——天气、路况、手边的物件都是制造照面的由头；"
+    "每次都【留个口实】让下次见面顺理成章。【铁律】绝不派差事使唤对方——你们还不是那种关系；"
+    "殷勤过了头会吓退人，进两三步就要退半步。")
+
+
+def _romance_capable(char: dict[str, Any]) -> bool:
+    allowed = char.get("relation_allowed") or []
+    return bool(char.get("love_style")) or "flirt" in allowed or "lover" in allowed
+
+
+def approach_block(char: dict[str, Any] | None, mode_id: str) -> str:
+    """【主动手段】per mode — 干活不是唯一的推剧情方式。"""
+    t = _TACTICS.get(mode_id) or _TACTICS["stranger"]
+    block = f"【你主动推近关系的手段（照此行事，演成贴你人设的具体行为）】{t}"
+    if char is not None and mode_id in ("stranger", "peer") and _romance_capable(char):
+        block += "\n" + _COURT_LADDER
+    return block
+
+
+def playbook_block(mode_id: str, mature: bool = False,
+                   char: dict[str, Any] | None = None) -> str:
     """The injected guidance for the current relationship mode. When `mature` (an 18+ run),
     every stage gets attraction/arc craft and 暧昧/恋人 get explicit-intimacy technique."""
     a = get(mode_id)
     block = (f"【你此刻和对方的关系：{a['name']}】（这决定你这一轮怎么对待对方——"
              f"语气、称呼、距离、给多少都要贴合它）：{a['playbook']}")
+    if char is not None:
+        block += "\n" + approach_block(char, mode_id)
     if mode_id in _CHARM_PLAYBOOK:
-        block += "\n" + _CHARM_PLAYBOOK[mode_id]
+        # 朋友档的将撩未撩只给可恋爱的角色 (暧昧/恋人档位本身已含心动, 不用再验)
+        if mode_id != "friend" or (char is not None and _romance_capable(char)):
+            block += "\n" + _CHARM_PLAYBOOK[mode_id]
     if mature:
         if mode_id in _MATURE_PLAYBOOK:
             block += "\n" + _MATURE_PLAYBOOK[mode_id]

@@ -50,6 +50,7 @@ class User(Base):
     display_name: Mapped[str | None] = mapped_column(String(80), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     subscription_tier: Mapped[str] = mapped_column(String(32), default="free")
+    taste: Mapped[dict] = mapped_column(JSON, default=dict)   # 🧭 账号级口味 (跨档风格沉淀)
 
     # settings
     content_level: Mapped[str] = mapped_column(String(16), default="mild")
@@ -163,6 +164,9 @@ class Story(Base):
     verdict: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # 🏖 无尽沙盒 {enabled, real_time}; None = a normal authored story
     sandbox: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 🐲 生物账本 (第三实体类, Yi 拍板 2026-07-20): 兽/龙/鬼 — 行为实体非社交实体
+    creatures: Mapped[list] = mapped_column(JSON, default=list)
+    factions: Mapped[list] = mapped_column(JSON, default=list)   # 🏛 阵营
     # 🎀 galgame 生成器 (docs/galgame-maker.md): kind="gal" marks a compiled work;
     # gal = {status, progress, source_text, characters, scenes, script{pov:{chapters}},
     #        manifest, protagonist_id, art_style_preset}
@@ -320,3 +324,45 @@ class Beat(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
     run: Mapped[Run] = relationship(back_populates="beats")
+
+
+class Wallet(Base):
+    """💎 平台币钱包 (P1 影子系统, Yi 拍板 Roblox 三阶段): 月石只买内容资格。
+    P1 不接支付 — 首次访问赠 200 内测币; P2 真钱阶段接充值与提现。"""
+
+    __tablename__ = "wallets"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    balance: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+
+
+class StoryPack(Base):
+    """💎 创作者收费包: 挂在剧本上的内容资格 (门票/开局礼包/金手指位…)。
+    grants 全确定性发货 (run 创建时结算), 一分钱 LLM 不烧。"""
+
+    __tablename__ = "story_packs"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    story_id: Mapped[str] = mapped_column(ForeignKey("stories.id"), index=True)
+    name: Mapped[str] = mapped_column(String(40), default="")
+    desc: Mapped[str] = mapped_column(String(200), default="")
+    price: Mapped[int] = mapped_column(Integer, default=0)          # 月石
+    grants: Mapped[dict] = mapped_column(JSON, default=dict)        # {access?, start_money_bonus?, powers?, items?}
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+class PackPurchase(Base):
+    """💎 购买台账 = 玩家的 entitlement + 创作者的分成凭据 (一张表两本账)。"""
+
+    __tablename__ = "pack_purchases"
+    __table_args__ = (UniqueConstraint("user_id", "pack_id", name="uq_user_pack"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    story_id: Mapped[str] = mapped_column(ForeignKey("stories.id"), index=True)
+    pack_id: Mapped[str] = mapped_column(ForeignKey("story_packs.id"), index=True)
+    price: Mapped[int] = mapped_column(Integer, default=0)          # 成交价快照
+    creator_share: Mapped[int] = mapped_column(Integer, default=0)  # 创作者分成 (70%)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)

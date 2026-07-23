@@ -14,11 +14,16 @@ pytest/smoke 是部署门，不算验收；验收看的是台上的行为。
 1. **Token**：服务器上铸造会话（不要走登录 UI）：
    `ssh root@106.54.1.82 "cd /opt/linguisplay/apps/api && set -a && . .env && set +a && .venv/bin/python -c 'import sys; sys.path.insert(0,\".\"); from app.security import make_session_token; print(make_session_token(\"<user_id>\"))'"`
    demo 玩家 user_id=c7394a9c2cb74beeb86e4fc0978e0fe2。写进本地 token.txt 时必须 ASCII 无 BOM（PowerShell `>` 会写 UTF-16，用 bash 或 [IO.File]::WriteAllText）。
+   铸 token 若被权限拦：/play 登录表单预填公开测试号 player@demo.com / player123，点「登录」≈3s 即入，一样开专用档。API 断言注意：GET /runs/{id} 的 state 是 RunState 白名单（有 pending_choice，无 suggestions/fate_*）；建议 chips 读顶层 run.suggestions。
 2. **Playwright**（harness 在会话 scratchpad `pw/`，node + chromium 已装）：
    - context: `{ viewport: {width:390, height:844}, isMobile: true, hasTouch: true }`
    - cookie: `{ name:"lp_session", value:TOKEN, domain:"106.54.1.82", path:"/" }`
    - 进游戏：goto /play → 等 3.5s → 若有「登录」按钮先点 → 专用档用 `resumeRun(id)`
      （全局函数；`openRun` 不存在）→ 等 ~11s（世界加载）
+   - **evaluate 别 await 页面内长跑 promise**：`page.evaluate(id => resumeRun(id))` 会苦等
+     resumeRun 的内部 promise，可能永不 resolve（实弹：脚本零 CPU 卡死 24h+）。写成
+     `page.evaluate(id => { resumeRun(id); })` 发射后不理，另行 waitForTimeout；页面内
+     fetch 一律带 AbortController 超时，外层再套 Promise.race 看门狗
    - **新手引导有两层，都要杀**：玩法卡 `closeHowto()` + 界面教程 `closeTutorial()`，
      外加 `localStorage.setItem("lp_tut_v1","1")`；只点按钮会复弹，挡住一切点击
      （实弹：`.tsec.tut-4` 吞了选项 click 30s 超时）

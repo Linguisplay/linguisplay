@@ -67,6 +67,51 @@ def _clock_on(content: dict[str, Any]) -> bool:
 # ═══════════════════════════════════════════════════════════════════════════════════════
 # Layer 2 — STORY LINTER (author-time structural consistency)
 # ═══════════════════════════════════════════════════════════════════════════════════════
+# ✍️ 人话修复指引 (创作 UX 首期, Yi 定: 手写模板不过 LLM — 错误类型是有限枚举,
+# 确定性归代码)。发布硬门把它拼在原始 msg 后面, 作者照着点就能修好。
+HUMAN_FIXES: dict[str, str] = {
+    "no_acts": "到「幕」区块加至少一幕——没有幕，故事无法开演。",
+    "no_chars": "到「角色」区块加至少一个角色（只有沙盒本可以空着让引擎现铸）。",
+    "dup_id": "两个条目撞了同一个编号——删掉重复的那个，或让系统重新生成。",
+    "dangling_frag": "某处的条件引用了已被删掉的碎片——去那里重选一个，或清掉这条条件。",
+    "gate_deadlock": "这一幕的推进要求一个更晚才解锁的碎片，玩家会被永远卡死——"
+                     "把该碎片的「解锁幕数」调早，或者换一个碎片做条件。",
+    "frag_bad_event": "碎片的触发事件已不存在——到「秘密」区重选触发事件。",
+    "dangling_event": "推进条件里的事件已被删掉——到「幕」区重选或清掉。",
+    "dangling_exit": "地点的出口指向了不存在的地点——改成现有地点名或删掉这个出口。",
+    "dangling_prop_frag": "物证指向的碎片已不存在——到「地点」区给它重选。",
+    "dangling_prop_event": "物证指向的事件已不存在——到「地点」区给它重选。",
+    "bad_schedule": "角色作息表里的地点不存在——用「地点」区里已有的名字。",
+    "bad_slot": "作息时段只能是 晨/午/夜。",
+    "bad_home": "角色的常驻地点不存在——重选一个已有地点。",
+    "bad_faction": "角色标了所属阵营，但剧本的阵营表里没有这个阵营——补上阵营或改掉归属。",
+    "bad_tie": "角色关系指向了不存在的角色——重选。",
+    "bad_frag_location": "碎片解锁条件里的地点不存在——重选。",
+    "peek_bad_char": "碎片标了「藏在TA设备里」，但那个角色不存在——重选 device_of。",
+    "peek_no_device": "碎片藏在设备里，但剧本没有可翻的实体设备——开启通讯并换掉「口信」。",
+    "peek_no_backup": "藏在设备里的碎片必须再留一条别的解锁路（追问/好感/地点/事件/物证）——"
+                      "玩家偷看被抓会永久锁死设备，唯一通路等于把真相锁死。",
+    "bad_deadline_ending": "时钟大限指向的结局不存在——到「结局」区确认后重选。",
+    "bad_act_time": "幕的时间锚不合法（day 要正整数、时段 晨/午/夜）。",
+    "act_time_backwards": "后一幕的时间锚比前一幕还早——把时间捋顺。",
+    "bad_kill": "事件要杀的角色不存在——重选。",
+    "verdict_no_answer": "指认选项里至少要有一个勾了「正确答案」。",
+    "verdict_bad_options": "指认选项要有各自独立的编号——删掉重复项。",
+    "verdict_bad_ending": "指认失败结局不存在——到「结局」区确认后重选。",
+    "threat_bad_char": "猎手指向的角色不存在——重选。",
+    "threat_bad_patrol": "猎手巡逻路线里有不存在的地点——重选。",
+    "doom_bad_char": "厄运名单里的角色不存在——重选。",
+    "doom_bad_day": "厄运的 day 要写正整数（第几天的夜里）。",
+    "doom_bad_to": "厄运把人带去的地点不存在——重选。",
+}
+
+
+def humanize_issue(issue: dict[str, Any]) -> str:
+    """一条 lint 结果 → 「哪里出了什么事 → 怎么修」的人话。"""
+    fix = HUMAN_FIXES.get(str(issue.get("code")), "照提示到对应区块修正。")
+    return f"{issue.get('msg', '')}  👉 {fix}"
+
+
 def lint_story(content: dict[str, Any]) -> list[Issue]:
     """Return every structural logic problem in a story. `error` = the run can dead-end or
     a reference is dangling; `warn` = a smell that probably isn't intended. Empty list = clean."""
@@ -104,7 +149,9 @@ def lint_story(content: dict[str, Any]) -> list[Issue]:
             warn("no_chars", "story", "沙盒无 authored 角色：开局将从世界观召唤卡司（设计如此）。")
         else:
             err("no_chars", "story", "剧本没有任何角色。")
-    if chars and not any(c.get("playable") for c in chars):
+    _sandbox_on = bool(((content.get("story") or {}).get("sandbox") or {}).get("enabled"))
+    if chars and not _sandbox_on and not any(c.get("playable") for c in chars):
+        # 🏖 沙盒玩家扮演的是自己 (persona), 不点名 playable 是常态 — 不喊
         warn("no_playable", "characters",
              "没有任何角色标记 playable —— 引擎会回退到「任选在场角色」，可能让玩家扮演会破坏剧情的角色。")
 
@@ -194,12 +241,22 @@ def lint_story(content: dict[str, Any]) -> list[Issue]:
 
     # — locations —
     start_id = locs[0].get("id") if locs else None
+    # 🏛 阵营归属: 角色指向的阵营必须在阵营表里 (声望账本按 id 记账, 悬空=永不生效)
+    fac_ids = {str(f.get("id") or "") for f
+               in ((content.get("story") or {}).get("factions") or [])
+               if isinstance(f, dict) and f.get("id")}
+    for c in chars:
+        fid = str(c.get("faction_id") or "").strip()
+        if fid and fid not in fac_ids:
+            err("bad_faction", f"char:{c.get('id')}",
+                f"「{c.get('name', '')}」的阵营「{fid}」不在剧本的阵营表里")
     for l in locs:
         lid = l.get("id")
         where = f"loc:{lid}"
         for ex in l.get("exits") or []:
             if ex not in loc_ids and ex not in loc_names:
-                err("dangling_exit", where, f"出口指向不存在的地点：{ex}")
+                err("dangling_exit", where,
+                    f"「{l.get('name', '')}」的出口指向不存在的地点：{ex}")
         frag_ids_all = {f.get("id") for f in frags if f.get("id")}
         event_ids_all = {ev.get("id") for a in acts for ev in (a.get("events") or []) if ev.get("id")}
         for p in (l.get("props") or []):
@@ -260,8 +317,10 @@ def lint_story(content: dict[str, Any]) -> list[Issue]:
                      f"角色「{c.get('name','')}」的关系模式「{ref}」不是已知原型（见 relationships.ARCHETYPES）。")
 
     # — endings —
-    if acts and not _endings(content):
-        warn("no_endings", "story", "剧本没有定义任何结局。")
+    if acts and not _endings(content) \
+            and not ((_story(content).get("sandbox") or {}).get("enabled")):
+        warn("no_endings", "story", "剧本没有定义任何结局。")  # 🏖 沙盒无结局是设计
+
     good = 0
     for e in _endings(content):
         where = f"ending:{e.get('id')}"
@@ -277,6 +336,28 @@ def lint_story(content: dict[str, Any]) -> list[Issue]:
         if lid and lid not in loc_ids:
             err("bad_frag_location", f"fragment[{f.get('id')}]",
                 f"解锁条件指向不存在的地点：{lid}")
+        # 📱🔍 device_of (藏在TA设备里): 角色要存在、设备要可翻 (口信没有实体)、
+        # 且必须有备用通路 — crit_fail 会永久锁设备, 唯一通路=运行时死锁
+        dof = (f.get("unlock") or {}).get("device_of")
+        if dof:
+            char_ids_f = {c.get("id") for c in chars if c.get("id")}
+            where_f = f"fragment[{f.get('id')}]"
+            if dof not in char_ids_f:
+                err("peek_bad_char", where_f, f"device_of 指向不存在的角色：{dof}")
+            ph = _story(content).get("phone") or {}
+            if ph.get("enabled") is False or "口信" in (ph.get("device") or ""):
+                err("peek_no_device", where_f,
+                    "碎片藏在设备里，但这个剧本没有可翻的实体设备（关了通讯或用的是口信）。")
+            u = f.get("unlock") or {}
+            prop_fids = {p.get("fragment_id")
+                         for l in locs for p in (l.get("props") or [])}
+            backup = (u.get("asks_min") is not None or u.get("affinity_min") is not None
+                      or u.get("location_id") or (u.get("trigger_event_ids") or [])
+                      or f.get("id") in prop_fids)
+            if not backup:
+                err("peek_no_backup", where_f,
+                    f"碎片「{f.get('id')}」只有翻设备一条通路——玩家被抓包锁死设备后，"
+                    "这条真相本局永远拿不到。")
 
     # — ⏳ clock / deadline —
     ck = _story(content).get("clock") or {}

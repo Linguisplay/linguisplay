@@ -66,9 +66,6 @@ class MockLLM:
         yield ("final", out)
 
     def generate(self, prompt: dict[str, Any]) -> dict[str, Any]:
-        # suggestions: mock returns none → runtime falls back to its deterministic template.
-        if prompt.get("suggest"):
-            return {"suggestions": []}
         # 🌍 活世界 twins: deterministic heartbeat pieces so living-world tests never call out
         if prompt.get("absent_scene"):
             return {"scene": (prompt.get("char") or {}).get("name", "") +
@@ -76,6 +73,31 @@ class MockLLM:
         if prompt.get("living_event"):
             return {"what": "去湖边走走", "slot": "夜", "day_offset": 1,
                     "invite": "明晚有空吗？想去湖边走走，你来。"}
+        # ✍️ 引擎本起草孪生 (创作 UX A): 确定性骨架/秘密 — 组装+lint+降级链路可测。
+        # 秘密里故意埋一个 act_min 越界 (=9), 让路由的夹逼/降级逻辑有靶子。
+        if prompt.get("engine_skeleton"):
+            return {"title": "码头夜话", "one_liner": "潮水退了，账露出来了。",
+                    "synopsis": "深夜码头，一本对不上的账把你卷进旧事。",
+                    "world_long": "八十年代的南方小码头，鱼腥和柴油味，帮规大过王法。",
+                    "world_facts": "码头晚上十点宵禁；账房只认算盘。",
+                    "trope_tags": ["悬疑", "市井"],
+                    "locations": [
+                        {"name": "账房", "detail": "一张掉漆的八仙桌，算盘缺了颗珠", "exits": ["栈桥"]},
+                        {"name": "栈桥", "detail": "湿木板，系着三条舢板", "exits": ["账房"]}],
+                    "acts": [{"title": "对不上", "goal": "发现账目缺口"},
+                             {"title": "顺藤", "goal": "追出经手人"},
+                             {"title": "潮落", "goal": "真相与代价"}]}
+        if prompt.get("engine_secrets"):
+            return {"secrets": [{"character_name": "码头老陈", "title": "那笔死账",
+                                 "fragments": [
+                                     {"layer": 1, "content": "缺的钱走了夜船。",
+                                      "cover": "账是潮水打湿了看不清。",
+                                      "retrieval_key": "夜船", "act_min": 1},
+                                     {"layer": 2, "content": "夜船是老陈亲手放的。",
+                                      "cover": "我那晚在家。",
+                                      "retrieval_key": "放船", "act_min": 9}]}],
+                    "endings": [{"kind": "good", "title": "水落", "text": "账合上了，人心也算合上了。",
+                                 "act_min": 3}]}
         # 🪄 文字→角色卡孪生: 路由消毒逻辑可测 (含一张带野字段的坏卡)
         if prompt.get("char_from_text"):
             return {"characters": [
@@ -204,9 +226,18 @@ class MockLLM:
                               {"name": "止血散", "price": 25, "detail": "外伤敷上，好得快"}]}
 
         # emergent location: deterministic stub description (real model writes the prose).
+        if prompt.get("music_judge"):
+            return {"track": "", "pivot": 0, "feel": ""}   # 🎼 孪生: 保持当前曲目
         if prompt.get("describe_place"):
-            name = prompt.get("place_name", "")
-            return {"detail": f"{name}——一处刚在故事里浮现出来的地方，轮廓在眼前渐渐清晰。"}
+            name = (prompt.get("place_name") or "").strip()
+            generic = (name.strip("一那这某换找个再的 ") in ("别处", "外面", "")
+                       or name.endswith(("地方", "地儿", "去处")))
+            if generic and not prompt.get("invent"):
+                return {"name": "", "detail": ""}   # 🧑‍⚖️ 判官驳回孪生
+            if generic:
+                name = "路边的凉棚"                  # invent 模式: 确定性地发明一个去处
+            return {"name": name[:12],
+                    "detail": f"{name}——一处刚在故事里浮现出来的地方，轮廓在眼前渐渐清晰。"}
 
         # opening location for a map-less story: deterministic stub (real model derives it).
         if prompt.get("start_place"):
@@ -256,6 +287,24 @@ class MockLLM:
         # 📱 text-back: deterministic in-voice stub, no relationship movement.
         if prompt.get("phone_reply"):
             return {"msgs": ["嗯。"], "closeness": 0, "romance": 0}
+
+        # 🏦📸 bank/social twins: deterministic for offline tests/smoke.
+        if prompt.get("social_posts"):
+            items = prompt.get("items") or []
+            return {"posts": [{"name": i.get("name"), "text": (i.get("hooks") or ["……"])[0]}
+                              for i in items[:2]]}
+        if prompt.get("social_reply"):
+            return {"reply": "嗯。", "closeness": 1}
+
+        # 📱🔍 peek twins: deterministic device content for offline tests/smoke.
+        if prompt.get("peek_nickname"):
+            return {"nickname": "那个人"}
+        if prompt.get("peek_threads"):
+            whys = prompt.get("whys") or []
+            return {"msgs": [f"{prompt.get('with','')}：{whys[0]}" if whys
+                             else f"{prompt.get('with','')}：回头再说。", "知道了。"]}
+        if prompt.get("peek_twist"):
+            return {"msgs": ["……以后别用这个号找我。"]}
 
         # parting cliffhanger (悬念离场): narration only, deterministic.
         if prompt.get("parting"):

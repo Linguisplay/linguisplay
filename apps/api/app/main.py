@@ -2,18 +2,20 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import Body, FastAPI
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 _STATIC = os.path.join(os.path.dirname(__file__), "static")
 _SCENE = os.path.join(_STATIC, "scene")
-for _sub in ("bg", "bgm", "sfx"):
+for _sub in ("bg", "bgm", "sfx", "creature"):
     os.makedirs(os.path.join(_SCENE, _sub), exist_ok=True)
 
 from .config import get_settings
 from .db import init_db
-from .routers import auth, cards, gal, me, personas, phone_mock, push, runs, stories
+from .routers import auth, cards, gal, me, packs, personas, phone_mock, push, runs, stories
 
 settings = get_settings()
 
@@ -52,6 +54,20 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# 🧾 422 must name the field in the LOG, not just the response — five mystery
+# "PATCH /stories 422" lines cost a debugging session (实弹 2026-07-19: a player's
+# save kept failing and the journal said nothing about why).
+@app.exception_handler(RequestValidationError)
+async def _log_validation_422(request, exc: RequestValidationError):
+    import logging
+    errs = exc.errors()
+    logging.getLogger("uvicorn.error").warning(
+        "422 %s %s :: %s", request.method, request.url.path,
+        "; ".join("→".join(str(x) for x in e.get("loc", [])) + ": " + (e.get("msg") or "")
+                  for e in errs[:5]))
+    return JSONResponse(status_code=422, content={"detail": jsonable_encoder(errs)})
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.web_origin],
@@ -66,6 +82,7 @@ app.include_router(me.router, prefix=API)
 app.include_router(personas.router, prefix=API)
 app.include_router(cards.router, prefix=API)  # 📚 角色卡库 (cross-story characters)
 app.include_router(stories.router, prefix=API)
+app.include_router(packs.router, prefix="/api/v1")
 app.include_router(runs.router, prefix=API)
 app.include_router(phone_mock.router, prefix=API)  # MOCK: phone domain skeleton
 app.include_router(gal.router, prefix=API)  # 🎀 galgame 生成器 (docs/galgame-maker.md)

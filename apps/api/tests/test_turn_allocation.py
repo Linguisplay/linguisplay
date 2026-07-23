@@ -5,7 +5,10 @@ whose secret was probed always get to speak; no judgment → legacy everyone-ans
 from app.engine import runtime
 
 STORY = {
-    "story": {"id": "s", "characters": [
+    # golden/snap 是概率触发的额外 LLM 调用 — 这里断言【精确调用清单】, 必须关掉
+    # (潜伏雷: 全局 RNG 流被前面的测试位移就会炸, 2026-07-15 实弹)
+    "story": {"id": "s", "tuning": {"golden_chance": 0, "snap_chance": 0},
+              "characters": [
         {"id": "a", "name": "甲", "is_lead": True},
         {"id": "b", "name": "乙"},
         {"id": "c", "name": "丙"},
@@ -25,6 +28,8 @@ class CasterLLM:
         self.calls = []
 
     def generate(self, prompt):
+        if prompt.get("music_judge"):
+            return {}   # 🎼 乐师是并行旁路, 不算发言调用
         if prompt.get("track_scene"):
             return {}                      # 🎥 the tracker pass is not a casting call
         if prompt.get("intro") or prompt.get("observe") or prompt.get("suggest"):

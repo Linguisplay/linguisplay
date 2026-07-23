@@ -730,7 +730,9 @@ def bg_prompt(scene: dict, world: str, art: str) -> str:
     lead = (art or "电影质感写实，强烈氛围与光影")
     return (f"{lead}。视觉小说场景背景插画，竖构图：{scene.get('name')}。"
             f"{(scene.get('visual') or '')[:180]} 世界背景：{world[:80]}。"
-            "空镜，画面里没有任何人物，没有文字、字幕、水印或相框边框，景深，氛围光。")
+            "空镜，画面里没有任何人物也没有任何生物——人、兽、鸟、猫狗、龙、怪物"
+            "一概不出现（这是等待角色登场的空舞台）；没有文字、字幕、水印或相框边框，"
+            "景深，氛围光。")
 
 
 def cover_prompt(gal: dict, title: str, world: str, art: str,
@@ -1122,7 +1124,8 @@ def build_work(story_id: str, session_factory, render_art: bool = True) -> None:
                     continue
                 img = generate_image(bg_prompt(sc, world, art), size="720*1280",
                                      model=SCENE_MODEL,
-                                     negative=portrait_negative(art) + _FRAME_NEG)
+                                     negative=portrait_negative(art) + _FRAME_NEG
+                                     + "，人物，人影，动物，猫，狗，鸟，龙，兽，怪物，生物")
                 if img:
                     p.write_bytes(shrink_jpg(img))
                     man["bgs"].append(sc["id"])

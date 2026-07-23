@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     # 火山方舟 (Volcengine Ark): unlocks 字节 Seedream image models — pass a
     # "doubao-seedream-*" model name to generate_image and it routes here.
     ark_api_key: str = ""
+    openai_api_key: str = ""   # GPT Image 生图 (2026-07-21 Yi 提供; 只进 .env 不进代码)
 
     # 🔔 Web Push (活世界 P3): keys unset = the whole layer degrades silently.
     # Quiet hours are Asia/Shanghai wall-clock; pushes are a knock on the window,
@@ -45,6 +46,10 @@ class Settings(BaseSettings):
     # structured plan call + a streamed prose render instead of one overloaded call.
     # Default OFF; a story can override either way via tuning.plan_render (pilot switch).
     plan_render: bool = False
+
+    # ▶ drive 防刷 (⚖️ 无点击不推进, Yi 2026-07-14): 观剧拍无玩家输入, 脚本空转可无人
+    # 值守刷剧情刷账单 — 服务端强制两拍之间的最小间隔秒数 (DRIVE_MIN_SECONDS)
+    drive_min_seconds: int = 5
 
     # Logic backstop: after the addressed character's turn is generated, a deterministic guard
     # verifies it against the live scene (no absent character walks in, no locked secret leaks)

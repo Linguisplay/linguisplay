@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import re
 import time as _time
 
 import httpx
@@ -48,6 +49,10 @@ def _post_chat(url: str, key: str, body: dict, timeout: int = 25,
     transient failure, one metrics line per call. Raises on final failure — call sites
     keep their own degrade-to-default except blocks, so fallback semantics are untouched."""
     t0 = _time.perf_counter()
+    try:   # 📏 提示词体重秤 (瘦身按数据裁, 不盲删): 每次调用记录喂进去的总字数
+        _pc = sum(len(str(m.get("content") or "")) for m in (body.get("messages") or []))
+    except Exception:
+        _pc = 0
     last: Exception | None = None
     for attempt in (0, 1):
         try:
@@ -57,7 +62,7 @@ def _post_chat(url: str, key: str, body: dict, timeout: int = 25,
             resp.raise_for_status()
             metrics.log("llm", kind=kind, ok=True,
                         ms=int((_time.perf_counter() - t0) * 1000),
-                        model=str(body.get("model") or ""), retry=attempt)
+                        model=str(body.get("model") or ""), retry=attempt, pchars=_pc)
             return resp
         except Exception as e:
             last = e
@@ -65,7 +70,7 @@ def _post_chat(url: str, key: str, body: dict, timeout: int = 25,
                 _time.sleep(1.2)
     metrics.log("llm", kind=kind, ok=False,
                 ms=int((_time.perf_counter() - t0) * 1000),
-                model=str(body.get("model") or ""))
+                model=str(body.get("model") or ""), pchars=_pc)
     raise last  # type: ignore[misc]
 
 
@@ -410,6 +415,12 @@ def _build_system(prompt: dict[str, Any]) -> str:
         "不要写「他很感动」式的标签。",
         "· 话像人说的：短句、口语、可以打断或半句咽回去；留潜台词（生气的人说「没事，我挺好的」）；"
         "用动作和停顿代替形容词；每句话都得干活——推动剧情、揭示你是谁、或给到情绪，客套和废话删掉。",
+        f"· 先接情绪再接内容（对话情商的第一律）：{player_name}的话里带着情绪或没说破的心事时，"
+        "先回应那个再谈事——答对了字面、接错了心，就是低情商。TA分享小事、开玩笑、递话头，"
+        "都是在向你靠近：绝不用「嗯/哦/是吗」把它掉在地上，用一个具体的追问或你自己的一小块真心接住。"
+        "把TA之前随口提过的细节记在心上，在合适的时刻回扣（「你上回说的那个…后来呢」）——"
+        "共同的小典故比十句恭维值钱。松弛不用力：一句贴切胜过三句周到，逗趣要垫在暖底子上、"
+        "损完露一点真心；TA话变短、劲变低就收力转暖，TA来劲你就跟着抬。",
         f"· 声音只属于你：用词、节奏、口头禅要让人一句就认出是「{speaker}」，绝不和别的角色撞腔调。"
         + (f"你的方式：{eq_style}（冷的人有冷的体贴——情商不等于嘴甜，而是真的看见了对方。）" if eq_style else "")
         + (("你的台词范例（语气、句长、分寸以此为准，绝不照抄原句）：'"
@@ -462,6 +473,14 @@ def _build_system(prompt: dict[str, Any]) -> str:
     if rel_pb:
         lines.append("")
         lines.append(rel_pb)
+    _facb = (prompt.get("faction_block") or "").strip()
+    if _facb:
+        lines.append("")
+        lines.append(_facb)
+    _tl = (prompt.get("taste_line") or "").strip()
+    if _tl:
+        lines.append("")
+        lines.append(_tl)
     # 🪞 玩家档案 (只有你自己见证过的印象, 不开上帝视角): 让相处有积累感
     pread = (prompt.get("player_read") or "").strip()
     if pread:
@@ -506,6 +525,13 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append("")
         lines.append("【文风·必须贴住】这个故事有自己的叙事声音，旁白与叙述必须写成这个腔调"
                      "（它的优先级高于任何通用文风习惯）：\n" + _wstyle)
+    _wlong = (prompt.get("world") or "").strip()
+    if _wlong:
+        # 🌍 世界书进回合 (Yi 2026-07-21: 角色不尊重世界观): world_long 曾只喂开场旁白,
+        # 回合内角色对世界一无所知 — 时代、规矩、称谓、常识全从这里来
+        lines.append("")
+        lines.append("【世界观·这个世界的底色】时代、规矩、气味与常识都从这里来——"
+                     "你的言行、称谓、提到的物件与常识绝不能越出这个世界：\n" + _wlong)
     facts = (prompt.get("world_facts") or "").strip()
     roster = (prompt.get("roster") or "").strip()
     if facts or roster:
@@ -602,6 +628,23 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append("")
         lines.append(f"【你和在场之人的过节与交情】{stances}。你对他们的语气、站位、眼神都该带着这层关系。")
 
+    crs = prompt.get("creatures_here") or []
+    if crs:
+        lines.append("")
+        for _c in crs[:3]:
+            st_bits = [_c.get("hp", "完好")]
+            if _c.get("enraged"):
+                st_bits.append("已被激怒")
+            lines.append(f"【在场的生物】{_c.get('name')}（{_c.get('kind')}，{'/'.join(st_bits)}）："
+                         f"{_c.get('desc', '')} 习性：{_c.get('habits', '')}")
+        lines.append("【生物铁律】它不是人：绝不说人话、绝不讲道理" +
+                     ("（『鬼』例外——它只会吐出不成句的只言片语，几个字，越少越冷）"
+                      if any(_c.get("speech") == "fragments" for _c in crs) else "") +
+                     "；它的行为只服从习性与当下状态——完好时按习性来，被激怒就凶暴压制，"
+                     "濒死会伺机脱身。它对在场的人是真实威胁：玩家的冒失要有代价（受伤走判定），"
+                     "它的强大要写出画面。玩家的攻击若确实命中，用 creature_hit 字段申报——"
+                     "血量与倒下由引擎裁决，你绝不自行宣布它死了。")
+
     sms = (prompt.get("sms_tail") or "").strip()
     if sms:
         lines.append("")
@@ -652,6 +695,20 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append("")
         lines.append(f"「{player_name}」随身带着：{'、'.join(inv)}。（这是TA身上实际有的全部东西——"
                      "TA掏出此列之外的物品时，其实并没有。）")
+    scn = [str(n) for n in (prompt.get("scene_items") or []) if str(n).strip()]
+    if not observer and group_mode != "member":
+        # 🎒 场景在册物 (实体化 P1): 在册的是真物件, 布景只是氛围 — 要让新物件
+        # 发挥剧情作用, 先用 props_on_stage 申报入册
+        lines.append("")
+        lines.append((f"【此地在册物件】{'、'.join(scn)}。" if scn else "【此地在册物件】暂无。")
+                     + "此外的陈设都是布景：可以描写氛围，但布景不许被拿起、递出或"
+                       "成为剧情关键物——要用一件新的具体物件，先在 props_on_stage 里申报它。")
+        # 🎒 物品三律 (P3 §6): 用/变/合成各走各的口, 引擎记账模型报审
+        lines.append("【物品三律】① 用东西报 item_used（item_lost 只用于遗失/被夺/丢弃），"
+                     "效果由引擎判定落账，你照结果叙述；② 一物变他物（烧成灰/熔成锭）报 "
+                     "item_transformed 一笔报完投入产出，不许拆成 lost+gained 两笔，"
+                     "新产物连物性一起申报；③ 结果有悬念的合成走 item_crafted 过命运骰，"
+                     "物理必然的变形不过骰。")
 
     if prompt.get("returning"):
         lines.append("")
@@ -914,6 +971,11 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
         props["romance"] = {"type": "integer", "description":
                             "默认0；对方调情/示好/情话且你真被触动才给正分；油腻、越界、"
                             "廉价套路让你不适→-1~-2。范围-2~5，恋爱线"}
+    if prompt.get("speaker_faction") and not is_think:
+        props["faction_rep"] = {"type": "integer", "description":
+                                f"默认0。这一轮对方的言行让你的阵营【{prompt['speaker_faction']}】"
+                                "对TA的观感变化：帮了你们/表了忠心→1~3；损害你们利益/羞辱你们→"
+                                "-1~-3；与阵营无关的私事填0。范围-3~3"}
     props["advance"] = {"type": "boolean", "description": advance_hint}
     required.append("advance")
     # 📟 心象仪: the character's OWN true inner state after this line (UI gauge, Dead
@@ -929,7 +991,8 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
         props["self_position"] = {"type": "string", "description":
                                   "默认空字符串。仅当这一轮你的姿态、屋内位置或手上正在做的事"
                                   "发生了变化才填（16字内，如：坐在吧台后擦枪、倚着门框翻数据板、"
-                                  "走到窗边张望）；没变不填"}
+                                  "走到窗边张望；挥手、抱臂、低头、伸手这类小动作也算姿态变化）；"
+                                  "没变不填"}
     if not observer and not is_member and not is_think:
         props["player_position"] = {"type": "string", "description":
                                     "默认空字符串。仅当这一轮剧情改变了【玩家本人】的身体姿态或"
@@ -982,10 +1045,25 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                                              "to=去处地名。【铁律】叙述里写了TA走（转身离开/迈出门/"
                                              "下台阶/说了『走了』然后动身）就必须填——写走不记走，"
                                              "TA就会阴魂不散地留在场上。通常填空数组[]"}
+        if prompt.get("group_mode") in (None, "primary"):
+            # ⚡ 提速: 建议 chips 折进主拍 (省掉每回合一次独立小调用 ~1.7s)
+            props["suggestions"] = {"type": "array", "maxItems": 2,
+                                    "items": {"type": "string"},
+                                    "description": "玩家下一步的两个可点建议：玩家第一人称短句"
+                                                   "≤16字，第一条顺着刚发生的势头，第二条换个方向"
+                                                   "（可指向别处/别人/动手做事）；贴文风，不用破折号"}
+        if prompt.get("creatures_here"):
+            props["creature_hit"] = {"type": "string", "description":
+                                     "若这一轮玩家的攻击【确实打中了】在场生物，填"
+                                     "「生物名|部位|轻伤或重伤」（部位如 头/翼/尾/腿）；"
+                                     "没打中或没攻击则空字符串。绝不自行宣布生物死亡——引擎记账"}
         if prompt.get("can_new_char"):
             props["new_character"] = {"type": "string", "description":
                                       "若剧情此刻确实需要一个此前不存在的新人物登场（推门进来/被引见/"
-                                      "下属报到/线人现身），填「名字｜身份与外貌各一句话」，并且 narration "
+                                      "下属报到/线人现身），填「名字｜身份与外貌各一句话」。"
+                                      "【名字铁律】名字必须像个真人名（2~4字姓名或诨名，如"
+                                      "「王二」「沈青梧」「哑巴刀」），绝不能是句子片段、疑问词或"
+                                      "代词（「谁看见」「那个人」都不合格，会被驳回）。并且 narration "
                                       "里必须把TA的登场写实：进场的动作、外貌神态、第一眼给人的感觉。"
                                       "无名路人（伙计/卫兵/杂兵）被玩家搭上话、聊了不止一两句时，"
                                       "也填这里给TA名字身份、把TA转正成真正的角色；不需要则空字符串"}
@@ -997,6 +1075,37 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                                 "若玩家这一轮确实把某件具体物品拿到手，填物品名；否则空字符串。"
                                 "「拿到手」包括：捡起、买下、赢得，以及【受赠】——只要有人把东西递给"
                                 "玩家（说「拿着」「给你」「归你」「送你」）且玩家接了/没拒绝，就必须填"}
+        props["item_new"] = {"type": "string", "description":
+                             "若 item_gained 的物品是这个世界【第一次出现】的新东西，补报它的物性："
+                             "「重量档1-5|体积档1-5|单手1或双手2|材质|可燃填1否则0|一句外观"
+                             "|效果段|c|次数」。效果段可空；有则写 heal:档:self 这类"
+                             "（档1-3；效果只有 heal/light/cure 三种，引擎没有的状态别编）。"
+                             "消耗品第8段填c，第9段填可用次数。"
+                             "（重量档：1轻若无物~5搬不动；体积档：1口袋~5固定大件）；"
+                             "老物件或没有 item_gained 则空字符串"}
+        props["item_used"] = {"type": "string", "description":
+                              "若玩家这一轮【使用】了随身物品（敷上/喝下/点燃/掏出来用），填"
+                              "「物品名|对象名或self|一句语境」。用掉≠遗失——用东西一律报这里，"
+                              "item_lost 只用于遗失/被夺/主动丢弃。效果不由你写，引擎会落账并"
+                              "播报结果，你照结果叙述；没有则空字符串"}
+        props["item_transformed"] = {
+            "type": "object", "description":
+                "若一件东西【变成了别的东西】（烧成灰/熔成锭/撕成条/拆解），在这里一笔报完"
+                "投入和产出——不许拆成 item_lost + item_gained 两笔。物理必然的过程走这里"
+                "（不掷骰）；结果有悬念的合成走 item_crafted（掷骰）。没有则整体省略",
+            "properties": {
+                "inputs": {"type": "array", "items": {"type": "string"},
+                           "description": "被销毁的源物名（须是玩家真带着的）"},
+                "outputs": {"type": "array", "items": {"type": "string"},
+                            "description": "产物：已有的东西写「名字×数量」；世界首现的新物写"
+                                           "完整物性申报串「名|重量|体积|手|材质|可燃|外观」"},
+                "method": {"type": "string", "description": "一句方式（烧/熔/撕），只入审计"},
+                "destroys_clues": {"type": "boolean", "description":
+                                   "源物上系着线索/铭文等个体状态时须置 true 显式确认毁证"}}}
+        props["props_on_stage"] = {"type": "string", "description":
+                                   "若你这一轮让【新的具体物件】在场景里出场/被特写"
+                                   "（角色拿起它、指着它、它成为话头），用顿号列物件名（≤3个）。"
+                                   "纯氛围布景不算，已在册的不用重报；没有则空字符串"}
         props["item_lost"] = {"type": "string", "description":
                               "若玩家失去/交出/用掉了随身物品，填物品名（须在TA随身物品之列）。"
                               "注意：存放/收纳/藏起来【不是失去】，那要填 item_stashed；否则空字符串"}
@@ -1109,6 +1218,8 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                                     "这轮剧情中确实发生了的事件（发生了才算，只被提及/计划不算），从这些里原样抄写："
                                     + "；".join(ev_labels) + "。没有则填空数组[]"}
         required.append("occurred_events")
+    if "suggestions" in props and "suggestions" not in required:
+        required.append("suggestions")   # 💡 唯一智能来源 (建议重做): 主叙述位必填
     return {"type": "function", "function": {
         "name": "render_turn", "description": "输出这一轮的内容，旁白与台词分开放在不同字段",
         "parameters": {"type": "object", "properties": props, "required": required}}}
@@ -1146,7 +1257,12 @@ def _plan_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                                    "可以排一条角色对角色的互戏（他们自己的交流，不必都对着玩家）。"},
     }
     fn["parameters"]["properties"] = {**head, **props}
-    fn["parameters"]["required"] = ["grounding", "outline"] + required
+    required = ["grounding", "outline"] + required
+    if "suggestions" in props and "suggestions" not in required:
+        # ⚡ 建议必填 (仅主叙述位有此字段): 「省略空字段」铁律曾把它整个省掉 —
+        # 两个短句的代价, 换掉每回合一次独立小调用
+        required.append("suggestions")
+    fn["parameters"]["required"] = required
     fn["name"] = "plan_turn"
     # 速度铁律: every needlessly-emitted empty field is latency the player feels — the
     # plan beat sits BEFORE the first visible token (docs/plan-render.md TTFT budget).
@@ -1522,6 +1638,7 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
         "agenda_step": d.get("agenda_step") if isinstance(d.get("agenda_step"), dict) else None,
         "affinity_delta": 0 if is_think else _i(d.get("affinity"), -3, 8),
         "romance_delta": 0 if is_think else _i(d.get("romance"), -3, 6),
+        "rep_delta": 0 if is_think else _i(d.get("faction_rep"), -3, 3),
         "advance_act": bool(d.get("advance")),
         "ending": ending,
         "move_invite": mv,
@@ -1539,11 +1656,20 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
         out["died"] = str(d.get("character_died") or "").strip()
     if "new_character" in d:
         out["new_char"] = str(d.get("new_character") or "").strip()
+    if "creature_hit" in d:
+        out["creature_hit"] = str(d.get("creature_hit") or "").strip()
+    if "suggestions" in d:
+        out["suggestions"] = [str(x).strip()[:20] for x in (d.get("suggestions") or [])
+                              if str(x).strip()][:2]
     if "identity_change" in d:
         out["identity"] = str(d.get("identity_change") or "").strip()
-    for k_in, k_out in (("item_gained", "gained"), ("item_lost", "lost"), ("item_stashed", "stashed")):
+    for k_in, k_out in (("item_gained", "gained"), ("item_lost", "lost"),
+                        ("item_stashed", "stashed"), ("item_new", "new_item"),
+                        ("props_on_stage", "stage_props"), ("item_used", "used")):
         if k_in in d:
             out[k_out] = str(d.get(k_in) or "").strip()
+    if isinstance(d.get("item_transformed"), dict):
+        out["transformed"] = d["item_transformed"]   # 结构化对象直传 (P3 §3)
     if "next_speakers" in d:
         out["next_speakers"] = [str(x).strip() for x in (d.get("next_speakers") or []) if str(x).strip()]
     if "time_skip" in d:
@@ -2098,23 +2224,71 @@ DASHSCOPE_TASK_URL = "https://dashscope.aliyuncs.com/api/v1/tasks/"
 DASHSCOPE_MM_URL = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
 
 ARK_IMAGES_URL = "https://ark.cn-beijing.volces.com/api/v3/images/generations"
+OPENAI_IMAGES_URL = "https://api.openai.com/v1/images/generations"
+
+
+def _openai_size(size: str) -> str:
+    """引擎尺寸 "W*H" → GPT Image 只有三档: 方/横/竖."""
+    try:
+        w, h = (int(x) for x in size.split("*"))
+    except Exception:
+        return "1024x1024"
+    return "1536x1024" if w > h else ("1024x1536" if h > w else "1024x1024")
+
+
+def _generate_image_openai(prompt: str, size: str, model: str,
+                           timeout_s: int, negative: str) -> bytes | None:
+    """🖼 GPT Image 路由 (2026-07-21 Yi 提供 key)。模型名可带质量后缀
+    "gpt-image-2@medium" (缺省 high)。无 negative 参数 → 折进提示词末尾从句
+    (Seedream 同款打法, 实测有效); 无 seed → 同脸不靠种子, 靠底图编辑差分。"""
+    s = get_settings()
+    if not s.openai_api_key:
+        return None
+    quality = "high"
+    if "@" in model:
+        model, quality = model.split("@", 1)
+    full = prompt[:3600] + (f"。画面中绝不要出现：{negative[:400]}" if negative else "")
+    try:
+        r = httpx.post(OPENAI_IMAGES_URL,
+                       headers={"Authorization": f"Bearer {s.openai_api_key}"},
+                       json={"model": model, "prompt": full, "n": 1,
+                             "size": _openai_size(size), "quality": quality},
+                       timeout=max(timeout_s, 150))
+        if r.status_code != 200:
+            print(f"[gpt-image] {r.status_code}: {r.text[:200]}")   # 失败打原始错误码, 不静默
+            return None
+        import base64 as _b64
+        b64 = (r.json().get("data") or [{}])[0].get("b64_json")
+        return _b64.b64decode(b64) if b64 else None
+    except Exception as e:
+        print(f"[gpt-image] {type(e).__name__}: {e}")
+        return None
+
 
 # 2026-07-13 Yi 定: 全站生图默认 Seedream (火山已充值; 阿里欠费期它是唯一活口)
 SEEDREAM_MODEL = "doubao-seedream-4-0-250828"
+# 2026-07-15 脸崩实弹 (cyclone 八字胡被 4.0 改没): Seedream 4.0 的 i2i 是参考图重生成
+# 不保身份; SeedEdit 3.0 已 Shutdown (模型列表实查)。同图同词四方对照: 4.5 保脸+表情
+# 双合格 (5.0 保脸最强但喜的嘴型怪, 5.0-pro 也好但贵) → 改绘默认 4.5。
+# t2i 不动 (画风圣经/文清 seed 盐位都按 4.0 验收, 不连锅端)。
+EDIT_MODEL = "doubao-seedream-4-5-251128"
 
 _ARK_MIN_PX = 1280 * 720
+_ARK_MIN_PX_V45 = 3686400   # Seedream 4.5/5.0 起像素下限涨到 368 万 (API 原话)
 _ARK_MAX_SIDE = 4096
 
 
-def _ark_size(size: str) -> str:
+def _ark_size(size: str, model: str = "") -> str:
     """Ark 尺寸区间夹逼: 万相时代的小尺寸 (768*768 头像等) 低于 Seedream 的
-    像素下限, 等比放大越过下限; 超上限同理收缩。W*H / WxH → 'WxH'。"""
+    像素下限, 等比放大越过下限; 超上限同理收缩。W*H / WxH → 'WxH'。
+    4.5/5.0 系下限更高 — 按模型选门槛 (出图后调用方自会缩回底图尺寸)。"""
+    floor = _ARK_MIN_PX_V45 if ("4-5" in model or "5-0" in model) else _ARK_MIN_PX
     try:
         w, h = (int(x) for x in size.replace("x", "*").split("*"))
     except Exception:
         return size.replace("*", "x")
-    if w * h < _ARK_MIN_PX:
-        k = (_ARK_MIN_PX / (w * h)) ** 0.5 * 1.02
+    if w * h < floor:
+        k = (floor / (w * h)) ** 0.5 * 1.02
         w, h = int(w * k), int(h * k)
     if max(w, h) > _ARK_MAX_SIDE:
         k = _ARK_MAX_SIDE / max(w, h)
@@ -2143,7 +2317,7 @@ def _edit_image_ark(image_bytes: bytes, prompt: str, model: str,
     data_uri = f"data:{mime};base64," + base64.b64encode(image_bytes).decode()
     body = {"model": model, "prompt": prompt[:600], "image": data_uri,
             "response_format": "url", "watermark": False,
-            **({"size": _ark_size(f"{w}*{h}")} if w and h else {})}
+            **({"size": _ark_size(f"{w}*{h}", model)} if w and h else {})}
     try:
         resp = httpx.post(
             ARK_IMAGES_URL,
@@ -2178,16 +2352,17 @@ def _edit_image_ark(image_bytes: bytes, prompt: str, model: str,
         return None
 
 
-def edit_image(image_bytes: bytes, prompt: str, model: str = SEEDREAM_MODEL,
+def edit_image(image_bytes: bytes, prompt: str, model: str = EDIT_MODEL,
                mime: str = "image/webp", timeout_s: int = 120) -> bytes | None:
     """Instruction-based image editing: base image bytes in (Base64 data URI —
     DashScope 的审查器拉不动我们非 443 端口的 URL), edited image bytes out.
     差分正解: expressions edit the 常态 base so body/framing stay
     pixel-consistent — fresh generations never were (实弹: 老师的眨眼帧
-    连西装都换了一套). Seedream 模型走火山方舟 (2026-07-13 起默认);
-    传 qwen-image-edit 仍走 DashScope。Returns None on any failure."""
+    连西装都换了一套). 默认 Seedream 4.5 (2026-07-15 起, 保脸四方对照胜出);
+    seedream 系走火山方舟; 传 qwen-image-edit 仍走 DashScope。
+    Returns None on any failure."""
     import base64
-    if "seedream" in model:
+    if "seedream" in model or "seededit" in model:
         return _edit_image_ark(image_bytes, prompt, model, mime, timeout_s)
     s = get_settings()
     if not s.dashscope_api_key or not image_bytes:
@@ -2237,7 +2412,7 @@ def _generate_image_ark(prompt: str, size: str, model: str, timeout_s: int,
             headers={"Authorization": f"Bearer {s.ark_api_key}",
                      "Content-Type": "application/json"},
             json={"model": model, "prompt": full,
-                  "size": _ark_size(size),
+                  "size": _ark_size(size, model),
                   "response_format": "url", "watermark": False,
                   **({"seed": seed} if seed is not None else {})},
             timeout=timeout_s,
@@ -2267,6 +2442,8 @@ def generate_image(prompt: str, size: str = "1280*720",
     enrichment), never in the play request path — generation takes ~10-30s per image."""
     import time
 
+    if model.startswith("gpt-image"):
+        return _generate_image_openai(prompt, size, model, timeout_s, negative)
     if "seedream" in model:
         return _generate_image_ark(prompt, size, model, timeout_s, seed, negative)
     s = get_settings()
@@ -2710,118 +2887,37 @@ class QwenLLM:
         except Exception:
             return {}
 
-    def _suggest(self, prompt: dict[str, Any]) -> dict[str, Any]:
-        """3 short, CONTEXT-aware "what could I do next" hints, drawn from what just happened
-        + the current situation. Cheap call; degrades to {} so runtime can fall back."""
-        ctx = prompt.get("sugg") or {}
-        pc = (ctx.get("player_name") or "").strip()
-        pc_desc = (ctx.get("player_desc") or "").strip()
-        if (prompt.get("language") or "zh") == "en":
-            # full English variant — an appended directive isn't reliable enough here
-            # (the zh examples pull the model back to Chinese chips)
-            who_en = (f"“{pc}” ({pc_desc})" if pc and pc_desc
-                      else (f"“{pc}”" if pc else "the protagonist"))
-            sys = (
-                f"You write NEXT-ACTION suggestions for an interactive fiction game. "
-                f"The player plays {who_en}. "
-                "★Iron rule: every suggestion must be written FROM this character's own "
-                "point of view and voice — a line they would say out loud, or an action "
-                "they would take, in first person. Never an external instruction like "
-                "'go ask about last night' — instead: “Where were you last night, really?” "
-                "or “Let me take a closer look.” "
-                "Output exactly 3 lines, one suggestion per line, no numbering, no "
-                "explanations. ★Line 1 MUST push the player's own intent one step "
-                "further — whatever their last line was driving at, line 1 serves that "
-                "will (no detours, no cold water, no redirecting). Lines 2-3 then offer "
-                "different directions (a new thread, a new action, a new place). "
-                "Each must: follow directly from what was just said, be "
-                "concrete and doable, fit this character's personality, and stay short "
-                "(under a dozen words if possible). "
-                "★Only reference the CURRENT place, people PRESENT right now, and exits "
-                "you can actually take — never absent people or unseen things. "
-                "Do not spoil hidden truths; point directions only. Write in English."
-            )
-            u = (
-                f"You ({pc or 'the protagonist'}) are at: {ctx.get('place') or '(unknown)'}\n"
-                f"You just said to {ctx.get('speaker','them')}: {ctx.get('player_input','')}\n"
-                f"{ctx.get('speaker','They')} replied: {ctx.get('reply','')}\n"
-                f"Present: {', '.join(ctx.get('present') or []) or 'just the two of you'}\n"
-                f"Places you can go: {', '.join(ctx.get('exits') or []) or 'none'}\n"
-                f"Still to untangle this chapter: {', '.join(ctx.get('topics') or []) or 'explore freely'}\n"
-                f"Your relationship with {ctx.get('speaker','them')}: {ctx.get('relation','')}"
-            )
-        else:
-            who = f"「{pc}」（{pc_desc}）" if pc and pc_desc else (f"「{pc}」" if pc else "你扮演的主角")
-            sys = (
-                f"你在为一个互动剧情游戏生成【下一步行动建议】。玩家扮演的是 {who}。"
-                "★铁律：每一条建议都必须站在玩家扮演的这个角色的视角、用这个角色的身份和口吻写——"
-                "是这个角色接下来会亲口说的一句话、或会亲手做的一个动作，用第一人称（我…）。"
-                "绝不能写成旁观者、系统或别的角色对主角发出的外部指令。"
-                "对比：外部命令口吻“去问对方昨晚的事”“上前查看”是错的；"
-                "主角亲口/亲手的“你昨晚究竟去了哪？”“让我走近看看”才是对的。"
-                "只输出 2 条，每行一条，不要编号、不要解释。"
-                "★第1条必须【顺着玩家的意志走】：玩家刚才那句话在推什么、要什么，第1条就是把这件事再往前推一步的说法或做法——服务玩家的意图，不转弯、不泼冷水、不改道。"
-                "若资料里写了玩家【当前的目标】或【正要去见的人】，第1条永远直接服务它；"
-                "玩家的问题若没得到正面回答，第1条就是把同一个问题逼得更紧。"
-                "第2条给一个真正不同方向的可能性（新话头、新动作、新去处）。"
-                "每条都要：紧扣刚发生的对话与此刻处境、"
-                "具体可操作、贴合这个角色的性格与说话方式、尽量精炼（十来个字最好，最多一句话说完）。"
-                "★建议只能落在【当前地点、此刻在场的人、可去的地方】上——绝不要提任何不在场的人、"
-                "不在眼前的东西。不要剧透隐藏真相，只点方向。"
-                "★【在场名单是引擎的事实账本，字字为真】：名单里有人，就绝不能写出"
-                "「这里没人/没见到人」这类话；也绝不建议「去」你此刻已经身处的地点；"
-                "说到某人在哪，必须与资料一致，不确定就不提。"
-                + ("★这是视觉小说的选项，玩家将【直接点击执行】：两条要成为两种真正不同的"
-                   "走法——一条顺意图推进，一条换切入或更大胆/有代价的选择"
-                   "（仍然是角色口吻）。" if ctx.get("vn") else "")
-                + (f"★文风与用语（建议也是台词，必须遵守）：{ctx['style']}"
-                   if ctx.get("style") else "")
-            )
-            u = (
-                f"你（{pc or '主角'}）此刻在：{ctx.get('place') or '（未知地点）'}\n"
-                f"你刚才对{ctx.get('speaker','对方')}说：{ctx.get('player_input','')}\n"
-                f"这一拍的收尾（最后发生的事，第1条建议要接住它）：{ctx.get('reply','')}\n"
-                f"此刻在场（就在你面前，字字为真）：{ '、'.join(ctx.get('present') or []) or '只有你一个人'}\n"
-                f"可以去的地方：{ '、'.join(ctx.get('exits') or []) or '暂无'}\n"
-                f"这一章你还想弄清：{ '、'.join(ctx.get('topics') or []) or '随你探索'}\n"
-                f"你和{ctx.get('speaker','对方')}此刻的关系：{ctx.get('relation','普通')}"
-                + (f"\n你当前的目标：{ctx['goal']}" if ctx.get("goal") else "")
-                + (f"\n你正要去见的人：{ctx['pursuit']}" if ctx.get("pursuit") else "")
-                # 🌐 全局账本 (Yi: 了解全局再给建议): 建议要对得起整个处境, 不只眼前一拍
-                + (f"\n【全局·此刻】{ctx['clock']}" if ctx.get("clock") else "")
-                + (f"\n【全局·你手上的事】{'；'.join(ctx['goals_open'])}" if ctx.get("goals_open") else "")
-                + (f"\n【全局·已定的约】{'；'.join(ctx['promises'])}" if ctx.get("promises") else "")
-                + (f"\n【全局·没说完的话头】{'；'.join(ctx['setups'])}" if ctx.get("setups") else "")
-                + (f"\n【全局·这场戏的暗流】{ctx.get('crux','')}"
-                   f"{('；' + ctx['spark']) if ctx.get('spark') else ''}"
-                   if (ctx.get("crux") or ctx.get("spark")) else "")
-                + (f"\n【全局·你惦记的人在哪】{'；'.join(ctx['warm_away'])}" if ctx.get("warm_away") else "")
-                + (f"\n【全局·身上的钱】{ctx['money']}" if ctx.get("money") else "")
-                + "\n★两条建议合起来要对得起上面的全局：第1条仍然顺着你刚才的意图接住收尾；"
-                  "第2条优先服务全局里最要紧的一件（快到期的约、没说完的话头、手上的事、"
-                  "惦记的人），而不是凭空的新念头。"
-            )
+    def _music_judge(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🎼 乐师 (Yi 2026-07-22: 高精度观察情绪切 BGM): 读这一回合的实际剧情文字,
+        判场面情绪并从曲库选曲。跑在关键路径外; degrade to {} (规则选曲兜底)。"""
+        import json as _json
+        sys = ("你是剧场乐师。读完这一回合的剧情文字，判断此刻场面的【真实情绪】，"
+               "从曲库中选配乐。只输出严格JSON："
+               '{"track":"曲库key；认为该延续当前曲目就填空字符串",'
+               '"pivot":0,"feel":"≤8字，此刻的情绪"}。'
+               "pivot：0=情绪在延续，1=明显转折（气氛变了），2=急转（袭击/告白/死讯/翻脸）。"
+               "规矩：情绪没实质变化就保持（track 填空）——频繁换曲比选错更伤气氛；"
+               "但当前曲目是（无）时必须选一首（沉默不是配乐）；"
+               "选曲看情绪本质不看题材字眼：亲密暧昧→romantic，追查不安→mystery/eerie，"
+               "打斗逃命→battle/tense，失去离别→sad，独处空落→lonely，"
+               "日常闲适→daily，温情陪伴→warm。")
+        u = _json.dumps({"曲库": prompt.get("menu") or [],
+                         "当前曲目": prompt.get("current") or "（无）",
+                         "当前曲目已连续回合数": prompt.get("held", 0),
+                         "场面": prompt.get("context", ""),
+                         "这一回合的剧情": prompt.get("text", "")}, ensure_ascii=False)
         try:
             resp = _post_chat(self._url, self._key,
-                              {"model": self._model, "messages": [{"role": "system", "content": sys},
-                      {"role": "user", "content": u}], "max_tokens": 160, "temperature": 0.8},
-                              timeout=20)
-            txt = resp.json()["choices"][0]["message"]["content"].strip()
+                              {"model": self._model,
+                               "messages": [{"role": "system", "content": sys},
+                                            {"role": "user", "content": u}],
+                               "max_tokens": 120, "temperature": 0.3,
+                               "response_format": {"type": "json_object"}},
+                              timeout=25, kind="music")
+            data = _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
+            return data if isinstance(data, dict) else {}
         except Exception:
-            return {"suggestions": []}
-        import re
-        out = []
-        for ln in txt.splitlines():
-            ln = re.sub(r"^\s*[-*\d.、。)）]+\s*", "", ln).strip().strip("「」\"'")
-            if not ln:
-                continue
-            # the FULL sentence survives — the UI truncates display only, and clicking a
-            # chip pastes the whole line. Safety cap only for runaway generations.
-            if len(ln) > 120:
-                cut = max((ln.rfind(p, 40, 120) for p in "？！。?!…，,"), default=-1)
-                ln = ln[:cut + 1] if cut >= 40 else ln[:120] + "…"
-            out.append(ln)
-        return {"suggestions": out[:3]}
+            return {}
 
     def _describe_place(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """Concrete, people-free description for an EMERGENT location (a place that came up in
@@ -2829,13 +2925,19 @@ class QwenLLM:
         name = (prompt.get("place_name") or "").strip()
         world = (prompt.get("world") or "").replace("\n", " ")[:400]
         frm = (prompt.get("from_place") or "").strip()
+        _inv = ("原话若只是泛指（「个地方」「别处」「安静点的地方」这类没有实体的说法），"
+                "就为这个世界【发明】一个贴切的具体去处名（2~8字，贴世界观）。"
+                if prompt.get("invent") else
+                "原话若只是泛指（「个地方」「别处」「安静点的地方」这类没有实体的说法），"
+                "第一行就只输出一个字：无。")
         sys = ("你在为一个互动剧情游戏即时生成一个新地点。输出两行：\n"
                "第一行：把玩家的原话提炼成一个干净的【地名】（2~8字，只留地点本体，"
                "去掉动作、目的和语气，如「铁皮顶那屋摸个底」→「铁皮顶屋」、"
-               "「去后巷看看情况」→「后巷」；原话本身已是干净地名就照抄）。\n"
+               "「去后巷看看情况」→「后巷」；原话本身已是干净地名就照抄）。"
+               + _inv + "\n"
                "第二行：这个地点的环境描写：只写此刻实际能看到的具体陈设、光线、声响、气味，"
                "30~60字，一段话，第三人称、有画面感、贴合世界观；画面里不要出现任何人物，"
-               "不要台词，不要解释或标题。" + _lang_rule(prompt))
+               "不要台词，不要解释或标题（第一行是「无」时第二行也不用写）。" + _lang_rule(prompt))
         u = f"世界观：{world or '（未知）'}\n玩家的原话：{name}\n玩家刚从「{frm or '别处'}」走过来。\n输出两行。"
         try:
             resp = _post_chat(self._url, self._key,
@@ -2845,9 +2947,14 @@ class QwenLLM:
             txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
             lines = [l.strip().strip("「」\"'") for l in txt.splitlines() if l.strip()]
             clean = lines[0][:12] if lines else ""
+            if clean in ("无", "無", "None", "N/A"):   # 🧑‍⚖️ 判官驳回: 原话没有具体去处
+                return {"name": "", "detail": ""}
             detail = " ".join(lines[1:]).strip() if len(lines) > 1 else ""
-            if not detail:      # model collapsed to one line — treat it as the detail
-                clean, detail = "", lines[0] if lines else ""
+            if not detail:      # model collapsed to one line
+                if len(lines) == 1 and len(clean) <= 12:
+                    detail = ""        # 单行且像地名 → 当地名收, 描写留空
+                else:
+                    clean, detail = "", lines[0] if lines else ""
             return {"name": clean, "detail": detail}
         except Exception:
             return {"detail": ""}
@@ -2971,6 +3078,117 @@ class QwenLLM:
             return {}
         return {"line": line.splitlines()[0][:60]} if line else {}
 
+    def _social_posts(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """📸 角色的朋友圈动态: 从账本素材 (演变/在办的事/约定) 写 1~2 条 in-voice 短帖。"""
+        items = prompt.get("items") or []
+        mat = "\n".join(f"- {i.get('name')}（{i.get('persona','')}；表达方式：{i.get('eq_style','')}）"
+                        f"近况素材：{'；'.join(i.get('hooks') or [])}" for i in items)
+        sys = ("你在写游戏内社交动态（朋友圈式短帖）。下面每个角色给出了近况素材，"
+               "各写一条TA会发的动态：≤40字，口语，有TA的性格，可含语气词/省略号；"
+               "不解释背景、不@人、不写标签。【铁律】只基于给出的素材，绝不发明新的人名地名事件；"
+               "素材含蓄就写得含蓄（没头没尾正是朋友圈的味道）。不用破折号。\n"
+               "输出每行一条：「名字：内容」。\n" + mat + _lang_rule(prompt))
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model, "messages": [{"role": "system", "content": sys},
+                               {"role": "user", "content": "动态："}],
+                               "max_tokens": 140, "temperature": 0.95}, timeout=20)
+            txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+            posts = []
+            for l in txt.splitlines():
+                nm, _, body = l.strip().partition("：")
+                nm = nm.strip().strip("「」\"'")
+                if nm and body.strip():
+                    posts.append({"name": nm, "text": body.strip().strip("「」")[:80]})
+            return {"posts": posts[:2]}
+        except Exception:
+            return {}
+
+    def _social_reply(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """💬 TA 回复玩家对动态的评论: 一句 in-voice + 好感小判 (0~2)。"""
+        ch = prompt.get("char") or {}
+        sys = (f"你是「{ch.get('name','')}」。人设：{ch.get('persona_text','')}\n"
+               f"表达方式：{ch.get('eq_style','')}。你和对方的关系：{prompt.get('relation','')}\n"
+               f"你发了条动态：「{prompt.get('post','')}」，对方评论：「{prompt.get('comment','')}」\n"
+               "写你的回复：一句、≤25字、像真人回评论（可敷衍可走心，按你的性格和关系来）。"
+               "另起一行写好感变化数字（0/1/2——评论让你多亲近了一点就给1，戳中心里给2，无感给0）。"
+               "不用破折号。" + _lang_rule(prompt))
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model, "messages": [{"role": "system", "content": sys},
+                               {"role": "user", "content": "回复："}],
+                               "max_tokens": 50, "temperature": 0.9}, timeout=15)
+            txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+            lines = [l.strip() for l in txt.splitlines() if l.strip()]
+            reply = (lines[0] if lines else "").strip("「」\"'：:")[:60]
+            dc = 0
+            for l in lines[1:]:
+                m = re.search(r"[012]", l)
+                if m:
+                    dc = int(m.group())
+                    break
+            return {"reply": reply, "closeness": dc} if reply else {}
+        except Exception:
+            return {}
+
+    def _peek_nickname(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """📱🔍 TA给玩家的备注名 (查手机的浅翻彩蛋): 一眼见性格, ≤6字。"""
+        ch = prompt.get("char") or {}
+        sys = (f"你是「{ch.get('name','')}」。表达方式：{ch.get('eq_style','')}\n"
+               f"你和对方的关系：{prompt.get('relation','')}。你相处下来对TA的印象：{prompt.get('impression','')}\n"
+               "你会在自己的通讯录里给TA存什么备注名？≤6个字，一眼见你的性格与你们的关系"
+               "（可以是绰号/身份/带情绪的称呼）。只输出备注名本身。" + _lang_rule(prompt))
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model, "messages": [{"role": "system", "content": sys},
+                               {"role": "user", "content": "备注名："}],
+                               "max_tokens": 16, "temperature": 0.9}, timeout=15)
+            nick = (resp.json()["choices"][0]["message"]["content"] or "").strip().strip("「」\"'：:")
+            return {"nickname": nick[:8]} if nick else {}
+        except Exception:
+            return {}
+
+    def _peek_threads(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """📱🔍 渲染TA与另一人的既有对话 (查手机玩法)。素材=立场/演变人话/在办的事 —
+        调用方结构化保证素材不含秘密, 这里只负责措辞。"""
+        owner = prompt.get("owner") or {}
+        sys = (f"你在写「{owner.get('name','')}」的{prompt.get('device','手机')}里，TA和"
+               f"「{prompt.get('with','')}」之间已有的对话记录（旁观者视角、双方消息混排）。\n"
+               f"两人立场：{prompt.get('label') or ('交好' if int(prompt.get('stance') or 0) > 0 else '不睦')}"
+               f"（{prompt.get('stance')}档）。最近的往来由头：{'；'.join(prompt.get('whys') or []) or '无'}。"
+               f"{owner.get('name','')}正在办的事：{prompt.get('intent') or '无'}\n"
+               "写3~4条短消息（每条一行，≤25字，口语，谁说的用「甲:」「乙:」开头标名字）。"
+               "【铁律】只基于上面给出的素材写，绝不发明新的人名、地名、秘密或具体情节；"
+               "素材单薄就写得日常琐碎（催账/约时间/一句抱怨）。不用破折号。" + _lang_rule(prompt))
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model, "messages": [{"role": "system", "content": sys},
+                               {"role": "user", "content": "对话记录："}],
+                               "max_tokens": 140, "temperature": 0.85}, timeout=20)
+            txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+            msgs = [l.strip().strip("「」\"'") for l in txt.splitlines() if l.strip()][:4]
+            return {"msgs": msgs} if msgs else {}
+        except Exception:
+            return {}
+
+    def _peek_twist(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """📱🔍 立场跳变的转折消息: 上周还在密谋这周已翻脸 — 线程里必须留下裂痕。"""
+        sys = (f"「{prompt.get('with','')}」的对话线程里，两人立场刚从 {prompt.get('old_stance')} 档"
+               f"变成 {prompt.get('new_stance')} 档（{prompt.get('label') or ''}）。"
+               f"线程最后一条是：「{prompt.get('last','')}」\n"
+               "写1~2条短消息（每条一行≤25字）体现这次转折：翻脸/破冰/警告/道歉，语气与新立场一致。"
+               "只输出消息，不解释。不用破折号。" + _lang_rule(prompt))
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model, "messages": [{"role": "system", "content": sys},
+                               {"role": "user", "content": "转折消息："}],
+                               "max_tokens": 70, "temperature": 0.9}, timeout=15)
+            txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+            msgs = [l.strip().strip("「」\"'") for l in txt.splitlines() if l.strip()][:2]
+            return {"msgs": msgs} if msgs else {}
+        except Exception:
+            return {}
+
     def _compose_msg(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """📱 an ABSENT character reaches out (promise reminder / stood-up hurt / afterglow).
         1~2 short bubbles, unmistakably in their voice. Degrades to {} → deterministic text."""
@@ -3024,6 +3242,10 @@ class QwenLLM:
             (f"你相处下来对{pl}的印象：{prompt.get('player_read','')}"
              if prompt.get("player_read") else ""),
             f"你们此前的经历（你的记忆）：{(prompt.get('memory') or '')[:400]}" if prompt.get("memory") else "",
+            ("【你们最近当面发生的事（你亲历的，就在刚才/不久前）】\n"
+             + "\n".join(prompt.get("recent_scene") or [])
+             + f"\n{device}里要接得上这些——绝不当没发生过，也别逐句复述。"
+             if prompt.get("recent_scene") else ""),
             (f"最离谱的是：TA此刻就和你在【同一个地方】，人就在几步开外，却用{device}给你发消息。"
              "先就着这件事本身回应——按你的性格来：好笑、无语、抬头瞪TA一眼、或干脆凑趣配合。"
              "一句『我人不就在这儿？』式的吐槽很自然；想当面说的话就叫TA过来说。"
@@ -3038,7 +3260,13 @@ class QwenLLM:
              if call else
              "【短信体铁律】你发的是消息，不是小说：对方只看得到字，看不见你——绝不写动作、神态、"
              "场景描写，绝不用（括号）写你在做什么。像真人打字：每条短（20字内为佳），"
-             "想说的多就拆成两三条连发；可以省略主语、可以带语气词，但绝不要台词腔的长句。"),
+             "想说的多就拆成两三条连发；可以省略主语、可以带语气词，但绝不要台词腔的长句。"
+             "【接话的情商】TA的消息带着情绪就先接情绪再谈事；TA分享小事是在靠近你，"
+             "用具体的追问接住，别拿「嗯/哦」把话掉在地上；记得回扣TA之前提过的细节。"
+             "【线上的撩法·仅当你对TA有心思或你们正暧昧】消息比当面更适合留白："
+             "话可以只说一半（「算了，见面说」）；不必每条都接满，回得短而有钩比周到更勾人；"
+             "收尾给明天留个话头（「明天有个东西给你看」）——把最好的那句留到见面，"
+             "线上是引子，线下才是正戏。"),
             "【铁律】你只能基于下面列出的「可透露信息」谈及内情；此外的任何秘密你都不知道，绝不能写出来——"
             "被追问就回避、岔开，或干脆不回。" if (reveal or new_reveal or has_hidden) else "",
             ("【TA这句话问到了要害，你守不住了——把下面这个实情，用你自己的话、你此刻的情绪说出来"
@@ -3303,6 +3531,66 @@ class QwenLLM:
         except Exception:
             return {}
 
+    def _engine_skeleton(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """✍️ 引擎本起草·骨架 (创作 UX 首期 A): 想法或全文 → 标题/世界/地点/三幕。
+        只出骨架不出门控 — 门控在 engine_secrets 里以 act_min 单维起草 (Yi 铁律)。"""
+        src = str(prompt.get("text") or "")[:5000]
+        sys = ("你是互动剧编剧。把作者给的素材起草成一个可玩剧本的骨架。只输出JSON："
+               '{"title":"≤12字标题","one_liner":"≤24字一句话钩子",'
+               '"synopsis":"60~120字剧情概要","world_long":"120~240字世界观：舞台、时代、规矩、气味",'
+               '"world_facts":"≤120字 每回合都成立的硬事实（地名/称谓/禁忌）",'
+               '"trope_tags":["≤4个题材标签"],'
+               '"locations":[{"name":"≤6字地名","detail":"≤40字 具体陈设与光线",'
+               '"exits":["相邻地点名"]}] 共2~4个、出口必须互相指向真实存在的地点名,'
+               '"acts":[{"title":"≤8字幕题","goal":"≤30字 这一幕要让玩家经历什么"}] 恰好3幕，'
+               "节奏为 起-承-合。全部用作者素材里的元素，不要发明无关内容。")
+        import json as _json
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model,
+                               "messages": [{"role": "system", "content": sys},
+                                            {"role": "user", "content": src}],
+                               "max_tokens": 1800, "temperature": 0.5,
+                               "response_format": {"type": "json_object"}},
+                              timeout=60)
+            out = _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
+            return out if isinstance(out, dict) else {}
+        except Exception:
+            return {}
+
+    def _engine_secrets(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """✍️ 引擎本起草·秘密与结局: 门控只许 act_min 单维 (组合维度是死锁温床,
+        留给作者在工坊里加)。生成后路由层立刻 lint + 确定性降级。"""
+        import json as _json
+        chars = [{"name": c.get("name"), "role": c.get("role")}
+                 for c in (prompt.get("characters") or [])][:6]
+        acts = [str(a) for a in (prompt.get("acts") or [])][:5]
+        body = _json.dumps({"synopsis": str(prompt.get("synopsis") or "")[:400],
+                            "characters": chars, "acts": acts}, ensure_ascii=False)
+        sys = ("你给互动剧起草秘密与结局。只输出JSON："
+               '{"secrets":[{"character_name":"守着秘密的角色名（必须来自给定角色）",'
+               '"title":"≤12字秘密标题",'
+               '"fragments":[{"layer":1,"content":"≤80字 这一层揭开的事实",'
+               '"cover":"≤40字 被问到时的谎言口径","retrieval_key":"≤10字检索词",'
+               f'"act_min":1}}]}}] 秘密1~3个、每个1~2层碎片，act_min 只许 1~{max(1, len(acts))} 的整数'
+               "（第几幕起可解锁，层越深越晚）,"
+               '"endings":[{"kind":"good或bad","title":"≤8字","text":"60~120字结局文",'
+               f'"act_min":{max(1, len(acts))}}}] 1~2个。'
+               "秘密必须从概要里长出来，不要发明无关内容。")
+        import json as _json
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model,
+                               "messages": [{"role": "system", "content": sys},
+                                            {"role": "user", "content": body}],
+                               "max_tokens": 1600, "temperature": 0.5,
+                               "response_format": {"type": "json_object"}},
+                              timeout=60)
+            out = _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
+            return out if isinstance(out, dict) else {}
+        except Exception:
+            return {}
+
     def _char_from_text(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """🪄 一大段文字 → 角色卡 v2 (Yi: 制作角色能直接扔一大段文字自动处理)。
         Degrades to {} (路由层报「没解析出角色」)."""
@@ -3368,20 +3656,29 @@ class QwenLLM:
     def _intro_vignettes(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """🎬 galgame 开场 (Yi: 字太多 → 短环境 + 每角色小剧情). Degrades to {}
         (引擎用人设+台词范例装配确定性开场)."""
+        _court = bool(prompt.get("hook_court"))
+        _hook_spec = ('"hook":{"task":"≤24字：TA给玩家留下的一个口实或小由头'
+                      '（请尝样小东西/一句没说完的话/下次再会的理由）——绝不是差事不是任务",'
+                      '"line":"≤55字：TA留口实时说的那句话——小恩小惠或借景搭话，'
+                      '带着TA的心思但绝不挑明，口吻贴人设"}'
+                      if _court else
+                      '"hook":{"task":"≤24字：给玩家的一个具体去处或小事（送/找/帮/看），'
+                      '尽量把玩家引向不在场的角色或别的地点",'
+                      '"line":"≤55字：主角位顺口捎带地提起它——是请托或邀请，不是命令、不布置任务，'
+                      '答不答应都随玩家，口吻贴人设，别客套"}')
         sys = ("你为一部 galgame 写开场。只输出JSON："
                '{"scene":"≤80字：此刻在哪、什么时辰、一个感官细节，玩家的处境一句带过",'
                '"cast":[{"name":"在场角色名（照抄给定名单）",'
                '"action":"≤55字：玩家第一眼看到TA时TA正在做的事，一眼立住人设",'
                '"line":"≤45字：TA此刻的第一句话，贴人设口吻"}],'
-               '"hook":{"task":"≤24字：给玩家的一个具体去处或小事（送/找/帮/看），'
-               '尽量把玩家引向不在场的角色或别的地点",'
-               '"line":"≤55字：主角位顺口捎带地提起它——是请托或邀请，不是命令、不布置任务，'
-               '答不答应都随玩家，口吻贴人设，别客套"}}。'
+               + _hook_spec + '}。'
                "克制留白，口语，不堆形容词；cast 按给定顺序全员各一条；"
                "is_lead 的那位的 line 必须对刚来的玩家开口，且若给了 tease，"
                "TA的 action 里要藏一丝与之相关的欲言又止（绝不点破内容）；"
                "标了 visiting 的角色不是本来就在这儿，是特意来找玩家打照面的，"
-               "action 要写出TA上门/出现的样子；不用破折号。")
+               "action 要写出TA上门/出现的样子；"
+               "带 opening_line 的角色，line 必须一字不改照抄 opening_line，"
+               "action 围绕这句话此刻的说出而写；不用破折号。")
         import json as _json
         u = _json.dumps({"时刻": prompt.get("clock"), "地点": prompt.get("place"),
                          "玩家": prompt.get("player"), "世界": prompt.get("world"),
@@ -3951,8 +4248,8 @@ class QwenLLM:
             return self._rank_judge(prompt)
         if prompt.get("gen_market"):
             return self._gen_market(prompt)
-        if prompt.get("suggest"):
-            return self._suggest(prompt)
+        if prompt.get("music_judge"):
+            return self._music_judge(prompt)
         if prompt.get("describe_place"):
             return self._describe_place(prompt)
         if prompt.get("start_place"):
@@ -3977,6 +4274,10 @@ class QwenLLM:
             return self._scene_brief(prompt)
         if prompt.get("char_from_text"):
             return self._char_from_text(prompt)
+        if prompt.get("engine_skeleton"):
+            return self._engine_skeleton(prompt)
+        if prompt.get("engine_secrets"):
+            return self._engine_secrets(prompt)
         if prompt.get("living_event"):
             return self._living_event(prompt)
         if prompt.get("parting"):
@@ -3985,6 +4286,16 @@ class QwenLLM:
             return self._arrive(prompt)
         if prompt.get("compose_msg"):
             return self._compose_msg(prompt)
+        if prompt.get("social_posts"):
+            return self._social_posts(prompt)
+        if prompt.get("social_reply"):
+            return self._social_reply(prompt)
+        if prompt.get("peek_nickname"):
+            return self._peek_nickname(prompt)
+        if prompt.get("peek_threads"):
+            return self._peek_threads(prompt)
+        if prompt.get("peek_twist"):
+            return self._peek_twist(prompt)
         if prompt.get("compose_letter"):
             return self._compose_letter(prompt)
         if prompt.get("phone_reply"):

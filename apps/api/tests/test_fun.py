@@ -77,13 +77,16 @@ def test_roll_check_mapping():
 
 
 def test_risky_do_action_rolls_and_briefs_the_director():
+    """⚡ 提速契约 (2026-07-22): 引擎认得出的动作引擎独立定档 — 不再花一次
+    LLM 调用问模型意见 (模型原本也只能调一档)。"""
     runtime._rng = random.Random(1)
     llm = FunLLM(risk=55)
     out = runtime.run_turn(BASE, runtime.default_state(), {"name": "我"}, "我翻墙进去",
                            channel="do", llm=llm)
     d = out["dice"]
-    assert d and d["risk"] == 65 and 1 <= d["roll"] <= 20 and d["die"] == 20
+    assert d and 1 <= d["roll"] <= 20 and d["die"] == 20
     assert 2 <= d["dc"] <= 20
+    assert not any(pr.get("risk_judge") for pr in llm.prompts)   # 零判险调用
     assert llm.prompts[0].get("check") == d          # the director must narrate the result
 
 
@@ -124,20 +127,24 @@ def test_pressure_blowout_forces_the_terminal_ending():
 
 
 def test_world_moves_by_itself_after_quiet_turns():
+    # ⚖️ 无点击不推进 (Yi 2026-07-14): 事件自燃默认关 (world_event_every=0) —
+    # 要这股「世界自己会动」劲头的剧本自己开 tuning
+    opted = {"story": {**BASE["story"], "tuning": {"world_event_every": 4}},
+             "secrets": []}
     st = runtime.default_state()
     fired_at = None
     for turn in range(1, 6):
-        out = runtime.run_turn(BASE, st, {"name": "我"}, "随便聊聊", channel="say")  # MockLLM
+        out = runtime.run_turn(opted, st, {"name": "我"}, "随便聊聊", channel="say")  # MockLLM
         st = out["state"]
         if any("就在这时，远处传来一声闷响" in b.get("text", "") for b in out["beats"]):
             fired_at = fired_at or turn
-    assert fired_at == 4                             # default world_event_every = 4
+    assert fired_at == 4                             # story opted in at every 4 quiet turns
     assert "ev1" in st["triggered_event_ids"]
     assert st["world_pulse"] == 1                    # reset at the impulse, +1 on the quiet 5th turn
 
 
 def test_world_impulse_respects_who_is_present():
-    story = {"story": {**BASE["story"],
+    story = {"story": {**BASE["story"], "tuning": {"world_event_every": 4},
                        "acts": [{"index": 1, "title": "一",
                                  "events": [{"id": "ev2", "what_happens": "神秘人推门而入。",
                                              "who_character_ids": ["ghost"]}]}]},

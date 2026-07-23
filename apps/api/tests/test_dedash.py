@@ -34,12 +34,11 @@ def test_dedash_guards_the_turn_pipeline():
         def generate(self, prompt):
             if prompt.get("risk_judge"):
                 return {"risk": 100}
-            if prompt.get("suggest"):
-                return {"suggestions": ["去问问他——那件事"]}
             return {"beats": [
                 {"type": "description", "speaker_name": None, "text": "灯闪了一下——熄了。"},
                 {"type": "dialogue", "speaker_name": "甲", "text": "你——你怎么进来的——说！"},
-            ], "affinity_delta": 0, "advance_act": False, "ending": None}
+            ], "suggestions": ["去问问他——那件事"],
+                "affinity_delta": 0, "advance_act": False, "ending": None}
 
     out = runtime.run_turn(story, runtime.default_state(), {"name": "我"}, "你好",
                            channel="say", llm=DashLLM())

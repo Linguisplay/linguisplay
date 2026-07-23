@@ -31,6 +31,47 @@ EXPRS: dict[str, str] = {
     "惊": "让人物的眼睛稍稍睁大一点，眉梢微挑，嘴唇微启，像刚听见不该听见的话" + _KEEP,
 }
 
+# 🧍 动作差分 (Yi 2026-07-21: 角色的动作可以增加, 但角色不能崩) — 同一条改图管线,
+# 幅度铁律换成动作版: 脸和身份钉死, 只动手臂和上半身, 双脚不挪 (挪脚=重新构图=崩相)。
+_KEEP_ACT = ("。铁律：这是同一张立绘的动作差分——严格保持同一个人：发型、五官、表情、"
+             "服装、体型、站位、构图、光线、背景、画风完全不变，双脚位置不动，"
+             "取景范围也不变（半身像仍是半身像，绝不把画面拉远画出全身或凭空补出腿脚），"
+             "只按要求调整手臂与上半身，动作自然克制，像真人演员的小动作，不夸张不变形")
+POSES: dict[str, str] = {
+    "挥手": "让人物抬起一只手，在胸口到肩膀的高度轻轻挥手打招呼，另一只手自然下垂" + _KEEP_ACT,
+    "抱臂": "让人物双臂在胸前交叉环抱，肩膀微微收紧，带一点防备的意味" + _KEEP_ACT,
+    "低头": "让人物微微低下头，视线落向地面，肩膀轻轻垮下一点" + _KEEP_ACT,
+    "伸手": "让人物向画面前方伸出一只手，掌心向上，像在递东西或发出邀请" + _KEEP_ACT,
+}
+DIFFS: dict[str, str] = {**EXPRS, **POSES}
+
+
+def _intact(cut: bytes, cid: str) -> bool:
+    """🩺 崩-gate: 差分上台前的确定性体检 — 抠完必须还有一个像样的人形, 且轮廓
+    与常态底图的差距在动作幅度以内 (人没了/人缩了/画面炸了一票否)。脸崩这里
+    测不出, 靠编辑铁律压着; 被否的差分不落盘, 客户端自然回落常态底 — 宁可不动,
+    不可崩相。"""
+    import io as _io
+
+    from PIL import Image
+    try:
+        im = Image.open(_io.BytesIO(cut))
+    except Exception:
+        return False
+    if im.mode == "RGBA" and not im.getchannel("A").getbbox():
+        return False   # 全透明 = 人没了 (无 alpha 通道不算罪 — 宁可少限制)
+    base = SPRITE_DIR / f"{cid}.webp"
+    if not base.exists():
+        return True
+    try:
+        bw, bh = Image.open(base).size
+    except Exception:
+        return True
+    w, h = im.size   # 两边都过了 trim_alpha, 尺寸即人形轮廓
+    if not bw or not bh:
+        return True
+    return 0.66 <= h / bh <= 1.4 and 0.5 <= w / bw <= 2.0
+
 
 def base_of(cid: str) -> Path | None:
     """改脸差分的底图: 立绘源图 (带背景, 编辑器吃这个) → 旧版立绘 jpg → 头像."""
@@ -39,6 +80,46 @@ def base_of(cid: str) -> Path | None:
         if p.exists():
             return p
     return None
+
+
+def avatar_from_base(cid: str) -> bytes | None:
+    """📇 头像同脸捷径 (Yi 2026-07-15: 手机头像也要形象稳定): 有立绘底图的角色,
+    头像直接从底图裁 — 零成本且与立绘绝对同脸, 不再单独 t2i 一张新想象的脸。
+    透底 webp 的 alpha 框与底图同尺寸时按人形定位; 否则按立绘惯例顶部取方窗
+    (站姿立绘的脸在顶部)。无底图返回 None (调用方回落 t2i)。"""
+    import io as _io
+
+    from PIL import Image
+
+    from .gal import shrink_jpg
+    src = SPRITE_DIR / f"{cid}_src.jpg"
+    if not src.exists():
+        return None
+    try:
+        im = Image.open(src).convert("RGB")
+    except Exception:
+        return None
+    box = None
+    cut = SPRITE_DIR / f"{cid}.webp"
+    try:
+        if cut.exists():
+            ci = Image.open(cut)
+            if ci.mode == "RGBA" and ci.size == im.size:
+                box = ci.getchannel("A").getbbox()
+    except Exception:
+        box = None
+    if box and box[2] > box[0]:
+        side = max(64, min(int((box[2] - box[0]) * 1.25), im.width, im.height))
+        cx = (box[0] + box[2]) // 2
+        left = max(0, min(cx - side // 2, im.width - side))
+        top = max(0, min(box[1] - side // 12, im.height - side))
+    else:   # 站姿立绘: 顶部居中方窗 = 头胸特写
+        side = min(im.size)
+        left = (im.width - side) // 2
+        top = 0
+    buf = _io.BytesIO()
+    im.crop((left, top, left + side, top + side)).save(buf, format="JPEG", quality=88)
+    return shrink_jpg(buf.getvalue(), quality=85, max_side=768)
 
 
 def ingest_upload(cid: str, data: bytes, keep_photo: bytes | None = None) -> dict[str, Any]:
@@ -87,7 +168,7 @@ def ingest_upload(cid: str, data: bytes, keep_photo: bytes | None = None) -> dic
     (AVATAR_DIR / f"{cid}.jpg").write_bytes(shrink_jpg(buf.getvalue(), quality=85, max_side=768))
 
     removed = 0
-    for e in EXPRS:
+    for e in DIFFS:
         for suffix in (".webp", ".jpg"):
             p = SPRITE_DIR / f"{cid}_{e}{suffix}"
             if p.exists():
@@ -222,11 +303,14 @@ def smart_cast(content: dict[str, Any], cids: list[str] | None = None) -> dict[s
 
 
 def build_expr_pack(cids: list[str], exprs: list[str] | None = None,
-                    force: bool = False) -> dict[str, Any]:
-    """Edit-generate the expression diffs for these characters. Sequential and
-    idempotent — rerun to backfill failures. Returns a per-file report."""
-    todo = list(exprs or EXPRS.keys())
-    report: dict[str, Any] = {"done": [], "skipped": [], "failed": [], "no_base": []}
+                    force: bool = False,
+                    no_pose_cids: set[str] | frozenset = frozenset()) -> dict[str, Any]:
+    """Edit-generate the expression AND pose diffs for these characters. Sequential
+    and idempotent — rerun to backfill failures. no_pose_cids: 非人形角色 (species)
+    跳过人类肢体动作, 只做表情. Returns a per-file report."""
+    todo = list(exprs or DIFFS.keys())
+    report: dict[str, Any] = {"done": [], "skipped": [], "failed": [],
+                              "no_base": [], "broken": []}
     SPRITE_DIR.mkdir(parents=True, exist_ok=True)
     for cid in cids:
         base = base_of(cid)
@@ -235,17 +319,21 @@ def build_expr_pack(cids: list[str], exprs: list[str] | None = None,
             continue
         raw = base.read_bytes()
         for expr in todo:
-            if expr not in EXPRS:
+            if expr not in DIFFS or (expr in POSES and cid in no_pose_cids):
                 continue
             out_path = SPRITE_DIR / f"{cid}_{expr}.webp"
             if out_path.exists() and not force:
                 report["skipped"].append(out_path.name)
                 continue
-            img = edit_image(raw, EXPRS[expr], mime="image/jpeg")
+            img = edit_image(raw, DIFFS[expr], mime="image/jpeg")
             if not img:
                 report["failed"].append(out_path.name)
                 continue
             # 🎭 差分同样上台前抠底+裁边 — 换表情不许换出背景板, 也不许缩一圈
-            out_path.write_bytes(to_webp(trim_alpha(debg(img))))
+            cut = to_webp(trim_alpha(debg(img)))
+            if not _intact(cut, cid):   # 🩺 崩了不上台 (角色不能崩 — Yi 铁律)
+                report["broken"].append(out_path.name)
+                continue
+            out_path.write_bytes(cut)
             report["done"].append(out_path.name)
     return report

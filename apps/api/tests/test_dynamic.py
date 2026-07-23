@@ -73,6 +73,25 @@ def test_emergent_character_joins_and_quota_holds():
     assert names.count("老周") == 1 and out2["content_mutated"] is False
 
 
+def test_emergent_name_guard_rejects_prose_fragments():
+    """🪪 名字守卫 (实弹: 玩家碰到过一个叫「谁看见」的NPC): a prose fragment in the
+    name slot must NOT become a person — rejected with a human-readable audit."""
+    assert runtime.npc_name_ok("老周") and runtime.npc_name_ok("沈青梧")
+    assert runtime.npc_name_ok("哪吒")          # 保守默认: bare 哪 not blocked
+    assert not runtime.npc_name_ok("谁看见")
+    assert not runtime.npc_name_ok("那个人")
+    assert not runtime.npc_name_ok("有人在门外")
+    st = runtime.default_state()
+    content = {"story": {**STORY["story"], "characters": [dict(c) for c in STORY["story"]["characters"]]},
+               "secrets": []}
+    out = runtime.run_turn(content, st, {"name": "我"}, "外面是谁？", channel="say",
+                           llm=WorldLLM(new_char="谁看见｜门口有个影子一闪", next_speakers=[]))
+    assert out["content_mutated"] is False
+    assert all(c.get("name") != "谁看见" for c in content["story"]["characters"])
+    assert any(not a["ok"] and "不像人名" in a.get("why", "")
+               for a in out["state"].get("last_audit") or [])
+
+
 def test_identity_change_tracked_and_injected():
     st = runtime.default_state()
     out = runtime.run_turn(STORY, st, {"name": "我"}, "宣读任命吧", channel="say",

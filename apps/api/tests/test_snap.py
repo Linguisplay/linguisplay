@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# 📷 同脸铁律 (2026-07-15): 自拍包必须带身份锚 — 见文末 test_selfie_carries_identity_anchor
 """📷 随手拍: a character's text can occasionally carry a photo — engine rolls the
 dice and owns the per-thread cooldown; calls never carry one; mock/no-key mode
 never mints an unrenderable URL."""
@@ -61,3 +62,22 @@ def test_art_style_rides_the_snap_prompt(monkeypatch):
     sn = runtime.maybe_snap(styled, runtime.default_state(),
                             SB["story"]["characters"][0], "看")
     assert sn and "阴郁冷调恐怖片美术" in sn["prompt"]
+
+
+def test_selfie_carries_identity_anchor(monkeypatch):
+    """📷 同脸铁律 (Yi 2026-07-15): 自拍包必须带身份锚 — cid + char_seed + 场景,
+    router 才能走 i2i 保脸或定种 t2i; 风景拍不带 (没有脸要保)。"""
+    _on(monkeypatch, roll=1)   # roll=1 → 过概率关 + 选自拍口味
+    st = runtime.default_state()
+    st["phone"] = {"threads": {"c1": {"msgs": [], "unread": 0, "snap_since": 99}}}
+    c = SB["story"]["characters"][0]
+    sn = runtime.maybe_snap(SB, st, c, "在吗")
+    assert sn and sn.get("selfie") is True and sn.get("cid") == "c1"
+    assert isinstance(sn.get("seed"), int)          # char_seed: 历张自拍互相同脸
+    assert "自拍" in sn["prompt"] and sn.get("scene")
+    # 风景口味: 两次掷骰同参 (1,100), 只能按次序造假 — 第一掷过概率关, 第二掷 50>45 选风景
+    st["phone"]["threads"]["c1"]["snap_since"] = 99
+    _rolls = iter([1, 50])
+    monkeypatch.setattr(runtime._rng, "randint", lambda a, b: next(_rolls))
+    sn2 = runtime.maybe_snap(SB, st, c, "在吗")
+    assert sn2 and not sn2.get("selfie") and "眼前的景象" in sn2["prompt"]

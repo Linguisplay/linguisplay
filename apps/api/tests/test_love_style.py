@@ -74,3 +74,20 @@ def test_stale_warm_peak_expires_without_retreat():
     runtime.run_turn(STORY, st, {"name": "我"}, "好久不见。", channel="say", llm=spy)
     assert "回撤" not in _main_prompt(spy)["relationship_playbook"]
     assert runtime._sim(st, "t1")["warm_peak"]["served"] is True
+
+
+def test_charm_playbook_hooks_and_friend_gating():
+    """🪝 撩拨+期待感手艺 (Yi 2026-07-22: 撩玩家要制造期待感): 暧昧/恋人档带离场钩子;
+    朋友档的将撩未撩只给可恋爱的角色 (工具人同事不许发烫)。"""
+    from app.engine import relationships as R
+    romantic = {"relation_allowed": ["stranger", "peer", "friend", "flirt", "lover"]}
+    plain = {"relation_allowed": ["stranger", "peer"]}
+    # 暧昧/恋人: 撩拨手艺 + 期待感钩子
+    assert "期待感" in R.playbook_block("flirt")
+    assert "期待感" in R.playbook_block("lover")
+    # 朋友档: 可恋爱角色有将撩未撩, 不可恋爱的没有
+    assert "将撩未撩" in R.playbook_block("friend", char=romantic)
+    assert "将撩未撩" not in R.playbook_block("friend", char=plain)
+    assert "将撩未撩" not in R.playbook_block("friend")   # 不传 char 保守不注入
+    # 陌生人档不带撩 (交浅不许言深)
+    assert "撩" not in R.playbook_block("stranger")

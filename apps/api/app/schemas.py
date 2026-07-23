@@ -1,7 +1,32 @@
 from datetime import date, datetime
-from typing import Any, Literal, Optional
+from typing import Annotated, Any, Literal, Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, BeforeValidator, EmailStr, Field
+
+
+# 🛡 作者填的数字槽一律宽收 (实弹 2026-07-19: 手机上 type=number 可输任意文本 →
+# 前端 parseInt→NaN→JSON null → 一格烂输入 422 掉整本剧本的保存)。
+# None/""/垃圾 → 默认值, 绝不让格式炸掉保存; 语义默认 0 = 该门槛不生效, 保守无害。
+def _lax_int(v: Any) -> Any:
+    if v is None or v == "":
+        return 0
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _lax_opt_int(v: Any) -> Any:
+    if v is None or v == "":
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+LaxInt = Annotated[int, BeforeValidator(_lax_int)]
+LaxOptInt = Annotated[Optional[int], BeforeValidator(_lax_opt_int)]
 
 # ── auth ──────────────────────────────────────────────────
 class SignupIn(BaseModel):
@@ -80,6 +105,9 @@ class Character(BaseModel):
     # 班底多样性由 linter 守卫（性别混合/年龄跨度），生成合同同规。
     gender: Optional[str] = None          # 男 | 女 | 其他
     age_band: Optional[str] = None        # 少年 | 青年 | 中年 | 老年
+    # 🐱 非人角色的物种 (猫/犬/龙…): 立绘与头像提示词据此换词——「男性青年」对猫角色
+    # 会召唤出人类身影 (猫铃堂实弹: 布偶猫背后站了个男青年)
+    species: Optional[str] = None
     # 性格三轴 (1~5, 3=中): 给导演排冲突/排主动权用的可推理量; 散文人设仍是主体
     traits: dict[str, int] = {}           # {外向, 温度, 主导}
     fear: Optional[str] = None            # 软肋一句 (冲突的抓手)
@@ -136,13 +164,21 @@ class Character(BaseModel):
     # to be talked to normally (e.g. a ghost, an absent person).
     presence: Literal["present", "offstage"] = "present"
     # if >0, this character only becomes present from that act onward (a later entrance).
-    appears_from_act: int = 0
+    appears_from_act: LaxInt = 0
     # 📚 provenance: imported from this library card (COPY semantics — editing the card
     # later never mutates this story). None = authored directly in the story.
     source_card_id: Optional[str] = None
     # 台词范例 carried from the card: lines that ARE this voice (future mes_example hook;
     # kept in the schema so publish doesn't silently drop them)
     examples: list[str] = []
+    # 🎙 作者写定的开场白 (Yi 2026-07-21): 开场时TA对玩家说的第一句话 — 引擎原样上台,
+    # 模型只围绕它写动作; 空 = 模型即兴
+    opening_line: str = ""
+    # 🏛 所属阵营 id (story.factions 里的) — 声望底色随阵营, 个人恩怨仍归关系双轴
+    faction_id: Optional[str] = None
+    # 📱🔍 authored 设备素材 (查TA手机时深翻可见): [{with, msgs:[..], reveals?: fragment_id}]
+    # — 悬疑本的关键证物写死在这, 既是叙事又可触发碎片解锁
+    device_peek: list[dict[str, Any]] = []
 
 
 class CharacterCardInput(BaseModel):
@@ -179,6 +215,8 @@ class StoryEvent(BaseModel):
     # ☠️ characters this event kills the moment it fires (authored deaths are final —
     # the engine books them dead, no two-stage ladder)
     kills_character_ids: list[str] = []
+    # 📱🔍 authored 机会窗口: 事件落地时该角色的设备就搁在手边 (确定性开窗, 不掷骰)
+    peek_cid: Optional[str] = None
 
 
 class AdvanceCondition(BaseModel):
@@ -188,7 +226,7 @@ class AdvanceCondition(BaseModel):
     (model/affinity) advance for backward compatibility."""
     required_fragment_ids: list[str] = []   # key info the player MUST have discovered
     required_event_ids: list[str] = []      # plot events that MUST have fired
-    affinity_min: int = 0
+    affinity_min: LaxInt = 0
 
 
 class ChoiceOption(BaseModel):
@@ -197,10 +235,10 @@ class ChoiceOption(BaseModel):
     id: str = ""
     label: str = ""                      # what the player says/does by picking this
     flag: Optional[str] = None           # set state.flags[flag] = True (endings can gate on it)
-    affinity_delta: int = 0              # global 好感 effect
+    affinity_delta: LaxInt = 0              # global 好感 effect
     character_id: Optional[str] = None   # optional target for the relationship deltas below
-    closeness_delta: int = 0
-    romance_delta: int = 0
+    closeness_delta: LaxInt = 0
+    romance_delta: LaxInt = 0
 
 
 class ActChoice(BaseModel):
@@ -214,13 +252,13 @@ class ActTime(BaseModel):
     """⏳ 时间锚点: when this act happens in STORY time. Entering the act snaps the run's
     clock FORWARD to here (never backward), so the 🕐 chip, everyone's 作息 and the prose
     all tell the same hour. day = 第几天 (0 = keep current), slot = 晨/午/夜 ("" = keep)."""
-    day: int = 0
+    day: LaxInt = 0
     slot: str = ""
 
 
 class Act(BaseModel):
     id: Optional[str] = None
-    index: int = 0
+    index: LaxInt = 0
     title: str = ""
     goal: str = ""  # the player's small objective during this act (shown as 🎯 guidance)
     advance: AdvanceCondition = AdvanceCondition()  # hard requirements to leave this act
@@ -233,8 +271,8 @@ class LocationUnlock(BaseModel):
     """When this place becomes reachable. ALL conditions ANDed. Empty = available from the
     start. Lets a place stay hidden until the player has learned it exists THIS act (e.g.
     a rooftop only the trusted are shown), instead of every exit being open from turn one."""
-    act_min: int = 0
-    affinity_min: int = 0
+    act_min: LaxInt = 0
+    affinity_min: LaxInt = 0
     required_fragment_ids: list[str] = []  # info the player must have uncovered first
 
 
@@ -248,6 +286,8 @@ class LocationProp(BaseModel):
     detail: str = ""
     fragment_id: Optional[str] = None  # unlocks this fragment when searched
     event_id: Optional[str] = None     # triggers this story event when searched
+    take: bool = False  # 搜到即入包 (可拿走)。2026-07-15 补: schema 缺此字段时,
+    #                     API 编辑过的剧本 round-trip 会把种子里的 take 静默剥掉
 
 
 class Location(BaseModel):
@@ -265,8 +305,8 @@ class Location(BaseModel):
 class EndingCondition(BaseModel):
     """All conditions ANDed. By default an ending is only eligible at the final act;
     set act_min to make it eligible earlier. required_fragment_ids must all be unlocked."""
-    affinity_min: int = 0
-    act_min: int = 0  # 0 = only at the final act
+    affinity_min: LaxInt = 0
+    act_min: LaxInt = 0  # 0 = only at the final act
     required_fragment_ids: list[str] = []
     required_flags: dict[str, Any] = {}
 
@@ -283,6 +323,9 @@ class Ending(BaseModel):
 
 
 class StoryInput(BaseModel):
+    # 🔒 乐观锁: 客户端载入草稿时拿到的 updated_at 原样回传; 服务器不一致就 409,
+    # 拒绝"旧快照整本盖新草稿"。不传 = 老客户端, 放行 (渐进启用)。
+    if_rev: Optional[str] = None
     title: Optional[str] = None
     # "zh" | "en" — the language the engine performs this story in (output directive +
     # localized deterministic narration). Default zh keeps every existing story unchanged.
@@ -311,11 +354,18 @@ class StoryInput(BaseModel):
     phone: Optional[dict] = None  # 📱 {enabled, device: "手机"|"传呼机"|"口信"…}
     verdict: Optional[dict] = None  # 🔍 {prompt, options, attempts, act_min, fail_ending_id}
     sandbox: Optional[dict] = None  # 🏖 {enabled, real_time} 无尽沙盒：玩家开局自定义世界观
+    # 🐲 生物账本: [{id,name,kind,desc,killable,menace,lair,territory,habits,drops,speech}]
+    creatures: Optional[list] = None
+    # 🏛 阵营: [{id,name,detail,rivals:[id]}] — 权谋/宫斗/帮派的声望地基
+    factions: Optional[list] = None
 
 
 class Story(BaseModel):
     id: str
     title: str
+    # 🔒 乐观锁票据 (透明字符串, 进快照 JSON 也安全): 草稿最后一次改动的时刻 —
+    # 客户端保存时回传 if_rev, 不一致 409 (实弹: 陈旧标签页整本覆盖回滚了修好的草稿)
+    updated_at: Optional[str] = None
     language: str = "zh"
     cover_url: Optional[str] = None
     one_liner: Optional[str] = None
@@ -343,6 +393,8 @@ class Story(BaseModel):
     phone: Optional[dict] = None
     verdict: Optional[dict] = None
     sandbox: Optional[dict] = None
+    creatures: Optional[list] = None   # 🐲 生物账本
+    factions: Optional[list] = None    # 🏛 阵营声望
     completion: float = 0.0
 
 
@@ -370,9 +422,12 @@ class StoryCardPage(BaseModel):
 
 # ── secrets / fragments ───────────────────────────────────
 class Unlock(BaseModel):
-    affinity_min: Optional[int] = None
-    act_min: Optional[int] = None
-    asks_min: Optional[int] = None
+    affinity_min: LaxOptInt = None
+    act_min: LaxOptInt = None
+    asks_min: LaxOptInt = None
+    # 📱🔍 藏在TA设备里 (查手机玩法的碎片通道): 深翻该角色的设备即解锁。
+    # lint 强制它必须有备用通路 (crit_fail 会永久锁设备, 不能锁死整本)
+    device_of: Optional[str] = None
     trigger_event_ids: list[str] = []
     # the player must BE at this place for the fragment to unlock — turns talking-only
     # investigation into go-there exploration (物理探索). None = anywhere.
@@ -383,7 +438,7 @@ class FragmentInput(BaseModel):
     # authored/stable id (optional): cross-references (act gates, location props/unlocks,
     # ending conditions) point at fragment ids, so authors may pin them; empty = generated
     id: Optional[str] = None
-    layer: int = 0
+    layer: LaxInt = 0
     content: str = ""
     retrieval_key: Optional[str] = None
     known_by_character_ids: list[str] = []
@@ -434,6 +489,9 @@ class RunState(BaseModel):
     relations: dict[str, Any] = {}  # {char_id:{mode,mode_name,closeness,romance}} toward player
     following: list[str] = []  # character ids currently traveling WITH the player
     here: list[dict[str, Any]] = []  # characters in the player's CURRENT scene [{id,name,...}]
+    beasts: list[dict[str, Any]] = []  # 🐲 creatures in the scene (standee + HUD)
+    factions: list[dict[str, Any]] = []  # 🏛 玩家已有名声的阵营 [{id,name,value,label}]
+    taste: list[dict[str, Any]] = []     # 🧭 口味分布 [{k,w}] (归一化, 验证/UI用)
     pending_choice: Optional[dict[str, Any]] = None  # an unanswered key-moment decision
     player_character_name: Optional[str] = None  # name of the embodied character (character mode)
     pressure: int = 0                    # ⚠️ story pressure meter value (0~100)
@@ -524,6 +582,7 @@ class PlayIn(BaseModel):
     input: str
     channel: Literal["say", "think", "do", "drive"] = "say"  # drive = ▶ 看下去 (director advances)
     target_character_id: Optional[str] = None  # who the player is addressing (optional)
+    client_turn_id: Optional[str] = None  # 🎫 幂等键: 每次点击唯一, 重放的请求不再推进剧情
 
 
 class MarketBuyIn(BaseModel):
@@ -561,8 +620,28 @@ class ConfrontIn(BaseModel):
     character_id: str
 
 
+class RenameIn(BaseModel):
+    # 🪪 player renames an EMERGENT character (fix bad births like「谁看见」)
+    name: str
+
+
 class PhoneSendIn(BaseModel):
     # 📱 a text message the player sends from the 信息 app
+    text: str
+
+
+class TransferIn(BaseModel):
+    # 🏦 银行转账: 给角色打钱 (真钱落账, TA 会有反应)
+    char_id: str
+    amount: LaxInt = 0
+
+
+class SocialLikeIn(BaseModel):
+    post_id: str
+
+
+class SocialCommentIn(BaseModel):
+    post_id: str
     text: str
 
 

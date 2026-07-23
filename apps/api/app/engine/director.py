@@ -89,6 +89,27 @@ def expr_of(mood: str | None) -> str | None:
     return None
 
 
+# 🧍 动作位 (Yi 2026-07-21: 角色的动作可以增加): 帧表 self_position 是模型已在报的
+# 肢体台账 — 从里面认出四个有差分素材的动作, 零新字段零新调用。认不出就不动 —
+# 常态站姿比错误的动作好 (角色不能崩)。
+POSE_ACTS = ("挥手", "抱臂", "低头", "伸手")
+_POSE_MAP = [
+    ("挥手", re.compile(r"挥手|招手|摆手|挥了挥")),
+    ("抱臂", re.compile(r"抱臂|抱着双?臂|环抱双?臂|双臂交叉|抱着胳膊|环胸")),
+    ("低头", re.compile(r"低头|垂着头|垂下头|垂首|埋着头|俯下头|俯首")),
+    ("伸手", re.compile(r"伸出手|伸手|递过|递出|摊开手|探出手|掌心向上")),
+]
+
+
+def pose_of(position: str | None) -> str | None:
+    if not position:
+        return None
+    for name, rx in _POSE_MAP:
+        if rx.search(position):
+            return name
+    return None
+
+
 class TurnStage:
     """One turn's per-beat director memory: sfx dedupe + the single flash."""
 
@@ -96,7 +117,8 @@ class TurnStage:
         self.used: set[str] = set()
         self.flashed = False
 
-    def beat_fx(self, text: str, mood: str | None = None) -> dict[str, Any]:
+    def beat_fx(self, text: str, mood: str | None = None,
+                act: str | None = None) -> dict[str, Any]:
         """演出注记 — rides the streamed beat dict. Keys absent when nothing fires."""
         t = text or ""
         out: dict[str, Any] = {}
@@ -112,9 +134,11 @@ class TurnStage:
         if not self.flashed and _FLASH_RE.search(t):
             self.flashed = True
             out["fx"] = "flash"
-        ex = expr_of(mood)
+        # 🧍 明确的肢体动作压过表情 (动作更具体; 单差分位一次只能换一张);
+        # 素材缺失客户端静默回落常态 — 全链条没有硬失败
+        ex = (act if act in POSE_ACTS else None) or expr_of(mood)
         if ex:
-            out["expr"] = ex   # 表情差分位: 客户端按 {cid}_{expr}.jpg 换脸, 缺素材回落常态
+            out["expr"] = ex   # 差分位: 客户端按 {cid}_{expr}.webp 换图, 缺素材回落常态
         return out
 
 
@@ -183,6 +207,11 @@ def stage_turn(final: dict[str, Any]) -> dict[str, Any]:
             pass
     base = pick_bgm(mood, pressure=pressure, hot=hot,
                     night=bool(scene.get("night")), frail=frail, heat=heat)
+    # 🎼 乐师判词 (读了实际剧情文字的高精度判断) 压过九宫格粗规则;
+    # 硬状态仍归引擎: 床笫的浪漫曲、危机的紧张曲不容乐师改判
+    judged = str(((final.get("music") or {}).get("track")) or "")
+    if judged and judged in BGM_TRACKS and heat < 2 and not hot:
+        base = judged
     salt = f"{st.get('location_id') or ''}|{(st.get('clock') or {}).get('day', 0)}"
     out["bgm"] = pick_variant(base, salt)
     if hot:

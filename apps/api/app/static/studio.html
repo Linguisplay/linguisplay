@@ -50,6 +50,33 @@
   .cardrow .cmeta { flex: 1; min-width: 0; }
   .cardrow .cname { font-weight: 600; font-size: 13.5px; }
   .cardrow .crole { color: #888; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 👤 角色卡照片 (Yi: 有照片会好很多) */
+.cav { position:relative; width:44px; height:44px; border-radius:50%; overflow:hidden;
+  background:#191a26; border:1px solid #45456a; flex:0 0 44px; }
+.cav img { width:100%; height:100%; object-fit:cover; }
+.cav .cavf { position:absolute; inset:0; display:flex; align-items:center;
+  justify-content:center; color:#aab2cc; font-size:18px; }
+/* ✍️ 折叠卡 + 分页简单模式 (Yi: 编辑要简单易懂, 多界面但不乱) */
+details.sec { border:1px solid #26262f; border-radius:12px; margin:10px 0; background:#101016; }
+details.sec > summary { cursor:pointer; padding:11px 14px; list-style:none;
+  display:flex; align-items:center; gap:8px; font-weight:700; font-size:15px; }
+details.sec > summary::-webkit-details-marker { display:none; }
+details.sec > summary::before { content:"▸"; color:#5d647a; font-weight:400; }
+details.sec[open] > summary::before { content:"▾"; }
+details.sec > .secbody { padding:0 14px 12px; }
+.seccount { color:#7f88a8; font-size:12px; font-weight:400; margin-left:auto; }
+.sectabs { display:none; position:sticky; top:0; z-index:5; background:#0b0b10;
+  padding:8px 0 6px; gap:6px; flex-wrap:wrap; }
+.sectabs button { background:#15151d; border:1px solid #2a2a36; color:#aab2cc;
+  border-radius:999px; padding:6px 12px; font-size:13px; cursor:pointer; }
+.sectabs button.on { border-color:#8ea2ff; color:#e7eaf3; background:#1b1e30; }
+.sectabs .tbadge { color:#7f88a8; font-size:11px; margin-left:3px; }
+/* 简单模式: 分页 — 只显示激活区, 标题行变页头不可折叠 */
+body.simple .sectabs { display:flex; }
+body.simple details.sec { display:none; }
+body.simple details.sec.active { display:block; }
+body.simple details.sec > summary { pointer-events:none; }
+body.simple details.sec > summary::before { content:""; }
 </style>
 </head>
 <body>
@@ -74,7 +101,9 @@
       <h2 style="border:0; margin:0">我的剧本</h2>
       <span class="bar">
         <button class="ghost" onclick="openCardLib(false)">📚 角色卡库</button>
+        <button class="ghost" onclick="location.href='/maker'">🪄 AI 起草</button>
         <button onclick="newStory()">+ 新建剧本</button>
+        <button onclick="newSandbox()">+ 新建沙盒剧本</button>
       </span>
     </div>
     <div id="stories"></div>
@@ -86,95 +115,183 @@
       <a onclick="backToList()">← 我的剧本</a>
       <span class="bar">
         <span id="saveMsg" class="muted"></span>
+        <button class="ghost sm" id="modeBtn" onclick="toggleSimple()">🛠 全部区块</button>
         <button class="ghost sm" onclick="lint()">🧪 体检</button>
         <button class="ghost" onclick="save(false)">保存草稿</button>
         <button onclick="save(true)">保存并发布</button>
       </span>
     </div>
     <div id="lintBox"></div>
+    <!-- ✍️ 简单模式 = 分页界面 (Yi: 核心五区多做几个界面, 看着不能乱):
+         一页一屏, 顶栏标签切换; 高级区有内容才长出标签 -->
+    <div id="secTabs" class="sectabs"></div>
 
-    <h2>基本信息</h2>
-    <div class="card">
+    <!-- ✍️ 折叠卡片信息架构 (Yi: 编辑要更简单易懂): 一区一卡, 摘要计数,
+         简单模式只露核心五区 + 有内容的高级区 -->
+    <details class="sec" data-sec="basic" open>
+      <summary>📝 基本信息 <span class="seccount" id="sc_basic"></span></summary>
+      <div class="secbody"><div class="card">
       <label>标题</label><input id="f_title" oninput="story.title=this.value" />
       <label>一句话简介（发现页卡片用）</label><input id="f_oneliner" oninput="story.one_liner=this.value" />
       <label>剧情梗概</label><textarea id="f_synopsis" oninput="story.synopsis=this.value"></textarea>
-      <label>世界观 / 场景设定（开局旁白会用到）</label><textarea id="f_world" oninput="story.world_long=this.value"></textarea>
-      <label>世界硬事实（world_facts：空间结构、关键物件、不可违背的设定；每回合都喂给 AI，防跑偏）</label>
-      <textarea id="f_facts" oninput="story.world_facts=this.value"></textarea>
-      <label>人物关系总览（relations_overview，可选）</label><textarea id="f_rel" oninput="story.relations_overview=this.value"></textarea>
+      <label>世界观 / 场景设定（AI 每回合都会看：时代、规矩、气味，角色言行不越界）</label><textarea id="f_world" oninput="story.world_long=this.value"></textarea>
       <div class="row3">
-        <div><label>题材标签（逗号分隔）</label><input id="f_tropes" oninput="story.trope_tags=this.value.split(/[,，]/).map(s=>s.trim()).filter(Boolean)" /></div>
         <div><label>可见性</label><select id="f_vis" onchange="story.visibility=this.value"><option value="private">私密</option><option value="public">公开</option></select></div>
-        <div><label>演出语言（AI 输出与旁白）</label><select id="f_lang" onchange="story.language=this.value"><option value="zh">中文</option><option value="en">English</option></select></div>
+        <div><label>演出语言</label><select id="f_lang" onchange="story.language=this.value"><option value="zh">中文</option><option value="en">English</option></select></div>
+        <div></div>
       </div>
-      <label style="display:flex;align-items:center;gap:8px;margin-top:8px;cursor:pointer">
-        <input type="checkbox" id="f_mature" onchange="story.mature=this.checked" style="width:auto" />
-        🔞 成人内容（18+）：开启后角色可参与明确成人情节（玩家已在注册时年龄门控）
-      </label>
-      <div style="margin-top:10px">
-        <button class="sm" type="button" onclick="enrich()">🔍 智能增强（为每个角色生成背景知识）</button>
-        <span id="enrichMsg" style="color:#8e8e93;font-size:12px;margin-left:8px"></span>
-      </div>
-    </div>
-
-    <h2>🗺 地点 <button class="sm" onclick="addLoc()">+ 加地点</button></h2>
-    <div class="muted">世界的物理地图。角色按作息待在地点里，玩家走过去才遇得到；地点上可以放「可搜查物证」。不配地图 = 所有角色随时在场（旧行为）。</div>
-    <div id="locs"></div>
-
-    <h2>角色 <button class="sm" onclick="addChar()">+ 加角色</button>
-      <button class="sm ghost" onclick="openCardLib(true)">📚 从角色卡库导入</button></h2>
-    <div class="muted">主角（is_lead）是默认开口的人。每个角色可挂秘密、作息表、随身物品、与他人的旧关系。卡库里的角色跨剧本复用（导入=复制，之后改卡不影响已导入的剧本）。</div>
-    <details style="margin:8px 0">
-      <summary style="cursor:pointer">🪄 扔一大段文字，自动生成角色卡（小说片段/wiki/你自己的笔记都行）</summary>
-      <textarea id="charBlob" rows="6" placeholder="把描述角色的文字整段粘进来——一段里有几个人就出几张卡：名字、性别、性格、口癖台词、人生目标都会自动填好，生成后可再手改。" style="width:100%;margin:6px 0"></textarea>
-      <button class="sm" onclick="parseCharBlob()">🪄 解析成角色卡</button>
-      <span class="muted" id="charBlobMsg"></span>
+      <details style="margin-top:10px">
+        <summary style="cursor:pointer" class="muted">更多设定（硬事实 / 关系总览 / 标签 / 18+ / 智能增强）</summary>
+        <label>世界硬事实（每回合都喂给 AI 防跑偏：空间结构、关键物件、不可违背的设定）</label>
+        <textarea id="f_facts" oninput="story.world_facts=this.value"></textarea>
+        <label>人物关系总览（可选）</label><textarea id="f_rel" oninput="story.relations_overview=this.value"></textarea>
+        <label>题材标签（逗号分隔）</label><input id="f_tropes" oninput="story.trope_tags=this.value.split(/[,，]/).map(s=>s.trim()).filter(Boolean)" />
+        <label style="display:flex;align-items:center;gap:8px;margin-top:8px;cursor:pointer">
+          <input type="checkbox" id="f_mature" onchange="story.mature=this.checked" style="width:auto" />
+          🔞 成人内容（18+）
+        </label>
+        <div style="margin-top:10px">
+          <button class="sm" type="button" onclick="enrich()">🔍 智能增强（为每个角色生成背景知识）</button>
+          <span id="enrichMsg" style="color:#8e8e93;font-size:12px;margin-left:8px"></span>
+        </div>
+      </details>
+      </div></div>
     </details>
-    <div id="chars"></div>
 
-    <h2>幕 / 剧情事件 <button class="sm" onclick="addAct()">+ 加一幕</button></h2>
-    <div class="muted">进入新一幕时引擎自动播该幕事件；幕可以锚定故事时间（第几天·什么时段），进幕时钟只进不退。</div>
-    <div id="acts"></div>
+    <details class="sec" data-sec="chars" open>
+      <summary>👥 角色 <span class="seccount" id="sc_chars"></span></summary>
+      <div class="secbody">
+      <div class="bar"><button class="sm" onclick="addChar()">+ 加角色</button>
+        <button class="sm ghost" onclick="openCardLib(true)">📚 从角色卡库导入</button></div>
+      <div class="muted">主角（is_lead）是默认开口的人。写好「TA是谁 + TA想要什么」，其他都可以后补。</div>
+      <details style="margin:8px 0">
+        <summary style="cursor:pointer">🪄 扔一大段文字，自动生成角色卡（小说片段/wiki/你自己的笔记都行）</summary>
+        <textarea id="charBlob" rows="6" placeholder="把描述角色的文字整段粘进来——一段里有几个人就出几张卡：名字、性别、性格、口癖台词、人生目标都会自动填好，生成后可再手改。" style="width:100%;margin:6px 0"></textarea>
+        <button class="sm" onclick="parseCharBlob()">🪄 解析成角色卡</button>
+        <span class="muted" id="charBlobMsg"></span>
+      </details>
+      <div id="chars"></div>
+      </div>
+    </details>
 
-    <h2>秘密 / 门控碎片 <button class="sm" onclick="addSecret()">+ 加秘密</button></h2>
-    <div class="muted">核心玩法：秘密分层碎片，按「好感/章节/追问/地点/事件」解锁。retrieval_key 是玩家追问时匹配的关键词（脱敏）。「谎言口径」是真相解锁前所有知情者统一说的假话，对峙成功会当场戳穿。</div>
-    <div id="secrets"></div>
+    <details class="sec" data-sec="relweb" open>
+      <summary>🕸 关系网 <span class="seccount" id="sc_relweb"></span></summary>
+      <div class="secbody">
+      <div class="bar"><button class="sm" onclick="addRelRow()">+ 加一对关系</button></div>
+      <div class="muted">上图下表：<b>点两个头像</b>直接建一对关系；<b>点连线</b>跳到对应行修改。
+        红线=仇、金线=厚，粗细=浓度。开局播种进活网，游戏中随剧情自动演变。</div>
+      <div id="relgraph"></div>
+      <div id="relweb"></div>
+      </div>
+    </details>
 
-    <h2>🖼 媒体（照片与背景）</h2>
-    <div class="muted">给角色上传照片、给地点上传背景图（JPG/PNG/WebP，≤5MB），会替换 AI 生成的图。先保存草稿才有可上传的对象。</div>
-    <div id="media"></div>
+    <details class="sec" data-sec="acts" open>
+      <summary>🎬 幕（章节）<span class="seccount" id="sc_acts"></span></summary>
+      <div class="secbody">
+      <div class="bar"><button class="sm" onclick="addAct()">+ 加一幕</button></div>
+      <div class="muted">幕 = 章节。每幕写一个「这幕要让玩家经历什么」；进新一幕时该幕事件自动上演。</div>
+      <div id="acts"></div>
+      </div>
+    </details>
 
-    <h2>结局 <button class="sm" onclick="addEnding()">+ 加结局</button></h2>
-    <div class="muted">结局是<b>可达成的里程碑</b>：默认在最后一幕按条件触发（真＞普通＞坏）。「机制触发」的结局（大限/危机/指认失败）不走条件匹配，只被对应机制点名。建议至少配一个好感≥0 的普通结局兜底。</div>
-    <div id="endings"></div>
+    <details class="sec" data-sec="endings" open>
+      <summary>🏁 结局 <span class="seccount" id="sc_endings"></span></summary>
+      <div class="secbody">
+      <div class="bar"><button class="sm" onclick="addEnding()">+ 加结局</button></div>
+      <div class="muted">结局是<b>可达成的里程碑</b>：默认在最后一幕按条件触发（真＞普通＞坏）。建议至少配一个好感≥0 的普通结局兜底。</div>
+      <div id="endings"></div>
+      </div>
+    </details>
 
-    <h2>⏳ 时钟与大限</h2>
-    <div class="muted">时钟开着时，回合消耗时段（晨/午/夜），角色按作息挪动；配了大限，睡过截止日会直接触发对应结局。</div>
-    <div id="clockCard"></div>
+    <details class="sec" data-sec="locs" data-adv="1">
+      <summary>🗺 地点 <span class="seccount" id="sc_locs"></span></summary>
+      <div class="secbody">
+      <div class="bar"><button class="sm" onclick="addLoc()">+ 加地点</button></div>
+      <div class="muted">世界的物理地图。角色按作息待在地点里，玩家走过去才遇得到；地点上可以放「可搜查物证」。不配地图 = 所有角色随时在场。</div>
+      <div id="locs"></div>
+      </div>
+    </details>
 
-    <h2>⚠️ 危机压力表</h2>
-    <div class="muted">一条从 0 涨到 100 的全局威胁（谁的注视/暴露风险）。到达各刻度播报警示旁白；爆表触发指定结局。不配 = 关闭。</div>
-    <div id="pressureCard"></div>
+    <details class="sec" data-sec="secrets" data-adv="1">
+      <summary>🔒 秘密（可解锁的真相）<span class="seccount" id="sc_secrets"></span></summary>
+      <div class="secbody">
+      <div class="bar"><button class="sm" onclick="addSecret()">+ 加秘密</button></div>
+      <div class="muted">核心玩法：秘密分层，玩家靠好感/追问/搜证一层层揭开。「谎言口径」是真相解锁前知情者统一说的假话，对峙成功会当场戳穿。</div>
+      <div id="secrets"></div>
+      </div>
+    </details>
 
-    <h2>📱 小手机</h2>
-    <div class="muted">不在场的角色能捎信来（提醒赴约、爽约质问、恋人余温），玩家也能主动发消息。device 是叫法：手机 / 传呼机 / 口信 / 纸鹤……</div>
-    <div id="phoneCard"></div>
+    <details class="sec" data-sec="media" data-adv="1">
+      <summary>🖼 媒体（照片与背景）<span class="seccount" id="sc_media"></span></summary>
+      <div class="secbody">
+      <div class="muted">给角色上传照片、给地点上传背景图（JPG/PNG/WebP，≤5MB），会替换 AI 生成的图。先保存草稿才有可上传的对象。</div>
+      <div id="media"></div>
+      </div>
+    </details>
 
-    <h2>🔍 指认结案</h2>
-    <div class="muted">给玩家一次「我知道真相了」的下注时刻：有限次数里指认正确答案。答对置 flags.verdict_solved（真结局可 gate 在它上面）；次数用光触发失败结局。</div>
-    <div id="verdictCard"></div>
+    <details class="sec" data-sec="clock" data-adv="1">
+      <summary>⏳ 时钟与大限 <span class="seccount" id="sc_clock"></span></summary>
+      <div class="secbody">
+      <div class="muted">时钟开着时，回合消耗时段（晨/午/夜），角色按作息挪动；配了大限，睡过截止日会直接触发对应结局。</div>
+      <div id="clockCard"></div>
+      </div>
+    </details>
 
-    <h2>🎲 命运骰</h2>
-    <div class="muted">「做」有风险的动作时掷一枚 20 面骰定成败，结果强制写进剧情。</div>
-    <div id="diceCard"></div>
+    <details class="sec" data-sec="pressure" data-adv="1">
+      <summary>⚠️ 危机压力表 <span class="seccount" id="sc_pressure"></span></summary>
+      <div class="secbody">
+      <div class="muted">一条从 0 涨到 100 的全局威胁。到达各刻度播报警示旁白；爆表触发指定结局。不配 = 关闭。</div>
+      <div id="pressureCard"></div>
+      </div>
+    </details>
 
-    <h2>🏖 无尽沙盒</h2>
-    <div class="muted">开启后这个剧本变成沙盒：玩家开局自定义世界观、开场人物按世界观现场生成、永不结束、玩家会死（死了只剩旁观）。时间与现实同步可单独关。</div>
-    <div id="sandboxCard"></div>
+    <details class="sec" data-sec="phone" data-adv="1">
+      <summary>📱 小手机 <span class="seccount" id="sc_phone"></span></summary>
+      <div class="secbody">
+      <div class="muted">不在场的角色能捎信来，玩家也能主动发消息。device 是叫法：手机 / 传呼机 / 口信 / 纸鹤……</div>
+      <div id="phoneCard"></div>
+      </div>
+    </details>
 
-    <h2>⚙️ 调参（tuning）</h2>
-    <div class="muted">留空 = 用引擎默认值（占位符里显示默认）。全部旋钮说明见 docs/tuning.md。</div>
-    <div id="tuningCard"></div>
+    <details class="sec" data-sec="verdict" data-adv="1">
+      <summary>🔍 指认结案 <span class="seccount" id="sc_verdict"></span></summary>
+      <div class="secbody">
+      <div class="muted">给玩家一次「我知道真相了」的下注时刻：有限次数里指认正确答案；次数用光触发失败结局。</div>
+      <div id="verdictCard"></div>
+      </div>
+    </details>
+
+    <details class="sec" data-sec="dice" data-adv="1">
+      <summary>🎲 命运骰 <span class="seccount" id="sc_dice"></span></summary>
+      <div class="secbody">
+      <div class="muted">「做」有风险的动作时掷一枚 20 面骰定成败，结果强制写进剧情。</div>
+      <div id="diceCard"></div>
+      </div>
+    </details>
+
+    <details class="sec" data-sec="sandbox" data-adv="1">
+      <summary>🏖 无尽沙盒 <span class="seccount" id="sc_sandbox"></span></summary>
+      <div class="secbody">
+      <div class="muted">开启后这个剧本变成沙盒：玩家开局自定义世界观、开场人物现场生成、永不结束。</div>
+      <div id="sandboxCard"></div>
+      </div>
+    </details>
+
+    <details class="sec" data-sec="packs" data-adv="1">
+      <summary>💎 收费包 <span class="seccount" id="sc_packs"></span></summary>
+      <div class="secbody">
+      <div class="muted">玩家用平台币「月石」购买的内容资格：门票 / 开局礼包 / 金手指位。确定性发货，创作者分成 70%。</div>
+      <div id="packsCard"></div>
+      </div>
+    </details>
+
+    <details class="sec" data-sec="tuning" data-adv="1">
+      <summary>⚙️ 调参 <span class="seccount" id="sc_tuning"></span></summary>
+      <div class="secbody">
+      <div class="muted">留空 = 用引擎默认值（占位符里显示默认）。全部旋钮说明见 docs/tuning.md。</div>
+      <div id="tuningCard"></div>
+      </div>
+    </details>
   </div>
 </div>
 
@@ -200,6 +317,13 @@ const TUNING_KNOBS = [
   ["affinity_taper_den", 100, "好感增益衰减分母"],
   ["close_taper_den", 130, "亲近增益衰减分母"],
   ["rom_taper_den", 110, "心动增益衰减分母（越大越易动心）"],
+  ["flirt_t", 25, "💘 心动多少进「暧昧」"],
+  ["lover_t", 60, "💘 心动多少进「恋人」"],
+  ["lover_close_min", 35, "💘 进恋人还需的亲近底线"],
+  ["rom_step_max", 6, "💘 单回合心动最大涨幅"],
+  ["rom_step_min", -4, "💘 单回合心动最大跌幅（负数，往0调更抗跌）"],
+  ["close_step_min", -6, "亲近单回合最大跌幅（负数，往0调更抗跌）"],
+  ["affinity_clamp_min", -3, "好感单回合最大跌幅（负数，往0调更抗跌）"],
   ["act_backstop_div", 12, "好感兜底推幕除数"],
 ];
 function blankStory(){ return { id:null, title:"", language:"zh", one_liner:"", synopsis:"", world_long:"", world_facts:"", relations_overview:"",
@@ -209,9 +333,27 @@ function gid(p){ return p + Math.random().toString(36).slice(2,8); }
 function esc(s){ return (s||"").toString().replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 async function j(path, opts={}) {
   const r = await fetch(API+path, { credentials:"include", headers:{"Content-Type":"application/json"}, ...opts });
-  if (!r.ok){ const b=await r.json().catch(()=>({})); throw new Error(b.detail||r.status); }
+  if (!r.ok){ const b=await r.json().catch(()=>({})); throw new Error(humanDetail(b.detail)||r.status); }
   return r.status===204 ? null : r.json();
 }
+// 🧾 422 的校验错误是对象数组 — 直接进 Error 会变成「[object Object]」，
+// 玩家只能对着乱码连按保存（实弹 2026-07-19）。翻成能照着改的人话。
+const FIELD_CN = { appears_from_act:"第几幕后登场", affinity_min:"好感≥", act_min:"第几幕起",
+  closeness_min:"亲近≥", day:"第几天", deadline_day:"限期天数", stance:"立场", layer:"层级",
+  affinity_delta:"好感变化", closeness_delta:"亲近变化", romance_delta:"心动变化",
+  attempts:"次数", asks_min:"追问≥", index:"序号", characters:"角色", acts:"幕",
+  endings:"结局", locations:"地点", title:"标题", name:"名字", visibility:"可见性" };
+function humanDetail(d){
+  if (!Array.isArray(d)) return d;
+  return d.slice(0,4).map(e=>{
+    const path=(e.loc||[]).filter(x=>x!=="body")
+      .map(x=>typeof x==="number"?`第${x+1}个`:(FIELD_CN[x]||x)).join("·");
+    const msg=/integer|number/i.test(e.msg||"")?"要填数字":(e.msg||"格式不对");
+    return `${path}：${msg}`;
+  }).join("；");
+}
+// 🔢 手机上 type=number 也可能吐出垃圾文本: parseInt→NaN→JSON 里变 null → 422。
+function NUM(v,d=0){ const n=parseInt(v,10); return Number.isFinite(n)?n:d; }
 const show=id=>document.getElementById(id).classList.remove("hidden");
 const hide=id=>document.getElementById(id).classList.add("hidden");
 
@@ -241,9 +383,24 @@ async function loadList(){
 }
 function backToList(){ loadList(); }
 
+// ── ✍️ 新建 (Yi 定: 只有两种 — 剧本 与 沙盒剧本; 起草交给 AI 通道) ──
 function newStory(){ story=blankStory(); secrets=[]; openEditor(); }
+function newSandbox(){
+  const s = blankStory();
+  s.title="（沙盒本·改成你的世界名）"; s.one_liner="没有主线，世界自己会活。";
+  s.synopsis="（一句话：这是个什么样的世界，玩家以什么身份醒来）";
+  s.world_long="（写世界观：时代/地理/规矩/钱怎么挣——沙盒的一切从这里长出来）";
+  s.locations=[{id:"loc_start", name:"（出生点）", detail:"（玩家睁眼看到的第一个地方）", exits:[],
+     unlock:{act_min:0,affinity_min:0,required_fragment_ids:[]}, props:[]}];
+  s.characters=[];   // 沙盒可空群像 — 开局由引擎按世界观现铸
+  s.acts=[{index:1, title:"活下去", goal:"在这个世界站住脚", events:[],
+     advance:{required_fragment_ids:[],required_event_ids:[],affinity_min:0}}];
+  s.sandbox={enabled:true, start_money:50};
+  story=s; secrets=[]; openEditor();
+}
 async function editStory(id){
   story = await j(`/stories/${id}`);
+  loadPacks();
   story.trope_tags=story.trope_tags||[]; story.characters=story.characters||[]; story.acts=story.acts||[];
   story.endings=story.endings||[]; story.locations=story.locations||[]; story.tuning=story.tuning||{};
   story.characters.forEach(c=>{ c.schedule=c.schedule||[]; c.ties=c.ties||[]; c.items=c.items||[]; c.bio_layers=c.bio_layers||[]; });
@@ -266,9 +423,271 @@ function openEditor(){
   f_tropes.value=(story.trope_tags||[]).join(", "); f_vis.value=story.visibility||"private";
   f_lang.value=story.language||"zh";
   f_mature.checked=!!story.mature;
+  initMode(); activeSec="basic";
   renderAll();
 }
-function renderAll(){ renderLocs(); renderChars(); renderActs(); renderSecrets(); renderEndings(); renderSystems(); renderMedia(); }
+function renderAll(){ renderLocs(); renderChars(); renderRelWeb(); renderActs(); renderSecrets(); renderEndings(); renderSystems(); renderPacksCard(); renderMedia(); updateSecMeta(); }
+
+// ── ✍️ 简单模式分页 (Yi: 核心五区一页一屏, 高级区有内容才长标签, 不乱) ──
+const CORE_SECS = [["basic","📝 基本"],["chars","👥 角色"],["relweb","🕸 关系"],["acts","🎬 幕"],["endings","🏁 结局"]];
+const ADV_SECS = [["secrets","🔒 秘密"],["locs","🗺 地点"],["clock","⏳ 时钟"],["pressure","⚠️ 危机"],
+  ["phone","📱 手机"],["verdict","🔍 结案"],["dice","🎲 骰"],["sandbox","🏖 沙盒"],["packs","💎 收费包"],["media","🖼 媒体"],["tuning","⚙️ 调参"]];
+let activeSec="basic";
+function isSimple(){ return localStorage.getItem("studio_full")!=="1"; }
+function initMode(){
+  document.body.classList.toggle("simple", isSimple());
+  const b=document.getElementById("modeBtn");
+  if(b) b.textContent = isSimple() ? "🛠 全部区块" : "🧸 简单模式";
+}
+function toggleSimple(){
+  localStorage.setItem("studio_full", isSimple() ? "1" : "0");
+  initMode(); updateSecMeta();
+}
+function pickSec(id){
+  activeSec=id;
+  document.querySelectorAll("details.sec").forEach(d=>{
+    const on=d.dataset.sec===id;
+    d.classList.toggle("active",on);
+    if(on) d.open=true;
+  });
+  document.querySelectorAll("#secTabs button").forEach(b=>b.classList.toggle("on",b.dataset.sec===id));
+}
+function _secCounts(){
+  // 「已配置」看内容不看真值 — renderSystems 会把空系统初始化成 {} (实弹: 空钟也亮标签)
+  const cfgd=o=>!!o&&Object.values(o).some(v=>v===true||(typeof v==="number"&&v>0)
+    ||(typeof v==="string"&&v)||(Array.isArray(v)&&v.length)
+    ||(v&&typeof v==="object"&&cfgd(v)));
+  const tn=Object.keys(story.tuning||{}).filter(k=>!k.startsWith("_")).length;
+  return { basic:"", chars:(story.characters||[]).length, relweb:relPairs().length,
+    acts:(story.acts||[]).length, endings:(story.endings||[]).length,
+    locs:(story.locations||[]).length, secrets:(secrets||[]).length,
+    clock:cfgd(story.clock)?"✓":0, pressure:cfgd(story.pressure)?"✓":0,
+    phone:(story.phone&&story.phone.enabled)?"✓":0,
+    verdict:cfgd(story.verdict)?"✓":0, dice:0,
+    sandbox:(story.sandbox&&story.sandbox.enabled)?"✓":0, media:"", tuning:tn||0 };
+}
+function updateSecMeta(){
+  const n=_secCounts();
+  [...CORE_SECS,...ADV_SECS].forEach(([id])=>{
+    const el=document.getElementById("sc_"+id);
+    if(el) el.textContent = n[id]==="✓" ? "已配置" : (n[id]>0?`×${n[id]}`:"");
+  });
+  // 标签栏: 核心五 + 有内容的高级区
+  const tabs=document.getElementById("secTabs");
+  if(!tabs) return;
+  const advLive=ADV_SECS.filter(([id])=>n[id]==="✓"||n[id]>0);
+  tabs.innerHTML=[...CORE_SECS,...advLive].map(([id,name])=>{
+    const badge=n[id]==="✓"?"":(n[id]>0?`<span class="tbadge">${n[id]}</span>`:"");
+    return `<button data-sec="${id}" onclick="pickSec('${id}')">${name}${badge}</button>`;
+  }).join("");
+  if(!document.querySelector(`#secTabs button[data-sec="${activeSec}"]`)) activeSec="basic";
+  pickSec(activeSec);
+}
+
+// ── 🕸 关系网 (创作 UX: 成对编辑, 底下写 ties — 零 schema 变更, 简单操作) ──
+const STANCES = [[-2,"死仇"],[-1,"不睦"],[0,"（平淡）"],[1,"交好"],[2,"生死之交"]];
+function relPairs(){
+  const seen={}, out=[];
+  (story.characters||[]).forEach(c=>(c.ties||[]).forEach(t=>{
+    if(!t.char_id||t.char_id===c.id) return;
+    const k=[c.id,t.char_id].sort().join("|");
+    if(seen[k]) return; seen[k]=1;
+    out.push({a:c.id,b:t.char_id,stance:t.stance|0,label:t.label||""});
+  }));
+  return out;
+}
+function _clearPair(a,b){
+  (story.characters||[]).forEach(c=>{
+    if(c.id===a||c.id===b) c.ties=(c.ties||[]).filter(t=>t.char_id!==(c.id===a?b:a));
+  });
+}
+function _writePair(p){
+  if(!p.a||!p.b||p.a===p.b) return;
+  _clearPair(p.a,p.b);
+  const ca=(story.characters||[]).find(c=>c.id===p.a);
+  if(ca)(ca.ties=ca.ties||[]).push({char_id:p.b,stance:p.stance|0,label:p.label||""});
+}
+let relRows=[];
+function addRelRow(){
+  if((story.characters||[]).length<2){ alert("先加至少两个角色"); return; }
+  relRows.push({a:"",b:"",stance:0,label:""}); renderRelWeb();
+}
+function setRelRow(i,k,v){
+  const old={...relRows[i]};
+  relRows[i][k]=(k==="stance")?NUM(v):v;
+  if(old.a&&old.b) _clearPair(old.a,old.b);   // 换人时把旧对清掉
+  _writePair(relRows[i]);
+  if(k==="a"||k==="b") renderRelWeb();
+  else renderRelGraph();   // 立场/渊源改动实时回画
+}
+function delRelRow(i){
+  const p=relRows[i];
+  if(p.a&&p.b) _clearPair(p.a,p.b);
+  relRows.splice(i,1); renderRelWeb();
+}
+function renderRelWeb(){
+  const host=document.getElementById("relweb");
+  if(!host) return;
+  const fresh=relPairs();
+  // 权威来源是 ties: 把非空行与 ties 对齐, 保留还没选全的空行
+  relRows=fresh.concat(relRows.filter(r=>!(r.a&&r.b)));
+  host.innerHTML = relRows.length? "" : "<p class='muted'>还没有关系——点上面「加一对关系」，或在图里点两个头像。</p>";
+  relRows.forEach((p,i)=>{
+    const row=document.createElement("div"); row.className="card"; row.id=`relrow_${i}`;
+    row.style.cssText="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:6px 0;padding:8px";
+    row.innerHTML =
+      `<select onchange="setRelRow(${i},'a',this.value)">${charOptions(p.a,true)}</select>`+
+      `<span class="muted">↔</span>`+
+      `<select onchange="setRelRow(${i},'b',this.value)">${charOptions(p.b,true)}</select>`+
+      `<select onchange="setRelRow(${i},'stance',this.value)">`+
+        STANCES.map(([v,n])=>`<option value="${v}" ${v===(p.stance|0)?"selected":""}>${n}</option>`).join("")+`</select>`+
+      `<input style="flex:1;min-width:120px" placeholder="渊源一句（如：同门师兄弟，为一桩旧账生分了）" value="${esc(p.label||"")}" onchange="setRelRow(${i},'label',this.value)">`+
+      `<button class="sm ghost" onclick="delRelRow(${i})">删</button>`;
+    host.appendChild(row);
+  });
+  renderRelGraph();
+}
+
+// ── 🕸 关系图 (Yi: 视觉化表达 + 就地编辑): 环形布局与游戏内同款视觉语言 —
+// 点两个头像建关系并当场弹出编辑卡; 点连线 = 打开该关系的编辑卡; 全程不离开图
+let _rgSel = null;      // 图上第一个被点中的头像
+let _rgEditKey = null;  // 正在就地编辑的关系 (排序对键 "a|b")
+const _pairK = (a, b) => [a, b].sort().join("|");
+function _rgPick(id){
+  if(_rgSel === id){ _rgSel = null; renderRelGraph(); return; }
+  if(_rgSel){
+    const a = _rgSel; _rgSel = null;
+    if(!relRows.some(r => r.a && r.b && _pairK(r.a, r.b) === _pairK(a, id))){
+      relRows.push({a, b: id, stance: 0, label: ""});
+      _writePair(relRows[relRows.length - 1]);
+    }
+    _rgEditKey = _pairK(a, id);   // 建完当场开编辑卡
+    renderRelWeb();
+    return;
+  }
+  _rgSel = id; renderRelGraph();
+}
+function _rgEditOpen(key){ _rgEditKey = key; _rgSel = null; renderRelGraph(); }
+function renderRelGraph(){
+  const host = document.getElementById("relgraph");
+  if(!host) return;
+  const chars = (story.characters || []).filter(c => c.id).slice(0, 12);
+  if(chars.length < 2){ host.innerHTML = ""; return; }
+  const W = Math.min(host.clientWidth || 520, 520), H = Math.min(90 + chars.length * 34, 340);
+  // 🔍 内容级缩放 (Yi: 放大=布局拉开, 不是整图吹大): s 只放大半径, 头像文字原大
+  const cx = W / 2, cy = H / 2, R = (Math.min(cx, cy) - 44) * _rgZoom.s;
+  const pos = {};
+  chars.forEach((c, i) => {
+    const a = -Math.PI / 2 + i * 2 * Math.PI / chars.length;
+    pos[c.id] = {x: cx + R * Math.cos(a), y: cy + R * Math.sin(a)};
+  });
+  let edges = "";
+  relRows.forEach((p) => {
+    const a = pos[p.a], b = pos[p.b];
+    if(!a || !b) return;
+    const key = _pairK(p.a, p.b), sel = key === _rgEditKey, s = p.stance | 0;
+    const col = s > 0 ? "#d8b57a" : s < 0 ? "#e0574f" : "#3a4160";
+    edges += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${col}"`
+      + ` stroke-width="${(s ? Math.abs(s) * 2.5 : 1.5) + (sel ? 1.5 : 0)}"`
+      + ` stroke-opacity="${sel ? 1 : .8}" ${s ? "" : 'stroke-dasharray="4 4"'}`
+      + ` style="cursor:pointer" onclick="_rgEditOpen('${key}')">`
+      + `<title>${esc(p.label || "")}</title></line>`;
+    // 🏷 独立文字框 (Yi: 词不许和线/头像糊在一起): 圆角小牌, 深底, 描边随立场色;
+    // 渊源优先, 没写渊源标立场词; 点牌 = 点线
+    const word = (p.label || "").trim().slice(0, 8)
+      || (STANCES.find(([v]) => v === s) || [0, ""])[1].replace(/[（）]/g, "");
+    if(word){
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, wc = s ? col : "#8a93b0";
+      const w = word.length * 11 + 16;
+      edges += `<g transform="translate(${mx},${my})" style="cursor:pointer" onclick="_rgEditOpen('${key}')">`
+        + `<rect x="${-w/2}" y="-10" width="${w}" height="20" rx="10" fill="#0f1018" stroke="${wc}" stroke-opacity=".7"/>`
+        + `<text y="4" text-anchor="middle" font-size="10.5" fill="${wc}">${esc(word)}</text></g>`;
+    }
+  });
+  const nodes = chars.map(c => {
+    const p = pos[c.id], sel = _rgSel === c.id;
+    const av = (c.avatar_url || "").trim();
+    return `<g transform="translate(${p.x},${p.y})" style="cursor:pointer" onclick="_rgPick('${c.id}')">`
+      + `<circle r="20" fill="#191a26" stroke="${sel ? "#8ea2ff" : "#45456a"}" stroke-width="${sel ? 3 : 2}"/>`
+      + (av ? `<image href="${esc(av)}" x="-20" y="-20" width="40" height="40" clip-path="circle(20px at 20px 20px)" preserveAspectRatio="xMidYMid slice"/>`
+            : `<text y="5" text-anchor="middle" fill="#aab2cc" font-size="14">${esc((c.name || "?").slice(0, 1))}</text>`)
+      + `<text y="34" text-anchor="middle" fill="#cfd4e6" font-size="11">${esc((c.name || "").slice(0, 5))}</text></g>`;
+  }).join("");
+  // 🖊 就地编辑卡 (Yi: 直接在可视化里编辑): 立场点选即生效, 渊源即改即存
+  let pop = "";
+  if(_rgEditKey){
+    const i = relRows.findIndex(r => r.a && r.b && _pairK(r.a, r.b) === _rgEditKey);
+    if(i >= 0){
+      const p = relRows[i];
+      const nm = id => ((story.characters || []).find(c => c.id === id) || {}).name || "?";
+      pop = `<div class="card" style="margin:8px auto;max-width:480px;padding:10px 12px">`
+        + `<b>${esc(nm(p.a))} ↔ ${esc(nm(p.b))}</b>`
+        + `<div style="display:flex;gap:6px;margin:8px 0;flex-wrap:wrap">`
+        + STANCES.map(([v, n]) =>
+            `<button class="sm${v === (p.stance | 0) ? "" : " ghost"}" onclick="setRelRow(${i},'stance','${v}')">${n}</button>`).join("")
+        + `</div>`
+        + `<input style="width:100%" placeholder="渊源一句（如：同门师兄弟，为一桩旧账生分了）"`
+        + ` value="${esc(p.label || "")}" onchange="setRelRow(${i},'label',this.value)">`
+        + `<div style="text-align:right;margin-top:8px">`
+        + `<button class="sm ghost" onclick="_rgEditKey=null;delRelRow(${i})">删除关系</button> `
+        + `<button class="sm" onclick="_rgEditKey=null;renderRelGraph()">完成</button></div></div>`;
+    } else { _rgEditKey = null; }
+  }
+  // 🔍 缩放平移 (Yi: 可以放大缩小): 滚轮/双指捏合/拖拽, 状态跨重绘保持
+  host.innerHTML = `<div style="text-align:right;margin:2px 0">`
+    + `<button class="sm ghost" onclick="_rgZoomBy(1.25)">＋</button> `
+    + `<button class="sm ghost" onclick="_rgZoomBy(.8)">－</button> `
+    + `<button class="sm ghost" onclick="_rgZoom={s:1,x:0,y:0};renderRelGraph()">⟳</button></div>`
+    + `<svg id="rgsvg" width="${W}" height="${H}" style="display:block;margin:0 auto;touch-action:none">`
+    + `<g transform="translate(${_rgZoom.x},${_rgZoom.y})">${edges}${nodes}</g></svg>`
+    + (_rgSel ? `<p class="muted" style="text-align:center;margin:2px 0">已选中「${esc((chars.find(c => c.id === _rgSel) || {}).name || "")}」——再点一个头像建立关系</p>` : "")
+    + pop;
+  _rgBindZoom();
+}
+let _rgZoom = {s: 1, x: 0, y: 0};
+let _rgRaf = false;
+function _rgRedraw(){                            // 捏合/滚轮重排布局, rAF 节流
+  if(_rgRaf) return;
+  _rgRaf = true;
+  requestAnimationFrame(() => { _rgRaf = false; renderRelGraph(); });
+}
+function _rgZoomBy(f){
+  _rgZoom.s = Math.max(.6, Math.min(2.5, _rgZoom.s * f));
+  _rgRedraw();
+}
+function _rgBindZoom(){
+  const svg = document.getElementById("rgsvg");
+  if(!svg) return;
+  svg.addEventListener("wheel", e => {           // 滚轮 = 内容级缩放
+    e.preventDefault();
+    _rgZoomBy(e.deltaY < 0 ? 1.15 : .87);
+  }, {passive: false});
+  const pts = new Map();
+  let pinch0 = 0, s0 = 1, drag0 = null;
+  svg.addEventListener("pointerdown", e => {
+    pts.set(e.pointerId, [e.clientX, e.clientY]);
+    if(pts.size === 1) drag0 = {x: e.clientX - _rgZoom.x, y: e.clientY - _rgZoom.y};
+    if(pts.size === 2){                          // 双指捏合起点
+      const [a, b] = [...pts.values()];
+      pinch0 = Math.hypot(a[0] - b[0], a[1] - b[1]); s0 = _rgZoom.s; drag0 = null;
+    }
+  });
+  svg.addEventListener("pointermove", e => {
+    if(!pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, [e.clientX, e.clientY]);
+    if(pts.size === 2 && pinch0){                // 捏合 = 布局拉开/收拢
+      const [a, b] = [...pts.values()];
+      _rgZoom.s = Math.max(.6, Math.min(2.5, s0 * Math.hypot(a[0]-b[0], a[1]-b[1]) / pinch0));
+      _rgRedraw();
+    } else if(pts.size === 1 && drag0){          // 单指/鼠标拖拽 = 平移 (快路径不重排)
+      _rgZoom.x = e.clientX - drag0.x; _rgZoom.y = e.clientY - drag0.y;
+      const g = svg.querySelector("g");
+      if(g) g.setAttribute("transform", `translate(${_rgZoom.x},${_rgZoom.y})`);
+    }
+  });
+  const up = e => { pts.delete(e.pointerId); pinch0 = 0; drag0 = null; };
+  svg.addEventListener("pointerup", up); svg.addEventListener("pointercancel", up);
+}
 
 // ── shared option builders ──
 function allFrags(){ const out=[]; secrets.forEach(s=>(s.fragments||[]).forEach(f=>{ if(f.id) out.push({id:f.id,label:`${s.title||"秘密"}·L${f.layer}`}); })); return out; }
@@ -283,9 +702,68 @@ function fragChips(selected, cb){ const fs=allFrags(); return fs.length ? fs.map
 
 // ── 🗺 locations ──
 function addLoc(){ story.locations.push({id:gid("loc_"),name:"",detail:"",exits:[],unlock:{act_min:0,affinity_min:0,required_fragment_ids:[]},props:[]}); renderAll(); }
-function delLoc(i){ story.locations.splice(i,1); renderAll(); }
-function setLoc(i,k,v){ story.locations[i][k]=v; }
-function setLocUnlock(i,k,v){ story.locations[i].unlock[k]=parseInt(v||0); }
+// 🧹 删地点要级联: 出口/角色的家/作息/碎片解锁地点都可能指着它 — 裸删会留下
+// 一堆悬空引用, 发布时被 lint 硬门拦下, 作者却不知道去哪修（玩家实弹 2026-07-19）。
+function delLoc(i){
+  const l=story.locations[i]||{}, lid=l.id, lname=(l.name||"").trim();
+  const hit=v=>v===lid||(!!lname&&v===lname);
+  let refs=0;
+  story.locations.forEach((x,xi)=>{ if(xi!==i) refs+=(x.exits||[]).filter(hit).length; });
+  (story.characters||[]).forEach(c=>{ if(c.home_location_id===lid) refs++;
+    refs+=(c.schedule||[]).filter(s=>s.location_id===lid).length; });
+  (secrets||[]).forEach(s=>(s.fragments||[]).forEach(f=>{ if((f.unlock||{}).location_id===lid) refs++; }));
+  if(!confirm(`删掉「${lname||lid}」？${refs?`有 ${refs} 处指向它的引用（出口/角色的家/作息/碎片解锁）会一并清理。`:""}`)) return;
+  story.locations.forEach((x,xi)=>{ if(xi!==i) x.exits=(x.exits||[]).filter(e=>!hit(e)); });
+  (story.characters||[]).forEach(c=>{
+    if(c.home_location_id===lid) c.home_location_id=null;
+    c.schedule=(c.schedule||[]).filter(s=>s.location_id!==lid); });
+  (secrets||[]).forEach(s=>(s.fragments||[]).forEach(f=>{ if((f.unlock||{}).location_id===lid) f.unlock.location_id=null; }));
+  story.locations.splice(i,1); renderAll();
+  saveMsg.textContent = refs?`已删「${lname||lid}」，顺手清掉 ${refs} 处指向它的引用 ✓`:`已删「${lname||lid}」✓`;
+}
+// 🏷 改名级联: 出口是按「地名字符串」连的 — 地点改名不带出口一起改, 别处的出口
+// 就成了悬空引用 (实弹: 玩家把天台屋改成天台, 三处出口当场断链, 发布被 lint 拦死)
+function setLoc(i,k,v){
+  if(k==="name"){
+    const old=(story.locations[i].name||"").trim();
+    if(old && v.trim()!==old) story.locations.forEach((x,xi)=>{ if(xi!==i)
+      x.exits=(x.exits||[]).map(e=>e===old?v.trim():e); });
+  }
+  story.locations[i][k]=v;
+}
+// 🧹 智能修复失效引用: 同一个失效地名被 ≥3 条出口指着 = 作者想要但还没建的地点
+// （实弹「九龙城寨室外」被 14 条路指着 — 盲删会把地图砍成孤岛），补建并双向接通；
+// 只有一两条指着的才当垃圾剔掉。家置空、作息行删除、碎片解锁点置空照旧。
+function sweepRefs(){
+  const ok=new Set(); (story.locations||[]).forEach(l=>{ if(l.id) ok.add(l.id); if((l.name||"").trim()) ok.add(l.name.trim()); });
+  const misses={};   // 失效地名 → 指向它的地点名列表
+  (story.locations||[]).forEach(l=>(l.exits||[]).forEach(e=>{
+    if(!ok.has(e)) (misses[e]=misses[e]||[]).push((l.name||"").trim()); }));
+  const created=[];
+  Object.entries(misses).forEach(([nm,froms])=>{
+    if(froms.length>=3){
+      story.locations.push({id:gid("loc_"),name:nm,
+        detail:"（🧹 修复时补建：这么多路都通向这里。给它写两句具体的样子吧。）",
+        exits:[...new Set(froms)],unlock:{},props:[]});
+      ok.add(nm); created.push(`「${nm}」（${froms.length} 条路通向它）`);
+    }});
+  let n=0;
+  (story.locations||[]).forEach(l=>{ const b=(l.exits||[]).length;
+    l.exits=(l.exits||[]).filter(e=>ok.has(e)); n+=b-l.exits.length; });
+  (story.characters||[]).forEach(c=>{
+    if(c.home_location_id && !ok.has(c.home_location_id)){ c.home_location_id=null; n++; }
+    const b=(c.schedule||[]).length;
+    c.schedule=(c.schedule||[]).filter(s=>!s.location_id||ok.has(s.location_id)); n+=b-(c.schedule||[]).length; });
+  (secrets||[]).forEach(s=>(s.fragments||[]).forEach(f=>{
+    if(f.unlock && f.unlock.location_id && !ok.has(f.unlock.location_id)){ f.unlock.location_id=null; n++; } }));
+  return {removed:n, created};
+}
+async function sweepAndPublish(){ const r=sweepRefs(); renderAll();
+  const made=r.created.length?`补建了 ${r.created.join("、")}；`:"";
+  saveMsg.textContent=`🧹 ${made}清掉 ${r.removed} 条失效引用，重新发布…`;
+  await save(true);
+  if(r.created.length) saveMsg.innerHTML += `<div class="muted" style="margin-top:6px">✍️ 补建的地点描述是占位文案——到「地点」区给它写两句具体的样子，场面会好很多。</div>`; }
+function setLocUnlock(i,k,v){ story.locations[i].unlock[k]=NUM(v); }
 function toggleExit(i,oi){ const me=story.locations[i], other=(story.locations[oi]||{}).name; if(!other) return;
   const k=me.exits.indexOf(other); k<0?me.exits.push(other):me.exits.splice(k,1); renderLocs(); }
 function toggleLocFrag(i,fid){ const a=story.locations[i].unlock.required_fragment_ids; const k=a.indexOf(fid); k<0?a.push(fid):a.splice(k,1); renderLocs(); }
@@ -312,6 +790,14 @@ function renderLocs(){
         <div><label>名字</label><input value="${esc(l.name)}" oninput="setLoc(${i},'name',this.value)"></div>
         <div><label>陈设细节（具体可感的物件/光线/布局，防旁白空泛）</label><input value="${esc(l.detail)}" oninput="setLoc(${i},'detail',this.value)"></div>
       </div>
+      <div class="bar" style="margin-top:8px;align-items:center;gap:10px;flex-wrap:wrap">
+        <img src="/scene/bg/${encodeURIComponent(l.id)}.jpg${_bgBust[l.id]?`?v=${_bgBust[l.id]}`:""}" alt=""
+             style="width:128px;height:72px;object-fit:cover;border-radius:8px;border:1px solid #2a2a36"
+             onerror="this.style.opacity=.18;this.title='尚未有背景图'">
+        <label class="sm ghost" style="cursor:pointer;margin:0;padding:4px 10px;border:1px solid #2a2a36;border-radius:8px">📷 上传背景<input type="file" accept="image/*" style="display:none" onchange="uploadLocBg(${i},this)"></label>
+        <button class="sm ghost" onclick="genLocBg(${i})">🎨 AI 画背景（跟剧本画风）</button>
+        <span class="muted" id="bgmsg_${i}" style="font-size:12px"></span>
+      </div>
       <div class="muted" style="margin-top:6px">通路（从这里能走去哪）：</div><div class="chips">${exits}</div>
       <div class="sub"><h3>🔓 出现条件（都满足才在地图上出现；留空=一开始就有）</h3>
         <div class="row2">
@@ -328,7 +814,7 @@ function renderLocs(){
 }
 
 // ── characters ──
-function addChar(){ story.characters.push({id:gid("c_"),name:"",role:"",is_lead:story.characters.length===0,persona_text:"",background:"",avatar_url:"",presence:"present",appears_from_act:0,playable:false,relation_default:"",agenda:"",eq_style:"",home_location_id:null,schedule:[],ties:[],items:[],bio_layers:[]}); renderAll(); }
+function addChar(){ story.characters.push({id:gid("c_"),name:"",role:"",is_lead:story.characters.length===0,persona_text:"",background:"",avatar_url:"",presence:"present",appears_from_act:0,playable:false,relation_default:"",agenda:"",eq_style:"",home_location_id:null,schedule:[],ties:[],items:[],bio_layers:[]}); _openChar=story.characters.length-1; renderAll(); }
 // 🪄 一大段文字 → 角色卡 (Yi 定): 后端 LLM 解析成卡 v2 全字段, 生成后照常手改
 async function parseCharBlob(){
   const ta = document.getElementById("charBlob"), msg = document.getElementById("charBlobMsg");
@@ -362,35 +848,101 @@ async function parseCharBlob(){
 }
 function delChar(i){ story.characters.splice(i,1); renderAll(); }
 function setChar(i,k,v){ story.characters[i][k]=v; }
-function setCharNum(i,k,v){ story.characters[i][k]=parseInt(v||0); }
+function setCharNum(i,k,v){ story.characters[i][k]=NUM(v); }
 function setLead(i){ story.characters.forEach((c,j)=>c.is_lead=(j===i)); renderChars(); }
 function addItem(i){ (story.characters[i].items=story.characters[i].items||[]).push({name:"",detail:""}); renderChars(); }
 function delItem(i,ii){ story.characters[i].items.splice(ii,1); renderChars(); }
 function setItem(i,ii,k,v){ story.characters[i].items[ii][k]=v; }
 function addSched(i){ (story.characters[i].schedule=story.characters[i].schedule||[]).push({from_act:1,location_id:"",slots:[]}); renderChars(); }
 function delSched(i,si){ story.characters[i].schedule.splice(si,1); renderChars(); }
-function setSched(i,si,k,v){ story.characters[i].schedule[si][k] = (k==="from_act")?parseInt(v||0):v; }
+function setSched(i,si,k,v){ story.characters[i].schedule[si][k] = (k==="from_act")?NUM(v,1):v; }
 function toggleSlot(i,si,slot){ const a=(story.characters[i].schedule[si].slots=story.characters[i].schedule[si].slots||[]); const k=a.indexOf(slot); k<0?a.push(slot):a.splice(k,1); renderChars(); }
 function addTie(i){ (story.characters[i].ties=story.characters[i].ties||[]).push({char_id:"",stance:0,label:""}); renderChars(); }
 function delTie(i,ti){ story.characters[i].ties.splice(ti,1); renderChars(); }
-function setTie(i,ti,k,v){ story.characters[i].ties[ti][k] = (k==="stance")?parseInt(v||0):v; }
+function setTie(i,ti,k,v){ story.characters[i].ties[ti][k] = (k==="stance")?NUM(v):v; }
 function addBio(i){ (story.characters[i].bio_layers=story.characters[i].bio_layers||[]).push({closeness_min:10,text:""}); renderChars(); }
 function delBio(i,bi){ story.characters[i].bio_layers.splice(bi,1); renderChars(); }
-function setBio(i,bi,k,v){ story.characters[i].bio_layers[bi][k] = (k==="closeness_min")?parseInt(v||0):v; }
+function setBio(i,bi,k,v){ story.characters[i].bio_layers[bi][k] = (k==="closeness_min")?NUM(v):v; }
+// ── 👤 角色卡 (创作 UX: 照片当门面, 默认折叠, 核心字段第一屏, 其余收「更多」) ──
+let _openChar = null;   // 新加的角色自动展开
+let _avBust = {};       // 头像缓存爆破 (上传/重画后强刷 img)
+function _charAvatar(c){
+  const src = ((c.avatar_url||"").trim() || `/scene/avatar/${c.id}.jpg`)
+    + (_avBust[c.id]?`?t=${_avBust[c.id]}`:"");
+  return `<span class="cav"><img src="${esc(src)}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+    + `<span class="cavf" style="display:none">${esc((c.name||"?").slice(0,1))}</span></span>`;
+}
+// 🖼 地点背景: 上传/AI 重画 (Yi: 编辑界面要能编辑地点背景) — 与角色照片同款两键
+let _bgBust = {};
+async function uploadLocBg(i, inp){
+  const f = inp.files && inp.files[0]; if(!f) return;
+  const l = story.locations[i];
+  const msg = document.getElementById(`bgmsg_${i}`); if(msg) msg.textContent = "上传中…";
+  try{
+    if(!story.id) await save(false);            // 上传需要草稿在库 — 自动先存
+    const fd = new FormData();
+    fd.append("kind","bg"); fd.append("target_id", l.id); fd.append("file", f);
+    const r = await fetch(API+`/stories/${story.id}/upload`,{method:"POST",credentials:"include",body:fd});
+    if(!r.ok) throw new Error((await r.json().catch(()=>({}))).detail||r.status);
+    _bgBust[l.id] = Date.now(); renderLocs();
+  }catch(e){ if(msg) msg.textContent = "上传失败: " + e.message; }
+}
+async function genLocBg(i){
+  const l = story.locations[i];
+  try{
+    if(!story.id) await save(false);
+    const msg = document.getElementById(`bgmsg_${i}`);
+    if(msg) msg.textContent = "🎨 排队作画中（约十几秒，画好自动出现）…";
+    await j(`/stories/${story.id}/gen_bg/${l.id}`,{method:"POST"});
+    let tries = 0;
+    const t = setInterval(()=>{                 // 画好即现: 定时爆缓存重试
+      tries++; _bgBust[l.id] = Date.now(); renderLocs();
+      if(tries >= 8) clearInterval(t);
+    }, 5000);
+  }catch(e){ const m=document.getElementById(`bgmsg_${i}`); if(m) m.textContent="失败: "+e.message; }
+}
+async function uploadCharPhoto(i, inp){
+  const f = inp.files && inp.files[0]; if(!f) return;
+  const c = story.characters[i];
+  const msg = document.getElementById(`avmsg_${i}`); if(msg) msg.textContent = "上传中…";
+  try{
+    if(!story.id) await save(false);            // 上传需要草稿在库 — 自动先存
+    const fd = new FormData();
+    fd.append("kind","avatar"); fd.append("target_id", c.id); fd.append("file", f);
+    const r = await fetch(API+`/stories/${story.id}/upload`,{method:"POST",credentials:"include",body:fd});
+    if(!r.ok) throw new Error((await r.json().catch(()=>({}))).detail||r.status);
+    const d = await r.json();
+    c.avatar_url = d.avatar || `/scene/avatar/${c.id}.jpg`;
+    _avBust[c.id] = Date.now();
+    await _refreshRev();
+    _openChar = i; renderChars(); renderRelGraph();
+  }catch(e){ if(msg) msg.textContent = "上传失败: " + e.message; }
+}
+async function genCharAvatar(i){
+  const c = story.characters[i];
+  try{
+    if(!story.id) await save(false);
+    const msg = document.getElementById(`avmsg_${i}`);
+    if(msg) msg.textContent = "🎨 排队作画中（约十几秒，画好自动出现）…";
+    await j(`/stories/${story.id}/gen_avatar/${c.id}`,{method:"POST"});
+    await _refreshRev();
+    c.avatar_url = `/scene/avatar/${c.id}.jpg`;
+    let tries = 0;
+    const t = setInterval(()=>{                 // 画好即现: 定时爆缓存重试
+      tries++; _avBust[c.id] = Date.now(); _openChar = i; renderChars(); renderRelGraph();
+      if(tries >= 8) clearInterval(t);
+    }, 5000);
+  }catch(e){ const m=document.getElementById(`avmsg_${i}`); if(m) m.textContent="失败: "+e.message; }
+}
 function renderChars(){
   chars.innerHTML="";
   story.characters.forEach((c,i)=>{
-    const d=document.createElement("div"); d.className="card fold open";
+    const d=document.createElement("div"); d.className="card fold"+(i===_openChar?" open":"");
     const scheds=(c.schedule||[]).map((s,si)=>`<div class="sub"><div class="row3">
         <div><span class="muted">第几幕起</span><input type="number" value="${s.from_act||1}" oninput="setSched(${i},${si},'from_act',this.value)"></div>
         <div><span class="muted">在哪</span><select onchange="setSched(${i},${si},'location_id',this.value)">${locOptions(s.location_id,"（选地点）")}</select></div>
         <div><span class="muted">哪些时段（都不勾=全天）</span><div class="chips">${SLOT_NAMES.map(sl=>`<span class="chk ${(s.slots||[]).includes(sl)?"on":""}" onclick="toggleSlot(${i},${si},'${sl}')">${sl}</span>`).join("")}</div></div>
       </div><button class="sm del" style="margin-top:4px" onclick="delSched(${i},${si})">删这条</button></div>`).join("");
-    const ties=(c.ties||[]).map((t,ti)=>`<div class="sub"><div class="row3">
-        <div><span class="muted">对谁</span><select onchange="setTie(${i},${ti},'char_id',this.value)">${charOptions(t.char_id,true)}</select></div>
-        <div><span class="muted">立场</span><select onchange="setTie(${i},${ti},'stance',this.value)">${[-2,-1,0,1,2].map(v=>`<option value="${v}" ${t.stance===v?"selected":""}>${({"-2":"仇怨 -2","-1":"不睦 -1","0":"平淡 0","1":"交好 +1","2":"莫逆 +2"})[v]}</option>`).join("")}</select></div>
-        <div><span class="muted">一句话（如：过命的交情）</span><input value="${esc(t.label||"")}" oninput="setTie(${i},${ti},'label',this.value)"></div>
-      </div><button class="sm del" style="margin-top:4px" onclick="delTie(${i},${ti})">删这条</button></div>`).join("");
     const items=(c.items||[]).map((it,ii)=>`<div class="sub"><div class="row2">
         <div><span class="muted">物件名</span><input value="${esc(it.name||"")}" oninput="setItem(${i},${ii},'name',this.value)"></div>
         <div><span class="muted">细节（可选）</span><input value="${esc(it.detail||"")}" oninput="setItem(${i},${ii},'detail',this.value)"></div>
@@ -401,7 +953,9 @@ function renderChars(){
       </div><button class="sm del" style="margin-top:4px" onclick="delBio(${i},${bi})">删这层</button></div>`).join("");
     d.innerHTML=`
       <div class="bar foldhead" style="justify-content:space-between" onclick="if(event.target.tagName!=='INPUT'&&event.target.tagName!=='BUTTON')this.parentElement.classList.toggle('open')">
-        <h3 style="margin:0">👤 ${esc(c.name||"未命名")} <code class="id">${esc(c.id)}</code></h3>
+        <span class="bar" style="gap:10px;align-items:center">${_charAvatar(c)}
+          <h3 style="margin:0">${esc(c.name||"未命名")}${c.is_lead?" ⭐":""}
+            <span class="muted" style="font-weight:400;font-size:12px">${esc((c.role||"").slice(0,18))}</span></h3></span>
         <span class="bar">
           <label style="margin:0"><input type="radio" name="lead" ${c.is_lead?"checked":""} onclick="setLead(${i})" style="width:auto"> 主角</label>
           <button class="sm ghost" onclick="saveCharAsCard(${i})">📚 存入卡库</button>
@@ -409,34 +963,42 @@ function renderChars(){
         </span>
       </div>
       <div class="foldbody">
+      <div class="bar" style="margin:2px 0 8px">
+        <label class="sm ghost" style="cursor:pointer;margin:0;padding:4px 10px;border:1px solid #2a2a36;border-radius:8px">📷 上传照片<input type="file" accept="image/*" style="display:none" onchange="uploadCharPhoto(${i},this)"></label>
+        <button class="sm ghost" onclick="genCharAvatar(${i})">🎨 AI 画一张（跟剧本画风）</button>
+        <span class="muted" id="avmsg_${i}" style="font-size:12px"></span>
+      </div>
       <div class="row2">
         <div><label>名字</label><input value="${esc(c.name)}" oninput="setChar(${i},'name',this.value)"></div>
-        <div><label>身份（role，一句话）</label><input value="${esc(c.role||"")}" oninput="setChar(${i},'role',this.value)"></div>
+        <div><label>身份（一句话）</label><input value="${esc(c.role||"")}" oninput="setChar(${i},'role',this.value)"></div>
       </div>
       <label>人设（外貌、性格、说话方式，喂给 AI 演这个角色）</label><textarea oninput="setChar(${i},'persona_text',this.value)">${esc(c.persona_text)}</textarea>
-      <label>背景（可选）</label><textarea oninput="setChar(${i},'background',this.value)">${esc(c.background||"")}</textarea>
-      <label>TA 自己的目的（agenda：独立于玩家想要什么，驱动自主行为）</label><textarea oninput="setChar(${i},'agenda',this.value)">${esc(c.agenda||"")}</textarea>
-      <div class="row2">
-        <div><label>情绪表达方式（eq_style，可选）</label><input value="${esc(c.eq_style||"")}" oninput="setChar(${i},'eq_style',this.value)"></div>
-        <div><label>对玩家的初始关系</label><select onchange="setChar(${i},'relation_default',this.value)">${REL_MODES.map(([v,t])=>`<option value="${v}" ${(c.relation_default||"")===v?"selected":""}>${t}</option>`).join("")}</select></div>
-      </div>
-      <div class="row4">
-        <div><label>在场状态</label><select onchange="setChar(${i},'presence',this.value)">
-          <option value="present" ${(c.presence||"present")==="present"?"selected":""}>在场·可对话</option>
-          <option value="offstage" ${c.presence==="offstage"?"selected":""}>幕后·不直接对话</option></select></div>
-        <div><label>第几幕后登场（0=开局就在）</label><input type="number" value="${c.appears_from_act||0}" oninput="setCharNum(${i},'appears_from_act',this.value)"></div>
-        <div><label>常驻地点（不配=随处在场）</label><select onchange="setChar(${i},'home_location_id',this.value||null)">${locOptions(c.home_location_id,"（随处在场）")}</select></div>
-        <div><label style="margin-bottom:6px">可被玩家扮演</label><label style="display:flex;align-items:center;gap:6px;margin:0;cursor:pointer"><input type="checkbox" ${c.playable?"checked":""} onchange="setChar(${i},'playable',this.checked)" style="width:auto"> playable</label></div>
-      </div>
-      <h3 style="margin-top:10px">🕐 作息表（比常驻地点更细：第几幕起、什么时段、在哪；有作息但当前时段没排班 = 不知去向）</h3>
-      ${scheds}<button class="sm ghost" onclick="addSched(${i})">+ 加作息</button>
-      <h3 style="margin-top:10px">🕸 与其他角色的旧关系（ties，NPC 关系网初始值）</h3>
-      ${ties}<button class="sm ghost" onclick="addTie(${i})">+ 加关系</button>
-      <h3 style="margin-top:10px">🎒 随身物品（世界里的实体：可送、可换、可被抢；玩家扮演 TA 时作为初始背包）</h3>
-      ${items}<button class="sm ghost" onclick="addItem(${i})">+ 加物件</button>
-      <h3 style="margin-top:10px">📖 分层小传（亲近到一定程度，才让玩家看到的过往）</h3>
-      ${bios}<button class="sm ghost" onclick="addBio(${i})">+ 加一层</button>
-      ${c.knowledge?`<label style="margin-top:10px">🔍 背景知识（智能增强生成，可手改）</label><textarea oninput="setChar(${i},'knowledge',this.value)">${esc(c.knowledge)}</textarea>`:""}
+      <label>开场白（开场时TA对玩家说的第一句话，会原样上台；留空则由 AI 即兴）</label><input value="${esc(c.opening_line||"")}" maxlength="80" placeholder="例：新来的？把袖子卷起来，让我看看你的手。" oninput="setChar(${i},'opening_line',this.value)">
+      <details class="sub" style="margin-top:8px">
+        <summary style="cursor:pointer" class="muted">⚙️ 更多设定（背景 / 动机 / 表达 / 登场 / 作息 / 随身物品 / 分层小传）</summary>
+        <label>背景（可选）</label><textarea oninput="setChar(${i},'background',this.value)">${esc(c.background||"")}</textarea>
+        <label>TA 自己的目的（独立于玩家想要什么，驱动自主行为）</label><textarea oninput="setChar(${i},'agenda',this.value)">${esc(c.agenda||"")}</textarea>
+        <div class="row2">
+          <div><label>情绪表达方式（可选）</label><input value="${esc(c.eq_style||"")}" oninput="setChar(${i},'eq_style',this.value)"></div>
+          <div><label>对玩家的初始关系</label><select onchange="setChar(${i},'relation_default',this.value)">${REL_MODES.map(([v,t])=>`<option value="${v}" ${(c.relation_default||"")===v?"selected":""}>${t}</option>`).join("")}</select></div>
+        </div>
+        <div class="row4">
+          <div><label>在场状态</label><select onchange="setChar(${i},'presence',this.value)">
+            <option value="present" ${(c.presence||"present")==="present"?"selected":""}>在场·可对话</option>
+            <option value="offstage" ${c.presence==="offstage"?"selected":""}>幕后·不直接对话</option></select></div>
+          <div><label>第几幕后登场（0=开局就在）</label><input type="number" value="${c.appears_from_act||0}" oninput="setCharNum(${i},'appears_from_act',this.value)"></div>
+          <div><label>常驻地点（不配=随处在场）</label><select onchange="setChar(${i},'home_location_id',this.value||null)">${locOptions(c.home_location_id,"（随处在场）")}</select></div>
+          <div><label style="margin-bottom:6px">可被玩家扮演</label><label style="display:flex;align-items:center;gap:6px;margin:0;cursor:pointer"><input type="checkbox" ${c.playable?"checked":""} onchange="setChar(${i},'playable',this.checked)" style="width:auto"> playable</label></div>
+        </div>
+        <p class="muted" style="margin:8px 0">🕸 与其他角色的关系 → 到上方「关系网」区编辑（图上点两个头像即可）。</p>
+        <h3 style="margin-top:10px">🕐 作息表（第几幕起、什么时段、在哪；有作息但当前时段没排班 = 不知去向）</h3>
+        ${scheds}<button class="sm ghost" onclick="addSched(${i})">+ 加作息</button>
+        <h3 style="margin-top:10px">🎒 随身物品（可送、可换、可被抢；玩家扮演 TA 时是初始背包）</h3>
+        ${items}<button class="sm ghost" onclick="addItem(${i})">+ 加物件</button>
+        <h3 style="margin-top:10px">📖 分层小传（亲近到一定程度，才让玩家看到的过往）</h3>
+        ${bios}<button class="sm ghost" onclick="addBio(${i})">+ 加一层</button>
+        ${c.knowledge?`<label style="margin-top:10px">🔍 背景知识（智能增强生成，可手改）</label><textarea oninput="setChar(${i},'knowledge',this.value)">${esc(c.knowledge)}</textarea>`:""}
+      </details>
       </div>`;
     chars.appendChild(d);
   });
@@ -446,8 +1008,8 @@ function renderChars(){
 function addAct(){ story.acts.push({id:gid("a_"),index:story.acts.length+1,title:"",goal:"",time:null,advance:{required_fragment_ids:[],required_event_ids:[],affinity_min:0},events:[],choice:null}); renderAll(); }
 function delAct(i){ story.acts.splice(i,1); story.acts.forEach((a,j)=>a.index=j+1); renderAll(); }
 function setAct(i,k,v){ story.acts[i][k]=v; }
-function setActTime(i,k,v){ const a=story.acts[i]; a.time=a.time||{day:0,slot:""}; a.time[k]=(k==="day")?parseInt(v||0):v; }
-function setAdvance(i,k,v){ story.acts[i].advance[k]=parseInt(v||0); }
+function setActTime(i,k,v){ const a=story.acts[i]; a.time=a.time||{day:0,slot:""}; a.time[k]=(k==="day")?NUM(v):v; }
+function setAdvance(i,k,v){ story.acts[i].advance[k]=NUM(v); }
 function toggleAdvEvent(i,eid){ const a=story.acts[i].advance.required_event_ids; const k=a.indexOf(eid); k<0?a.push(eid):a.splice(k,1); renderActs(); }
 function toggleAdvFrag(i,fid){ const a=story.acts[i].advance.required_fragment_ids; const k=a.indexOf(fid); k<0?a.push(fid):a.splice(k,1); renderActs(); }
 function addEvent(ai){ story.acts[ai].events.push({id:gid("e_"),what_happens:"",who_character_ids:[],kills_character_ids:[]}); renderAll(); }
@@ -459,7 +1021,7 @@ function toggleChoice(i,on){ story.acts[i].choice = on ? (story.acts[i].choice||
 function setChoice(i,k,v){ story.acts[i].choice[k]=v; }
 function addChoiceOpt(i){ story.acts[i].choice.options.push({id:gid("o_"),label:"",flag:"",affinity_delta:0,character_id:null,closeness_delta:0,romance_delta:0}); renderActs(); }
 function delChoiceOpt(i,oi){ story.acts[i].choice.options.splice(oi,1); renderActs(); }
-function setChoiceOpt(i,oi,k,v){ const o=story.acts[i].choice.options[oi]; o[k]=(["affinity_delta","closeness_delta","romance_delta"].includes(k))?parseInt(v||0):(v||null); if(k==="label"||k==="flag") o[k]=v; }
+function setChoiceOpt(i,oi,k,v){ const o=story.acts[i].choice.options[oi]; o[k]=(["affinity_delta","closeness_delta","romance_delta"].includes(k))?NUM(v):(v||null); if(k==="label"||k==="flag") o[k]=v; }
 function renderActs(){
   acts.innerHTML="";
   story.acts.forEach((a,i)=>{
@@ -526,7 +1088,7 @@ function setSecret(i,k,v){ secrets[i][k]=v; }
 function addFrag(si){ secrets[si].fragments.push({id:gid("f_"),layer:secrets[si].fragments.length+1,content:"",retrieval_key:"",cover:"",known_by_character_ids:[],unlock:{affinity_min:0,act_min:1,asks_min:1,trigger_event_ids:[],location_id:null}}); renderAll(); }
 function delFrag(si,fi){ secrets[si].fragments.splice(fi,1); renderAll(); }
 function setFrag(si,fi,k,v){ secrets[si].fragments[fi][k]=v; }
-function setUnlock(si,fi,k,v){ secrets[si].fragments[fi].unlock[k]=parseInt(v||0); }
+function setUnlock(si,fi,k,v){ secrets[si].fragments[fi].unlock[k]=NUM(v); }
 function setUnlockLoc(si,fi,v){ secrets[si].fragments[fi].unlock.location_id=v||null; }
 function toggleUnlockEvent(si,fi,eid){ const u=secrets[si].fragments[fi].unlock; u.trigger_event_ids=u.trigger_event_ids||[]; const a=u.trigger_event_ids; const k=a.indexOf(eid); k<0?a.push(eid):a.splice(k,1); renderSecrets(); }
 function toggleKnown(si,fi,cid){ const a=secrets[si].fragments[fi].known_by_character_ids; const k=a.indexOf(cid); k<0?a.push(cid):a.splice(k,1); renderSecrets(); }
@@ -572,7 +1134,7 @@ function addEnding(){ story.endings.push({id:gid("end_"),kind:"normal",trigger:n
 function delEnding(i){ story.endings.splice(i,1); renderAll(); }
 function setEnd(i,k,v){ story.endings[i][k]=v; }
 function setEndTrigger(i,v){ story.endings[i].trigger=v||null; renderEndings(); }
-function setEndCond(i,k,v){ story.endings[i].condition[k]=parseInt(v||0); }
+function setEndCond(i,k,v){ story.endings[i].condition[k]=NUM(v); }
 function toggleEndFrag(i,fid){ const a=story.endings[i].condition.required_fragment_ids; const k=a.indexOf(fid); k<0?a.push(fid):a.splice(k,1); renderEndings(); }
 function setEndFlags(i,v){ const flags={}; v.split(/[,，\s]+/).map(x=>x.trim()).filter(Boolean).forEach(f=>flags[f]=true); story.endings[i].condition.required_flags=flags; }
 function renderEndings(){
@@ -612,19 +1174,71 @@ function ensureSys(){
   story.phone=story.phone||{}; story.verdict=story.verdict||{options:[]}; story.verdict.options=story.verdict.options||[];
   story.sandbox=story.sandbox||{}; story.tuning=story.tuning||{};
 }
-function setClock(k,v){ ensureSys(); story.clock[k]=(k==="deadline_day")?parseInt(v||0):v; }
-function setTuning(k,v){ ensureSys(); if(v==="") delete story.tuning[k]; else story.tuning[k]=parseInt(v); }
+function setClock(k,v){ ensureSys(); story.clock[k]=(k==="deadline_day")?NUM(v):v; }
+function setTuning(k,v){ ensureSys(); const n=parseInt(v,10); if(!Number.isFinite(n)) delete story.tuning[k]; else story.tuning[k]=n; }
 function setPress(k,v){ ensureSys(); story.pressure[k]=v; }
 function addPLevel(){ ensureSys(); story.pressure.levels.push({at:35,note:""}); renderSystems(); }
 function delPLevel(i){ story.pressure.levels.splice(i,1); renderSystems(); }
-function setPLevel(i,k,v){ story.pressure.levels[i][k]=(k==="at")?parseInt(v||0):v; }
+function setPLevel(i,k,v){ story.pressure.levels[i][k]=(k==="at")?NUM(v):v; }
 function setPhone(k,v){ ensureSys(); story.phone[k]=v; }
-function setVerdict(k,v){ ensureSys(); story.verdict[k]=(["attempts","act_min"].includes(k))?parseInt(v||0):v; }
+function setVerdict(k,v){ ensureSys(); story.verdict[k]=(["attempts","act_min"].includes(k))?NUM(v):v; }
 function addVOpt(){ ensureSys(); story.verdict.options.push({id:gid("v_"),label:"",correct:false,text:""}); renderSystems(); }
 function delVOpt(i){ story.verdict.options.splice(i,1); renderSystems(); }
 function setVOpt(i,k,v){ story.verdict.options[i][k]=v; }
 function setVCorrect(i){ story.verdict.options.forEach((o,j)=>o.correct=(j===i)); renderSystems(); }
 function setSandbox(k,v){ ensureSys(); story.sandbox[k]=v; }
+// ── 💎 收费包 (平台币 P1): 服务器侧清单, 与剧本文档分离存储 ──
+let storyPacks = [], packEarn = null;
+async function loadPacks(){
+  storyPacks = []; packEarn = null;
+  if (!story.id) return;
+  try { storyPacks = (await j(`/stories/${story.id}/packs`)).packs || []; } catch(e) {}
+  try { packEarn = await j(`/stories/${story.id}/earnings`); } catch(e) {}
+  renderPacksCard();
+}
+function renderPacksCard(){
+  const el = document.getElementById("packsCard"); if (!el) return;
+  if (!story.id) { el.innerHTML = `<p class="muted">先保存草稿，才能配置收费包。</p>`; return; }
+  const earn = packEarn && packEarn.sales
+    ? `<div class="muted" style="margin-bottom:8px">💰 已售 ${packEarn.sales} 份 · 你的分成 <b>${packEarn.total_share}</b> 月石（${packEarn.share_pct}%）</div>` : "";
+  const rows = storyPacks.map((p,i)=>`<div class="sub">
+    <div class="row3">
+      <div><label>名字</label><input value="${esc(p.name)}" oninput="storyPacks[${i}].name=this.value"></div>
+      <div><label>价格（月石）</label><input type="number" value="${p.price}" oninput="storyPacks[${i}].price=NUM(this.value)"></div>
+      <div><label style="display:flex;align-items:center;gap:6px;margin-top:20px"><input type="checkbox" style="width:auto" ${p.grants&&p.grants.access?"checked":""} onchange="(storyPacks[${i}].grants=storyPacks[${i}].grants||{}).access=this.checked"> 🎫 门票（不买不能开档）</label></div>
+    </div>
+    <div class="row2">
+      <div><label>说明（玩家看到的介绍）</label><input value="${esc(p.desc||"")}" oninput="storyPacks[${i}].desc=this.value"></div>
+      <div><label>送金手指（每行一条，最多2）</label><input value="${esc(((p.grants||{}).powers||[]).join("；"))}" oninput="(storyPacks[${i}].grants=storyPacks[${i}].grants||{}).powers=this.value.split('；').map(s=>s.trim()).filter(Boolean)"></div>
+    </div>
+    <div class="row2">
+      <div><label>开局加钱（沙盒本生效）</label><input type="number" value="${(p.grants||{}).start_money_bonus||0}" oninput="(storyPacks[${i}].grants=storyPacks[${i}].grants||{}).start_money_bonus=NUM(this.value)"></div>
+      <div style="display:flex;gap:8px;align-items:end">
+        <button class="sm" onclick="savePack(${i})">保存包</button>
+        <button class="sm del" onclick="retirePack(${i})">下架</button>
+        <span class="muted" id="pkmsg_${i}" style="font-size:12px"></span></div>
+    </div></div>`).join("");
+  el.innerHTML = `<div class="card">${earn}${rows||`<p class="muted">还没有收费包。</p>`}
+    <button class="sm" style="margin-top:8px" onclick="addPack()">＋ 新建收费包</button></div>`;
+}
+function addPack(){ storyPacks.push({id:null,name:"",desc:"",price:0,grants:{}}); renderPacksCard(); }
+async function savePack(i){
+  const p = storyPacks[i];
+  const msg = document.getElementById(`pkmsg_${i}`);
+  try{
+    if(!story.id) await save(false);
+    const body = JSON.stringify({name:p.name,desc:p.desc,price:p.price,grants:p.grants||{}});
+    const res = p.id ? await j(`/packs/${p.id}`,{method:"PATCH",body})
+                     : await j(`/stories/${story.id}/packs`,{method:"POST",body});
+    storyPacks[i] = res;
+    if(msg) msg.textContent = "已保存 ✓（对玩家即时生效）";
+  }catch(e){ if(msg) msg.textContent = "出错: " + e.message; }
+}
+async function retirePack(i){
+  const p = storyPacks[i];
+  if(p.id){ try{ await j(`/packs/${p.id}`,{method:"DELETE"}); }catch(e){} }
+  storyPacks.splice(i,1); renderPacksCard();
+}
 function renderSystems(){
   ensureSys();
   const ck=story.clock, pr=story.pressure, ph=story.phone, vd=story.verdict, sb=story.sandbox, tn=story.tuning;
@@ -687,6 +1301,11 @@ function renderSystems(){
     ${sb.enabled?`<label style="display:flex;align-items:center;gap:8px;margin-top:8px;cursor:pointer">
       <input type="checkbox" ${sb.real_time!==false?"checked":""} onchange="setSandbox('real_time',this.checked)" style="width:auto"> ⏰ 时间与现实同步（关掉则回到回合制时钟）
     </label>
+    <div style="margin-top:8px"><label>🎬 开场访客（起点空场时由谁来接玩家——不选则按关系档位自动挑）</label>
+      <select onchange="setSandbox('opening_visitor',this.value||undefined)">
+        <option value="">（自动）</option>
+        ${(story.characters||[]).filter(c=>c.id&&c.name).map(c=>`<option value="${c.id}" ${sb.opening_visitor===c.id?"selected":""}>${esc(c.name)}</option>`).join("")}
+      </select></div>
     <div class="muted" style="margin-top:6px">沙盒剧本建议：角色留空（按玩家世界观现场生成）、结局留空、tuning 里 world_event_every=0。</div>`:""}
   </div>`;
   document.getElementById("tuningCard").innerHTML=`<div class="card"><div class="row3">
@@ -780,18 +1399,25 @@ function _cleanup(){
     sandbox: sb.enabled ? sb : null,
   };
 }
+// 🔒 乐观锁票据刷新: 发布/画头像/传照片会 bump 服务器 updated_at —
+// 不刷票据的话下一次保存会误报 409「被别的窗口改过」(自审抓的, 没上过战场)
+async function _refreshRev(){
+  if(!story.id) return;
+  try{ const s=await j(`/stories/${story.id}`); story.updated_at=s.updated_at; }catch(e){}
+}
 async function save(publish){
   try{
     saveMsg.textContent="保存中…";
     const sys=_cleanup();
-    const payload = { title:story.title, language:story.language||"zh",
+    const payload = { if_rev: story.updated_at || null,
+      title:story.title, language:story.language||"zh",
       one_liner:story.one_liner, synopsis:story.synopsis, world_long:story.world_long,
       world_facts:story.world_facts, relations_overview:story.relations_overview,
       trope_tags:story.trope_tags, visibility:story.visibility, mature:!!story.mature,
       characters:story.characters, acts:story.acts, endings:story.endings, locations:story.locations,
       tuning:story.tuning||{}, ...sys };
-    if (!story.id){ const res=await j("/stories",{method:"POST",body:JSON.stringify(payload)}); story.id=res.id; }
-    else { await j(`/stories/${story.id}`,{method:"PATCH",body:JSON.stringify(payload)}); }
+    if (!story.id){ const res=await j("/stories",{method:"POST",body:JSON.stringify(payload)}); story.id=res.id; story.updated_at=res.updated_at; }
+    else { const res=await j(`/stories/${story.id}`,{method:"PATCH",body:JSON.stringify(payload)}); story.updated_at=res.updated_at; }
     // ⚡ 秘密只在真改动时重写 (曾经每次保存全删全建 = 一串串行往返, 保存显得很久);
     // 重写时删除并行、重建保序 (fragment ids 客户端钉死, 门控引用不受影响)
     if (JSON.stringify(secrets) !== secretsSnapshot) {
@@ -801,8 +1427,26 @@ async function save(publish){
       for (const s of secrets) await j(`/stories/${story.id}/secrets`,{method:"POST",body:JSON.stringify(s)});
       secretsSnapshot = JSON.stringify(secrets);
     }
-    if (publish){ saveMsg.textContent="发布中…"; const r=await j(`/stories/${story.id}/publish`,{method:"POST"}); saveMsg.textContent=`已发布 v${r.version} ✓`; }
-    else saveMsg.textContent="已保存草稿 ✓";
+    if (publish){
+      saveMsg.textContent="发布中…";
+      // ✍️ lint 硬门: 422 带人话错误清单 — 逐条展示, 作者照着修
+      const r = await fetch(API+`/stories/${story.id}/publish`,{method:"POST",credentials:"include"});
+      if (r.status === 422){
+        const d = (await r.json()).detail || {};
+        const list = (d.lint_errors||[]).map(m=>`<li>${esc(m)}</li>`).join("");
+        // 🧹 失效引用类错误全是机械修 (删出口/置空) — 给一键, 别让作者手工扫26条
+        const sweepable = (d.lint_errors||[]).some(m=>/指向|不存在|不是已知/.test(m));
+        saveMsg.innerHTML = `<span style="color:#ff9d9d">🧪 体检未过（${d.count||"?"} 处），修好才能发布：</span>`+
+          `<ul style="margin:6px 0 0 18px;color:#ffb9b9">${list}</ul>`+
+          (sweepable?`<button class="sm" style="margin-top:8px" onclick="sweepAndPublish()">🧹 一键清理失效引用并重新发布</button>`:"");
+        return;
+      }
+      if (!r.ok) throw new Error((await r.json().catch(()=>({}))).detail || r.status);
+      const pr = await r.json();
+      await _refreshRev();
+      saveMsg.innerHTML = `已发布 v${pr.version} ✓ <span class="muted">进行中的旧档仍演旧版（护档设计）——开新档才吃新版。</span>`;
+    }
+    else saveMsg.innerHTML=`已保存草稿 ✓ <span class="muted">草稿不上线：点「发布」，改动才会进游戏（且只对新开的档生效）。</span>`;
     renderMedia();
   }catch(e){ saveMsg.textContent="出错: "+e.message; }
 }

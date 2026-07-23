@@ -18,9 +18,12 @@ from typing import Any
 
 from ..config import get_settings
 from . import actions as actions_mod
+from . import factions as factions_mod
+from . import taste as taste_mod
 from . import gating
 from . import heat as heat_mod
 from . import intent as intent_mod
+from . import items as items_mod
 from . import logic
 from . import profile as profile_mod
 from . import relationships
@@ -118,8 +121,13 @@ def default_state() -> dict[str, Any]:
         "dead_character_ids": [],       # ☠️ killed characters: never appear again, remembered
         "identity": None,               # 🎖 the player's CURRENT 身份/职务 (None = as authored)
         "identity_log": [],             # [{act, text}] — how the identity evolved
-        "inventory": [],                # 🎒 pocket: [{name, detail?}] carried items
+        "inventory": [],                # 🎒 pocket: [{name, detail?, tid, qty|iid+indiv}] (items.py)
         "stashes": {},                  # {location_id: [{name,...}]} items left somewhere
+        "item_templates": {},           # 🎒 物性卡快照 {tid: card} — 判定唯一读取源 (items.py)
+        "item_quarantine": [],          # 🎒 未申报实体隔离区 [{name,src,day,hits}]
+        "scene_items": {},              # 🎒 场景在册物 {location_id: [rows]} — 特写过的才在册
+        # ⚠️ schema_version 不放这里: default 合并会把旧档也标成新纪元, 迁移永不触发
+        # (items.migrate_state 自己盖章)
         "place_facts": {},              # 🌍 {location_id: [{text,label}]} lasting physical changes
         "money": None,                  # 💰 cash balance (None = economy off for this run)
         "money_log": [],                # 💰 [{delta, why, label}] the last 20 bookings
@@ -181,6 +189,8 @@ STUCK_SPELL = 4
 # romance script want different rhythms). Values here are the engine defaults — the module
 # constants above stay the single source for them. See docs/tuning.md for the knob table.
 DEFAULT_TUNING = {
+    "peek_drop_chance": 18,     # 📱🔍 TA离场时遗落设备的概率% (0=关闭偷看玩法)
+    "pursue_threshold": 15,     # 💘 心动过此线角色开始主动追玩家 (0=关闭)
     "affinity_clamp_min": -3,   # per-turn floor on summed 好感 delta
     "affinity_clamp_max": 8,    # per-turn ceiling on summed 好感 delta
     "act_backstop_div": 12,     # soft acts: act floor = 1 + affinity // this
@@ -200,9 +210,12 @@ DEFAULT_TUNING = {
     "rom_taper_den": 110,       # per-char 心动 gain taper denominator
     "min_turns_per_act": 6,     # soft acts: no advance (model OR backstop) before this many turns
     "max_new_characters": 4,    # 👋 emergent mid-story characters a run may accumulate
-    "key_choice_min": 6,        # ⚖️ 命运抉择 window: fires at a RANDOM turn count in
-    "key_choice_max": 12,       #    [min, max] so the fork is never predictable (min 0 = off)
-    "world_event_every": 4,     # 🌊 after this many quiet turns an authored act event fires itself (0 = off)
+    "key_choice_min": 0,        # ⚖️ 命运抉择 window: fires at a RANDOM turn count in
+    "key_choice_max": 12,       #    [min, max] (min 0 = off; Yi 2026-07-21 定: 默认关, 剧本级可开)
+    "fate_auto_resolve": 0,     # ⚖️ 宽限耗尽引擎替玩家落子 (0 = off; Yi 2026-07-14 定:
+                                #    无点击不推进 — 玩家没点的选择不许系统代点, 剧本级可开)
+    "world_event_every": 0,     # 🌊 after this many quiet turns an authored act event fires
+                                #    itself (0 = off; Yi 2026-07-14 定: 默认不自燃, 剧本级可开)
     "turns_per_slot": 6,        # ⏳ turns per 时段 (晨/午/夜); a day = 3 slots. 0 = clock off
     "troupe": 0,                # 🎬 剧组 (导演场次单+编剧扩展): 灰度旗, 剧本级试点 (照 plan_render 前例)
     "confront_base": 55,        # 🃏 evidence-confrontation base success %, + closeness//2
@@ -488,6 +501,90 @@ def economy_on(state: dict[str, Any]) -> bool:
 ATTRS = ("力量", "敏捷", "体质", "心思", "气运")
 
 
+def _player_strength(state: dict[str, Any]) -> int:
+    """🎒 物品判定用的力量读数 (1~10, 5=常人; 无五维档按常人算 — 保守默认)。"""
+    try:
+        return int((state.get("attrs") or {}).get("力量", 5) or 5)
+    except (TypeError, ValueError):
+        return 5
+
+
+def _item_known_anywhere(state: dict[str, Any], name: str) -> bool:
+    """🎒 防复活查重全集 (P3 §5): inventory ∪ stashes ∪ char_items —
+    灯笼收进柜子 ≠ 灯笼可以被导演重报出场。"""
+    if _inv_find(state.get("inventory") or [], name) >= 0:
+        return True
+    for rows in (state.get("stashes") or {}).values():
+        if _inv_find(rows or [], name) >= 0:
+            return True
+    for sim in (state.get("char_sim") or {}).values():
+        if _inv_find((sim or {}).get("items") or [], name) >= 0:
+            return True
+    return False
+
+
+_HP_UP = {"dying": "hurt", "hurt": "healthy"}   # 血条阶梯的向上一档
+
+
+def _apply_item_effect(content: dict[str, Any], state: dict[str, Any],
+                       eff: dict[str, Any], target_name: str, item_name: str,
+                       moments: list) -> str:
+    """P3 §2.2 效果确定性落账 — 从卡读档位写对应账本, 模型说了不算。
+    返回点名肇因的叙事句 (效果孪生拍); no_op 也要点明白费并记账。
+    枚举铁律: 这里每个分支都对应一个真实存在的账本。"""
+    t = str(eff.get("type"))
+    mag = max(1, min(3, int(eff.get("magnitude", 1) or 1)))
+    if t == "heal":
+        if target_name not in ("", "self", "自己"):
+            ch = next((c for c in scene_characters(content, state)
+                       if (c.get("name") or "") == target_name), None)
+            if ch is None:
+                _audit(state, "item.effect", False, item_name, f"{target_name}不在跟前")
+                return ""
+            sim = _sim(state, ch.get("id"))
+            steps = 0
+            for _ in range(mag):
+                nxt = _HP_UP.get(sim.get("hp") or "healthy")
+                if nxt:
+                    sim["hp"] = nxt
+                    steps += 1
+            if not steps:
+                _audit(state, "item.effect", True, f"{item_name} no_op", "对方本就无伤")
+                return f"（你给{target_name}用了{item_name}——TA本就没有伤，白费了。）"
+            _audit(state, "item.effect", True, f"heal→{target_name}")
+            return f"（{item_name}起了效：{target_name}的伤势见好。）"
+        steps = 0
+        for _ in range(mag):
+            nxt = _HP_UP.get(state.get("player_hp") or "healthy")
+            if nxt:
+                state["player_hp"] = nxt
+                steps += 1
+        if not steps:
+            _audit(state, "item.effect", True, f"{item_name} no_op", "本就无伤")
+            return f"（你用了{item_name}——可你本就没有伤，白费了。）"
+        moments.append({"kind": "player_hp", "hp": state["player_hp"]})
+        _audit(state, "item.effect", True, "heal→self")
+        return f"（{item_name}起了效：伤口不再渗血，伤势见好。）"
+    if t == "light":
+        lid = state.get("location_id")
+        if not lid:
+            return ""
+        # 落 place_facts (地点持久物理事实 — 提示词在读的真账本, 见 P3 实现偏差②)
+        pf = dict(state.get("place_facts") or {})
+        lst = list(pf.get(lid) or [])
+        wf = f"这里被{item_name}照亮了"
+        if all(logic._norm(x.get("text", "")) != logic._norm(wf) for x in lst):
+            lst.append({"text": wf,
+                        "label": (clock_view(content, state) or {}).get("label", "")})
+            pf[lid] = lst[-6:]
+            state["place_facts"] = pf
+        _audit(state, "item.effect", True, "light")
+        return f"（你点起{item_name}，暗处亮起来了。）"
+    # reserved 类 (cure 等): 账本未立, live_effects 已在上游滤掉 — 到这里是防御
+    _audit(state, "item.effect", False, item_name, f"{t}账本未立")
+    return ""
+
+
 def ensure_player_attrs(content: dict[str, Any], state: dict[str, Any],
                         persona: dict[str, Any] | None, llm: LLM | None = None) -> dict | None:
     """玩家五维 (1~10, 5=常人): judged ONCE from who the player is in this world, then
@@ -670,6 +767,11 @@ def market_view(content: dict[str, Any], state: dict[str, Any],
         items = [dict(it) for it in (out.get("items") or []) if it.get("name")]
         for i, it in enumerate(items):
             it["id"] = f"mk{day}_{i}"
+            # 🎒 上架即入籍 (实体化 P2): 集市是 new_template 最高频来源 —
+            # 货一亮相物性卡就快照进档 (detail 上收 desc), 配图管线按 tid 直接可用
+            it["tid"] = items_mod.ensure_template(
+                state, it["name"], {**items_mod.rule_card(it["name"]),
+                                    "desc": str(it.get("detail") or "")[:60]})
         mk = {"day": day, "items": items}
         state["market"] = mk
     return {"day": day, "currency": currency_of(content),
@@ -688,7 +790,12 @@ def market_buy(content: dict[str, Any], state: dict[str, Any], item_id: str,
     if have < price:
         raise ValueError(f"钱不够：这要{price}{view['currency']}，你身上只有{have}")
     state["money"] = have - price
-    _inv_add(state, it.get("name", ""), it.get("detail", ""))
+    log = list(state.get("money_log") or [])   # 🏦 银行流水: 买东西也是账
+    log.append({"delta": -price, "why": f"买{it.get('name', '')}"[:30],
+                "label": (clock_view(content, state) or {}).get("label", "")})
+    state["money_log"] = log[-20:]
+    # 🎒 市集入库走堆叠 (add_stock 粒度): 买第二份同名货是 qty+1, 不是被防重复吞掉
+    items_mod.add_stack(state, it.get("name", ""), 1, it.get("detail", ""))
     _audit(state, "market.buy", True, f"{it.get('name', '')} -{price}")
     view["money"] = state["money"]
     view["bought"] = it.get("name")
@@ -827,6 +934,26 @@ def sync_real_clock(content: dict[str, Any], state: dict[str, Any]) -> dict[str,
     return clock_view(content, state)
 
 
+# 🪪 名字守卫: the directed channel occasionally leaks a prose fragment into the
+# name slot (实弹: an NPC named「谁看见」). Interrogatives, pronouns and deictic
+# openers are dead giveaways. Conservative on purpose — 宁可放过, 不可错杀真名.
+_NAME_BAD_FULL = {"你", "我", "他", "她", "它", "咱", "大家", "众人", "别人",
+                  "对方", "自己", "有人", "某人", "路人"}
+_NAME_BAD_START = ("谁", "什么", "怎么", "哪个", "哪里", "哪儿", "哪位", "那个",
+                   "这个", "有人", "某个", "某人", "一个", "一位", "此人",
+                   "这人", "那人", "路人")
+
+
+def npc_name_ok(nm: str) -> bool:
+    """A name must LOOK like a name — reject sentence fragments before they become people."""
+    nm = (nm or "").strip()
+    if not nm or len(nm) > 12:
+        return False
+    if nm in _NAME_BAD_FULL or any(nm.startswith(p) for p in _NAME_BAD_START):
+        return False
+    return not any(ch in nm for ch in "，。！？；：、,.!?;: \n\t")
+
+
 def seed_sandbox_cast(content: dict[str, Any], llm: LLM | None = None,
                       mature: bool = False) -> None:
     """🏖 the sandbox opens ALIVE: conjure a small starting cast from the player's
@@ -845,7 +972,7 @@ def seed_sandbox_cast(content: dict[str, Any], llm: LLM | None = None,
     chars: list[dict[str, Any]] = []
     for c in (out.get("characters") or [])[:4]:
         nm = str(c.get("name") or "").strip().strip("「」\"'")[:12]
-        if not nm or any(nm == x.get("name") for x in chars):
+        if not nm or not npc_name_ok(nm) or any(nm == x.get("name") for x in chars):
             continue
         # 🎒 conjured people carry real things: gift-able, trade-able, snatch-able
         items = []
@@ -1021,7 +1148,7 @@ def apply_char_move(content: dict[str, Any], state: dict[str, Any], name_ref: st
     if not dest or not dest.get("id") or dest["id"] == state.get("location_id"):
         return None
     _sim(state, mover["id"])["pos"] = dest["id"]
-    return {"name": mover.get("name"), "to_name": dest.get("name")}
+    return {"id": mover.get("id"), "name": mover.get("name"), "to_name": dest.get("name")}
 
 
 # graded life state: absent = healthy; "hurt" walks and talks; "dying" is one breath
@@ -1299,6 +1426,34 @@ def resolve_location(content: dict[str, Any], ref: str | None) -> dict[str, Any]
     return None
 
 
+def _lcs_len(a: str, b: str) -> int:
+    """Longest common substring length (short CJK names — O(n·m) is nothing)."""
+    if not a or not b:
+        return 0
+    best = 0
+    for i in range(len(a)):
+        j = i + best + 1
+        while j <= len(a) and a[i:j] in b:
+            best = j - i
+            j += 1
+    return best
+
+
+def near_location(content: dict[str, Any], ref: str | None) -> dict[str, Any] | None:
+    """近亲地点: 名字与 ref 有 ≥2 字连续重合的已有地点。只用在「要不要造新地点」的
+    判定上 — 玩家口头的简称对全名时精确/包含匹配都会漏, 差点铸出重复的幽灵地点;
+    硬移动仍走严格 resolve_location: 宁可改道给玩家确认真名, 不可默默把人带错地方。"""
+    ref = (ref or "").strip()
+    if len(ref) < 2:
+        return None
+    best, best_n = None, 1
+    for loc in _locations(content):
+        n = _lcs_len(ref, loc.get("name") or "")
+        if n > best_n:
+            best, best_n = loc, n
+    return best if best_n >= 2 else None
+
+
 def current_location(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
     """Where the player is now. Defaults to the first authored location if unset."""
     locs = _locations(content)
@@ -1475,8 +1630,44 @@ def ensure_start_location(content: dict[str, Any], state: dict[str, Any],
     return loc
 
 
+def _music_worker(llm: LLM, payload: dict[str, Any], box: dict[str, Any]) -> None:
+    try:
+        box["out"] = llm.generate(payload) or {}
+    except Exception:
+        box["out"] = {}
+
+
+def settle_music(state: dict[str, Any], mj: dict[str, Any] | None) -> dict[str, Any]:
+    """🎼 乐师收卷 (Yi 2026-07-22: 高精度观察情绪切 BGM): 报审入账 —
+    曲名过白名单; 迟滞防抽风: 无转折 (pivot 0) 至少稳两回合才许换曲,
+    明显转折 (pivot≥1) 立刻切。返回 {track, feel} 给 direct 装配用。"""
+    from .director import BGM_TRACKS
+    led = state.setdefault("bgm_led", {"track": "", "held": 0})
+    track = str((mj or {}).get("track") or "").strip()
+    try:
+        pivot = max(0, min(2, int((mj or {}).get("pivot") or 0)))
+    except (TypeError, ValueError):
+        pivot = 0
+    if track and track in BGM_TRACKS and track != led.get("track"):
+        # 空账必收 (首拍没有可延续的曲目); 之后无转折至少稳两回合
+        if not led.get("track") or pivot >= 1 or int(led.get("held", 0)) >= 2:
+            led["track"], led["held"] = track, 0
+    led["held"] = int(led.get("held", 0)) + 1
+    return {"track": str(led.get("track") or ""), "feel": str((mj or {}).get("feel") or "")[:8]}
+
+
+def _generic_place(nm: str) -> bool:
+    """「个地方」「别处」这类泛指碎片 — 不是地名, 不许上地图 (实弹: 「换个地方聊」
+    被铸成地点「个地方」)。"""
+    nm = (nm or "").strip()
+    core = nm.strip("一那这某换找个再的 ")
+    return (not nm or nm in _DEICTIC or core in _DEICTIC or core == ""
+            or nm.endswith(("地方", "地儿", "去处")))   # 中文地名不会以量词短语结尾
+
+
 def generate_and_move(content: dict[str, Any], state: dict[str, Any], place_name: str,
-                      persona: dict[str, Any] | None = None, llm: LLM | None = None) -> dict[str, Any]:
+                      persona: dict[str, Any] | None = None, llm: LLM | None = None,
+                      move: bool = True, invent: bool = False) -> dict[str, Any] | None:
     """EMERGENT LOCATION: the player agreed to go somewhere that isn't on the authored map.
     Create that place for real — the model writes a concrete, people-free description grounded
     in the world + where you're coming from — wire it two-way to the current place, append it
@@ -1489,8 +1680,14 @@ def generate_and_move(content: dict[str, Any], state: dict[str, Any], place_name
         raise ValueError("unknown location")
     existing = resolve_location(content, place_name)
     if existing and existing.get("id"):
-        state["location_id"] = existing["id"]
+        if move:
+            state["location_id"] = existing["id"]
         return existing
+    # 🚧 泛指预筛 (Yi 2026-07-22: 「个地方」上了地图, 这部分走 LLM): 指示代词/泛指
+    # 碎片不进 LLM 直接驳回; invent=True (给涌现人物安家) 例外 — 交给模型发明去处
+    if _generic_place(place_name) and not invent:
+        _audit(state, "loc.mint", False, place_name[:12], "泛指不是去处，驳回")
+        return None
     llm = lang_llm(llm or get_llm(), content)
     cur = current_location(content, state)
     story = content.get("story") or {}
@@ -1499,19 +1696,24 @@ def generate_and_move(content: dict[str, Any], state: dict[str, Any], place_name
     try:
         dp = llm.generate({"describe_place": True, "place_name": place_name, "world": world,
                            "from_place": (cur or {}).get("name", ""),
+                           "invent": bool(invent),
                            "mature": bool(state.get("mature"))}) or {}
         detail = dp.get("detail") or ""
         clean = (dp.get("name") or "").strip()
     except Exception:
         detail = ""
-    # 地名提炼: the player's raw phrase may be a whole intent（「铁皮顶那屋摸个底」）—
-    # the describe call distills the PLACE out of it, so the map never holds an action.
-    # If the distilled name matches a place that already exists, go there instead.
-    final_name = clean or place_name
+    # 🧑‍⚖️ LLM 是铸造判官 (地名提炼): 原话可能是整句意图（「铁皮顶那屋摸个底」→「铁皮顶屋」）,
+    # 也可能根本不含具体去处（模型答「无」）。提炼不出干净地名 = 不铸造 —
+    # 宁可这回合没有确认条, 不许垃圾上地图。
+    if not clean or len(clean) < 2 or _generic_place(clean):
+        _audit(state, "loc.mint", False, place_name[:12], "提炼不出具体去处，驳回")
+        return None
+    final_name = clean
     if clean and clean != place_name:
         existing = resolve_location(content, clean)
         if existing and existing.get("id"):
-            state["location_id"] = existing["id"]
+            if move:
+                state["location_id"] = existing["id"]
             return existing
     import uuid
     lid = "loc_gen_" + uuid.uuid4().hex[:8]
@@ -1525,7 +1727,8 @@ def generate_and_move(content: dict[str, Any], state: dict[str, Any], place_name
         exits = cur.setdefault("exits", [])
         if final_name not in exits:
             exits.append(final_name)
-    state["location_id"] = lid
+    if move:
+        state["location_id"] = lid
     return new_loc
 
 
@@ -2033,10 +2236,22 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
     # 的作者信号 (peer=自来熟 > stranger)。授权剧本不碰: 空场可能是导演故意的 (恐怖片)。
     if not present_chars and sandbox_on(content) and not is_god:
         _rank = {"friend": 4, "peer": 3, "junior": 2, "elder": 1}
-        caller = max((c for c in present_characters(content, 1, _dead_ids(state))
-                      if c.get("id") and c.get("id") != pcid and c.get("name")),
-                     key=lambda c: _rank.get(c.get("relation_default") or "", 0),
-                     default=None)
+        # 🎬 作者点名优先 (sandbox.opening_visitor = 角色id或名字): 「这个故事围绕谁」
+        # 只有作者知道 — 档位启发式会抓来跑龙套的 (实弹: 男主标 stranger 永远轮不到,
+        # 开场被 peer 档的配角抢走)。点名无效/已死才回落档位排序。
+        _ov = str(((content.get("story") or {}).get("sandbox") or {})
+                  .get("opening_visitor") or "").strip()
+        caller = None
+        if _ov:
+            _ovc = _char_by_id(content, _ov) or next(
+                (c for c in _characters(content) if c.get("name") == _ov), None)
+            if _ovc and _ovc.get("id") != pcid and _ovc.get("id") not in _dead_ids(state):
+                caller = _ovc
+        caller = caller or max(
+            (c for c in present_characters(content, 1, _dead_ids(state))
+             if c.get("id") and c.get("id") != pcid and c.get("name")),
+            key=lambda c: _rank.get(c.get("relation_default") or "", 0),
+            default=None)
         if caller and start and start.get("id"):
             # 用 char_pins 落位 (不是 sim pos): 作息表的优先级压过 sim, 排了班的访客
             # 会被自己的班表瞬移走; pin 压过作息, 且玩家一离开就自动放人回作息
@@ -2057,10 +2272,14 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
                      if (s.get("title") or "").strip()), None)
     # 🎬 galgame 开场 (Yi: 字太多 → 简短环境交代 + 每个角色一段小剧情):
     # 一拍 ≤80 字的环境, 然后在场每人「你第一眼看到TA在干嘛」+「TA的第一句话」
+    # 🎯 钩子分道预判 (Yi: 不同初始关系用不同手段): 追求线的主角位留口实不派差事
+    _hook_court = bool(lead) and relationships.initial_mode(lead) in ("stranger", "peer") \
+        and relationships._romance_capable(lead)
     out = {}
     try:
         out = llm.generate({
             "intro_vignettes": True,
+            "hook_court": _hook_court,
             "clock": (clock_view(content, state) or {}).get("label", ""),
             "player": {"name": (player_char or {}).get("name") or "你",
                        "role": (player_char or {}).get("role") or "刚来到这里的人"},
@@ -2072,6 +2291,8 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
                        "persona_text": (c.get("persona_text") or "")[:120],
                        "is_lead": bool(c.get("is_lead")),
                        **({"visiting": True} if c.get("visiting") else {}),
+                       **({"opening_line": str(c.get("opening_line") or "")[:80]}
+                          if str(c.get("opening_line") or "").strip() else {}),
                        "examples": [str(x)[:40] for x in (c.get("examples") or [])][:2]}
                       for c in present_chars],
             "tease": tease or "",
@@ -2093,6 +2314,10 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
         seen.add(nm)
         act_txt = dedash(str(v.get("action") or "").strip())[:80]
         line_txt = dedash(str(v.get("line") or "").strip().strip("「」\"'"))[:60]
+        # 🎙 作者写定的开场白原样上台 — 模型的即兴让位, 只保留它写的动作
+        _auth = dedash(str(by_name[nm].get("opening_line") or "").strip().strip("「」\"'"))[:80]
+        if _auth:
+            line_txt = _auth
         if act_txt:
             beats.append({"type": "description", "speaker_name": None, "text": act_txt})
         if line_txt:
@@ -2115,14 +2340,23 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
                           "text": f"{nm}就在不远处，正忙着{(c.get('role') or '自己')[:12]}的事，"
                                   "注意到了你。"})
         if not is_god:
+            _auth = dedash(str(c.get("opening_line") or "").strip().strip("「」\"'"))[:80]
             ex = [str(x) for x in (c.get("examples") or []) if str(x).strip()]
             beats.append({"type": "dialogue", "speaker_name": nm,
-                          "text": (ex[0][:60] if ex else "新来的？")})
+                          "text": (_auth or (ex[0][:60] if ex else "新来的？"))})
     # 🎯 开局由头 (Yi: 一开始要给玩家一件具体的事): 主角位亲口交代第一件差事
     # (最好把玩家引向不在场的角色/地点 = 探索钩子); 目标条与首批建议都指向它
     hk = out.get("hook") or {}
     task = dedash(str(hk.get("task") or "").strip())[:30]
     hline = dedash(str(hk.get("line") or "").strip().strip("「」\"'"))[:70]
+    # 🎯 钩子分道 (Yi: 干活维持剧情太扁平): 追求线的访客不派差事 — 留口实;
+    # 上下级/长辈才吩咐办事。引擎选战术, 措辞交给确定性模板或模型。
+    _court = _hook_court
+    if not task and lead and not is_god and _court:
+        task = f"看清{lead.get('name')}葫芦里卖的什么药"[:30]
+        _ex = [str(x) for x in (lead.get("examples") or []) if str(x).strip()]
+        hline = (_ex[1][:70] if len(_ex) > 1 else
+                 "顺路多买了一份，尝尝？就当认识一场。")
     if not task and lead and not is_god:
         _pids = {x.get("id") for x in present_chars}
         other = next((c for c in _characters(content)
@@ -2141,8 +2375,9 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
         # 🎯 目标栈: 由头压差事层 (幕目标兜底不受扰); 镜像给 UI
         goal_push(state, "errand", task, src="opening")
         state["goal"] = goal_top(content, state)
-        set_suggestions(state, [f"答应下来：{task}",
-                                "婉拒，想先自己四处转转"], content)
+        set_suggestions(state, (["接过来，道声谢", "不动声色，先看看TA想干什么"]
+                                if _court else
+                                [f"答应下来：{task}", "婉拒，想先自己四处转转"]), content)
         _audit(state, "opening.hook", True, task[:24])
     return [dedash_beat(b) for b in beats]
 
@@ -2483,150 +2718,11 @@ def _logic_guard(llm, prompt: dict[str, Any], directed: dict[str, Any], content:
     return retry
 
 
-def _smart_suggestions(llm, all_beats, player_input, primary, content, state, location,
-                       needed_topics, observer) -> list[str]:
-    """LLM-generated next-step hints grounded in THIS turn's exchange + the current scene.
-    Returns [] on any failure / mock, so the caller falls back to the template."""
-    if observer or not primary:
-        return []
-    primary_name = primary.get("name") or "对方"
-    # 顺着当下的戏剧钩子 (Yi: 建议又乱): ground the chips in the TURN'S CLOSING beats —
-    # the last thing said (often a cliffhanger like 宁荣荣's「等等」) is what chip 1
-    # must answer, not the primary's line from three beats ago.
-    tail = [b for b in all_beats if (b.get("text") or "").strip()][-3:]
-    reply = "；".join(
-        f"{b.get('speaker_name') or '旁白'}：{(b.get('text') or '')[:60]}" for b in tail)
-    pcid = state.get("player_character_id")
-    # 现场事实账本: 在场名单含主答者本人 (实弹: 排除主答者后名单为空,
-    # 模型顺理成章编出「补习社没人」— 文清明明正抬头看着玩家)
-    present = [c.get("name") for c in scene_characters(content, state)
-               if c.get("name") and c.get("id") != pcid]
-    exits = (location or {}).get("exits") or []
-    rels = state.get("rel") or {}
-    rel_name = relationships.name_of(relationships.derive_mode(primary, rels.get(primary.get("id")) or relationships.new_scores(), tuning_for(content)))
-    # the ROLE the player embodies — every suggestion must be spoken/acted from this POV.
-    pc = _char_by_id(content, pcid) if pcid else None
-    player_name = (pc or {}).get("name") or ""
-    player_desc = ((pc or {}).get("role") or (pc or {}).get("persona_text")
-                   or (pc or {}).get("background") or "").strip()[:60]
-    # 顺着玩家: what the player is ACTUALLY pursuing right now rides into the call, so
-    # chip 1 serves the hunt instead of offering scenery (Yi: 建议要顺着玩家).
-    pins = state.get("char_pins") or {}
-    pursuit = "、".join(n for n in ((_char_by_id(content, cid) or {}).get("name")
-                                   for cid in pins) if n)[:30]
-    # 🌐 全局账本随行 (Yi: 要了解全局数据后再给建议): 目标栈/约定/伏笔/钱/关系热度/
-    # 不在场但重要的人此刻在哪 — 建议不再只看眼前一拍
-    open_goals = [f"{g.get('text')}" for g in goals_of(state)
-                  if g.get("status") == "open"][:3]
-    open_promises = [f"{promise_when_label(content, p, state)}和"
-                     f"{(_char_by_id(content, p.get('char_id')) or {}).get('name', '')}"
-                     f"约了{p.get('what', '')}"
-                     for p in (state.get("promises") or [])
-                     if p.get("status") == "open"][:2]
-    setups_open = [str(s.get("text")) for s in (state.get("setups") or [])
-                   if not s.get("paid")][:2]
-    sb = state.get("scene_brief") if isinstance(state.get("scene_brief"), dict) else {}
-    # 最暖的两位不在场的人此刻在哪 (作息推位): 建议能指路「去找谁」
-    rels_all = state.get("rel") or {}
-    warm_away = []
-    _here_ids = {c.get("id") for c in scene_characters(content, state)}
-    for c in sorted(_characters(content),
-                    key=lambda c: -(int((rels_all.get(c.get("id")) or {}).get("closeness", 0) or 0)
-                                    + int((rels_all.get(c.get("id")) or {}).get("romance", 0) or 0))):
-        cid = c.get("id")
-        if not cid or cid == pcid or cid in _here_ids or cid in _dead_ids(state):
-            continue
-        if int((rels_all.get(cid) or {}).get("closeness", 0) or 0) <= 0:
-            continue
-        _pos = char_position(content, state, c)
-        _loc = _location_by_id(content, _pos) if _pos and _pos != AWAY else None
-        if _loc:
-            warm_away.append(f"{c.get('name')}这会儿在{_loc.get('name')}")
-        if len(warm_away) >= 2:
-            break
-    try:
-        out = llm.generate({"suggest": True, "sugg": {
-            "speaker": primary_name, "player_input": player_input, "reply": reply[:220],
-            "present": present, "exits": exits, "topics": needed_topics, "relation": rel_name,
-            "player_name": player_name, "player_desc": player_desc,
-            "place": (location or {}).get("name") or "",
-            "goal": (state.get("goal") or "")[:60], "pursuit": pursuit,
-            "goals_open": open_goals,          # 🎯 目标栈全览 (不只栈顶)
-            "promises": open_promises,         # 🤝 已定的约 (建议别撞车、可赴约)
-            "setups": setups_open,             # 📌 未收的钩子 (可以追问)
-            "crux": str(sb.get("crux") or "")[:30],    # 🎬 导演戏眼
-            "spark": str(sb.get("spark") or "")[:36],  # 在场暗流
-            "warm_away": warm_away,            # 💗 惦记的人此刻在哪
-            "money": (f"{int(state.get('money') or 0)}{currency_of(content)}"
-                      if economy_on(state) else ""),
-            "clock": (clock_view(content, state) or {}).get("label", ""),
-            # 🎀 VN mode: choices ARE the interaction — one of them should carry teeth
-            "vn": bool(tuning_for(content).get("vn_mode")),
-            # 📜 文风/方言禁令随行 (实弹: 浮生的建议冒出「得唔得/真系」— 建议也是台词)
-            "style": ((content.get("story") or {}).get("style") or "")[:200],
-        }})
-        outs = [dedash(s) for s in (out.get("suggestions") or []) if s][:3]
-        # en story hard backstop: a chip that came back in Chinese never reaches the UI
-        # (drop it — the deterministic English fallback covers the gap)
-        if lang_of(content) == "en":
-            outs = [s for s in outs if not has_cjk(s)]
-        return suggestion_gate(content, state, outs)
-    except Exception:
-        return []
-
-
-def suggestion_gate(content: dict[str, Any], state: dict[str, Any],
-                    items: list[str]) -> list[str]:
-    """🚪 建议出口的确定性验账 (Yi: 建议胡说要根除 — 模型申报, 引擎验账):
-    与引擎账本矛盾的建议直接毙 (审计留痕), 缺口由模板兜底补足。
-    毙: ①现场有人却说「没人」 ②建议前往此刻已在的地点 ③提到已死的人
-    ④「去L…N」而位置账本明确 N 不在 L。账本不知道的不毙 (宁缺勿枉)。"""
-    import re as _re
-    pcid = state.get("player_character_id")
-    here = [c for c in scene_characters(content, state) if c.get("id") != pcid]
-    cur = current_location(content, state) or {}
-    cur_name = (cur.get("name") or "").strip()
-    dead = _dead_ids(state)
-    chars_by_name = {c.get("name"): c for c in _characters(content) if c.get("name")}
-    locs_by_name = {l.get("name"): l for l in _locations(content)
-                    if l.get("name") and len(l.get("name")) >= 3}
-    ok: list[str] = []
-    for s in items or []:
-        t = str(s or "")
-        why = ""
-        if here and _re.search(r"(没人|没有人|无人|空无一人|一个人都没|一个人也没)", t):
-            why = "现场有人却说没人"
-        elif cur_name and _re.search(r"(去|绕去|赶去|前往|回)" + _re.escape(cur_name), t):
-            why = f"已在{cur_name}还建议前往"
-        else:
-            for nm, c in chars_by_name.items():
-                if nm and nm in t and c.get("id") in dead:
-                    why = f"{nm}已不在人世"
-                    break
-            if not why:
-                for lnm, loc in locs_by_name.items():
-                    if lnm == cur_name or lnm not in t:
-                        continue
-                    for nm, c in chars_by_name.items():
-                        if not nm or nm not in t or t.find(lnm) > t.find(nm):
-                            continue
-                        pos = char_position(content, state, c)
-                        if pos and pos != AWAY and pos != loc.get("id"):
-                            why = f"{nm}不在{lnm}"
-                            break
-                    if why:
-                        break
-        if why:
-            _audit(state, "sugg.gate", False, t[:24], why)
-        else:
-            ok.append(s)
-    return ok
-
-
 def ensure_three_suggestions(primary: list[str], backup: list[str],
                              content: dict[str, Any]) -> list[str]:
-    """The chip row must ALWAYS hold exactly 2 (Yi 定; 名字里的 three 是历史):
-    smart hints first, template hints next, player-voice pads last. Never fewer."""
+    """The chip row must ALWAYS hold exactly 2 (Yi 定; 名字里的 three 是历史)。
+    重做后的极简契约 (Yi 2026-07-20: 旧四层瀑布太差太杂, 删了重做):
+    导演随主拍写的两条 = 唯一智能来源; 不足则用固定的玩家口吻垫底句补齐。"""
     en = lang_of(content) == "en"
     pads = (["I take a careful look around.",
              "I steer the talk toward what I care about.",
@@ -2635,38 +2731,13 @@ def ensure_three_suggestions(primary: list[str], backup: list[str],
     out: list[str] = []
     seen: set[str] = set()
     for x in list(primary or []) + list(backup or []) + pads:
-        x = (x or "").strip()
+        x = dedash((x or "").strip())
         if x and x not in seen:
             seen.add(x)
             out.append(x)
         if len(out) == 2:
             break
     return out
-
-
-def build_suggestions(context: dict[str, Any], content: dict[str, Any] | None = None) -> list[str]:
-    """Nudge the player toward what's close to unlocking, without spoiling content.
-
-    hint_topics are secrets exactly one condition short — steering the player there
-    is a fair gameplay hint (it's the topic label, never the secret body)."""
-    en = content is not None and lang_of(content) == "en"
-    s: list[str] = []
-    for t in context.get("hint_topics", [])[:2]:
-        s.append(f"Press them about “{t}”" if en else f"再追问「{t}」")
-    if context.get("new_reveal"):
-        s.append("Dig into what they just admitted" if en else "顺着他刚说的继续深挖")
-    if not s and context.get("has_hidden"):
-        s.append("They're dodging — come at it sideways" if en else "他像在回避，换个角度问问")
-    s.append("Use “Do” to describe an action" if en else "用「做」描述你的一个动作")
-    if len(s) < 3:
-        s.append("Keep talking, get closer" if en else "跟他多聊聊，拉近距离")
-    # de-dup preserving order
-    seen, out = set(), []
-    for x in s:
-        if x not in seen:
-            seen.add(x)
-            out.append(x)
-    return out[:3]
 
 
 # ── entrances & exits: people never just pop in/out of the cast bar ─────────────
@@ -2807,35 +2878,23 @@ def arrival_narration(content: dict[str, Any], state: dict[str, Any], persona: d
 
 def arrival_suggestions(content: dict[str, Any], state: dict[str, Any],
                         llm: LLM | None = None) -> list[str]:
-    """Fresh next-step chips for a scene the player JUST WALKED INTO — the previous
-    turn's suggestions point at people and things that are no longer here. Grounded in
-    the current place, who is actually present, and the act's open topics; falls back
-    to a deterministic set (talk to who's here / search what's here / look around)."""
+    """到达建议 (Yi 2026-07-20 建议重做: 确定性两条, 不再花一次 LLM 调用 — 下一回合
+    导演接手): 有人就搭话+看看; 没人就翻翻没搜过的东西+看看。god 模式无建议。"""
     if (state.get("mode") or "character") == "god":
         return []
-    llm = lang_llm(llm or get_llm(), content)
     loc = current_location(content, state) or {}
     pcid = state.get("player_character_id")
     here = [c for c in scene_characters(content, state) if c.get("id") != pcid]
     if here:
         primary = next((c for c in here if c.get("is_lead")), here[0])
-        smart = _smart_suggestions(
-            llm, [], f"（你刚走进{loc.get('name') or '这里'}，还没开口）", primary,
-            content, state, location_view(content, state),
-            _pending_topics(act_progress(content, state, int(state.get("act", 1) or 1))),
-            False)
-        if smart:
-            return smart
-    en = lang_of(content) == "en"
-    det: list[str] = [(f"Talk to {c.get('name')}" if en else f"和{c.get('name')}搭话")
-                      for c in here[:2] if c.get("name")]
+        return [_t(content, f"跟{primary.get('name')}搭句话", f"Say hi to {primary.get('name')}"),
+                _t(content, "先四下看看这地方", "Look around first")]
     searched = set(state.get("searched_prop_ids") or [])
     prop = next((p.get("name") for p in (loc.get("props") or [])
                  if p.get("name") and p.get("id") not in searched), None)
-    if prop:
-        det.append(f"Search the {prop}" if en else f"翻查{prop}")
-    det.append("Look around" if en else "看看四周")
-    return det[:3]
+    det = [_t(content, f"翻查{prop}", f"Search the {prop}")] if prop else []
+    det.append(_t(content, "先四下看看这地方", "Look around first"))
+    return det[:2]
 
 
 def _detect_asks(content: dict[str, Any], player_input: str) -> list[str]:
@@ -3060,9 +3119,13 @@ def _apply_fate(content: dict[str, Any], state: dict[str, Any], option_id: str) 
                 state["location_id"] = dest["id"]
             else:                                # sandbox: the named place becomes real
                 dest = generate_and_move(content, state, str(target))
-                res["content_mutated"] = True
-            _audit(state, "fate.move", True, (dest or {}).get("name", ""))
-            res["moved_to"] = (dest or {}).get("name", "")
+                if dest is not None:
+                    res["content_mutated"] = True
+            if dest is None:
+                _audit(state, "fate.move", False, str(target), "不是具体去处")
+            else:
+                _audit(state, "fate.move", True, dest.get("name", ""))
+                res["moved_to"] = dest.get("name", "")
         except Exception:
             _audit(state, "fate.move", False, str(target), "生成失败")
     if kind in ("bond", "rift") and target:
@@ -3304,9 +3367,9 @@ def sane_delta(content: dict[str, Any], state: dict[str, Any], delta: int,
         return None
     state["sanity"] = new
     _audit(state, "sanity", True, f"{'+' if delta > 0 else ''}{delta}", (why or "")[:24])
-    if sanity_mod.band_of(new)[0] < sanity_mod.band_of(old)[0]:
+    if sanity_mod.band_of(new, scfg)[0] < sanity_mod.band_of(old, scfg)[0]:
         return {"kind": "sanity", "value": new,
-                "label": sanity_mod.band_of(new)[1], "name": scfg["name"]}
+                "label": sanity_mod.band_of(new, scfg)[1], "name": scfg["name"]}
     return None
 
 
@@ -3683,12 +3746,828 @@ def _thread_tail(state: dict[str, Any], cid: str, n: int = 4) -> list[dict[str, 
 
 
 def sms_tail_line(state: dict[str, Any], cid: str) -> str:
-    """ONE lean line of the recent exchange with this character, for scene continuity."""
-    tail = _thread_tail(state, cid, 3)
+    """The recent exchange with this character, for scene continuity. 6×60 — 短信里
+    定好的时间地点细节要能完整进场上 (实弹: 3×30 截头去尾, 玩家觉得线上线下不通)."""
+    tail = _thread_tail(state, cid, 6)
     if not tail:
         return ""
-    return "；".join(f"{'TA' if m.get('from') == 'me' else '你'}：{(m.get('text') or '')[:30]}"
+    return "；".join(f"{'TA' if m.get('from') == 'me' else '你'}：{(m.get('text') or '')[:60]}"
                      for m in tail)
+
+
+# ── 🐲 生物账本 P0 (Yi 拍板 2026-07-20): 兽/龙/鬼 — 第三实体类 ────────────────
+# 设计参照 D&D 五版 stat block (怪物是障碍不是社交实体, 独立底盘) + MH 本体
+# (隐藏血条外在表现/部位破坏/激怒/濒死逃巢)。合同: 引擎持有血阶与位置账本,
+# 命中由模型报审 (creature_hit) 按骰面裁决; 血阶联动行为是引擎规则不是模型好意:
+# 重创→自动激怒, 濒死→逃回巢穴 (真实移动, 狩猎自带三幕)。鬼 killable=false 打不死。
+_CR_HP = ["完好", "带伤", "重创", "濒死", "讨伐"]
+
+
+def _creatures(content: dict[str, Any]) -> list[dict[str, Any]]:
+    return (content.get("story") or {}).get("creatures") or []
+
+
+def _creature_by_ref(content: dict[str, Any], ref: str) -> dict[str, Any] | None:
+    ref = (ref or "").strip()
+    for cr in _creatures(content):
+        nm = cr.get("name") or ""
+        if cr.get("id") == ref or nm == ref or (nm and (nm in ref or ref in nm)):
+            return cr
+    return None
+
+
+def _cr_sim(state: dict[str, Any], crid: str, cr: dict[str, Any] | None = None) -> dict[str, Any]:
+    sims = state.setdefault("creature_sim", {})
+    return sims.setdefault(crid, {"hp": 0, "pos": (cr or {}).get("lair"),
+                                  "enraged": False, "wounds": [], "seen": False,
+                                  "carved": False})
+
+
+def creatures_here(content: dict[str, Any], state: dict[str, Any],
+                   mark: bool = True) -> list[dict[str, Any]]:
+    """在场生物: sim 位置=玩家当前地点的 (讨伐了的尸体也在场 — 剥取要走过去)。
+    mark=False 是只读视图路径 (序列化器不许有副作用)。"""
+    loc = state.get("location_id")
+    if not loc:
+        return []
+    out = []
+    for cr in _creatures(content):
+        sim = _cr_sim(state, cr.get("id"), cr)
+        if sim.get("pos") == loc:
+            if mark:
+                sim["seen"] = True
+            out.append({"id": cr.get("id"), "name": cr.get("name"), "kind": cr.get("kind") or "兽",
+                        "desc": (cr.get("desc") or "")[:120], "habits": (cr.get("habits") or "")[:80],
+                        "hp": _CR_HP[min(int(sim.get("hp") or 0), 4)],
+                        "enraged": bool(sim.get("enraged")),
+                        "killable": cr.get("killable", True) is not False,
+                        "speech": cr.get("speech") or "none",
+                        "menace": int(cr.get("menace") or 1)})
+    return out
+
+
+def _player_rank_idx(content: dict[str, Any], state: dict[str, Any]) -> int:
+    """玩家段位序号 (progression 阶梯); 无阶梯=0。碾压锚用。"""
+    prog = state.get("progression") or {}
+    try:
+        return int(prog.get("idx") or prog.get("rank_idx") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def apply_creature_hit(content: dict[str, Any], state: dict[str, Any], raw: str,
+                       dice: dict[str, Any] | None) -> dict[str, Any] | None:
+    """模型报审的命中「生物名|部位|轻重」→ 引擎裁决入账。
+    规矩: 没掷骰/骰败不认; 鬼不认; 段位碾压不认 (menace 高两档=打不动是账本事实);
+    重伤走一档血阶 (crit 附送部位伤), 轻伤记部位。"""
+    nm, _, rest = (raw or "").partition("|")
+    part, _, sev = rest.partition("|")
+    cr = _creature_by_ref(content, nm)
+    if not cr:
+        return None
+    crid = cr.get("id")
+    sim = _cr_sim(state, crid, cr)
+    if sim.get("pos") != state.get("location_id"):
+        _audit(state, "creature.hit", False, cr.get("name", ""), "它不在这儿")
+        return None
+    if int(sim.get("hp") or 0) >= 4:
+        _audit(state, "creature.hit", False, cr.get("name", ""), "它已经倒下了")
+        return None
+    if cr.get("killable", True) is False:
+        _audit(state, "creature.hit", False, cr.get("name", ""),
+               "这不是能被杀死的东西——你的攻击穿了过去")
+        return {"kind": "creature", "name": cr.get("name"), "ghost": True}
+    if int(cr.get("menace") or 1) > _player_rank_idx(content, state) + 2:
+        _audit(state, "creature.hit", False, cr.get("name", ""),
+               "段位碾压——它的皮肉毫发无伤，这不是你现在够得着的对手")
+        return {"kind": "creature", "name": cr.get("name"), "no_dent": True}
+    if not dice or dice.get("outcome") not in ("success", "crit_success", "mixed"):
+        _audit(state, "creature.hit", False, cr.get("name", ""), "没有命中判定背书，不入账")
+        return None
+    part = (part or "").strip()[:8]
+    heavy = "重" in (sev or "") or dice.get("outcome") == "crit_success"
+    moved = False
+    if heavy:
+        sim["hp"] = min(4, int(sim.get("hp") or 0) + 1)
+        moved = True
+    if part and part not in (sim.get("wounds") or []):
+        sim.setdefault("wounds", []).append(part)
+    hp_i = int(sim["hp"])
+    ev = {"kind": "creature", "name": cr.get("name"), "hp": _CR_HP[hp_i],
+          "part": part, "heavy": heavy}
+    # 血阶联动 (引擎规则): 重创→激怒; 濒死→逃回巢穴 (真实移动, 追击到领地决战)
+    if moved and hp_i == 2 and not sim.get("enraged"):
+        sim["enraged"] = True
+        ev["enraged"] = True
+        _audit(state, "creature", True, cr.get("name", ""), "重创——它被激怒了")
+    if moved and hp_i == 3 and sim.get("pos") != cr.get("lair") and cr.get("lair"):
+        sim["pos"] = cr.get("lair")
+        ev["fled"] = (_location_by_id(content, cr["lair"]) or {}).get("name") or "巢穴"
+        _audit(state, "creature", True, cr.get("name", ""), f"濒死——逃往{ev['fled']}")
+    if hp_i >= 4:
+        ev["slain"] = True
+        sim["enraged"] = False
+        _audit(state, "creature", True, cr.get("name", ""), "讨伐完成")
+    else:
+        _audit(state, "creature.hit", True, f"{cr.get('name', '')}·{part or '躯干'}",
+               "重伤" if heavy else "轻伤")
+    return ev
+
+
+_CARVE_RE = re.compile(r"剥取|剥皮|采集素材|收取素材|剥了")
+
+
+def carve_creature(content: dict[str, Any], state: dict[str, Any],
+                   player_input: str, channel: str) -> list[dict[str, Any]]:
+    """剥取: 讨伐倒地的生物, 素材真实入包 (走物品实体); 部位伤=手艺加成 qty+1。"""
+    if channel != "do" or not _CARVE_RE.search(player_input or ""):
+        return []
+    got = []
+    for cr in _creatures(content):
+        sim = _cr_sim(state, cr.get("id"), cr)
+        if sim.get("pos") != state.get("location_id") or int(sim.get("hp") or 0) < 4 \
+                or sim.get("carved"):
+            continue
+        sim["carved"] = True
+        bonus = len(sim.get("wounds") or [])
+        for i, d in enumerate((cr.get("drops") or [])[:4]):
+            nm = str(d.get("name") or "").strip()[:16]
+            if not nm:
+                continue
+            qty = 2 if (bonus and i == 0) else 1   # 部位破坏的头件素材翻倍
+            for _ in range(qty):
+                _inv_add(state, nm, str(d.get("detail") or "").strip()[:60])
+            got.append({"name": nm, "qty": qty})
+        _audit(state, "creature.carve", True, cr.get("name", ""),
+               f"素材{len(got)}种" + (f"·部位加成×{bonus}" if bonus else ""))
+    return got
+
+
+def creature_arrival_beat(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
+    """进入生物盘踞的地点: 遭遇拍 (确定性)。"""
+    here = creatures_here(content, state)
+    live = [c for c in here if c["hp"] != "讨伐"]
+    if not live:
+        return None
+    c = live[0]
+    mood = "它带着伤，暴戾之气几乎凝成实物" if c["enraged"] else \
+           ("空气骤然一沉" if c["kind"] != "鬼" else "温度毫无来由地降了下去")
+    return {"type": "description", "speaker_name": None,
+            "text": _t(content,
+                       f"（{mood}。{c['name']}就在这片地方——{c['desc'][:60]}）",
+                       f"({c['name']} is here.)")}
+
+
+def bestiary_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+    """📖 图鉴: 只列见过的 (server-authoritative — 没遭遇过的生物不剧透), 余者计数。"""
+    rows, unseen = [], 0
+    for cr in _creatures(content):
+        sim = (state.get("creature_sim") or {}).get(cr.get("id")) or {}
+        if not sim.get("seen"):
+            unseen += 1
+            continue
+        rows.append({"id": cr.get("id"), "name": cr.get("name"), "kind": cr.get("kind") or "兽",
+                     "desc": cr.get("desc") or "", "habits": cr.get("habits") or "",
+                     "menace": int(cr.get("menace") or 1),
+                     "hp": _CR_HP[min(int(sim.get("hp") or 0), 4)],
+                     "wounds": sim.get("wounds") or [],
+                     "img": f"/scene/creature/{cr.get('id')}.jpg"})
+    return {"rows": rows, "unseen": unseen}
+
+
+# ── 💘 追求系统 P0 (Yi 拍板 2026-07-20): AI 角色主动追玩家 ────────────────────
+# 合同: 引擎持有追求台账并排节拍 (一游戏日至多一拍), 模型只演当拍的行为;
+# 玩家回应由模型报审 (court_response), 裁决归引擎: 三次明拒=死心 (退火+记疤, 永不再启);
+# 单追求者锁 (同时只有一位在追); 表白=关键节点抉择卡, 拒绝直接死心 (选择有重量)。
+# 风格差异不加新字段 — 各 love_style 的追法写进节拍指令 (傲娇的殷勤全用借口包装)。
+COURT_STAGES = {
+    1: "留意：眼神多停半拍，记住对方随口提过的话，找机会接一句——还不到刻意接近的时候",
+    2: "借口接近：制造一次自然的照面或搭话（顺路/带话/正好多了一份），绝不显得刻意",
+    3: "小殷勤：把一样具体的小东西真的递到对方手里（吃的/用得上的小物件——用 item 申报入账），"
+       "或顺手帮一个不求回报的忙；嘴上要有个说得过去的借口",
+    4: "邀约：约对方去一个具体的地方做一件具体的事（说清时间地点，让约定成立）；被婉拒就笑着留后路",
+    5: "心迹渐显：让在意藏不住半次——一次没收住的关心、一句说了一半的话、一点看得见的吃醋；"
+       "但还不摊牌",
+    6: "表白：把话说到明处——用你的性格能说出口的方式，正面告诉对方你的心意",
+}
+_COURT_STYLE = {
+    "tsundere": "（你是傲娇：每一步殷勤都必须用借口包装——「顺路」「多出来的」「别多想」，被点破就恼羞）",
+    "aloof": "（你冷感慢热：动作永远比话多，靠近的幅度极小，但每一步都是真的）",
+    "avoidant": "（你回避亲密：当面只敢做到七分，剩下的靠捎话和不在场的惦记）",
+    "possessive": "（你占有欲强：靠近带着宣示性，但绝不越界成控制——可以吃醋，不可以拦路）",
+    "sunny": "（你是直球：大方承认自己乐意见到对方，殷勤给得坦荡，被拒也笑得住）",
+}
+
+
+def _court_of(state: dict[str, Any], cid: str) -> dict[str, Any]:
+    return _sim(state, cid).setdefault("court", {})
+
+
+def court_tick(content: dict[str, Any], state: dict[str, Any]) -> None:
+    """回合末: 心动过线的角色开一本追求台账 (单追求者锁: 同时只有一位)。"""
+    tun = tuning_for(content)
+    thr = int(tun.get("pursue_threshold", 15) or 0)
+    if thr <= 0:
+        return
+    active = [cid for cid, si in (state.get("char_sim") or {}).items()
+              if (si.get("court") or {}).get("stage")
+              and not (si.get("court") or {}).get("dead")
+              and not (si.get("court") or {}).get("done")]
+    if active:
+        return
+    dead_ids = _dead_ids(state)
+    best, best_r = None, thr - 1
+    for c in _characters(content):
+        cid = c.get("id")
+        if not cid or cid in dead_ids or cid == state.get("player_character_id"):
+            continue
+        if not relationships._romance_capable(c):
+            continue
+        court = _court_of(state, cid)
+        if court.get("dead") or court.get("done"):
+            continue
+        scores = (state.get("rel") or {}).get(cid) or {}
+        mode = relationships.derive_mode(c, scores, tun)
+        if mode in ("lover", "enemy"):
+            continue
+        r = int(scores.get("romance") or 0)
+        if r > best_r:
+            best, best_r = cid, r
+    if best:
+        _court_of(state, best).update({"stage": 1, "rebuffs": 0, "last_day": -1, "beats": 0})
+        _audit(state, "court.start", True,
+               (_char_by_id(content, best) or {}).get("name", ""), "心动过线，TA开始留意你")
+
+
+def court_directive_for(content: dict[str, Any], state: dict[str, Any],
+                        cid: str) -> str | None:
+    """这一拍该 TA 主动了吗: 一游戏日至多一拍; 返回节拍指令 (注入TA的提示词)。"""
+    c = _char_by_id(content, cid)
+    if not c:
+        return None
+    court = ((state.get("char_sim") or {}).get(cid) or {}).get("court") or {}
+    if not court.get("stage") or court.get("dead") or court.get("done"):
+        return None
+    day = _time_index(state) // 3
+    if court.get("last_day") == day or day < int(court.get("skip_until") or 0):
+        return None
+    court["last_day"] = day
+    court["beats"] = int(court.get("beats") or 0) + 1
+    stage = int(court["stage"])
+    if stage >= 6:
+        state["_court_confess"] = cid   # 表白拍: 台词由模型演, 抉择卡由引擎在回合末立
+    style = _COURT_STYLE.get((c.get("love_style") or "").strip(), "")
+    _audit(state, "court.beat", True, f"{c.get('name', '')}·第{stage}步")
+    return (f"【追求节拍·这一轮你要主动】你对对方的心意到了该行动的一步。"
+            f"本拍任务——{COURT_STAGES.get(stage, COURT_STAGES[1])}。{style}"
+            "把它演成贴你人设的具体言行，融进当下的场面，绝不突兀跳戏。")
+
+
+def court_apply_response(content: dict[str, Any], state: dict[str, Any],
+                         cid: str, resp: str) -> None:
+    """模型报审的玩家回应 → 引擎裁决: 暧昧/接受推进, 回避原地, 明拒记振 (三振死心)。"""
+    court = ((state.get("char_sim") or {}).get(cid) or {}).get("court") or {}
+    if not court.get("stage") or court.get("dead") or court.get("done"):
+        return
+    c = _char_by_id(content, cid) or {}
+    resp = (resp or "").strip()
+    if resp in ("接受", "暧昧"):
+        court["stage"] = min(6, int(court["stage"]) + 1)
+        court["beats"] = 0
+        _audit(state, "court.step", True, f"{c.get('name', '')}→第{court['stage']}步")
+    elif resp == "明拒":
+        court["rebuffs"] = int(court.get("rebuffs") or 0) + 1
+        court["skip_until"] = _time_index(state) // 3 + 1 + int(court["rebuffs"])  # 冷却随拒绝加长
+        if court["rebuffs"] >= 3:
+            _court_die(content, state, cid, "你一次次把话挑明，TA终于把那份心思收起来了")
+        else:
+            _audit(state, "court", False, c.get("name", ""),
+                   f"被明确拒过{court['rebuffs']}次，TA退了半步")
+    elif int(court.get("beats") or 0) >= 2 and int(court["stage"]) < 6:
+        # 殷勤两拍没被拒 = 默许 — 不逼模型每拍都报审
+        court["stage"] = int(court["stage"]) + 1
+        court["beats"] = 0
+
+
+def _court_die(content: dict[str, Any], state: dict[str, Any], cid: str, why: str) -> None:
+    """死心: 台账关死永不再启, 心动退到暧昧线下, 记忆留疤。铁律: 尊重拒绝。"""
+    court = _court_of(state, cid)
+    court.update({"dead": True, "stage": 0})
+    tun = tuning_for(content)
+    rel_all = state.setdefault("rel", {})
+    sc = dict(rel_all.get(cid) or relationships.new_scores())
+    sc["romance"] = min(int(sc.get("romance") or 0), max(0, int(tun["flirt_t"]) // 2))
+    rel_all[cid] = sc
+    c = _char_by_id(content, cid) or {}
+    mem = (state.get("memory_by_char", {}) or {}).get(cid) or ""
+    state.setdefault("memory_by_char", {})[cid] = \
+        (mem + f"；{why}——这件事你不会再提，也不会再试").strip("；")
+    _audit(state, "court.over", True, c.get("name", ""), "死心")
+
+
+def court_confession_pending(content: dict[str, Any], state: dict[str, Any]) -> None:
+    """表白拍的回合末: 立关键节点抉择卡 (拒绝直接死心 — 选择有重量)。"""
+    cid = state.pop("_court_confess", None)
+    if not cid or state.get("pending_choice"):
+        return
+    c = _char_by_id(content, cid)
+    if not c:
+        return
+    state["pending_choice"] = {
+        "kind": "court", "key": f"court_{cid}", "char_id": cid,
+        "prompt": _t(content, f"{c.get('name')}把话说到了明处。你要怎么回答？",
+                     f"{c.get('name')} has laid it all out. Your answer?"),
+        "options": [
+            {"id": "court_yes", "label": _t(content, f"接受{c.get('name')}的心意",
+                                            f"Accept {c.get('name')}'s feelings")},
+            {"id": "court_no", "label": _t(content, "把话说明白：你们不合适",
+                                           "Be honest: this isn't it")},
+        ]}
+
+
+def _apply_court_choice(content: dict[str, Any], state: dict[str, Any],
+                        option_id: str) -> dict[str, Any]:
+    pending = state.get("pending_choice") or {}
+    cid = pending.get("char_id")
+    c = _char_by_id(content, cid) or {}
+    picked = next((o for o in pending.get("options") or [] if o.get("id") == option_id), None)
+    if picked is None:
+        raise ValueError("unknown option")
+    tun = tuning_for(content)
+    if option_id == "court_yes":
+        rel_all = state.setdefault("rel", {})
+        sc = dict(rel_all.get(cid) or relationships.new_scores())
+        sc["romance"] = max(int(sc.get("romance") or 0), int(tun["lover_t"]))
+        sc["closeness"] = max(int(sc.get("closeness") or 0), int(tun["lover_close_min"]))
+        rel_all[cid] = sc
+        _court_of(state, cid).update({"done": True, "stage": 0})
+        mem = (state.get("memory_by_char", {}) or {}).get(cid) or ""
+        state.setdefault("memory_by_char", {})[cid] = \
+            (mem + "；你们把心意挑明了，从那天起是彼此的人").strip("；")
+        _audit(state, "court.won", True, c.get("name", ""))
+    else:
+        _court_die(content, state, cid, "你当面拒绝了TA的表白")
+    answered = dict(state.get("choices") or {})
+    answered[pending.get("key") or "court"] = option_id
+    state["choices"] = answered
+    state["pending_choice"] = None
+    return {"label": picked.get("label") or "", "flag": None}
+
+
+# ── 📱🔍 查TA的设备 (偷看手机) — 随身版搜查物证 ────────────────────────────
+# 设计合同 (Yi 拍板 2026-07-20):
+# · 机会三层: 作者写死 (event.peek_cid) > 引擎遗落骰 (TA离场且TA的账本有新货才掷)
+#   > 没有导演报审通道 (防模型滥发)
+# · 内容全有账本背书: 玩家线程用真账 (从TA视角+备注名彩蛋), NPC线程从 npc_rel/char_sim/
+#   promises 渲染一次缓存 + rel 立场快照 — 立场跳变时插「转折消息」再续 (防一致性穿帮)
+# · 浅翻 (线程末句+备注名, 渲染素材结构化不含任何秘密 — 措辞想泄密也无密可泄) /
+#   深翻 (全文+authored 素材+device_of 碎片解锁, DC 加高 = 风险加倍)
+# · 代价: fail=被撞见 (好感掉+TA记一笔), crit_fail=设备加锁永久封路
+#   (lint 保证 device_of 碎片必有备用通路, 锁死不锁本)
+# · 节奏: 每角色每游戏日至多一次窗口; 账本无新增不开窗 (机会=世界有新货的信号)
+_PEEK_WINDOW_TURNS = 3
+_PEEK_RE = re.compile(
+    r"(?:偷看|偷翻|翻看|翻查|查看|检查|翻|查)\s*(?:一下|了|看)?\s*"
+    r"([^，。！？\s]{1,10}?)的(?:手机|设备|通讯|传呼机|数据板|沃克斯|水晶|留言|口信)")
+
+
+def peekable(content: dict[str, Any]) -> bool:
+    # 口信没有实体设备可翻 — 功能整体沉默 (沉默即叙事)
+    return phone_enabled(content) and "口信" not in phone_device(content)
+
+
+def _peek_state(state: dict[str, Any], cid: str) -> dict[str, Any]:
+    return state.setdefault("phone_peek", {}).setdefault(cid, {})
+
+
+def _peek_ledger_mark(content: dict[str, Any], state: dict[str, Any], cid: str) -> int:
+    """TA的账本指纹: 关系演变/约定/短信/在办的事有新增, 指纹就变 — 没新货不开窗。"""
+    n = 0
+    for k, e in (state.get("npc_rel") or {}).items():
+        if cid in k.split("|"):
+            n += 1 + len(e.get("log") or [])
+    n += sum(1 for p in (state.get("promises") or []) if p.get("char_id") == cid)
+    n += len((((state.get("phone") or {}).get("threads") or {}).get(cid) or {}).get("msgs") or [])
+    n += 1 if ((state.get("char_sim") or {}).get(cid) or {}).get("intent") else 0
+    return n
+
+
+def peek_maybe_drop(content: dict[str, Any], state: dict[str, Any],
+                    cid: str, name: str) -> dict[str, Any] | None:
+    """TA 离场时的遗落骰。条件全过才掷: 可翻设备/未上锁/今天没开过窗/账本有新货。"""
+    if not peekable(content) or not cid:
+        return None
+    chance = int(tuning_for(content).get("peek_drop_chance", 0) or 0)
+    if chance <= 0:
+        return None
+    pk = _peek_state(state, cid)
+    if pk.get("locked") or int(pk.get("window") or 0) > 0:
+        return None
+    day = _time_index(state) // 3
+    if pk.get("last_window_day") == day:
+        return None
+    mark = _peek_ledger_mark(content, state, cid)
+    if mark <= int(pk.get("ledger_mark") or 0):
+        return None    # 世界没新东西, 翻了也是空转 — 不骗玩家赌命运判定
+    if _rng.randint(1, 100) > chance:
+        return None
+    pk["window"] = _PEEK_WINDOW_TURNS
+    pk["last_window_day"] = day
+    pk["shallow_done"] = False
+    _audit(state, "peek.window", True, name)
+    return {"kind": "peek_window", "name": name, "device": phone_device(content)}
+
+
+def peek_open_window(state: dict[str, Any], cid: str) -> None:
+    """作者写死的机会窗口 (event.peek_cid): 确定性开窗, 不掷骰不看账本。"""
+    pk = _peek_state(state, cid)
+    if not pk.get("locked"):
+        pk["window"] = _PEEK_WINDOW_TURNS
+        pk["shallow_done"] = False
+
+
+def peek_tick(state: dict[str, Any]) -> None:
+    """每回合窗口倒数 — 机会稍纵即逝。"""
+    for pk in (state.get("phone_peek") or {}).values():
+        if int(pk.get("window") or 0) > 0:
+            pk["window"] = int(pk["window"]) - 1
+
+
+def _peek_cache(content: dict[str, Any], state: dict[str, Any],
+                c: dict[str, Any], llm: LLM) -> dict[str, Any]:
+    """渲染并缓存TA设备的内容 (一次生成永远一致)。素材结构化保证不含秘密:
+    只喂 npc_rel 立场/演变人话、char_sim 在办的事、约定 — 措辞想泄密也无密可泄。"""
+    cid = c.get("id")
+    pk = _peek_state(state, cid)
+    tun = tuning_for(content)
+    scores = (state.get("rel") or {}).get(cid) or relationships.new_scores()
+    mode = relationships.derive_mode(c, scores, tun)
+    if not pk.get("nickname"):
+        try:
+            out = llm.generate({"peek_nickname": True,
+                                "char": {"name": c.get("name"), "eq_style": (c.get("eq_style") or "")[:80]},
+                                "relation": relationships.name_of(mode),
+                                "impression": profile_mod.impression_of(state, cid)}) or {}
+            pk["nickname"] = str(out.get("nickname") or "").strip()[:10] \
+                or relationships.name_of(mode)
+        except Exception:
+            pk["nickname"] = relationships.name_of(mode)
+    # NPC↔NPC 线程: 立场最重的两对
+    web = state.get("npc_rel") or {}
+    pairs = sorted([(k, e) for k, e in web.items() if cid in k.split("|")],
+                   key=lambda kv: -abs(int(kv[1].get("stance") or 0)))[:2]
+    threads = pk.setdefault("threads", {})
+    for k, e in pairs:
+        other_id = next((x for x in k.split("|") if x != cid), None)
+        other = _char_by_id(content, other_id)
+        if not other:
+            continue
+        stance = int(e.get("stance") or 0)
+        th = threads.get(other_id)
+        if th is None:
+            material = {"owner": {"name": c.get("name"), "persona": (c.get("persona_text") or "")[:80]},
+                        "with": other.get("name"),
+                        "stance": stance, "label": e.get("label") or "",
+                        "whys": [str(l.get("why") or "")[:40] for l in (e.get("log") or [])[-3:]],
+                        "intent": (((state.get("char_sim") or {}).get(cid) or {}).get("intent") or "")[:40],
+                        "device": phone_device(content)}
+            try:
+                out = llm.generate({"peek_threads": True, **material}) or {}
+                msgs = [dedash(str(m).strip()[:60]) for m in (out.get("msgs") or []) if str(m).strip()][:4]
+            except Exception:
+                msgs = []
+            threads[other_id] = {"with": other.get("name"), "msgs": msgs or ["……"],
+                                 "snap": stance}
+        else:
+            old = int(th.get("snap") or 0)
+            # 立场跳变 (变号或跨两档): 插转折消息再续 — 防「上周密谋这周如常」穿帮
+            if (old > 0 > stance) or (old < 0 < stance) or abs(stance - old) >= 2:
+                try:
+                    out = llm.generate({"peek_twist": True, "with": th.get("with"),
+                                        "old_stance": old, "new_stance": stance,
+                                        "label": e.get("label") or "",
+                                        "last": (th.get("msgs") or [""])[-1],
+                                        "device": phone_device(content)}) or {}
+                    tw = [dedash(str(m).strip()[:60]) for m in (out.get("msgs") or []) if str(m).strip()][:2]
+                except Exception:
+                    tw = []
+                th["msgs"] = ((th.get("msgs") or []) + (tw or ["……以后别用这个号找我。"]))[-8:]
+                th["snap"] = stance
+    return pk
+
+
+def _peek_deep_frags(content: dict[str, Any], c: dict[str, Any]) -> list[str]:
+    """深翻的碎片收成: unlock.device_of 指着TA的 + authored 素材标 reveals 的。"""
+    fids = []
+    for sec in content.get("secrets") or []:
+        for f in sec.get("fragments") or []:
+            if (f.get("unlock") or {}).get("device_of") == c.get("id") and f.get("id"):
+                fids.append(f["id"])
+    for e in (c.get("device_peek") or []):
+        if e.get("reveals"):
+            fids.append(str(e["reveals"]))
+    return fids
+
+
+def peek_attempt(content: dict[str, Any], state: dict[str, Any], player_input: str,
+                 channel: str, llm: LLM) -> dict[str, Any] | None:
+    """玩家「做:翻TA的手机」。返回 {beats, frag_ids, moments} 或 None (不是这个动作)。"""
+    if channel != "do" or not peekable(content):
+        return None
+    m = _PEEK_RE.search(player_input or "")
+    if not m:
+        return None
+    ref = m.group(1)
+    c = next((x for x in _characters(content) if x.get("name")
+              and (x["name"] == ref or x["name"] in ref or ref in x["name"])), None)
+    if not c or c.get("id") == state.get("player_character_id"):
+        return None
+    cid = c["id"]
+    dev = phone_device(content)
+    pk = _peek_state(state, cid)
+    corpse = cid in _dead_ids(state)
+    beats: list[dict[str, Any]] = []
+    moments: list[dict[str, Any]] = []
+
+    def _b(zh, en):
+        beats.append({"type": "description", "speaker_name": None, "text": _t(content, zh, en)})
+
+    if pk.get("locked"):
+        _audit(state, "peek", False, c.get("name", ""), "设备已上锁——上次被抓的代价")
+        _b(f"（{c.get('name')}的{dev}换了锁。上次的事之后，这条路对你永远封死了。）",
+           f"({c.get('name')}'s {dev} is locked now. That door closed for good.)")
+        return {"beats": beats, "frag_ids": [], "moments": moments}
+    if not corpse and int(pk.get("window") or 0) <= 0:
+        _audit(state, "peek", False, c.get("name", ""), "没有机会窗口")
+        _b(f"（{c.get('name')}的{dev}此刻不在你够得到的地方。）",
+           f"({c.get('name')}'s {dev} isn't within your reach right now.)")
+        return {"beats": beats, "frag_ids": [], "moments": moments}
+
+    deep = corpse or bool(pk.get("shallow_done"))
+    wits = int(((state.get("attrs") or {}).get("心思") or 5))
+    dice = {"outcome": "success", "roll": 0, "dc": 0} if corpse \
+        else _roll_dc((13 if deep else 9) - (wits - 5))
+    out = dice["outcome"]
+    scores = (state.get("rel") or {}).get(cid) or relationships.new_scores()
+    tun = tuning_for(content)
+    if out == "crit_fail":
+        pk["locked"] = True
+        pk["window"] = 0
+        state.setdefault("rel", {})[cid] = relationships.apply_deltas(scores, -8, -4, tun)
+        mem = (state.get("memory_by_char", {}) or {}).get(cid) or ""
+        state.setdefault("memory_by_char", {})[cid] = \
+            (mem + f"；对方偷翻你的{dev}被你当场抓住，你从此对TA设了防").strip("；")
+        _audit(state, "peek", False, c.get("name", ""), "当场抓包——设备从此上锁")
+        _b(f"（{c.get('name')}回来得比你想的快。TA一言不发拿回{dev}，看你的眼神变了。）",
+           f"({c.get('name')} came back too soon. They took the {dev} without a word.)")
+        moments.append({"kind": "peek_caught", "name": c.get("name")})
+        return {"beats": beats, "frag_ids": [], "moments": moments}
+    if out == "fail":
+        pk["window"] = 0
+        state.setdefault("rel", {})[cid] = relationships.apply_deltas(scores, -4, -2, tun)
+        mem = (state.get("memory_by_char", {}) or {}).get(cid) or ""
+        state.setdefault("memory_by_char", {})[cid] = \
+            (mem + f"；你撞见对方动过你的{dev}，心里存了个疙瘩").strip("；")
+        _audit(state, "peek", False, c.get("name", ""), "被撞见——什么都没看到")
+        _b(f"（你刚拿起{dev}，{c.get('name')}的脚步声就到了门口。你放下的动作快了半拍——但TA看见了。）",
+           f"(You'd barely lifted the {dev} when {c.get('name')} walked in. They saw.)")
+        return {"beats": beats, "frag_ids": [], "moments": moments}
+
+    cache = _peek_cache(content, state, c, llm)
+    if out == "mixed" and not corpse:
+        mem = (state.get("memory_by_char", {}) or {}).get(cid) or ""
+        state.setdefault("memory_by_char", {})[cid] = \
+            (mem + f"；你隐约觉得有人动过你的{dev}").strip("；")
+    if not deep:
+        pk["shallow_done"] = True
+        my_th = (((state.get("phone") or {}).get("threads") or {}).get(cid) or {}).get("msgs") or []
+        mine = f"你们的对话置顶着——TA给你的备注是「{cache.get('nickname')}」。" if my_th else \
+               f"通讯录里有你——备注是「{cache.get('nickname')}」。"
+        peeks = "；".join(f"和{t.get('with')}的最后一条：「{(t.get('msgs') or ['……'])[-1]}」"
+                          for t in (cache.get("threads") or {}).values()) or "没有别的对话。"
+        _audit(state, "peek", True, c.get("name", ""), "浅翻")
+        _b(f"（你飞快扫了一眼{c.get('name')}的{dev}。{mine} {peeks} 屏幕还亮着——要不要翻得更深？）",
+           f"(A quick glance at {c.get('name')}'s {dev}. {peeks})")
+        view = {"mode": "shallow", "device": dev, "nickname": cache.get("nickname"),
+                "owner": {"name": c.get("name"), "avatar_url": c.get("avatar_url")},
+                "threads": [{"with": t.get("with"), "msgs": [(t.get("msgs") or ["……"])[-1]]}
+                            for t in (cache.get("threads") or {}).values()],
+                "mine_last": (my_th or [{}])[-1].get("text") if my_th else None}
+        return {"beats": beats, "frag_ids": [], "moments": moments, "view": view}
+    # 深翻: 全文 + authored 素材 + 碎片收成
+    pk["window"] = 0
+    pk["ledger_mark"] = _peek_ledger_mark(content, state, cid)
+    lines = []
+    for t in (cache.get("threads") or {}).values():
+        lines.append(f"和{t.get('with')}：" + " / ".join((t.get("msgs") or [])[-4:]))
+    for e in (c.get("device_peek") or []):
+        who = str(e.get("with") or "未知号码")
+        lines.append(f"和{who}：" + " / ".join(str(x)[:60] for x in (e.get("msgs") or [])[:4]))
+    body = "。".join(lines) or "里面干净得反常。"
+    _audit(state, "peek", True, c.get("name", ""), "深翻")
+    _b(f"（你把{c.get('name')}的{dev}翻了个底朝天。{body}）",
+       f"(You went through {c.get('name')}'s {dev}. {body})")
+    view = {"mode": "deep", "device": dev, "nickname": pk.get("nickname"),
+            "owner": {"name": c.get("name"), "avatar_url": c.get("avatar_url")},
+            "threads": ([{"with": t.get("with"), "msgs": list(t.get("msgs") or [])}
+                         for t in (cache.get("threads") or {}).values()]
+                        + [{"with": str(e.get("with") or "未知号码"),
+                            "msgs": [str(x)[:60] for x in (e.get("msgs") or [])[:4]]}
+                           for e in (c.get("device_peek") or [])])}
+    return {"beats": beats, "frag_ids": _peek_deep_frags(content, c),
+            "moments": moments, "view": view}
+
+
+# ── 🏦📸 小手机新 app: 银行 + 社媒 (Yi 拍板 2026-07-20, P0 纯内环) ────────────
+# 银行 = money/money_log 账本的视图 + 转账(传令落账: 真钱动了, TA 短信里真会回应);
+# 社媒 = 活世界账本的可见面: 角色动态从 npc_rel 演变/在办的事/约定渲染, 一次生成
+# 缓存 (账本指纹变了才出新帖), 点赞确定性回好感(每帖一次), 评论走小 LLM 限频。
+# 皮肤铁律: 只有现代设定 (device=手机) 默认开, 作者可用 phone.apps 显式配置。
+
+
+def phone_apps(content: dict[str, Any]) -> set[str]:
+    cfg = phone_cfg(content)
+    if isinstance(cfg.get("apps"), list):
+        apps = {str(a) for a in cfg["apps"]}
+    else:
+        apps = {"bank", "social"} if phone_device(content) == "手机" else set()
+    if _creatures(content):
+        apps.add("bestiary")   # 📖 有生物的世界自动有图鉴 (不吃现代皮肤门槛)
+    return apps
+
+
+def bank_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+    dead = _dead_ids(state)
+    met = set(state.get("met_ids") or [])
+    contacts = [{"id": c.get("id"), "name": c.get("name")}
+                for c in _characters(content)
+                if c.get("id") in met and c.get("id") not in dead
+                and c.get("id") != state.get("player_character_id")
+                and has_contact(state, c.get("id"))]
+    return {"currency": currency_of(content), "balance": int(state.get("money") or 0),
+            "log": list(reversed(state.get("money_log") or [])),
+            "contacts": contacts}
+
+
+def bank_transfer(content: dict[str, Any], state: dict[str, Any], persona: dict[str, Any],
+                  char_id: str, amount: int, llm: LLM | None = None) -> dict[str, Any]:
+    """💸 给角色转账 — 真钱落账 (book_money), TA 的记忆与短信都会知道这件事。"""
+    llm = lang_llm(llm or get_llm(), content)
+    c = _char_by_id(content, char_id)
+    if not c or char_id in _dead_ids(state) or char_id not in set(state.get("met_ids") or []):
+        raise ValueError("没有这个收款人")
+    if not has_contact(state, char_id):
+        raise ValueError("你还没有TA的账户——先要到联系方式")
+    amount = _to_int(amount, 0, 9999)
+    if amount <= 0:
+        raise ValueError("金额不对")
+    if amount > int(state.get("money") or 0):
+        raise ValueError("余额不够")
+    applied = book_money(content, state, -amount, f"转给{c.get('name')}")
+    if not applied:
+        raise ValueError("没有入账")
+    _audit(state, "bank.transfer", True, f"{c.get('name')}·{amount}")
+    mem = (state.get("memory_by_char", {}) or {}).get(char_id) or ""
+    state.setdefault("memory_by_char", {})[char_id] = \
+        (mem + f"；对方给你转了{amount}{currency_of(content)}").strip("；")
+    # TA 的短信回应: 收钱不是无声的 (走既有 compose+push 管线, 进线程带未读)
+    now_label = (clock_view(content, state) or {}).get("label", "")
+    msgs = compose_message(content, state, c, "received_transfer",
+                           f"对方刚给你转了{amount}{currency_of(content)}，你按自己的性格回应"
+                           "（谢/推辞/起疑/打趣都行），1~2条短消息",
+                           _t(content, "收到了。这是做什么？", "Got it. What's this for?"), llm)
+    push = phone_push(content, state, c, msgs, now_label)
+    return {"view": bank_view(content, state), "reply": push}
+
+
+_SOCIAL_CAP = 12          # feed 最多留几条
+_SOCIAL_COMMENTS_PER_DAY = 5
+
+
+def _social_state(state: dict[str, Any]) -> dict[str, Any]:
+    return state.setdefault("social", {"posts": [], "mark": -1, "cday": -1, "cnum": 0})
+
+
+def _social_mark(content: dict[str, Any], state: dict[str, Any]) -> int:
+    n = _time_index(state)
+    for e in (state.get("npc_rel") or {}).values():
+        n += 1 + len(e.get("log") or [])
+    for si in (state.get("char_sim") or {}).values():
+        n += 1 if si.get("intent") else 0
+    n += len(state.get("promises") or []) + len(state.get("met_ids") or [])
+    return n
+
+
+def social_feed(content: dict[str, Any], state: dict[str, Any],
+                llm: LLM | None = None) -> dict[str, Any]:
+    """📸 动态: 已认识角色的"朋友圈"。素材全取自账本 (演变人话/在办的事/约定),
+    账本指纹没变不出新帖 — 一次生成永久缓存, 不烧无谓的调用。"""
+    llm = lang_llm(llm or get_llm(), content)
+    so = _social_state(state)
+    mark = _social_mark(content, state)
+    if mark != so.get("mark"):
+        so["mark"] = mark
+        dead = _dead_ids(state)
+        met = set(state.get("met_ids") or [])
+        items = []
+        for c in _characters(content):
+            cid = c.get("id")
+            if not cid or cid not in met or cid in dead \
+                    or cid == state.get("player_character_id"):
+                continue
+            hooks = []
+            for k, e in (state.get("npc_rel") or {}).items():
+                if cid in k.split("|"):
+                    hooks += [str(l.get("why") or "")[:40] for l in (e.get("log") or [])[-1:]]
+            intent = ((state.get("char_sim") or {}).get(cid) or {}).get("intent")
+            if intent:
+                hooks.append(f"正在办：{str(intent)[:40]}")
+            for p in state.get("promises") or []:
+                if p.get("char_id") == cid and p.get("status") == "open":
+                    hooks.append(f"惦记着约好的：{str(p.get('what') or '')[:30]}")
+            if hooks:
+                items.append({"cid": cid, "name": c.get("name"),
+                              "persona": (c.get("persona_text") or "")[:80],
+                              "eq_style": (c.get("eq_style") or "")[:60],
+                              "hooks": hooks[:2]})
+        posted = {p.get("cid") for p in (so.get("posts") or [])[-3:]}
+        items = [i for i in items if i["cid"] not in posted][:2]
+        if items:
+            try:
+                out = llm.generate({"social_posts": True, "items": items}) or {}
+                new_posts = out.get("posts") or []
+            except Exception:
+                new_posts = []
+            now_label = (clock_view(content, state) or {}).get("label", "")
+            by_name = {i["name"]: i["cid"] for i in items}
+            import uuid as _uuid_s
+            for p in new_posts[:2]:
+                nm = str(p.get("name") or "").strip()
+                cid = by_name.get(nm)
+                txt = dedash(str(p.get("text") or "").strip()[:80])
+                if not cid or not txt:
+                    continue
+                so["posts"].append({"id": f"po_{_uuid_s.uuid4().hex[:8]}", "cid": cid,
+                                    "name": nm, "text": txt, "label": now_label,
+                                    "liked": False, "comments": []})
+            so["posts"] = so["posts"][-_SOCIAL_CAP:]
+    return {"posts": list(reversed(so.get("posts") or []))}
+
+
+def social_like(content: dict[str, Any], state: dict[str, Any], post_id: str) -> dict[str, Any]:
+    so = _social_state(state)
+    post = next((p for p in so.get("posts") or [] if p.get("id") == post_id), None)
+    if not post:
+        raise ValueError("这条动态不见了")
+    if not post.get("liked"):
+        post["liked"] = True
+        tun = tuning_for(content)
+        cid = post.get("cid")
+        scores = (state.get("rel") or {}).get(cid) or relationships.new_scores()
+        state.setdefault("rel", {})[cid] = relationships.apply_deltas(scores, 1, 0, tun)
+        _audit(state, "social.like", True, post.get("name", ""))
+    return {"liked": True}
+
+
+def social_comment(content: dict[str, Any], state: dict[str, Any], persona: dict[str, Any],
+                   post_id: str, text: str, llm: LLM | None = None) -> dict[str, Any]:
+    """💬 评论TA的动态 — TA 会用自己的声音回一句 (小调用, 每游戏日限5条)。"""
+    llm = lang_llm(llm or get_llm(), content)
+    so = _social_state(state)
+    post = next((p for p in so.get("posts") or [] if p.get("id") == post_id), None)
+    if not post:
+        raise ValueError("这条动态不见了")
+    text = (text or "").strip()[:60]
+    if not text:
+        raise ValueError("评论不能是空的")
+    day = _time_index(state) // 3
+    if so.get("cday") != day:
+        so["cday"], so["cnum"] = day, 0
+    if int(so.get("cnum") or 0) >= _SOCIAL_COMMENTS_PER_DAY:
+        raise ValueError("今天的嘴已经聊累了——明天再来（每天限5条评论）")
+    so["cnum"] = int(so.get("cnum") or 0) + 1
+    c = _char_by_id(content, post.get("cid")) or {}
+    tun = tuning_for(content)
+    scores = (state.get("rel") or {}).get(post.get("cid")) or relationships.new_scores()
+    try:
+        out = llm.generate({"social_reply": True, "post": post.get("text"),
+                            "comment": text,
+                            "char": {"name": c.get("name"), "eq_style": (c.get("eq_style") or "")[:80],
+                                     "persona_text": (c.get("persona_text") or "")[:100]},
+                            "relation": relationships.name_of(
+                                relationships.derive_mode(c, scores, tun))}) or {}
+    except Exception:
+        out = {}
+    reply = dedash(str(out.get("reply") or "").strip()[:60]) or "（TA看到了，没回。）"
+    dc = max(0, min(2, _to_int(out.get("closeness"), 0, 2)))
+    if dc:
+        state.setdefault("rel", {})[post.get("cid")] = \
+            relationships.apply_deltas(scores, dc, 0, tun)
+    post.setdefault("comments", []).append({"from": "me", "text": text})
+    post["comments"].append({"from": "them", "text": reply})
+    post["comments"] = post["comments"][-6:]
+    _audit(state, "social.comment", True, f"{post.get('name', '')}:{text[:15]}")
+    return {"reply": reply, "closeness": dc, "comments": post["comments"]}
 
 
 _SNAP_GAP = 5   # 📷 at least this many exchanges between two photos in one thread
@@ -3702,7 +4581,8 @@ def maybe_snap(content: dict[str, Any], state: dict[str, Any], char: dict[str, A
     owns the cooldown ledger and writes the prompt; the ROUTER queues the actual
     render (it owns the serialized image worker). Returns {"url", "prompt"} or None."""
     _cfg = get_settings()
-    if _cfg.llm_provider == "mock" or not (_cfg.dashscope_api_key or "").strip():
+    if _cfg.llm_provider == "mock" or not ((_cfg.dashscope_api_key or "").strip()
+                                           or (getattr(_cfg, "ark_api_key", "") or "").strip()):
         return None   # no image backend (or deterministic test mode) → never mint a URL
     chance = int(tuning_for(content).get("snap_chance", 0) or 0)
     if chance <= 0 or not char.get("id"):
@@ -3717,14 +4597,24 @@ def maybe_snap(content: dict[str, Any], state: dict[str, Any], char: dict[str, A
     url = f"/scene/snap/snap_{_uuid_s.uuid4().hex[:10]}.jpg"
     loc = _location_by_id(content, char_position(content, state, char) or "") or {}
     look = ((char.get("persona_text") or "").strip().replace("\n", " "))[:100]
+    scene = f"{loc.get('name', '')}，{(loc.get('detail') or '')[:80]}"
     if _rng.randint(1, 100) <= 45 and look:
+        # 📷 自拍必须同脸 (Yi 2026-07-15: 角色形象要稳定): 身份锚随包出门 —
+        # router 有底图走 i2i 改绘 (EDIT_MODEL 保脸), 无底图用 char_seed 定种 t2i
+        # (同角色历张自拍互相同脸)。此处 prompt 只是 t2i 回落用。
         prompt = (f"{char.get('name')}用手机拍的一张自拍：{look}。"
-                  f"所在环境：{loc.get('name', '')}，{(loc.get('detail') or '')[:80]}。"
+                  f"所在环境：{scene}。"
                   "写实手机自拍质感，轻微俯仰角，浅景深，生活抓拍感，无文字水印")
-    else:
-        prompt = (f"一张随手拍的手机照片，拍下此刻眼前的景象：{loc.get('name', '')}，"
-                  f"{(loc.get('detail') or '')[:140]}。与这句话有关：{(gist or '')[:60]}。"
-                  "手机摄影质感，自然光影，轻微晃动与噪点，写实，画面里没有文字或水印")
+        _art = art_style_of(content)
+        if _art:
+            prompt += f"。画面基调：{_art}"
+        from .gal import char_seed as _cseed
+        return {"url": url, "prompt": prompt, "selfie": True, "cid": char["id"],
+                "seed": _cseed((content.get("story") or {}).get("id") or "", char["id"]),
+                "scene": scene, "art": _art or ""}
+    prompt = (f"一张随手拍的手机照片，拍下此刻眼前的景象：{loc.get('name', '')}，"
+              f"{(loc.get('detail') or '')[:140]}。与这句话有关：{(gist or '')[:60]}。"
+              "手机摄影质感，自然光影，轻微晃动与噪点，写实，画面里没有文字或水印")
     _art = art_style_of(content)
     if _art:
         prompt += f"。画面基调：{_art}"
@@ -3875,8 +4765,12 @@ def phone_threads_view(content: dict[str, Any], state: dict[str, Any]) -> dict[s
                          "role": (c.get("role") or "")[:24],
                          "avatar_url": c.get("avatar_url"),
                          "dead": cid in dead, "has_thread": cid in have})
+    apps = phone_apps(content)
+    if not economy_on(state):
+        apps = apps - {"bank"}   # 💰 没有经济账本的本, 银行 app 无账可管 — 不亮
     return {"device": phone_device(content), "threads": rows,
-            "unread": sum(r["unread"] for r in rows), "contacts": contacts}
+            "unread": sum(r["unread"] for r in rows), "contacts": contacts,
+            "apps": sorted(apps)}   # 🏦📸 现代设定的扩展 app 清单
 
 
 def phone_thread(content: dict[str, Any], state: dict[str, Any], char_id: str,
@@ -3950,10 +4844,15 @@ def _phone_probe(content: dict[str, Any], state: dict[str, Any], char_id: str,
 
 def _phone_exchange(content: dict[str, Any], state: dict[str, Any], persona: dict[str, Any],
                     c: dict[str, Any], text: str, llm: LLM, newly: list[str],
-                    call: bool = False, same_room: bool = False) -> dict[str, Any]:
+                    call: bool = False, same_room: bool = False,
+                    beat_log: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """One gated text/call exchange with a character: build their view, ask the model,
     apply relationship movement. Returns the raw LLM output dict."""
     char_id = c.get("id")
+    # 📱↔🎭 线上线下要通气 (玩家实弹: 剧情里刚一起经历大事, 短信里TA像没事人):
+    # memory_by_char 只蒸馏滑出窗口的旧回合, 刚发生的戏必须现喂 — TA 亲历的最近几拍
+    recent_scene = [str(m.get("content") or "")[:80]
+                    for m in history_for(beat_log, char_id)[-8:]] if beat_log else []
     tun = tuning_for(content)
     scores = (state.get("rel") or {}).get(char_id) or relationships.new_scores()
     mode = relationships.derive_mode(c, scores, tun)
@@ -3969,7 +4868,7 @@ def _phone_exchange(content: dict[str, Any], state: dict[str, Any], persona: dic
                                  "agenda": (c.get("agenda") or "")[:100]},
                         "relation": relationships.name_of(mode),
                         "relationship_playbook": relationships.playbook_block(
-                            mode, mature=bool(state.get("mature"))),
+                            mode, mature=bool(state.get("mature")), char=c),
                         "player_read": profile_mod.impression_of(state, char_id),  # 🪞
                         "context": ctx,
                         "player_name": (pc or {}).get("name") or (persona or {}).get("name") or "",
@@ -3977,6 +4876,7 @@ def _phone_exchange(content: dict[str, Any], state: dict[str, Any], persona: dic
                         # digest is the PLAYER's whole life and must never leak into a
                         # character who wasn't there for it
                         "memory": (state.get("memory_by_char", {}) or {}).get(char_id) or "",
+                        "recent_scene": recent_scene,
                         "thread_tail": _thread_tail(state, char_id, 12),
                         "text": text}) or {}
     dc = int(out.get("closeness", 0) or 0)
@@ -4022,7 +4922,8 @@ def _digest_phone_overflow(state: dict[str, Any], cid: str, llm: LLM) -> None:
 
 
 def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str, Any],
-               char_id: str, text: str, llm: LLM | None = None) -> dict[str, Any]:
+               char_id: str, text: str, llm: LLM | None = None,
+               beat_log: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """The player texts a character from anywhere. The character answers IN VOICE with
     their gated context (locked truths can't leak over text either) — or reads and says
     nothing (已读不回 is a statement too). Small relationship movement applies. Probing
@@ -4039,7 +4940,8 @@ def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str
     th["msgs"].append({"from": "me", "text": text[:200], "at": now_label})
     _thread_cap(th)
     newly, cracked = _phone_probe(content, state, char_id, text)
-    out = _phone_exchange(content, state, persona, c, text, llm, newly, same_room=here)
+    out = _phone_exchange(content, state, persona, c, text, llm, newly, same_room=here,
+                          beat_log=beat_log)
     msgs = [dedash(str(m).strip()[:120]) for m in (out.get("msgs") or []) if str(m).strip()][:3]
     snap = None
     if msgs:
@@ -4096,7 +4998,8 @@ def _apply_phone_judgments(content: dict[str, Any], state: dict[str, Any], c: di
 
 
 def phone_call(content: dict[str, Any], state: dict[str, Any], persona: dict[str, Any],
-               char_id: str, text: str, llm: LLM | None = None) -> dict[str, Any]:
+               char_id: str, text: str, llm: LLM | None = None,
+               beat_log: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """📞 the player CALLS a character. Live voice: the reply comes back as spoken lines
     plus one line of what the player HEARS down the line (背景音 — a truth of its own).
     Same gate as everything else; probing on a call counts too. A character whose 作息
@@ -4123,7 +5026,8 @@ def phone_call(content: dict[str, Any], state: dict[str, Any], persona: dict[str
     th["msgs"].append({"from": "me", "text": f"📞 {text[:200]}", "at": now_label, "call": True})
     _thread_cap(th)
     newly, cracked = _phone_probe(content, state, char_id, text)
-    out = _phone_exchange(content, state, persona, c, text, llm, newly, call=True)
+    out = _phone_exchange(content, state, persona, c, text, llm, newly, call=True,
+                          beat_log=beat_log)
     msgs = [dedash(str(m).strip()[:120]) for m in (out.get("msgs") or []) if str(m).strip()][:3]
     ambient = dedash((out.get("ambient") or "").strip())[:60]
     if ambient:
@@ -4337,10 +5241,14 @@ def _inv_find(items: list, name: str) -> int:
 
 
 def _inv_add(state: dict[str, Any], name: str, detail: str = "") -> bool:
+    """模型报审/确定性动词的单件入包: 防重复守卫照旧 (模型隔轮重报同一收获 =
+    幻觉, 不是第二件)。行出生即带籍 (tid + qty, 物性卡快照进档 — items.py)。"""
     items = list(state.get("inventory") or [])
     if not (name or "").strip() or _inv_find(items, name) >= 0:
         return False
-    items.append({"name": name.strip(), **({"detail": detail.strip()} if detail.strip() else {})})
+    tid = items_mod.ensure_template(state, name)
+    items.append({"name": name.strip(), "tid": tid, "qty": 1,
+                  **({"detail": detail.strip()} if detail.strip() else {})})
     state["inventory"] = items
     return True
 
@@ -4422,10 +5330,48 @@ _ACCEPT_RE_ZH = re.compile(
     r"([^，。！？!?,.、\s]{1,12})")
 _ACCEPT_BA_RE_ZH = re.compile(
     r"把(?:这把|那把|这个|那个)?([^，。！？!?,.、\s]{1,12}?)"
-    r"(?:收进|收入|放进|装进|收好|揣进|揣好|收起来)")
+    r"(?:收进|收入|放进|装进|收好|揣进|揣好|收起来|收下|拿上|带上|捡走|拿走)")
 _ACCEPT_RE_EN = re.compile(
     r"(?:\baccept the\b|\bpocket the\b|\btuck the\b|\bput the\b|\bpick up the\b|\bgrab the\b)\s+([a-zA-Z' -]{2,30}?)"
     r"(?:\s+(?:in|into|away)\b|[,.!?]|$)", re.IGNORECASE)
+
+
+_EXAMINE_WORDS = ("掂", "端详", "打量", "细看", "翻看", "查验", "examine")
+
+
+def examine_items(content: dict[str, Any], state: dict[str, Any], player_input: str,
+                  channel: str = "say") -> list[tuple[str, str]]:
+    """🔍 主动查验 (物品实体化 第3题③): 掂一掂/端详一件随身或在册物件 →
+    物性卡经叙事渗出 (确定性孪生, 零 LLM)。想知道的玩家有确定的获知渠道,
+    不想管的玩家不被标签打扰。返回 [(物名, 叙事句)]。"""
+    if channel not in ("do", "think", "say"):
+        return []
+    text = (player_input or "").strip()
+    if not text or not any(w in text for w in _EXAMINE_WORDS):
+        return []
+    # 🎒 掂量隔离区里的名字 = 玩家对它发起动词 — 最强转正信号 (P3 §4.1)
+    for _q in list(state.get("item_quarantine") or []):
+        if _q.get("name") and _q["name"] in text:
+            items_mod.quarantine_touch(state, _q["name"])
+    out: list[tuple[str, str]] = []
+    rows = list(state.get("inventory") or []) \
+        + list(items_mod.scene_rows(state, state.get("location_id")))
+    for r in rows:
+        nm = (r.get("name") or "").strip()
+        if not nm or nm not in text:
+            continue
+        card = items_mod.card_of(state, r)
+        bits = ([str(card["desc"])] if card.get("desc") else []) \
+            + [items_mod.card_desc(card)]
+        indiv = "，".join(str(v) for v in (r.get("indiv") or {}).values() if str(v).strip())
+        if indiv:
+            bits.append(indiv)
+        desc = "。".join(b for b in bits if b)
+        if desc:
+            out.append((nm, desc))
+        if len(out) >= 2:   # 一回合至多查验两件, 别把回合变成鉴宝大会
+            break
+    return out
 
 
 def accept_item(content: dict[str, Any], state: dict[str, Any], player_input: str,
@@ -4458,6 +5404,7 @@ def accept_item(content: dict[str, Any], state: dict[str, Any], player_input: st
         if _inv_find(state.get("inventory") or [], n) >= 0:
             continue  # already carrying it
         item = None
+        from_scene = False
         # someone present is carrying it → a consensual handover moves the real object
         for c in scene_characters(content, state):
             if c.get("id") == pcid:
@@ -4467,9 +5414,29 @@ def accept_item(content: dict[str, Any], state: dict[str, Any], player_input: st
             if ti >= 0:
                 item = their.pop(ti)
                 break
+        # 🎒 场景在册物 (实体化 P1): 申报过的场景物件是真东西 — 拿走 = 场上少一件
+        if item is None:
+            srow = items_mod.scene_take(state, state.get("location_id"), n)
+            if srow is not None:
+                item, from_scene = srow, True
         # otherwise it must at least have come up in the recent conversation
         if item is None and n in recent:
             item = {"name": n}
+        # ⚖️ 拿取判定 (第3题②): 从环境里拿的东西过物性关 — 失败点名肇因属性,
+        # 且东西留回原地 (人递到手里的不查: 递得动就接得住)。判定驳回是终审:
+        # 绝不落 _pending_take, 否则回合末「正文认可」通道会绕过物理关 (实弹后门)
+        if item is not None and from_scene:
+            rejected = False
+            card = items_mod.card_of(state, item)
+            for ok, why in (items_mod.lift_check(card, _player_strength(state)),
+                            items_mod.bag_check(card)):
+                if not ok:
+                    _audit(state, "take", False, n, why)
+                    items_mod.scene_add(state, state.get("location_id"), n)
+                    rejected = True
+                    break
+            if rejected:
+                continue
         if item is not None and _inv_add(state, item.get("name", n), item.get("detail", "")):
             got.append(item)
         elif item is None:
@@ -4480,6 +5447,7 @@ def accept_item(content: dict[str, Any], state: dict[str, Any], player_input: st
             if n not in pend:
                 pend.append(n)
             state["_pending_take"] = pend[:2]
+            items_mod.quarantine_touch(state, n)   # 伸手 = 最强转正信号 (P3 §4.1)
     return got
 
 
@@ -4494,7 +5462,14 @@ def settle_pending_takes(state: dict[str, Any], all_beats: list[dict[str, Any]])
     booked = []
     for n in pend:
         if n and n in txt and _inv_find(state.get("inventory") or [], n) < 0:
-            if _inv_add(state, n):
+            # ⚖️ 正文认可 ≠ 免检: 环境物件入包同样过物性关 (石碑不因被提到就装进背包)
+            _card = items_mod.card_of(state, n)
+            _bad = next((why for ok, why in
+                         (items_mod.lift_check(_card, _player_strength(state)),
+                          items_mod.bag_check(_card)) if not ok), "")
+            if _bad:
+                _audit(state, "take", False, n, _bad)
+            elif _inv_add(state, n):
                 _audit(state, "take", True, f"{n}（正文认可）")
                 booked.append(n)
         elif n:
@@ -5314,6 +6289,9 @@ def mint_sought_character(content: dict[str, Any], state: dict[str, Any], name: 
     nm = (name or "").strip()[:12]
     if not nm:
         return None
+    if not npc_name_ok(nm):
+        _audit(state, "seek.scout", False, nm, "名字不像人名，驳回")
+        return None
     tun = tuning_for(content)
     gen_now = sum(1 for c in _characters(content) if c.get("generated"))
     if gen_now >= tun["max_new_characters"]:
@@ -5322,10 +6300,12 @@ def mint_sought_character(content: dict[str, Any], state: dict[str, Any], name: 
     where = (scout.get("where") or "").strip() or _t(content, "附近的去处", "somewhere near")
     prev = state.get("location_id")
     try:
-        loc = generate_and_move(content, state, where, llm=llm)
+        loc = generate_and_move(content, state, where, llm=llm, invent=True)
     except ValueError:
-        return None
+        loc = None
     state["location_id"] = prev   # the confirm chip moves the player, not the mint
+    if loc is None:
+        return None
     char = {
         "id": f"gen_{_uuid.uuid4().hex[:8]}",
         "name": nm,
@@ -5670,9 +6650,12 @@ def _secret_has_newly(content: dict[str, Any], sid, newly) -> bool:
 
 
 def build_parting_hook(content: dict[str, Any], state: dict[str, Any],
-                       persona: dict[str, Any], llm: LLM | None = None) -> list[dict[str, Any]]:
-    """悬念离场: ONE cliffhanger narration emitted when the player leaves mid-run — the last
-    thing they see on return, pulling them back in. Spoiler-safe (topic labels only)."""
+                       persona: dict[str, Any], llm: LLM | None = None,
+                       comeback: bool = False) -> list[dict[str, Any]]:
+    """悬念离场: ONE cliffhanger narration — the last thing they see on return, pulling
+    them back in. Spoiler-safe (topic labels only).
+    ⚖️ comeback=True (现行唯一入口): /leave 只暂存, 归来的点击回合才在这里写词回放,
+    框成〔上回〕闪回, 且不带下幕预告 (人都回来了, 不用再钓)."""
     llm = lang_llm(llm or get_llm(), content)
     act = int(state.get("act", 1) or 1)
     topics = _pending_topics(act_progress(content, state, act))
@@ -5693,6 +6676,10 @@ def build_parting_hook(content: dict[str, Any], state: dict[str, Any],
                              f"(You rise to leave. Behind you, someone hesitates, "
                              f"{hint_en} left unsaid.)")}]
     beats = beats[:1]
+    if comeback:
+        beats[0]["text"] = _t(content, f"〔上回〕{beats[0]['text']}",
+                              f"[Previously] {beats[0]['text']}")
+        return [dedash_beat(b) for b in beats]
     # 📺 下幕预告: leaving mid-story gets a next-episode tease — the NEXT act's authored
     # title only (never its events), like the preview after the credits. Retention hook.
     nxt = current_act(content, act + 1)
@@ -5840,14 +6827,16 @@ def _confront_gen(content, state, persona, secret, frag, next_locked, target, ll
         "history": sp_hist,
         "memory": (state.get("memory_by_char", {}) or {}).get(char_id) or "",
         "world_facts": (content.get("story") or {}).get("world_facts") or "",
+        "world": ((content.get("story") or {}).get("world_long") or "")[:600],
         "style": (content.get("story") or {}).get("style") or "",  # ✍️ 文风
         "roster": _physical_roster(content, state, persona),
+        "creatures_here": creatures_here(content, state),
         "place": _physical_place(content, state),
         "eq_style": target.get("eq_style", ""),
         "agenda": target.get("agenda", ""),
         "relationship_playbook": relationships.playbook_block(
             relationships.derive_mode(target, rel_all.get(char_id) or scores, tun),
-            mature=bool(state.get("mature"))),
+            mature=bool(state.get("mature")), char=target),
         "knowledge": target.get("knowledge", ""),
         "mature": bool(state.get("mature")),
         "scene": current_act(content, old_act),
@@ -5998,6 +6987,15 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
         dr = int(rel_all[sp_id].get("romance", 0)) - int(old_scores.get("romance", 0))
         if dc or dr:
             rel_deltas[sp_id] = {"name": sp_name, "closeness": dc, "romance": dr}
+        # 🏛 阵营声望落账 (报审): 发言者代表自己的阵营感受玩家言行; 对头反向记半
+        _fac = factions_mod.of_char(content, sp)
+        _fd = int(directed.get("rep_delta") or 0)
+        if _fac and _fd:
+            _applied = factions_mod.apply_delta(state, content, _fac["id"], _fd)
+            if _applied:
+                _audit(state, "faction.rep", True,
+                       "；".join(f"{(factions_mod.by_id(content, k) or {}).get('name', k)}"
+                                 f"{'+' if v > 0 else ''}{v}" for k, v in _applied.items()))
         # CELEBRATE a tier-up (陌生→朋友→暧昧→恋人): the "高潮=阈值被跨过" moment, made
         # visible — a strong reward + come-back hook. Only on an UPGRADE, never a downgrade.
         if mode_after != mode_before and _RANK.get(mode_after, 0) > _RANK.get(mode_before, 0):
@@ -6073,9 +7071,11 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
                 _audit(state, "move.narrated", True, mv_to)
             elif not dest_l and sandbox_on(content) and not _bad_place_name(mv_to):
                 try:
-                    generate_and_move(content, state, mv_to, llm=llm)
-                    flags["content_mutated"] = True    # run grew a location → persist content
-                    _audit(state, "move.narrated", True, f"{mv_to}（新生成）")
+                    if generate_and_move(content, state, mv_to, llm=llm) is not None:
+                        flags["content_mutated"] = True    # run grew a location → persist content
+                        _audit(state, "move.narrated", True, f"{mv_to}（新生成）")
+                    else:
+                        _audit(state, "move.narrated", False, mv_to, "不是具体去处")
                 except Exception:
                     _audit(state, "move.narrated", False, mv_to, "生成失败")
             else:
@@ -6236,6 +7236,11 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
                 booked = apply_char_move(content, state, mv.get("who", ""), mv.get("to", ""))
                 if booked:
                     _audit(state, "npc_move", True, f"{booked.get('name')}→{booked.get('to_name')}")
+                    # 📱🔍 遗落骰: TA刚起身离开 — 设备可能落下 (条件在函数里)
+                    _pw_ev = peek_maybe_drop(content, state, booked.get("id") or "",
+                                             booked.get("name") or "")
+                    if _pw_ev:
+                        moments.append(_pw_ev)
                 else:
                     _audit(state, "npc_move", False,
                            f"{mv.get('who', '')}→{mv.get('to', '')}",
@@ -6250,6 +7255,9 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
             parts = _re.split(r"[｜|：:，,]", nc_raw, maxsplit=1)
             nc_name = parts[0].strip().strip("「」\"'")[:12]
             nc_desc = clip_sentence(parts[1].strip() if len(parts) > 1 else "", 140)
+            if nc_name and not npc_name_ok(nc_name):
+                _audit(state, "new_char", False, nc_name, "名字不像人名（像句子片段），驳回")
+                nc_name = ""
             exists = any((c.get("name") or "") == nc_name for c in _characters(content))
             if nc_name and exists:
                 _audit(state, "new_char", False, nc_name, "已有同名角色，不重复登场")
@@ -6267,7 +7275,8 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
                 })
                 flags["content_mutated"] = True
                 flags["gen_count"] += 1
-                moments.append({"kind": "arrival", "name": nc_name})
+                # id 随行: 首次登场的 toast 上给玩家一个当场改名的机会 (Yi: 名字乱)
+                moments.append({"kind": "arrival", "name": nc_name, "id": nc_id})
         # 🕸 NPC↔NPC shifts: the scene moved two characters closer/apart (≤2 a turn,
         # both must be living and present, never the player — engine-enforced)
         for sh in (directed.get("npc_shifts") or [])[:2]:
@@ -6285,6 +7294,16 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
             moments.append({"kind": "identity", "text": idt})
         # 🛠 CRAFT: the player made something with their own materials — every
         # material must be in the pocket; a failed fate roll voids the attempt
+        # ⚡ 主拍自带的建议 chips (提速: 免掉独立小调用)
+        if is_primary and directed.get("suggestions"):
+            flags["dir_suggestions"] = [str(x).strip()[:20]
+                                        for x in directed["suggestions"] if str(x).strip()][:2]
+        # 🐲 生物命中报审 → 引擎按骰面裁决入账 (血阶联动在函数里)
+        _crh = (directed.get("creature_hit") or "").strip()
+        if _crh and not observer:
+            _crev = apply_creature_hit(content, state, _crh, dice)
+            if _crev:
+                moments.append(_crev)
         cr = (directed.get("crafted") or "").strip()
         if cr and dice and dice.get("outcome") in ("fail", "crit_fail"):
             _audit(state, "item.crafted", False, cr.partition("|")[0], "命运判定失败，制作作废")
@@ -6460,34 +7479,199 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
         if not observer:
             g = (directed.get("gained") or "").strip()
             if g:
-                if _inv_add(state, g):
+                # 🎒 申报制铸卡 (P0/P3): 世界首现的新物, 物性+效果随申报一次产出
+                # (item_new「重量|体积|手|材质|可燃|外观|效果段|c|uses」) → minted 卡;
+                # 没申报的走 rule_card 保守默认 (backfilled)。已有档内卡永不覆盖。
+                _decl = (directed.get("new_item") or "").strip()
+                if _decl:
+                    _, _dd = items_mod.decl_from_pipes(_decl)
+                    for _x in items_mod.parse_effects(_dd.get("effects_raw") or "")[1]:
+                        _audit(state, "item.effect", False, _x,
+                               "枚举外或账本未立，夹逼成无效果")
+                    items_mod.ensure_template(state, g, items_mod.card_from_decl(g, _dd))
+                # ⚖️ 判定渗出 (第3题②): 拿得起吗 — 失败叙事点名肇因属性, 不是黑箱
+                _card = items_mod.card_of(state, g)
+                _ok, _why = items_mod.lift_check(_card, _player_strength(state))
+                if not _ok:
+                    _audit(state, "item.gained", False, g, _why)
+                elif _inv_add(state, g):
                     moments.append({"kind": "item", "verb": "gained", "name": g})
                 else:
                     _audit(state, "item.gained", False, g, "已在身上，不重复入包")
             l = (directed.get("lost") or "").strip()
             if l:
-                it = _inv_remove(state, l)
-                if it:
-                    moments.append({"kind": "item", "verb": "lost", "name": it.get("name")})
+                _li = _inv_find(state.get("inventory") or [], l)
+                _lrow = (state.get("inventory") or [])[_li] if _li >= 0 else None
+                _lcard = items_mod.card_of(state, _lrow) if _lrow else {}
+                if (_lrow is not None and _lcard.get("consumable")
+                        and items_mod.live_effects(_lcard)):
+                    # 🧴 lost 封口 (P3 §2.6): 带效果的消耗品报 lost 十有八九是"用掉" —
+                    # 驳回改道 item_used (真丢弃的罕见误伤在 audit 里可见)
+                    _audit(state, "item.lost", False, l,
+                           "消耗走 item_used——lost 只用于遗失/被夺/丢弃")
+                elif _lrow is not None and {k: v for k, v in (_lrow.get("indiv") or {}).items()
+                                            if str(v or "").strip()}:
+                    # 🔥 有籍件 (线索/铭文在身) 不许经 lost 悄悄消失 —
+                    # 销毁走 item_transformed 的毁证显式确认 (P3 §3.4)
+                    _audit(state, "item.lost", False, l,
+                           "此物上系有线索——销毁走 item_transformed 显式确认")
                 else:
-                    _audit(state, "item.lost", False, l, "身上没有这件东西，不能凭空失去")
+                    it = _inv_remove(state, l)
+                    if it:
+                        moments.append({"kind": "item", "verb": "lost", "name": it.get("name")})
+                    else:
+                        _audit(state, "item.lost", False, l, "身上没有这件东西，不能凭空失去")
+                        # 🎒 隔离区喂料: 模型笃定存在却不在册的名字 — 监控指标, 不铸造
+                        items_mod.quarantine(state, l, "judged.lost",
+                                             int((state.get("clock") or {}).get("day", 1) or 1))
             st_ref = (directed.get("stashed") or "").strip()
             if st_ref and state.get("location_id"):   # never remove without a shelf
                 it = _inv_remove(state, st_ref)
                 if not it:
                     _audit(state, "item.stashed", False, st_ref, "身上没有这件东西")
+                    items_mod.quarantine(state, st_ref, "judged.stashed",
+                                         int((state.get("clock") or {}).get("day", 1) or 1))
                 if it:
                     stashes = dict(state.get("stashes") or {})
                     stashes.setdefault(state["location_id"], []).append(it)
                     state["stashes"] = stashes
                     moments.append({"kind": "item", "verb": "stashed", "name": it.get("name")})
+            # 🎒 场景物申报 (实体化 P1): 导演特写的新物件入册 — 从此有籍可查,
+            # 玩家伸手拿它不再是幽灵 (accept_item 的场景源)。每拍≤3, 每地上限内轮换。
+            # 防复活查重 = inventory ∪ stashes ∪ char_items (P3 §5): 已在任何账本里的
+            # 同名物 → 申报按过期幻觉驳回 (收进柜子的灯笼也不许被重报出场)
+            _sp = (directed.get("stage_props") or "").strip()
+            if _sp and state.get("location_id"):
+                for _n in [x.strip(" 。，") for x in _re_split_mats(_sp)][:3]:
+                    if not _n:
+                        continue
+                    if _item_known_anywhere(state, _n):
+                        _audit(state, "prop.staged", False, _n, "已在账本上——重复申报不复活")
+                    elif items_mod.scene_add(state, state["location_id"], _n):
+                        _audit(state, "prop.staged", True, _n)
+            # 🧴 item_used (P3 §2): 使用走报审, 效果引擎落账, 消耗归卡与成败解耦。
+            # 效果孪生拍就地 yield — 点名肇因是不变式, 不靠模型自觉 (实现偏差④)。
+            _used = (directed.get("used") or "").strip()
+            if _used:
+                _day3 = int((state.get("clock") or {}).get("day", 1) or 1)
+                _up = [x.strip() for x in _used.split("|")]
+                _uname = _up[0]
+                _utgt = _up[1] if len(_up) > 1 and _up[1] else "self"
+                _urow = items_mod.find_usable(state, _uname)   # 先用开封的那件
+                if _urow is None:
+                    _audit(state, "item.used", False, _uname, "身上没有此物")
+                    items_mod.quarantine(state, _uname, "judged.used", _day3)
+                else:
+                    _ucard = items_mod.card_of(state, _urow)
+                    _effs = items_mod.live_effects(_ucard)
+                    if not _effs:
+                        _audit(state, "item.used", False, _uname,
+                               "此物无可用之效")   # 驳回但允许正文描写徒劳动作
+                    else:
+                        _texts = [
+                            _apply_item_effect(content, state, _e, _utgt,
+                                               _urow.get("name", _uname), moments)
+                            for _e in _effs]
+                        _spent = items_mod.consume_one_use(state, _urow)
+                        if _spent == "destroyed":
+                            _texts.append(f"（{_urow.get('name', _uname)}用尽了。）")
+                        _audit(state, "item.used", True, f"{_uname}[{_spent}]",
+                               str(_up[2] if len(_up) > 2 else "")[:24])
+                        moments.append({"kind": "item", "verb": "used",
+                                        "name": _urow.get("name", _uname)})
+                        for _t3 in _texts:
+                            if _t3:
+                                yield emit({"type": "description",
+                                            "speaker_name": None, "text": _t3})
+            # 🔥 item_transformed (P3 §3): 一笔原子交换 — 销 n 铸 m 同拍落账,
+            # 不许拆 lost+gained (拆开漏报一半=幽灵)。物理必然, 不过骰。
+            _tr = directed.get("transformed") or {}
+            if isinstance(_tr, dict) and (_tr.get("inputs") or _tr.get("outputs")):
+                _day4 = int((state.get("clock") or {}).get("day", 1) or 1)
+                _ins = [str(x).strip() for x in (_tr.get("inputs") or [])
+                        if str(x).strip()][:3]
+                _outs_raw = [str(x).strip() for x in (_tr.get("outputs") or [])
+                             if str(x).strip()][:3]
+                _rows = state.get("inventory") or []
+                _src, _bad = [], ""
+                for _n in _ins:
+                    _i = _inv_find(_rows, _n)
+                    if _i < 0:
+                        _bad = _n
+                        break
+                    _src.append(_rows[_i])
+                if _bad or not _ins or not _outs_raw:
+                    _audit(state, "item.transformed", False, _bad or "（空单）",
+                           "材料不在身上" if _bad else "投入产出必须一笔报全")
+                    if _bad:
+                        items_mod.quarantine(state, _bad, "judged.transformed", _day4)
+                else:
+                    # 有籍件销毁 = 毁证, 须显式确认 (P3 §3.4 — 世界记得玩家毁证)
+                    _clues = [r for r in _src
+                              if {k: v for k, v in (r.get("indiv") or {}).items()
+                                  if str(v or "").strip()}]
+                    if _clues and not _tr.get("destroys_clues"):
+                        _audit(state, "item.transformed", False,
+                               _clues[0].get("name", ""), "此物上系有线索，销毁须显式确认")
+                    else:
+                        for _r in _clues:
+                            _de = list(state.get("destroyed_evidence") or [])
+                            _de.append({"name": _r.get("name"),
+                                        "indiv": dict(_r.get("indiv") or {}),
+                                        "day": _day4,
+                                        "method": str(_tr.get("method") or "")[:30]})
+                            state["destroyed_evidence"] = _de
+                        # 原子落账: 全验已过, 先销后铸
+                        for _r in _src:
+                            if _r.get("iid"):
+                                _rows2 = list(state.get("inventory") or [])
+                                if _r in _rows2:
+                                    _rows2.remove(_r)
+                                    state["inventory"] = _rows2
+                            else:
+                                items_mod.take_stack(state, _r.get("name", ""), 1)
+                        _made = []
+                        for _o in _outs_raw:
+                            if "|" in _o:   # 内联申报 — 走现有铸卡口, 不新增出生入口
+                                _nm, _dd2 = items_mod.decl_from_pipes(_o, with_name=True)
+                                if not _nm:
+                                    continue
+                                for _x in items_mod.parse_effects(
+                                        _dd2.get("effects_raw") or "")[1]:
+                                    _audit(state, "item.effect", False, _x,
+                                           "枚举外或账本未立，夹逼成无效果")
+                                items_mod.ensure_template(
+                                    state, _nm, items_mod.card_from_decl(_nm, _dd2))
+                                items_mod.add_stack(state, _nm, 1)
+                                _made.append(_nm)
+                            else:
+                                _m = re.match(r"^(.+?)[×xX*](\d+)$", _o)
+                                _nm, _q = ((_m.group(1).strip(), int(_m.group(2)))
+                                           if _m else (_o, 1))
+                                items_mod.add_stack(state, _nm, max(1, min(9, _q)))
+                                _made.append(f"{_nm}×{_q}" if _q > 1 else _nm)
+                        _audit(state, "item.transformed", True,
+                               f"{'、'.join(_ins)}→{'、'.join(_made)}",
+                               str(_tr.get("method") or "")[:24])
+                        moments.append({"kind": "item", "verb": "transformed",
+                                        "name": "、".join(_made)})
+                        yield emit({"type": "description", "speaker_name": None,
+                                    "text": _t(content,
+                                               f"（{'、'.join(_ins)}化作了{'、'.join(_made)}。）",
+                                               f"(The {'、'.join(_ins)} became "
+                                               f"{'、'.join(_made)}.)")})
 
 
 def _emit_twin_beats(content, moments, emit, moved, arrival_discoveries,
-                     retrieved, stashed_now, accepted, found_props):
+                     retrieved, stashed_now, accepted, found_props, examined=()):
     """管线 P6 · 确定性旁白: the deterministic twins' narration beats — the move and
-    its arrival discoveries, retrieved/stashed/accepted items, searched evidence —
-    all land BEFORE anyone speaks. First phase physically extracted (刀1)."""
+    its arrival discoveries, retrieved/stashed/accepted/examined items, searched
+    evidence — all land BEFORE anyone speaks. First phase physically extracted (刀1)."""
+    for nm, desc in examined:
+        # 🔍 主动查验 (第3题③): 物性用世界的语言说出来, 不是数字标签
+        yield emit({"type": "description", "speaker_name": None,
+                    "text": _t(content, f"（你掂量着{nm}：{desc}。）",
+                               f"(You look the {nm} over: {desc}.)")})
     if moved:
         yield emit({"type": "description", "speaker_name": None,
                     "text": _t(content, f"（你动身去了{moved.get('name','')}。）",
@@ -6562,6 +7746,8 @@ def run_turn_stream(
     sheet. Extraction into module-level phase functions is staged (刀2+): P6 done."""
     llm = lang_llm(llm or get_llm(), content)
     state = {**default_state(), **(state or {})}
+    # 🎒 懒迁移 (物品实体化 P0): 旧档物品行在被加载的这一刻补籍, 幂等零感知
+    items_mod.migrate_state(state)
     old_act = int(state.get("act", 1))
     # 🌅 日翻页哨兵 (Yi: 每天要给玩家自由活动的时间) — 回合末对账, 翻了天就发自由活动菜单
     _day0 = int((state.get("clock") or {}).get("day", 1) or 1)
@@ -6630,10 +7816,39 @@ def run_turn_stream(
     # ━━━━━━━━━━ 管线 P2 · 确定性孪生（移动/找人/搜证/收纳/取回/受赠） ━━━━━━━━━━
     state["last_audit"] = []   # 📋 fresh audit sheet each turn
 
+    # 🎒 隔离区例行 (P3 §4): 过期清扫 + 满足条件的名字批量补铸转正 (origin=promoted)。
+    # LLM 只在这个点击回合里跑; 补铸失败走规则表兜底不阻塞 (保守默认)。
+    items_mod.quarantine_sweep(state, int((state.get("clock") or {}).get("day", 1) or 1))
+    _promo = items_mod.promotable(state)[:4]
+    if _promo and (state.get("mode") or "character") != "god" and channel != "think":
+        _qcards: dict = {}
+        try:
+            _qout = llm.generate({"mint_item_cards": True, "names": _promo,
+                                  "world": ((content.get("story") or {}).get("world_long")
+                                            or "")[:200],
+                                  "language": lang_of(content)}) or {}
+            for _c in (_qout.get("cards") or []):
+                if isinstance(_c, dict) and _c.get("name"):
+                    _qcards[items_mod._norm(str(_c["name"]))] = _c
+        except Exception:
+            _qcards = {}
+        for _n in _promo:
+            _cd = _qcards.get(items_mod._norm(_n))
+            _card = items_mod.card_from_decl(_n, _cd) if _cd else items_mod.rule_card(_n)
+            _card["origin"] = "promoted"
+            items_mod.ensure_template(state, _n, _card)
+            if state.get("location_id"):   # 入籍位置: 当前场景 (伸手就能拿到的地方)
+                items_mod.scene_add(state, state["location_id"], _n)
+            items_mod.quarantine_remove(state, _n)
+            _audit(state, "quarantine.promoted", True, _n)
+
     # ⏳ 命运不等人: a pending fate loses one grace turn per player turn; at zero the
     # engine resolves it ITSELF (random pick) — the fork cannot be shelved forever.
+    # ⚖️ 默认关 (Yi 2026-07-14: 无点击不推进 — 玩家没点的选择不许系统代点); 要这口
+    # 紧迫感的剧本自己开 tuning.fate_auto_resolve. 关着时岔口一直等, 宽限也不倒数.
     _pc0 = state.get("pending_choice")
-    if isinstance(_pc0, dict) and _pc0.get("kind") == "fate" and (state.get("mode") or "character") != "god":
+    if (tun["fate_auto_resolve"] > 0 and isinstance(_pc0, dict)
+            and _pc0.get("kind") == "fate" and (state.get("mode") or "character") != "god"):
         _pc0["expires"] = int(_pc0.get("expires", 3)) - 1
         if _pc0["expires"] <= 0:
             _opt = random.choice(_pc0.get("options") or [{}])
@@ -6655,6 +7870,9 @@ def run_turn_stream(
         player_move(content, state, player_input, channel)
     if moved:
         _audit(state, "move", True, moved.get("name", ""))
+        _enc = creature_arrival_beat(content, state)   # 🐲 走进了它的领地
+        if _enc:
+            yield ("beat", dedash_beat(_enc))
     arrival_discoveries = discover_on_arrival(content, state) if moved else []
     # 🏖 the player named an OFF-MAP destination in a sandbox (「去后台」, no 后台 yet):
     # surface a generate-and-go confirm chip at final — 想去哪就去哪, even somewhere new
@@ -6845,9 +8063,24 @@ def run_turn_stream(
     #     physical evidence unlocks directly, its story event fires. Deterministic.
     found_props = search_props(content, state, player_input, channel)
     prop_frag_ids = [pf["fragment_id"] for pf in found_props if pf.get("fragment_id")]
+    peek_tick(state)   # 📱🔍 机会稍纵即逝: 窗口每回合倒数
+    carved = carve_creature(content, state, player_input, channel)   # 🐲 剥取素材入包
+    for _cv in carved:
+        yield ("beat", dedash_beat({"type": "description", "speaker_name": None,
+            "text": _t(content, f"（你俯身剥取。{_cv['name']}×{_cv['qty']}，收进了行囊。）",
+                       f"(You carve: {_cv['name']} ×{_cv['qty']}.)")}))
+    peeked = peek_attempt(content, state, player_input, channel, llm)
+    if peeked:
+        if peeked.get("view"):
+            yield ("peek", peeked["view"])   # 📱 P1 手机壳: TA的设备界面
+        for _pb in peeked["beats"]:
+            yield ("beat", dedash_beat(_pb))
+        prop_frag_ids += [f for f in peeked["frag_ids"] if f]
+        early_moments.extend(peeked.get("moments") or [])
     retrieved = retrieve_stash(content, state, player_input, channel)
     stashed_now = stash_items(content, state, player_input, channel)  # 📦 deterministic 收纳
     accepted = accept_item(content, state, player_input, channel, history)  # 🤲 受赠确定性化
+    examined = examine_items(content, state, player_input, channel)  # 🔍 主动查验 (物性渗出)
     for pf in found_props:   # 🎒 a takeable prop goes straight into the pocket
         if pf.get("take"):
             _inv_add(state, pf.get("name", ""), pf.get("detail", ""))
@@ -6886,18 +8119,22 @@ def run_turn_stream(
         # tier + wound/equipment modifiers). A classified action ALWAYS rolls — the
         # model no longer holds a no-roll veto over stunts.
         base = actions_mod.classify(content, state, player_input)
-        rj = llm.generate({"risk_judge": True, "action": player_input,
-                           "place": (current_location(content, state) or {}).get("name") or "",
-                           # ✨ declared powers count as real capability when judging odds
-                           "powers": list(state.get("powers") or []),
-                           "world_facts": (content.get("story") or {}).get("world_facts") or ""}) or {}
-        try:
-            risk = max(0, min(100, int(rj.get("risk", 100))))
-        except (TypeError, ValueError):
-            risk = 100
+        risk = 100
+        if base is None:
+            # 🎲 只有引擎认不出的非常规尝试才请模型判险 (否则奇招永远不掷骰)
+            rj = llm.generate({"risk_judge": True, "action": player_input,
+                               "place": (current_location(content, state) or {}).get("name") or "",
+                               # ✨ declared powers count as real capability when judging odds
+                               "powers": list(state.get("powers") or []),
+                               "world_facts": (content.get("story") or {}).get("world_facts") or ""}) or {}
+            try:
+                risk = max(0, min(100, int(rj.get("risk", 100))))
+            except (TypeError, ValueError):
+                risk = 100
         if base:
-            # the model's opinion adjusts the engine's tier by AT MOST one step
-            final = actions_mod.resolve_dc(base, risk)
+            # ⚡ 引擎独立定档 (提速 2026-07-22): 已分类的动作不再花一次 LLM 调用问意见 —
+            # 模型原本也只能调一档, 为一档每个动作回合多付 ~1.7s 不值 (骰子归引擎)
+            final = actions_mod.resolve_dc(base, None)
             dc = final["dc"]
             # ⚡ 境界碾压 at the dice: cultivation lowers the DC of physical feats — a
             # 斗皇 shrugs off what floors a 斗者. This is the mechanical teeth of rank.
@@ -6908,7 +8145,7 @@ def run_turn_stream(
                     f"{cult_view(content, state)['rank']}·{cult_view(content, state)['stage']}{_cm}")
             if state.get("perk") == "instinct":   # 🌱 NG+ 直觉: fate runs warmer
                 dc = max(2, dc - max(1, INSTINCT_BONUS // 5))
-            _sm = sanity_mod.dc_mod(int(state.get("sanity", 999)))
+            _sm = sanity_mod.dc_mod(int(state.get("sanity", 999)), sanity_mod.cfg(content))
             if _sm and sanity_mod.cfg(content):   # 🧠 shaking hands miss
                 dc = min(19, dc + _sm)
             dice = _roll_dc(dc)
@@ -7029,7 +8266,8 @@ def run_turn_stream(
             if _unf:
                 _hdc = 19   # and a mixed roll won't save you either (下面降档)
                 _audit(state, "threat.unfightable", True, _hname, "攻击它等于把自己递过去")
-            _hdc = min(19, _hdc + sanity_mod.dc_mod(int(state.get("sanity", 999))))
+            _hdc = min(19, _hdc + sanity_mod.dc_mod(int(state.get("sanity", 999)),
+                                                     sanity_mod.cfg(content)))
             hdice = _roll_dc(_hdc)
             hdice["contest"] = _hname
             yield ("dice", hdice)
@@ -7277,10 +8515,25 @@ def run_turn_stream(
                           sch, rarity=2)
                 moments.append({"kind": "secret_full", "title": title})
 
+    # 🚪 悬念钩回放 (⚖️ 无点击不推进): /leave 的 beacon 只暂存不落拍, 真正离场归来的
+    # 这一拍才把钩子写词上台. 只是切了下标签页 (没到回归门槛) — 钩子作废, 当没走过.
+    _pp = state.pop("parting_pending", None)
+    if (_pp and returning and (state.get("mode") or "character") != "god"
+            and channel != "think"):
+        for _b in build_parting_hook(content, state, persona, llm, comeback=True):
+            all_beats.append(_b)
+            yield ("beat", _b)
+
     # 🌍 活世界回归播报: 心跳期间落账的后果 (缺席戏/世界邀约), 玩家一回来就摆在面前，
     # 各讲一次 — 你看到的是既成事实，不是过期任务列表
     if (state.get("mode") or "character") != "god" and channel != "think":
         from . import living as _living_mod
+        # ⚖️ 先补演心跳押下的词债 (缺席戏文/带刺短信/周年讯息/邀约) — LLM 只在
+        # 这个点击驱动的回合里跑, 心跳里绝不跑 (无点击不推进)
+        for _pev in _living_mod.settle_pending(content, state, llm):
+            yield ("phone", _pev)
+            moments.append({"kind": "phone", "name": _pev.get("name", ""),
+                            "device": _pev.get("device"), "call": False})
         for _nw in _living_mod.serve_living_news(state):
             _lb = dedash_beat({"type": "description", "speaker_name": None,
                                "text": _t(content, f"（你不在的时候：{_nw}）",
@@ -7531,6 +8784,7 @@ def run_turn_stream(
     # another (接话/附和/反驳) instead of being generated in parallel and talking past each
     # other / echoing the same opener.
     said_this_turn: list[dict[str, str]] = []
+    _music_job: dict[str, Any] = {}   # 🎼 乐师线程句柄 (主拍起卷, 流末收卷)
     responder_hist: dict[str, list[dict[str, str]]] = {}  # each responder's witnessed history
 
     rel_all = state.setdefault("rel", {})
@@ -7540,7 +8794,7 @@ def run_turn_stream(
 
     # ━━━━━━━━━━ 管线 P6 · 确定性旁白（孪生的叙事落地）━━━━━━━━━━
     yield from _emit_twin_beats(content, moments, emit, moved, arrival_discoveries,
-                                retrieved, stashed_now, accepted, found_props)
+                                retrieved, stashed_now, accepted, found_props, examined)
 
     # P7 shared flag sheet: the scalars the settle cascade accumulates across speakers
     flags = {"affinity_delta": affinity_delta, "advance": advance,
@@ -7555,7 +8809,10 @@ def run_turn_stream(
         ctx = gating.build_context(sp_id, frags, state, newly_ids=newly)
         rel_scores = rel_all.get(sp_id) or relationships.new_scores()
         rel_playbook = relationships.playbook_block(
-            relationships.derive_mode(sp, rel_scores, tun), mature=bool(state.get("mature"))) if rel_active else ""
+            relationships.derive_mode(sp, rel_scores, tun), mature=bool(state.get("mature")),
+            char=sp) if rel_active else ""
+        # 💘 追求节拍: 引擎排拍, 这一轮该TA主动就把节拍指令贴进TA的提示词
+        court_dir = court_directive_for(content, state, sp_id) if rel_active else None
         # 💘 防御风格: the style's voice always rides along; after a warm spike (rel-up /
         # golden moment) the ENGINE schedules ONE pullback at the next meeting — the
         # "昨天那么好，今天怎么冷了" hook is a rule, not model whim.
@@ -7597,9 +8854,19 @@ def run_turn_stream(
             "history": sp_hist,
             "memory": sp_mem,   # THIS character's private rolling digest
             "world_facts": (content.get("story") or {}).get("world_facts") or "",
+            # 🌍 世界书 (Yi: 角色不尊重世界观 — world_long 从前只到开场旁白为止)
+            "world": ((content.get("story") or {}).get("world_long") or "")[:600],
+            # 🏛 阵营底色 (权谋地基): 归属 + 玩家在本阵营的风评
+            "faction_block": factions_mod.block(content, state, sp,
+                                                zh=lang_of(content) != "en"),
+            # 🧭 口味罗盘: 只给主答者, 样本够了才有内容 (倾斜不转向)
+            **({"taste_line": taste_mod.prompt_line(state, lang_of(content) != "en")}
+               if idx == 0 else {}),
+            "speaker_faction": (factions_mod.of_char(content, sp) or {}).get("name", ""),
             "style": (content.get("story") or {}).get("style") or "",  # ✍️ 文风
             "fate_log": list(state.get("fate_log") or [])[-3:],  # 📜 命运的既定轨迹
             "roster": _physical_roster(content, state, persona),  # deterministic headcount
+            "creatures_here": creatures_here(content, state),
             "place": place,                       # concrete current-location anchor (if authored)
             "intent_digest": intent_digest,       # 🧩 engine-verified referents of the line
             "eq_style": sp.get("eq_style", ""),   # how THIS character reads/expresses emotion
@@ -7727,6 +8994,11 @@ def run_turn_stream(
             "deaths": dead_names,
             "player_items": ([i.get("name") for i in (state.get("inventory") or [])]
                              if is_primary else []),
+            # 🎒 场景在册物 (物品实体化 P1): 此地被特写过的物件 — 提示词里划清
+            # 在册与布景的界线, 申报过的才许发挥剧情作用
+            "scene_items": ([r.get("name") for r in
+                             items_mod.scene_rows(state, state.get("location_id"))]
+                            if is_primary else []),
             "can_new_char": (is_primary and flags["gen_count"] < tun["max_new_characters"]),
             # what the others have ALREADY said this turn → react, don't echo
             "said_this_turn": list(said_this_turn),
@@ -7811,6 +9083,40 @@ def run_turn_stream(
                 if b.get("type") == "dialogue":
                     b["mood"] = mood
                     break
+        # 🧍 动作位: 帧表里报了明确的肢体动作 → 随最后一句台词下发动作差分
+        # (可见的身体语言, 不吃 mind_reader 门 — 那道门拦的是内心剧透)
+        from .director import pose_of as _pose_of
+        _act = _pose_of(directed.get("self_position"))
+        if _act:
+            for b in reversed(d_beats):
+                if b.get("type") == "dialogue":
+                    b["act"] = _act
+                    break
+        # 🎼 乐师起卷 (Yi 2026-07-22: 高精度观察情绪切 BGM): 主拍一结算就开线程读
+        # 这一回合的实际文字判情绪 — 跑在配角发言/结算的影子里, 不占关键路径;
+        # 流末收卷 (direct 事件本来就在流末发, 音乐不差这一拍)
+        if is_primary and not observer and d_beats and not _music_job.get("thread"):
+            try:
+                import threading as _muth
+
+                from .director import BGM_TRACKS as _BT
+                _mled = state.get("bgm_led") or {}
+                _mtxt = (f"玩家：{player_input}\n" + "\n".join(
+                    f"{b.get('speaker_name') or '旁白'}：{b.get('text', '')}"
+                    for b in d_beats if b.get("text")))[:1200]
+                _music_job["box"] = {}
+                _music_job["thread"] = _muth.Thread(
+                    target=_music_worker, daemon=True,
+                    args=(llm, {"music_judge": True, "text": _mtxt,
+                                "context": f"地点：{(current_location(content, state) or {}).get('name', '')}",
+                                "current": str(_mled.get("track") or ""),
+                                "held": int(_mled.get("held") or 0),
+                                "menu": [{"key": k, "tags": sorted(v["tags"]), "energy": v["energy"]}
+                                         for k, v in _BT.items()]},
+                          _music_job["box"]))
+                _music_job["thread"].start()
+            except Exception:
+                _music_job.pop("thread", None)
         for b in d_beats:
             said_this_turn.append({
                 "speaker": b.get("speaker_name") or "旁白",
@@ -7824,6 +9130,10 @@ def run_turn_stream(
                                     moments, rel_deltas, rel_all, rel_active,
                                     said_this_turn, dead_names, emergent_ids,
                                     emit, llm, flags)
+        # ⚡ 建议提前上桌 (Yi: 总是慢半拍): 主拍一结算就推给前端, 不等全回合收尾
+        # (配角发言/辅助结算还在后面跑); final 里的权威版随后照旧覆盖
+        if is_primary and flags.get("dir_suggestions"):
+            yield ("sugg", ensure_three_suggestions(flags["dir_suggestions"], [], content))
         # WHO ELSE speaks this turn: the primary judged who'd naturally chime in
         # (varies 0~2 by context/personality — not everyone, not a fixed order);
         # characters named by the player or whose secret was probed always get to
@@ -7975,6 +9285,7 @@ def run_turn_stream(
             "world_facts": (content.get("story") or {}).get("world_facts") or "",
             "style": (content.get("story") or {}).get("style") or "",  # ✍️ 文风
             "roster": _physical_roster(content, state, persona),
+            "creatures_here": creatures_here(content, state),
             "place": place,
             "knowledge": (observe_target or {}).get("knowledge", "") if observe_target else "",
             "mature": bool(state.get("mature")),
@@ -8070,6 +9381,14 @@ def run_turn_stream(
                      for a in (content.get("story") or {}).get("acts", []) or []
                      for e in a.get("events", []) or []}
         for _eid in sorted(_new_evs):
+            _pcid_ev = (_ev_by_id.get(_eid) or {}).get("peek_cid")
+            if _pcid_ev:
+                # 📱🔍 作者写死的机会窗口: 事件落地, 设备就搁在那儿
+                peek_open_window(state, _pcid_ev)
+                _pc_ev = _char_by_id(content, _pcid_ev)
+                if _pc_ev:
+                    moments.append({"kind": "peek_window", "name": _pc_ev.get("name"),
+                                    "device": phone_device(content)})
             for _kid in (_ev_by_id.get(_eid) or {}).get("kills_character_ids") or []:
                 _kc = _char_by_id(content, _kid)
                 if _kc and _kid not in _dead_ids(state) and _kid != pcid:
@@ -8466,14 +9785,26 @@ def run_turn_stream(
     if beat_log is not None:
         # per-character: each responder folds THEIR OWN witnessed history into THEIR digest
         # (isolation holds long-term). Only present responders this turn need updating.
-        for cid, ch in responder_hist.items():
-            _update_memory_for(state, cid, ch, llm)
+        _folds = list(responder_hist.items())
+        if len(_folds) > 1:
+            # ⚡ 各角色的记忆互相独立 — 并行折叠 (串行时多人回合一人 1.7s 全排队)
+            import threading as _mth
+            _mts = [_mth.Thread(target=_update_memory_for, args=(state, cid, ch, llm))
+                    for cid, ch in _folds]
+            for t in _mts:
+                t.start()
+            for t in _mts:
+                t.join()
+        elif _folds:
+            _update_memory_for(state, _folds[0][0], _folds[0][1], llm)
     else:
         _update_memory(state, history, llm)  # legacy/global (tests, opening)
 
     # 7. immersive scene (background / mood / sfx) from this turn's text
     # 🎣 pending environmental takes: prose ratified → booked into the pocket
     settle_pending_takes(state, all_beats)
+    # 🎒 隔离区提及计数 (P3 §4.1): 正文再次点到在押名字 → hits+1 (提及≥2 可转正)
+    items_mod.note_mentions(state, " ".join((b.get("text") or "") for b in all_beats))
     # 🧭 文实合一兜底: 旁白把人写到了别的已知地点而账本没动 → 确定性收账
     if not observer and settle_prose_arrival(content, state, all_beats, _loc0,
                                              sp_id=state.get("last_speaker_id")):
@@ -8509,27 +9840,60 @@ def run_turn_stream(
             move_request = {"to": dest["id"], "to_name": dest.get("name"),
                             "by_id": primary_id, "by_name": primary_name_for_invite}
         elif not dest and primary_invite.strip():
-            # a place that ISN'T on the authored map — an emergent destination. Offer to
-            # GENERATE it on accept (still gated behind the player's confirmation).
-            move_request = {"to": None, "to_name": primary_invite.strip(), "generate": True,
-                            "by_id": primary_id, "by_name": primary_name_for_invite}
+            near = near_location(content, primary_invite)
+            if near and near.get("id") != cur_id \
+                    and location_available(content, state, near) \
+                    and (not exits or near.get("name") in exits or near.get("id") in exits):
+                # 🧭 近似命中改道: 别造重复地点 — 确认条指真名, 不对玩家自然会拒绝
+                move_request = {"to": near["id"], "to_name": near.get("name"),
+                                "by_id": primary_id, "by_name": primary_name_for_invite}
+            elif not near:
+                # 📍 提及即立档 (Yi: 玩家不去也该先生成): 地点当场铸进世界 (不落脚),
+                # 确认条变普通去处 — 拒绝了它也在地图上, 想去随时去
+                try:
+                    _mint = generate_and_move(content, state, primary_invite.strip(),
+                                              llm=llm, move=False)
+                except ValueError:
+                    _mint = None
+                if _mint and _mint.get("id"):
+                    flags["content_mutated"] = True
+                    content_mutated = True   # 局部快照在 9238 已定格, 这里要直写
+                    _audit(state, "place.mint", True, _mint.get("name", ""), "听说的去处已立档")
+                    move_request = {"to": _mint["id"], "to_name": _mint.get("name"),
+                                    "by_id": primary_id, "by_name": primary_name_for_invite,
+                                    "minted": True}
+            # near exists but locked/unconnected → no chip: 不造垃圾, 也不带人去不可达处
     if move_request is None and emergent_dest and not observer \
             and not resolve_location(content, emergent_dest):
         # the PLAYER named the off-map place themselves — same chip, no inviter.
         # (If the director's moved_to already generated it this turn, we're there; skip.)
-        move_request = {"to": None, "to_name": emergent_dest, "generate": True,
-                        "by_id": None, "by_name": None, "self_go": True}
+        _near2 = near_location(content, emergent_dest)
+        _cur2 = (location or {}).get("id")
+        _exits2 = (location or {}).get("exits") or []
+        if _near2 and _near2.get("id") != _cur2 \
+                and location_available(content, state, _near2) \
+                and (not _exits2 or _near2.get("name") in _exits2 or _near2.get("id") in _exits2):
+            move_request = {"to": _near2["id"], "to_name": _near2.get("name"),
+                            "by_id": None, "by_name": None, "self_go": True}
+        elif not _near2:
+            try:
+                _mint2 = generate_and_move(content, state, emergent_dest, llm=llm, move=False)
+            except ValueError:
+                _mint2 = None
+            if _mint2 and _mint2.get("id"):
+                flags["content_mutated"] = True
+                content_mutated = True
+                _audit(state, "place.mint", True, _mint2.get("name", ""), "你说起的去处已立档")
+                move_request = {"to": _mint2["id"], "to_name": _mint2.get("name"),
+                                "by_id": None, "by_name": None, "self_go": True,
+                                "minted": True}
 
-    # suggestions steer toward what's close to unlocking for the primary speaker
-    sugg_context = gating.build_context(primary_id, frags, state, newly_ids=newly) if primary else {}
-    # context-aware "what could I do next" hints: ask the model to ground 3 hints in what JUST
-    # happened + the current situation; fall back to the deterministic template if it can't.
+    # 💡 建议单一来源 (Yi 2026-07-20 重做): 导演随主拍写的两条, 不够垫底句补齐。
+    # 旧的独立小调用/门控模板层已删 — 少一层逻辑, 少一次调用, 一个声音。
     suggestions = []
     if not (fired and fired.get("terminal")):
         suggestions = ensure_three_suggestions(
-            _smart_suggestions(llm, all_beats, player_input, primary, content, state,
-                               location, needed_topics, observer),
-            build_suggestions(sugg_context, content), content)
+            [s for s in (flags.get("dir_suggestions") or []) if s][:2], [], content)
 
     # ⚖️ 命运抉择: every N turns (tuning key_choice_every, 0=off) the story throws a
     # high-authority fork generated from the LIVE scene. Options are engine-verified and
@@ -8589,9 +9953,26 @@ def run_turn_stream(
     state["_last_text"] = " ".join((b.get("text") or "") for b in all_beats)[:1600]
 
     # 建议随档持久化: 重开 App 恢复存档时, 上一轮的下一步 chips 原样还在 (竖屏 App 常驻件)
+    # 🧭 口味罗盘 (Yi: 了解玩家喜好非常重要): 引擎已知的硬信号记账, 零调用;
+    # 玩家点了上一轮的建议 chips = 亲手投票, 当回合命中加倍
+    if not observer:
+        _hits = []
+        if provisional_asks or taste_mod.curious(player_input):
+            _hits.append("探查")
+        if dice is not None:
+            _hits.append("冒险")
+        if move_request is not None or state.get("location_id") != _loc0:
+            _hits.append("探索")
+        if any(int((d or {}).get("romance", 0) or 0) > 0 for d in rel_deltas.values()):
+            _hits.append("心动")
+        if not _hits and channel == "say":
+            _hits.append("闲话")
+        _clicked = (player_input or "").strip() in {str(s) for s in
+                                                    (state.get("suggestions") or [])}
+        taste_mod.note(state, _hits, clicked=_clicked)
     suggestions = set_suggestions(state, suggestions, content)
 
-    yield ("final", {
+    _final_payload = {
         "state": state,
         "newly_unlocked": newly,
         # only suppress suggestions on a terminal (death) ending; milestones keep playing
@@ -8605,6 +9986,8 @@ def run_turn_stream(
         "cast": cast_for(content, state["act"], exclude_id=pcid if mode == "character" else None,
                          state=state),
         "here": scene_cast(content, state, exclude_id=pcid if mode == "character" else None),
+        "beasts": creatures_here(content, state, mark=False),   # 🐲 台上要站巨兽
+        "factions": factions_mod.view(content, state),   # 🏛 玩家的江湖名声
         "following": list(state.get("following") or []),
         "goal": state["goal"],
         "progress": progress,  # {items:[{label,done}], done, total} — the clue checklist
@@ -8630,8 +10013,20 @@ def run_turn_stream(
         # from moments — the debuggable "what the engine decided and why" sheet
         "cultivation": cult_view(content, state),  # ⚡ rank + bottleneck progress (or None)
         "audit": _finish_audit(state, moments),
-    })
+        "music": None,   # 🎼 乐师判词 post-final 收卷后回填 (router 流末才读 final)
+    }
+    yield ("final", _final_payload)
 
+    # 🎼 乐师收卷 (post-final): 主拍时起的判官线程此刻多半早已回卷 — join≈0;
+    # 万一没回, 最多等 6s (音乐迟到一拍不伤, 抢戏才伤)。router 与 run_turn 包装器
+    # 都在流耗尽后才读 final 引用, 这里的回填照样落地。
+    if _music_job.get("thread") is not None:
+        try:
+            _music_job["thread"].join(timeout=6.0)
+            _final_payload["music"] = settle_music(
+                state, (_music_job.get("box") or {}).get("out"))
+        except Exception:
+            pass
     # 🎥 场记 (post-final): re-derives every frame from THIS turn's prose. Runs after the
     # final event so the player never waits on it; the router persists state at stream
     # end, so the bookings still land in this turn's save.

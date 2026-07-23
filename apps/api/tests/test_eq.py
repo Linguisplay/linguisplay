@@ -68,6 +68,8 @@ def test_group_speakers_see_what_others_said_this_turn():
 
     class GroupLLM:
         def generate(self, prompt):
+            if prompt.get("music_judge"):
+                return {}   # 🎼 乐师是并行旁路, 不进对话记录
             if prompt.get("intro") or prompt.get("observe"):
                 return {"beats": [{"type": "description", "speaker_name": None, "text": "x"}],
                         "affinity_delta": 0, "advance_act": False, "ending": None}

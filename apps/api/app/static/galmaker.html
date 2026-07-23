@@ -30,8 +30,9 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>🎀 Galgame 生成器 <a href="/gal" style="font-size:14px;font-weight:400;margin-left:10px">📚 我的书架</a></h1>
-  <div class="muted">贴进一个故事，我来做成一部手机 galgame：识别角色与场景、绘制立绘与背景、编成可点击的剧本。beta 期每人 1 本。</div>
+  <h1>🪄 AI 剧本生成器 <a href="/gal" style="font-size:14px;font-weight:400;margin-left:10px">📚 我的书架</a>
+    <a href="/studio" style="font-size:14px;font-weight:400;margin-left:6px">🛠 剧本工坊</a></h1>
+  <div class="muted">贴一个故事或一个想法，AI 帮你起草：可以直接建成一部可玩的 galgame（识别角色、绘制立绘、编成可点剧本），也可以起草成引擎本草稿再进工坊精修（秘密门控、自由行动的真互动）。</div>
 
   <div class="card" id="form">
     <label>创作方式</label>
@@ -40,6 +41,13 @@
       <button class="ghost" id="tabB" onclick="setMode('expand')">💡 我有想法</button>
       <button class="ghost" id="tabC" onclick="setMode('survey')">🎲 帮我想一个</button>
     </div>
+    <label>做成什么</label>
+    <div style="display:flex;gap:8px;margin-bottom:4px">
+      <button class="ghost" id="outGal" onclick="setOut('gal')">🎀 Galgame 成品本</button>
+      <button class="ghost" id="outEngine" onclick="setOut('engine')">🧩 引擎本草稿</button>
+    </div>
+    <p class="muted" id="outHint" style="margin:2px 0 8px;font-size:12.5px">
+      成品本：AI 全自动出可玩的选项式本子。引擎本：AI 起草角色/三幕/秘密，进工坊精修后可玩真互动（秘密门控、自由行动）。</p>
     <label>作品标题</label>
     <input id="title" maxlength="24" placeholder="给你的 galgame 起个名字">
     <div id="paneA">
@@ -67,6 +75,7 @@
         <div id="outlineList"></div>
       </div>
     </div>
+    <div id="galOnly">
     <label>画风</label>
     <select id="style">
       <option value="">默认（电影质感写实）</option>
@@ -89,6 +98,7 @@
     <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
       <input type="checkbox" id="mature" style="width:auto"> 🔞 含成人内容（18+；成人片段以背景+文字呈现，不出立绘）
     </label>
+    </div>
     <button id="go" onclick="build()">开始建造</button>
     <div id="prog" class="muted" style="display:none"></div>
   </div>
@@ -134,8 +144,36 @@ async function genOutline() {
     $id("outlineBox").style.display = "";
   } catch (e) { alert("⚠️ " + e.message); }
 }
+// ✍️ 成品类型 (创作 UX 首期 A): gal 全自动成品 vs 引擎本草稿→工坊精修
+let OUT = "gal";
+function setOut(o){
+  OUT = o;
+  document.getElementById("outGal").style.borderColor = o==="gal" ? "#8ea2ff" : "";
+  document.getElementById("outEngine").style.borderColor = o==="engine" ? "#8ea2ff" : "";
+  // 引擎本用不上 gal 专属项 (画风/文风/配图/18+) — 藏起来别误导
+  document.getElementById("galOnly").style.display = o==="gal" ? "" : "none";
+  document.getElementById("go").textContent = o==="gal" ? "开始建造" : "开始起草（完成后进工坊精修）";
+}
+setOut("gal");
 async function build() {
   const go = document.getElementById("go");
+  if (OUT === "engine") {   // 🧩 引擎本草稿: 走 /stories/draft_engine, 完成跳工坊
+    const text = MODE === "text" ? $id("src").value.trim() : $id("idea").value.trim();
+    if (text.length < 10) { alert("多给一点素材：想法几句话，或整段原文"); return; }
+    go.disabled = true; go.textContent = "AI 起草中…（角色→三幕→秘密→自检）";
+    try {
+      const jb = await j("/stories/draft_engine", { method: "POST",
+        body: JSON.stringify({ text, title: $id("title").value.trim() }) });
+      const t = setInterval(async () => {
+        try {
+          const r = await j(`/stories/draft_engine/${jb.job}`);
+          if (r.status === "done") { clearInterval(t); location.href = `/studio?story=${r.story_id}`; }
+          else if (r.status === "error") { clearInterval(t); alert("⚠️ " + r.error); go.disabled = false; go.textContent = "开始建造"; }
+        } catch (e) { clearInterval(t); alert("⚠️ " + e.message); go.disabled = false; go.textContent = "开始建造"; }
+      }, 2500);
+    } catch (e) { alert("⚠️ " + e.message); go.disabled = false; go.textContent = "开始建造"; }
+    return;
+  }
   const body = { title: $id("title").value.trim(),
                  art_style: $id("style").value,
                  style: $id("wstyle").value,

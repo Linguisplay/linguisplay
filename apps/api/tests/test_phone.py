@@ -151,3 +151,30 @@ def test_phone_disabled_story():
     with pytest.raises(ValueError, match="没有这种联系方式"):
         runtime.phone_send(off, st, {"name": "我"}, "b", "喂", llm=PhoneLLM())
     assert runtime.phone_deliveries(off, st, set(), PhoneLLM()) == []
+
+
+def test_phone_reply_sees_recent_scene_witnessed_only():
+    """📱↔🎭 线上线下通气 (玩家实弹: 剧情里刚发生的事, 短信里TA像没事人):
+    phone_reply 要带上TA亲历的最近正文; 没见证的拍绝不许喂 (信息不开天眼)。"""
+    st = runtime.default_state()
+    st["contact_ids"] = ["b"]
+    st["met_ids"] = ["b"]
+    beat_log = [
+        {"author": "engine", "type": "dialogue", "speaker_name": "乙",
+         "text": "巷口那批货今晚就到。", "present_ids": ["b"]},
+        {"author": "player", "type": "dialogue", "speaker_name": None,
+         "text": "我帮你望风。", "present_ids": ["b"]},
+        {"author": "engine", "type": "dialogue", "speaker_name": "甲",
+         "text": "这句乙不在场，不许进乙的脑子。", "present_ids": ["a"]},
+    ]
+    llm = PhoneLLM()
+    runtime.phone_send(STORY, st, {"name": "我"}, "b", "今晚还去吗", llm=llm, beat_log=beat_log)
+    p = next(x for x in llm.prompts if x.get("phone_reply"))
+    joined = "\n".join(p.get("recent_scene") or [])
+    assert "今晚就到" in joined and "望风" in joined
+    assert "不许进乙的脑子" not in joined          # 未见证的拍不进TA的短信脑
+    # 不带 beat_log (老调用) 不炸、字段为空
+    llm2 = PhoneLLM()
+    runtime.phone_send(STORY, st, {"name": "我"}, "b", "在吗", llm=llm2)
+    p2 = next(x for x in llm2.prompts if x.get("phone_reply"))
+    assert not p2.get("recent_scene")

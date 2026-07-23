@@ -6,13 +6,15 @@ Yi 的产品法条 (2026-07-11): 世界有自己的钟, 角色有自己的记性
 
 每次心跳 (服务端定时器驱动, per-run 可调, 默认每现实日一次):
   ① 游戏内时钟前进一天 — 挂在钟上的一切 (约定/差事/作息) 真的「到点」
-  ② 缺席因果: 玩家没赴的约, 引擎写下「没有你的那场戏」并真落账 —
-     关系掉分、关系大事记、TA 手机里那条带刺的消息、living_news 回归播报
-  ③ 世界心跳事件: 从最暖的关系里挑一人, 生成一条新的带时限邀约
-     (走 make_promise 正账 + 角色亲笔的邀约短信) — 世界会主动提出, 不只回应
+  ② 缺席因果: 玩家没赴的约当场落账 (状态翻转 + 关系掉分, 纯数学) —
+     戏文与那条带刺的消息押成词债, 回归时才写
+  ③ 世界心跳事件: 从最暖的关系里挑一人 (确定性选角), 邀约本体押成词债
 
-引擎法度照旧: 触发全部确定性, 模型只负责写词; 每样都有确定性兜底;
-心跳不产 run beats (没有观众的戏不上台), 后果经 serve_living_news 回归时播报.
+⚖️ 无点击不推进 (Yi 2026-07-14 定): 心跳只攒不演 — 不产 run beats (没有观众的
+戏不上台), 也不跑 LLM 不发短信. 心跳期间只做确定性状态数学 + 把「该演的」押进
+living_news 的 pend 字段; 玩家亲手点开的下一回合由 settle_pending 一次补齐
+(写缺席戏文/带刺短信/周年讯息/新邀约并送进小手机), 再经 serve_living_news 播报.
+引擎法度照旧: 触发全部确定性, 模型只负责写词; 每样都有确定性兜底.
 """
 from __future__ import annotations
 
@@ -20,6 +22,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from . import profile as profile_mod
+from . import taste as taste_mod
 from . import relationships
 from . import runtime
 from .llm import LLM
@@ -91,10 +94,9 @@ def _absent_scene(content, state, char, pr, llm: LLM) -> str:
                    f"一个人把（{pr.get('what','')}）的位置坐冷了。")
 
 
-def _heartbeat_event(content, state, llm: LLM) -> dict[str, Any] | None:
-    """③ 世界主动提出: pick the warmest promise-free character (deterministic),
-    let the model write the intent + the invite; book it through make_promise
-    (all its refusals — slate full, bad hour, 作息 away — stand)."""
+def _pick_invite_char(content, state) -> dict[str, Any] | None:
+    """③ 世界主动提出的选角 (确定性, 心跳时跑): pick the warmest promise-free,
+    contactable character. The invite itself is a word-debt — written at settle."""
     tun = runtime.tuning_for(content)
     if tun["turns_per_slot"] <= 0 or not runtime.phone_enabled(content):
         return None
@@ -110,7 +112,20 @@ def _heartbeat_event(content, state, llm: LLM) -> dict[str, Any] | None:
     if not cands:
         return None
     cands.sort(key=lambda c: -_warmth(state, c.get("id")))
-    char = cands[0]
+    return cands[0]
+
+
+def _write_invite(content, state, char, llm: LLM) -> dict[str, Any] | None:
+    """③ 邀约补演 (settle 时跑, LLM 在此): the model writes the intent + the invite;
+    book it through make_promise (all its refusals — slate full, bad hour, 作息
+    away — stand). Re-checks the staged pick: the world moved since the heartbeat."""
+    if (not char or not runtime.phone_enabled(content)
+            or char.get("id") in runtime._dead_ids(state)
+            or not runtime.has_contact(state, char.get("id"))
+            or any(p.get("char_id") == char.get("id") and p.get("status") == "open"
+                   for p in state.get("promises") or [])):
+        return None
+    tun = runtime.tuning_for(content)
     scores = (state.get("rel") or {}).get(char.get("id")) or relationships.new_scores()
     try:
         out = llm.generate({"living_event": True,
@@ -121,6 +136,7 @@ def _heartbeat_event(content, state, llm: LLM) -> dict[str, Any] | None:
                             # 🪞 P2 个性化: TA 按自己对你的了解来约, 不发通用邀请
                             "impression": profile_mod.impression_of(state, char.get("id")),
                             "player_facts": profile_mod.facts_of(state)[:4],
+                            "player_taste": taste_mod.top(state),
                             "worldview": ((content.get("story") or {}).get("world_long")
                                           or "")[:400],
                             "recent_news": [n.get("text") for n in
@@ -143,16 +159,16 @@ def _heartbeat_event(content, state, llm: LLM) -> dict[str, Any] | None:
     invite = runtime.dedash(str(out.get("invite") or "").strip())[:120] \
         or f"{when}有空吗？{what}。你来。"
     now_label = (runtime.clock_view(content, state) or {}).get("label", "")
-    msgs = [invite]
-    runtime.phone_push(content, state, char, msgs, now_label)
+    ev = runtime.phone_push(content, state, char, [invite], now_label)
     return {"char_id": char.get("id"), "name": char.get("name"),
-            "what": what, "when": when, "invite": invite}
+            "what": what, "when": when, "invite": invite, "_phone": ev}
 
 
 def world_tick(content: dict[str, Any], state: dict[str, Any],
-               llm: LLM, now: datetime | None = None) -> dict[str, Any]:
+               now: datetime | None = None) -> dict[str, Any]:
     """One heartbeat. Mutates state; returns a summary for the caller/audit.
-    Safe to call on any run — refuses ended runs and clock-off stories."""
+    Safe to call on any run — refuses ended runs and clock-off stories.
+    ⚖️ 无点击不推进: 签名里没有 llm — 心跳在结构上就写不了词, 只做状态数学 + 押词债."""
     out: dict[str, Any] = {"advanced": False, "absent": [], "event": None}
     tun = runtime.tuning_for(content)
     if state.get("ended") or tun["turns_per_slot"] <= 0:
@@ -173,7 +189,6 @@ def world_tick(content: dict[str, Any], state: dict[str, Any],
     now_idx = runtime._time_index(state)
     news = list(state.get("living_news") or [])
     day = int((state.get("clock") or {}).get("day", 1) or 1)
-    now_label = (runtime.clock_view(content, state) or {}).get("label", "")
     for pr in (state.get("promises") or []):
         if len(out["absent"]) >= TICK_ABSENT_CAP:
             break
@@ -184,25 +199,21 @@ def world_tick(content: dict[str, Any], state: dict[str, Any],
         if not char:
             continue
         cid = char.get("id")
-        # the sting (same ledger the in-play爽约 uses)
+        # the sting (same ledger the in-play爽约 uses) — 纯数学, 心跳当场落账
         old_sc = (state.get("rel") or {}).get(cid) or relationships.new_scores()
         state.setdefault("rel", {})[cid] = relationships.apply_deltas(
             old_sc, -tun["promise_break_cost"],
             -tun["promise_break_cost"] if pr.get("romantic") else 0, tun)
-        # the scene, committed as world truth
-        scene = _absent_scene(content, state, char, pr, llm)
-        runtime.rel_log(state, cid, int(state.get("act", 1) or 1), "promise",
-                        f"你没来。{scene}")
+        # ⚖️ 只攒不演: 戏文与带刺短信押成词债 (pend), settle_pending 回归补写 —
+        # 心跳里一个 LLM 都不跑, 一条短信都不发 (无点击不推进)
+        text_due = runtime.phone_enabled(content) and not pr.get("texted")
+        if text_due:
+            pr["texted"] = True   # staged: 这条短信 settle 时必补, 不重复押
         news.append({"day": day, "kind": "absent", "char_id": cid,
-                     "name": char.get("name") or "", "text": scene, "told": False})
-        # the hurt text lands in the 小手机 NOW, not when the player next shows up
-        if runtime.phone_enabled(content) and not pr.get("texted"):
-            pr["texted"] = True
-            msgs = runtime.compose_message(
-                content, state, char, "stood_up",
-                f"TA爽约了你们约好的（{pr.get('what','')}），你心里不好受，忍不住捎话给TA",
-                "我等了你很久。你没来。", llm)
-            runtime.phone_push(content, state, char, msgs, now_label)
+                     "name": char.get("name") or "", "text": "", "told": False,
+                     "pend": {"what": pr.get("what") or "", "slot": pr.get("slot") or "",
+                              "day": pr.get("day"), "romantic": bool(pr.get("romantic")),
+                              "text_due": text_due}})
         out["absent"].append({"char_id": cid, "name": char.get("name"),
                               "what": pr.get("what")})
 
@@ -223,27 +234,24 @@ def world_tick(content: dict[str, Any], state: dict[str, Any],
         if not char or cid in dead or _warmth(state, cid) < 35:
             continue
         months = span // 30
-        if runtime.phone_enabled(content):
-            msgs = runtime.compose_message(
-                content, state, char, "anniversary",
-                f"今天是你们认识满{months}个月的日子，TA记得，想对玩家说点什么"
-                "（贴人设，可以提一件你们共同经历的小事，别煽情过头）",
-                f"今天，是我们认识满{months}个月的日子。我记得。", llm)
-            runtime.phone_push(content, state, char, msgs, now_label)
+        # ⚖️ 只攒不演: 那条亲笔讯息押成词债, settle 时才写才送 (播报文案本就是确定性的)
         news.append({"day": day, "kind": "anniv", "char_id": cid,
                      "name": char.get("name") or "",
                      "text": f"{char.get('name', '')}记得：今天是你们认识满{months}个月的日子。",
-                     "told": False})
+                     "told": False,
+                     "pend": {"months": months,
+                              "msg_due": bool(runtime.phone_enabled(content))}})
         out["anniv"] = {"char_id": cid, "name": char.get("name"), "months": months}
         break
 
-    # ③ the world proposes something new (one per heartbeat, engine-picked, model-worded)
-    out["event"] = None if out["anniv"] else _heartbeat_event(content, state, llm)
-    if out["event"]:
-        news.append({"day": day, "kind": "invite", "char_id": out["event"]["char_id"],
-                     "name": out["event"]["name"],
-                     "text": f"{out['event']['name']}约了你{out['event']['when']}："
-                             f"{out['event']['what']}。", "told": False})
+    # ③ the world proposes something new (one per heartbeat, engine-picked at tick;
+    #    the invite itself is model-worded at settle — 只攒不演)
+    ev_char = None if out["anniv"] else _pick_invite_char(content, state)
+    if ev_char is not None:
+        out["event"] = {"char_id": ev_char.get("id"), "name": ev_char.get("name") or ""}
+        news.append({"day": day, "kind": "invite", "char_id": ev_char.get("id"),
+                     "name": ev_char.get("name") or "", "text": "", "told": False,
+                     "pend": {"invite_due": True}})
 
     state["living_news"] = news[-NEWS_CAP:]
     lc = cfg(state)
@@ -254,12 +262,72 @@ def world_tick(content: dict[str, Any], state: dict[str, Any],
     return out
 
 
+SETTLE_CAP = 4   # 一次回归至多补演几件押后的词债 (其余留给下一拍, 别把回归变成放映厅)
+
+
+def settle_pending(content: dict[str, Any], state: dict[str, Any],
+                   llm: LLM) -> list[dict[str, Any]]:
+    """⚖️ 回归结算 (无点击不推进的另一半): 心跳押下的词债, 在玩家亲手点开的回合里
+    一次补齐 — 写缺席戏文入关系大事记、补带刺短信/周年讯息、把邀约写词并 make_promise
+    正账落定. LLM 只在这里跑. 返回 phone UI 事件列表 (调用方逐个 yield ("phone", ev))."""
+    events: list[dict[str, Any]] = []
+    done = 0
+    now_label = (runtime.clock_view(content, state) or {}).get("label", "")
+    for nw in state.get("living_news") or []:
+        pend = nw.get("pend")
+        if not pend or nw.get("told"):
+            continue
+        if done >= SETTLE_CAP:
+            break
+        char = runtime._char_by_id(content, nw.get("char_id"))
+        if not char:   # 角色没了 (回溯/改稿) — 这笔词债作废
+            nw.pop("pend", None)
+            nw["told"] = True
+            continue
+        cid = char.get("id")
+        kind = nw.get("kind")
+        if kind == "absent":
+            pr = {"what": pend.get("what"), "slot": pend.get("slot"),
+                  "day": pend.get("day"), "romantic": pend.get("romantic")}
+            scene = _absent_scene(content, state, char, pr, llm)
+            nw["text"] = scene
+            runtime.rel_log(state, cid, int(state.get("act", 1) or 1), "promise",
+                            f"你没来。{scene}")
+            if pend.get("text_due") and runtime.phone_enabled(content):
+                msgs = runtime.compose_message(
+                    content, state, char, "stood_up",
+                    f"TA爽约了你们约好的（{pend.get('what', '')}），你心里不好受，忍不住捎话给TA",
+                    "我等了你很久。你没来。", llm)
+                events.append(runtime.phone_push(content, state, char, msgs, now_label))
+        elif kind == "anniv":
+            months = int(pend.get("months") or 1)
+            if pend.get("msg_due") and runtime.phone_enabled(content):
+                msgs = runtime.compose_message(
+                    content, state, char, "anniversary",
+                    f"今天是你们认识满{months}个月的日子，TA记得，想对玩家说点什么"
+                    "（贴人设，可以提一件你们共同经历的小事，别煽情过头）",
+                    f"今天，是我们认识满{months}个月的日子。我记得。", llm)
+                events.append(runtime.phone_push(content, state, char, msgs, now_label))
+        elif kind == "invite":
+            ev = _write_invite(content, state, char, llm)
+            if not ev:   # 订不上 (档满/作息/世道变了) — 邀约作废, 不硬凑
+                nw.pop("pend", None)
+                nw["told"] = True
+                continue
+            nw["text"] = f"{ev['name']}约了你{ev['when']}：{ev['what']}。"
+            events.append(ev["_phone"])
+        nw.pop("pend", None)
+        done += 1
+    return events
+
+
 def serve_living_news(state: dict[str, Any], cap: int = 3) -> list[str]:
     """Untold heartbeat consequences, marked told — the comeback turn narrates these
-    as beats (你不在的时候…). Separate from world_news's rumor mill on purpose."""
+    as beats (你不在的时候…). Separate from world_news's rumor mill on purpose.
+    带 pend 的词债还没补演 (settle cap 溢出) — 跳过留给下一拍, 不许白丢."""
     out = []
     for nw in state.get("living_news") or []:
-        if nw.get("told"):
+        if nw.get("told") or nw.get("pend"):
             continue
         if len(out) >= cap:
             break

@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import APIRouter, Cookie, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -41,6 +43,7 @@ def _to_story(s: StoryModel) -> Story:
     return Story(
         id=s.id,
         title=s.title,
+        updated_at=str(s.updated_at) if s.updated_at else None,
         language=s.language or "zh",
         cover_url=s.cover_url,
         one_liner=s.one_liner,
@@ -68,6 +71,8 @@ def _to_story(s: StoryModel) -> Story:
         phone=s.phone,
         verdict=s.verdict,
         sandbox=s.sandbox,
+        creatures=s.creatures or [],
+        factions=s.factions or [],
         completion=_completion(s),
     )
 
@@ -144,6 +149,7 @@ def discover(
 
 
 class CharBlobInput(BaseModel):
+    title: Optional[str] = None   # ✍️ draft_engine 用: 作者填了标题就尊重 (AI 不再自作主张)
     text: str = ""
     world: str = ""    # 剧本世界观随行, 解析出的卡贴世界的年代与口吻
     style: str = ""
@@ -217,6 +223,224 @@ def parse_characters_result(job_id: str, user: User = Depends(current_user)):
     if job.get("status") == "error":
         return {"status": "error", "error": job.get("error")}
     return {"status": "done", "characters": job.get("characters") or []}
+
+
+# ── ✍️ 引擎本起草 (创作 UX 首期 A): 想法/全文 → AI 起草引擎本 draft → 工坊精修 ──
+# 铁律 (Yi 2026-07-18 拍板): ①门控只起草 act_min 单维 ②生成→lint→确定性降级闭环,
+# 落地草稿必须「打得通但保守」 ③与 studio 共用 StoryInput/SecretInput 同一套 schema
+# (本路由不维护私有输出格式) ④ai_draft 埋点给质量分层留抓手。
+def _degrade_draft(content: dict, issues: list) -> None:
+    """确定性降级 (不过 LLM): 修不好的门控一律降保守 — gate_deadlock 的碎片
+    act_min 归 1; 悬空引用就地拆除。原地修改 content。"""
+    story = content.get("story") or {}
+    frags = {f.get("id"): f for sec in content.get("secrets") or []
+             for f in sec.get("fragments") or []}
+    for i in issues:
+        code, where = str(i.get("code")), str(i.get("where") or "")
+        if code == "gate_deadlock":
+            for f in frags.values():   # 保守到底: 所有碎片解锁降为第一幕
+                (f.setdefault("unlock", {}))["act_min"] = 1
+        elif code in ("dangling_frag", "dangling_event"):
+            for a in story.get("acts") or []:
+                adv = a.get("advance") or {}
+                adv["required_fragment_ids"] = [x for x in adv.get("required_fragment_ids") or []
+                                                if x in frags]
+                adv["required_event_ids"] = []
+            for e in story.get("endings") or []:
+                cond = e.get("condition") or {}
+                cond["required_fragment_ids"] = [x for x in cond.get("required_fragment_ids") or []
+                                                 if x in frags]
+        elif code == "dangling_exit":
+            names = {l.get("name") for l in story.get("locations") or []}
+            for l in story.get("locations") or []:
+                l["exits"] = [x for x in l.get("exits") or [] if x in names]
+        elif code == "frag_bad_event":
+            for f in frags.values():
+                (f.get("unlock") or {}).pop("trigger_event_ids", None)
+
+
+def _strip_all_gates(content: dict) -> None:
+    """最终保底: 全部门控拆除 — 宁可平铺直叙, 不许一个死锁上架。"""
+    for sec in content.get("secrets") or []:
+        for f in sec.get("fragments") or []:
+            f["unlock"] = {"act_min": 1}
+    for a in (content.get("story") or {}).get("acts") or []:
+        a["advance"] = {"required_fragment_ids": [], "required_event_ids": [],
+                        "affinity_min": 0}
+
+
+@router.post("/draft_engine")
+def draft_engine(body: CharBlobInput, user: User = Depends(current_user)):
+    """✍️ AI 起草引擎本: 立即返回 {job}; 轮询 GET /stories/draft_engine/{job}。
+    完成后返回 story_id, 客户端跳 /studio?story=id 精修。"""
+    import threading
+    import time as _t
+    import uuid as _uuid
+    text = (body.text or "").strip()[:5000]
+    if len(text) < 10:
+        raise HTTPException(400, "多给一点素材：一个想法的几句话，或整段原文")
+    jid = _uuid.uuid4().hex[:12]
+    _PARSE_JOBS[jid] = {"status": "working", "at": _t.time(), "uid": user.id}
+    while len(_PARSE_JOBS) > _PARSE_CAP:
+        _PARSE_JOBS.pop(next(iter(_PARSE_JOBS)), None)
+    uid = user.id
+    utitle = (body.title or "").strip()[:24]   # 作者填了标题就尊重
+
+    def _work():
+        import json as _json
+
+        from ..db import SessionLocal
+        from ..engine import logic as logic_mod
+        from ..engine.llm import get_llm
+        job = _PARSE_JOBS.get(jid)
+        try:
+            llm = get_llm()
+            sk = llm.generate({"engine_skeleton": True, "text": text}) or {}
+            if not (sk.get("title") and sk.get("acts")):
+                raise ValueError("骨架没起出来，换一段更具体的素材试试")
+            cards = _sanitize_cards(llm.generate({"char_from_text": True, "text": text,
+                                                  "world": sk.get("world_long") or ""}) or {})
+            # id 铸造 (服务端确定性), 名字→id 映射供秘密归属
+            chars = []
+            for i, c in enumerate(cards[:5]):
+                chars.append({**c, "id": f"ch_{i+1}", "playable": False,
+                              "schedule": [], "ties": [], "items": c.get("items") or [],
+                              "bio_layers": c.get("bio_layers") or []})
+            by_name = {str(c.get("name") or ""): c["id"] for c in chars}
+            acts = [{"index": i + 1, "title": str(a.get("title") or f"第{i+1}幕")[:16],
+                     "goal": str(a.get("goal") or "")[:60],
+                     "events": [], "advance": {"required_fragment_ids": [],
+                                               "required_event_ids": [], "affinity_min": 0}}
+                    for i, a in enumerate((sk.get("acts") or [])[:4])]
+            locs = [{"id": f"loc_{i+1}", "name": str(l.get("name") or f"地点{i+1}")[:12],
+                     "detail": str(l.get("detail") or "")[:80],
+                     "exits": [str(x) for x in (l.get("exits") or [])],
+                     "unlock": {"act_min": 0, "affinity_min": 0, "required_fragment_ids": []},
+                     "props": []}
+                    for i, l in enumerate((sk.get("locations") or [])[:4])]
+            sec_out = llm.generate({"engine_secrets": True,
+                                    "synopsis": sk.get("synopsis") or "",
+                                    "characters": chars,
+                                    "acts": [a["title"] for a in acts]}) or {}
+            n_acts = max(1, len(acts))
+            secrets, fi = [], 0
+            for si, s in enumerate((sec_out.get("secrets") or [])[:3]):
+                owner = by_name.get(str(s.get("character_name") or "")) \
+                    or (chars[0]["id"] if chars else None)
+                if not owner:
+                    continue
+                frags = []
+                for f in (s.get("fragments") or [])[:2]:
+                    fi += 1
+                    try:   # ⚖️ act_min 夹逼进合法幕数 (Mock 埋了越界靶子)
+                        amin = max(1, min(n_acts, int(f.get("act_min", 1))))
+                    except (TypeError, ValueError):
+                        amin = 1
+                    frags.append({"id": f"frag_d{fi}", "layer": int(f.get("layer", 1) or 1),
+                                  "content": str(f.get("content") or "")[:160],
+                                  "cover": str(f.get("cover") or "")[:80],
+                                  "retrieval_key": str(f.get("retrieval_key") or "")[:20],
+                                  "known_by_character_ids": [owner],
+                                  "unlock": {"act_min": amin}})
+                if frags:
+                    secrets.append({"id": f"sec_d{si+1}", "character_id": owner,
+                                    "title": str(s.get("title") or "秘密")[:20],
+                                    "sensitivity": "medium", "fragments": frags})
+            # 最后一层碎片作为末幕推进与结局条件 (act_min 单维世界里的最保守连线)
+            last_fids = [s["fragments"][-1]["id"] for s in secrets][:1]
+            if last_fids and len(acts) >= 2:
+                acts[-1]["advance"]["required_fragment_ids"] = []
+                acts[-2]["advance"]["required_fragment_ids"] = last_fids
+            endings = []
+            for ei, e in enumerate((sec_out.get("endings") or [])[:2]):
+                endings.append({"id": f"end_d{ei+1}",
+                                # schema 枚举是 true/normal/bad/death — good 映射为 true
+                                "kind": "bad" if str(e.get("kind")) == "bad" else "true",
+                                "title": str(e.get("title") or "结局")[:12],
+                                "trigger": "condition",
+                                "text": str(e.get("text") or "")[:300],
+                                "condition": {"affinity_min": 0, "act_min": n_acts,
+                                              "required_fragment_ids": last_fids,
+                                              "required_flags": {}}})
+            payload = {
+                "title": utitle or str(sk.get("title") or "未命名草稿")[:24],
+                "language": "zh", "visibility": "private",
+                "one_liner": str(sk.get("one_liner") or "")[:40],
+                "synopsis": str(sk.get("synopsis") or "")[:400],
+                "world_long": str(sk.get("world_long") or "")[:600],
+                "world_facts": str(sk.get("world_facts") or "")[:200],
+                "trope_tags": [str(t)[:8] for t in (sk.get("trope_tags") or [])[:4]],
+                "characters": chars, "acts": acts, "locations": locs,
+                "endings": endings,
+                "tuning": {"_origin": "ai_draft"},
+            }
+            # ③ 共用 schema: 起草物必须过 StoryInput/SecretInput 这两道门 —
+            # maker 无私有格式 (实弹: sensitivity 写成数字曾绕过枚举直落库)
+            data = StoryInput(**payload)
+            secrets = [{**SecretInput(**{k: v for k, v in s.items() if k != "id"}).model_dump(),
+                        "id": s.get("id")} for s in secrets]
+            content = {"story": data.model_dump(), "secrets": secrets}
+            # ② 生成→lint→确定性降级 (≤2 轮), 再不干净就拆光门控保底
+            for _round in range(2):
+                errs = [i for i in logic_mod.lint_story(content)
+                        if i.get("severity") == "error"]
+                if not errs:
+                    break
+                _degrade_draft(content, errs)
+            if [i for i in logic_mod.lint_story(content) if i.get("severity") == "error"]:
+                _strip_all_gates(content)
+            # 落库: 与 create_story 同构 (owner + JSON 块), 秘密走 SecretModel
+            db = SessionLocal()
+            try:
+                st = content["story"]
+                st["tuning"]["_draft_size"] = len(_json.dumps(content, ensure_ascii=False))
+                row = StoryModel(
+                    owner_id=uid,
+                    title=st["title"], language=st.get("language") or "zh",
+                    one_liner=st.get("one_liner"), synopsis=st.get("synopsis"),
+                    world_long=st.get("world_long"), world_facts=st.get("world_facts"),
+                    trope_tags=st.get("trope_tags") or [],
+                    visibility="private",
+                    characters=st.get("characters") or [],
+                    acts=st.get("acts") or [], endings=st.get("endings") or [],
+                    locations=st.get("locations") or [], tuning=st.get("tuning") or {},
+                )
+                db.add(row)
+                db.flush()
+                for s in content["secrets"]:
+                    sec = SecretModel(story_id=row.id, character_id=s["character_id"],
+                                      title=s["title"], sensitivity=s.get("sensitivity", 2))
+                    sec.fragments = [FragmentModel(
+                        id=f["id"], layer=f["layer"], content=f["content"],
+                        retrieval_key=f.get("retrieval_key") or "",
+                        known_by_character_ids=f.get("known_by_character_ids") or [],
+                        unlock=f.get("unlock") or {}, cover=f.get("cover") or "")
+                        for f in s["fragments"]]
+                    db.add(sec)
+                db.commit()
+                sid = row.id
+            finally:
+                db.close()
+            if job is not None:
+                job.update({"status": "done", "story_id": sid})
+        except Exception as e:
+            if job is not None:
+                job.update({"status": "error", "error": str(e)[:120] or "起草失败"})
+
+    threading.Thread(target=_work, daemon=True).start()
+    return {"job": jid}
+
+
+@router.get("/draft_engine/{job_id}")
+def draft_engine_result(job_id: str, user: User = Depends(current_user)):
+    job = _PARSE_JOBS.get(job_id)
+    if not job or job.get("uid") != user.id:
+        raise HTTPException(404, "任务不存在或已过期")
+    if job.get("status") == "working":
+        return {"status": "working"}
+    if job.get("status") == "error":
+        return {"status": "error", "error": job.get("error")}
+    return {"status": "done", "story_id": job.get("story_id")}
 
 
 @router.post("", status_code=201, response_model=Story)
@@ -334,7 +558,12 @@ def update_story(
     db: Session = Depends(get_db),
 ):
     s = _own_story(story_id, user, db)
+    # 🔒 乐观锁: 客户端载入时的 updated_at 与库里不一致 = 别处已改过 — 拒绝整本覆盖
+    if body.if_rev is not None and str(s.updated_at or "") != str(body.if_rev):
+        raise HTTPException(409, "这本剧本在别的窗口或设备被改过——先刷新页面拿最新版再改；"
+                                 "直接保存会把那边的改动埋掉。")
     data = body.model_dump(exclude_unset=True)
+    data.pop("if_rev", None)
     if "characters" in data:
         s.characters = [c if isinstance(c, dict) else c.model_dump() for c in data.pop("characters")]
     if "acts" in data:
@@ -361,6 +590,10 @@ def update_story(
         s.phone = data.pop("phone")
     if "verdict" in data:
         s.verdict = data.pop("verdict")
+    if "creatures" in data:
+        s.creatures = data.pop("creatures") or []
+    if "factions" in data:
+        s.factions = data.pop("factions") or []
     for k, v in data.items():
         setattr(s, k, v)
     db.commit()
@@ -377,11 +610,30 @@ def delete_story(story_id: str, user: User = Depends(current_user), db: Session 
 @router.post("/{story_id}/publish", response_model=PublishResult)
 def publish(story_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     s = _own_story(story_id, user, db)
-    new_version = s.version + 1
     snapshot_content = {
         "story": _to_story(s).model_dump(),
         "secrets": [_to_secret(sec).model_dump() for sec in s.secrets],
     }
+    # ✍️ lint 硬门 (创作 UX 首期, 与 AI 起草绑定的安全包): 错误清零才许发布 —
+    # 坏本 (死锁/悬空引用) 不再能一键上架。warn 不拦; 文案人话化 (手写模板)。
+    from ..engine import logic as logic_mod
+    _errs = [i for i in logic_mod.lint_story(snapshot_content)
+             if i.get("severity") == "error"]
+    if _errs:
+        raise HTTPException(422, {
+            "lint_errors": [logic_mod.humanize_issue(i) for i in _errs[:8]],
+            "count": len(_errs)})
+    # ✍️ 质量信号 (与 A 同期埋, Yi 定): AI 起草本的人工编辑痕迹 = 草稿与发布版的
+    # 体量差 — 「起草即发布」的同质本 _edit_ratio≈0, 给公共库推荐排序留抓手
+    _tun = dict(s.tuning or {})
+    if _tun.get("_origin") == "ai_draft" and _tun.get("_draft_size"):
+        import json as _json
+        _now = len(_json.dumps(snapshot_content, ensure_ascii=False))
+        _tun["_edit_ratio"] = round(
+            abs(_now - int(_tun["_draft_size"])) / max(1, int(_tun["_draft_size"])), 3)
+        s.tuning = _tun
+        flag_modified(s, "tuning")
+    new_version = s.version + 1
     snapshot_content["story"]["version"] = new_version
     db.add(
         StorySnapshot(story_id=s.id, version=new_version, content=snapshot_content)
@@ -552,6 +804,62 @@ def _sniff_image(data: bytes) -> str | None:
     if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return "webp"
     return None
+
+
+@router.post("/{story_id}/gen_avatar/{cid}")
+def gen_avatar(story_id: str, cid: str,
+               user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """🎨 工坊里给角色画头像 (创作 UX: 角色卡要有照片): 与运行时补脸同一管线 —
+    同 char_seed 同画风, 以后游戏里生成的立绘/自拍不会换脸。排队后台画, 约十几秒。"""
+    s = _own_story(story_id, user, db)
+    c = next((x for x in (s.characters or []) if x.get("id") == cid), None)
+    if not c:
+        raise HTTPException(404, "这个剧本里没有该角色")
+    from .runs import _AV_DIR, _char_seed, _enqueue_image, _story_art
+    content = {"story": _to_story(s).model_dump()}
+    art, neg = _story_art(content)
+    world = ((s.world_long or "").strip().replace("\n", " "))[:120]
+    bits = "，".join(b for b in (c.get("name"), c.get("role") or "",
+                                 (c.get("persona_text") or "")[:160]) if b)
+    prompt = (f"{art}。人物肖像，胸像特写，正面微侧，目光看向镜头外，"
+              f"柔和的侧光，背景虚化，情绪克制内敛：{bits}。世界背景：{world}")
+    path = _AV_DIR / f"{cid}.jpg"
+    if path.exists():
+        path.unlink()   # 作者主动重画 — 旧脸让位
+    _enqueue_image(prompt, path, "768*768", negative=neg,
+                   seed=_char_seed(content, cid))
+    chars = list(s.characters or [])
+    for x in chars:
+        if x.get("id") == cid:
+            x["avatar_url"] = f"/scene/avatar/{cid}.jpg"
+    s.characters = chars
+    flag_modified(s, "characters")
+    db.commit()
+    return {"queued": True, "url": f"/scene/avatar/{cid}.jpg"}
+
+
+@router.post("/{story_id}/gen_bg/{loc_id}")
+def gen_bg(story_id: str, loc_id: str,
+           user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """🎨 工坊里给地点画背景 (创作 UX: 地点也要有脸): 与运行时补图同一管线同画风 —
+    游戏里这个地点就用这张图。排队后台画, 约十几秒。"""
+    s = _own_story(story_id, user, db)
+    from ..engine.gal import safe_asset_key
+    try:
+        loc_id = safe_asset_key(loc_id)
+    except ValueError:
+        raise HTTPException(400, "非法的地点 id")
+    loc = next((l for l in (s.locations or []) if l.get("id") == loc_id), None)
+    if not loc:
+        raise HTTPException(404, "这个剧本里没有该地点")
+    from .runs import _BG_DIR, _bg_negative, _bg_prompt, _enqueue_image
+    content = {"story": _to_story(s).model_dump()}
+    path = _BG_DIR / f"{loc_id}.jpg"
+    if path.exists():
+        path.unlink()   # 作者主动重画 — 旧图让位
+    _enqueue_image(_bg_prompt(content, loc), path, "1280*720",
+                   negative=_bg_negative(content))
+    return {"queued": True, "url": f"/scene/bg/{loc_id}.jpg"}
 
 
 @router.post("/{story_id}/upload")

@@ -1,5 +1,8 @@
 import copy
+import fcntl
 import json
+import os
+import tempfile
 import time as _time_mod
 from datetime import datetime, timezone
 
@@ -9,16 +12,19 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from .. import metrics
+from ..config import get_settings
 from ..db import SessionLocal, get_db
 from ..deps import current_user
-from ..engine import director, living, runtime
+from ..engine import director, factions as factions_mod, living, runtime
+from ..engine import taste as taste_mod
 from ..engine.llm import get_llm
 from ..models import Beat as BeatModel
 from ..models import Persona as PersonaModel
 from ..models import Run as RunModel
 from ..models import Story as StoryModel
 from ..models import StoryMeta, StorySnapshot, User
-from ..schemas import (Beat, ChooseIn, ConfrontIn, FollowIn, MarketBuyIn, MoveIn, PhoneSendIn,
+from ..schemas import (Beat, ChooseIn, ConfrontIn, FollowIn, MarketBuyIn, MoveIn, PhoneSendIn, RenameIn,
+                       SocialCommentIn, SocialLikeIn, TransferIn,
                        PlayIn, RewindIn, Run, RunCreate, RunState, RunSummary, VerdictIn)
 from .stories import _to_secret, _to_story
 
@@ -33,6 +39,7 @@ _BG_DIR = __import__("pathlib").Path(__file__).resolve().parents[1] / "static" /
 _AV_DIR = __import__("pathlib").Path(__file__).resolve().parents[1] / "static" / "scene" / "avatar"
 _SNAP_DIR = __import__("pathlib").Path(__file__).resolve().parents[1] / "static" / "scene" / "snap"
 _SPRITE_DIR = __import__("pathlib").Path(__file__).resolve().parents[1] / "static" / "scene" / "sprite"
+_ITEM_DIR = __import__("pathlib").Path(__file__).resolve().parents[1] / "static" / "scene" / "item"
 
 import queue as _imgqueue  # noqa: E402
 import threading as _imgthreading  # noqa: E402
@@ -46,6 +53,32 @@ _IMG_WORKER: list = []
 # run is refused (409) instead of racing the first stream's state write.
 _TURN_ACTIVE: set = set()
 _TURN_GUARD = _imgthreading.Lock()
+# ▶ drive 防刷 (⚖️ 无点击不推进): run_id → 上一次接受观剧拍的时刻 (脚本空转拦截)
+_DRIVE_LAST: dict = {}
+# 🔒 跨进程回合锁: _TURN_ACTIVE 只在本进程有效 — uvicorn 开多 worker 后两个 /play
+# 会各自过闸并发碾档。flock 把「一局同时只有一回合」钉在主机级; 进程被杀锁自动释放。
+_TURN_LOCK_DIR = os.path.join(tempfile.gettempdir(), "linguisplay-turnlocks")
+
+
+def _turn_lock_acquire(run_id: str):
+    """Non-blocking per-run flock. Returns the held file object, or None if another
+    process is mid-turn on this run. run_id 已过 _own_run 校验, 不含路径花样."""
+    os.makedirs(_TURN_LOCK_DIR, exist_ok=True)
+    f = open(os.path.join(_TURN_LOCK_DIR, f"{run_id}.lock"), "w")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return f
+    except OSError:
+        f.close()
+        return None
+
+
+def _turn_lock_release(f) -> None:
+    try:
+        fcntl.flock(f, fcntl.LOCK_UN)
+        f.close()
+    except Exception:
+        pass
 
 
 def _img_worker():
@@ -91,6 +124,23 @@ def _enqueue_image(prompt: str, path, size: str,
     _IMG_Q.put((prompt, path, size, negative, seed))
 
 
+def _queue_item_icons(state: dict, rows) -> None:
+    """🎒 物品配图懒生成 (实体化 第5题): 模板第一次被展示才排队 — 提示词 =
+    纯函数(物性卡), tid 定 seed, 同模板永远同图, 生成后永久缓存全服复用。"""
+    from ..engine import items as items_engine
+    for r in rows or []:
+        tid = (r or {}).get("tid")
+        if not tid:
+            continue
+        path = _ITEM_DIR / f"{tid}.jpg"
+        if path.exists():
+            continue
+        card = ((state.get("item_templates") or {}).get(tid)
+                or items_engine.rule_card(str(r.get("name") or "")))
+        prompt, neg = items_engine.icon_prompt(card)
+        _enqueue_image(prompt, path, "1024*1024", neg, items_engine.icon_seed(tid))
+
+
 def _story_art(content: dict) -> tuple[str, str]:
     """🎨 一世界一画风 (Yi: 角色画风要统一): 统一的风格引导 (开头压阵, gal 实弹教训:
     风格词放尾巴会被人物描述带跑) + 反向词封另一头 (写实店禁二次元, 动漫店禁真人)."""
@@ -113,14 +163,58 @@ def _char_seed(content: dict, cid: str) -> int:
     return char_seed(str(((content.get("story") or {}).get("id")) or ""), cid)
 
 
+# 🏞 背景铁律 (Yi 2026-07-21: 背景就是背景, 主体一定要是背景): 正向条款会被地点
+# detail 里的「猫咪懒洋洋趴在窗边」这类描写顶翻, 负面提示词必须同时压阵 —
+# 三个出图口 (开档补图/游戏内重画/工坊画背景) 共用这一份。
+_BG_NEG = "人物，人影，人群，动物，猫，狗，鸟，龙，兽，怪物，生物，宠物"
+
+
+def _bg_negative(content: dict) -> str:
+    return (_story_art(content)[1] + "，" + _BG_NEG).strip("，")
+
+
 def _bg_prompt(content: dict, loc: dict) -> str:
     story = content.get("story") or {}
     era = ((story.get("world_long") or story.get("world_facts") or "")
            .strip().replace("\n", " "))[:140]
-    art, _ = _story_art(content)  # 🎨 场景与人物同一画风 (风格开头压阵)
-    return (f"{art}。场景概念图，强烈氛围与光影，景深，横构图宽幅；"
-            f"空镜，画面里没有任何人物，没有文字、字幕或水印。{era} "
-            f"场景：{loc.get('name', '')}。{(loc.get('detail') or '')[:200]}")
+    # 🎨 tuning.bg_style: 背景专用画风 (Yi: 背景就是背景) — 有的本子 art_style 本身
+    # 以生物为主体 (猫咪摄影), 直接喂背景就画出猫; 缺省回落统一画风
+    art = str((story.get("tuning") or {}).get("bg_style") or "").strip()         or _story_art(content)[0]
+    # 空镜铁律放句尾压轴 (地名/描述常自带生物名 — 铁律必须是模型读到的最后一句)
+    return (f"{art}。场景概念图，强烈氛围与光影，景深，横构图宽幅。{era} "
+            f"场景：{loc.get('name', '')}。{(loc.get('detail') or '')[:200]}"
+            f"。铁律：空镜，画面里没有任何人物也没有任何生物——人、兽、龙、猫狗、鸟、"
+            f"怪物一概不出现；哪怕场景名或描述里提到了它们，也只画它们不在场时的空舞台"
+            f"（住处、痕迹、器物照画，活物本身绝不入画）；没有文字、字幕或水印")
+
+
+_CRE_DIR = __import__("pathlib").Path(__file__).resolve().parents[1] / "static" / "scene" / "creature"
+
+
+def _spawn_creature_art(content: dict) -> None:
+    """🐲 生物图鉴图: t2i 一次, 全服共用 (授权生物按 id 定种子, 同怪永远同脸)。"""
+    _CRE_DIR.mkdir(parents=True, exist_ok=True)
+    art, neg = _story_art(content)
+    for cr in (content.get("story") or {}).get("creatures") or []:
+        crid = cr.get("id")
+        if not crid:
+            continue
+        path = _CRE_DIR / f"{crid}.jpg"
+        if not path.exists():   # 📖 图鉴图与立绘各自独立判缺 (曾因 continue 连坐跳过立绘)
+            prompt = (f"{art}。怪物图鉴立绘：单体全身，威压构图，环境虚化，"
+                      f"{cr.get('kind', '兽')}：{cr.get('name', '')}，{(cr.get('desc') or '')[:120]}")
+            _enqueue_image(prompt, path, "1024*1024", negative=neg,
+                           seed=_char_seed(content, str(crid)))
+        sp_path = _SPRITE_DIR / f"{crid}.webp"
+        if not sp_path.exists():   # 🎪 舞台立绘: 透底剪影上台 (worker 见 .webp 自动抠底)
+            sp = (f"{art}。生物舞台立绘：画面里只有这一只生物，绝无人类猎人或其它生物同框；"
+                  "全身站姿完整不裁切，皮肤鳞甲羽毛完好覆盖躯体——绝不显露内脏、肋骨或肌肉解剖结构；"
+                  "威压占满画面，背景为纯粹的极深色（近黑），"
+                  f"{cr.get('kind', '兽')}：{cr.get('name', '')}，{(cr.get('desc') or '')[:120]}")
+            _enqueue_image(sp, sp_path, "1024*1280",
+                           negative=(neg + "，外露的骨骼，肋骨，内脏，肌肉解剖结构，"
+                                     "骷髅，腐尸质感，人类，猎人").strip("，"),
+                           seed=_char_seed(content, str(crid) + "·v2"))
 
 
 def _spawn_location_bg(content: dict, loc: dict | None) -> None:
@@ -132,16 +226,50 @@ def _spawn_location_bg(content: dict, loc: dict | None) -> None:
     if path.exists():
         return
     _enqueue_image(_bg_prompt(content, loc), path, "1280*720",
-                   negative=_story_art(content)[1])
+                   negative=_bg_negative(content))
 
 
 def _queue_snap(payload: dict | None) -> None:
     """📷 Pop an engine-minted snap off a phone payload and queue its render — the
     message arrives instantly, the photo develops in the background (the client
-    keeps retrying the img until the file lands)."""
+    keeps retrying the img until the file lands).
+    同脸铁律 (Yi 2026-07-15: 自拍也要角色形象稳定): 有底图的角色自拍走 i2i 改绘
+    (EDIT_MODEL 保脸, 与表情差分同管线); 无底图回落 char_seed 定种 t2i。"""
     sn = (payload or {}).pop("snap", None)
-    if sn and sn.get("url") and sn.get("prompt"):
-        _enqueue_image(sn["prompt"], _SNAP_DIR / sn["url"].rsplit("/", 1)[-1], "768*768")
+    if not (sn and sn.get("url") and sn.get("prompt")):
+        return
+    path = _SNAP_DIR / sn["url"].rsplit("/", 1)[-1]
+    if sn.get("selfie") and sn.get("cid"):
+        from ..engine.sprites import base_of
+        base = base_of(str(sn["cid"]))
+        if base is not None:
+            scene = str(sn.get("scene") or "")[:100]
+            art = str(sn.get("art") or "")[:60]
+
+            def _selfie_work(base=base, path=path, scene=scene, art=art):
+                try:
+                    if path.exists():
+                        return
+                    from ..engine.gal import shrink_jpg
+                    from ..engine.qwen import edit_image
+                    img = edit_image(
+                        base.read_bytes(),
+                        "严格保持照片中人物的性别、发型、五官、体格与服装特征完全不变，"
+                        f"改画成TA自己举着手机拍的一张自拍：所在环境是{scene}。"
+                        "手机自拍构图，轻微俯仰角，浅景深，生活抓拍感，无文字水印"
+                        # 🎨 画风跟世界走 (混搭实弹: 动漫底图硬套写实质感出半写实)
+                        + (f"。画面基调与人物画风保持原图一致：{art}" if art
+                           else "。画风质感与原图完全一致"),
+                        mime="image/jpeg")
+                    if img:
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_bytes(shrink_jpg(img, quality=82, max_side=1024))
+                except Exception:
+                    pass
+
+            _imgthreading.Thread(target=_selfie_work, daemon=True).start()
+            return
+    _enqueue_image(sn["prompt"], path, "768*768", seed=sn.get("seed"))
 
 
 def _ensure_char_avatars(content: dict, vn: bool = False) -> bool:
@@ -154,6 +282,19 @@ def _ensure_char_avatars(content: dict, vn: bool = False) -> bool:
     story = content.get("story") or {}
     world = ((story.get("world_long") or "").strip().replace("\n", " "))[:120]
     changed = False
+
+    # 🚻 性别/年龄从卡上走 (角色卡 v2): 「武备官/佣兵」这类词会被生图模型脑补成
+    # 男性 — 实弹: 女武备官的立绘画成了男骑士, 头像另一条提示词碰巧画对, 同脸法随之破
+    def _look_bits(c: dict) -> str:
+        sp = (c.get("species") or "").strip()
+        g = (c.get("gender") or "").strip()
+        if sp and sp not in ("人", "人类"):
+            # 🐱 非人角色: 性别词换物种语系, 并硬性排除人类身影
+            g = {"男": "公", "女": "母"}.get(g, "")
+            return f"{g}{sp}，画面中只有这只{sp}——绝不出现任何人类或人形身影"
+        g = {"男": "男性", "女": "女性"}.get(g, g)
+        return "，".join(x for x in (g, (c.get("age_band") or "").strip()) if x)
+
     # 🏅 重要性排序 (Yi: 智能检索要给人物重要性排名): 限流/排队时主角位、恋爱位
     # 的脸先落地; 重要角色哪怕此刻不在场, 立绘也在这条每回合补漏的队里
     for c in rank_cast(story.get("characters") or []):
@@ -170,7 +311,16 @@ def _ensure_char_avatars(content: dict, vn: bool = False) -> bool:
         path = _AV_DIR / f"{cid}.jpg"
         if path.exists():
             continue
-        bits = "，".join(b for b in (name, c.get("role") or "",
+        try:   # 📇 同脸捷径: 有立绘底图 → 头像从底图裁 (零成本且与立绘绝对同脸)
+            from ..engine.sprites import avatar_from_base
+            _av = avatar_from_base(cid)
+            if _av:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(_av)
+                continue
+        except Exception:
+            pass
+        bits = "，".join(b for b in (name, _look_bits(c), c.get("role") or "",
                                      (c.get("persona_text") or "")[:160]) if b)
         # 🎨 一世界一画风: 风格开头压阵 + 反向词 + 稳定种子 (同角色重画不换脸)
         art, neg = _story_art(content)
@@ -190,7 +340,7 @@ def _ensure_char_avatars(content: dict, vn: bool = False) -> bool:
             spath = _SPRITE_DIR / f"{cid}.webp"
             if spath.exists():
                 continue
-            bits = "，".join(b for b in (name, c.get("role") or "",
+            bits = "，".join(b for b in (name, _look_bits(c), c.get("role") or "",
                                          (c.get("persona_text") or "")[:160]) if b)
             sp = (f"{art}。游戏立绘：单人站姿，全身或及膝，竖构图，正面微侧，"
                   "视线看向观者，人物完整居中不裁切，背景为纯粹的极深色（近黑），"
@@ -231,6 +381,9 @@ def _to_run(r: RunModel) -> Run:
             location=runtime.location_view(r.pinned_content or {}, st),
             relations=runtime.relations_summary(r.pinned_content or {}, st),
             following=list(st.get("following") or []),
+            beasts=runtime.creatures_here(r.pinned_content or {}, st, mark=False),
+            factions=factions_mod.view(r.pinned_content or {}, st),
+            taste=taste_mod.view(st),
             here=runtime.scene_cast(r.pinned_content or {}, st,
                                     exclude_id=pcid if mode == "character" else None),
             pending_choice=st.get("pending_choice"),
@@ -349,6 +502,10 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
     # Public published stories, or the author's own draft (dev testing), are runnable.
     if (story.visibility != "public" or story.status != "published") and story.owner_id != user.id:
         raise HTTPException(403, "story not available")
+    # 💎 门票 (P1 收费包): 有 access 包且一张没买 → 拦在门外 (作者自动全通行)
+    from .packs import access_blocked
+    if access_blocked(db, user.id, story.id, story.owner_id == user.id):
+        raise HTTPException(403, "这本剧本需要通行包——先在剧本页购入门票")
 
     version, content = _pin_content(story, db)
     # own a private copy — this run may grow its own map (bootstrap start place, emergent
@@ -387,6 +544,10 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
     state = {**runtime.default_state(), "scene": runtime.opening_scene(content),
              "mode": body.mode, "player_character_id": pcid}
     state["goal"] = runtime.goal_for(content, state, 1)
+    # 🧭 口味温启动: 账号级风格先验 (只学风格不带剧透) — 换个本子世界依然懂你
+    _seed_taste = taste_mod.seed_from_account(getattr(user, "taste", None))
+    if _seed_taste:
+        state["taste"] = _seed_taste
     if runtime.sandbox_on(content) and (body.worldview or "").strip():
         state["worldview"] = body.worldview.strip()[:2000]
     # 💰 the sandbox runs a real cash ledger: start with the authored pocket money
@@ -411,6 +572,7 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
     # starting place synthesized from their opening setting.
     start_loc = runtime.ensure_start_location(content, state)
     _spawn_location_bg(content, start_loc)
+    _spawn_creature_art(content)   # 🐲 图鉴图: 每只生物一张 (画风圣经+定种子, 幂等)
     # 🏖 sandbox spatial rigor: the conjured cast LIVES at the start place (not
     # everywhere); the map decides who you can meet, movement means something
     if runtime.sandbox_on(content) and start_loc and start_loc.get("id"):
@@ -422,6 +584,21 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
         pc = next((c for c in (content.get("story") or {}).get("characters", [])
                    if c.get("id") == pcid), None)
         state["inventory"] = [dict(i) for i in ((pc or {}).get("items") or []) if i.get("name")]
+    # 💎 收费包发货 (确定性, run 创建时一次结算): 开局钱/金手指位/开局物件
+    from .packs import owned_grants
+    for _g in owned_grants(db, user.id, story.id, story.owner_id == user.id):
+        _b = int(_g.get("start_money_bonus") or 0)
+        if _b and runtime.sandbox_on(content):
+            state["money"] = int(state.get("money") or 0) + _b
+        for _pw in (_g.get("powers") or []):
+            if _pw and _pw not in (state.get("powers") or []):
+                state.setdefault("powers", []).append(str(_pw)[:40])
+        for _it in (_g.get("items") or []):
+            state.setdefault("inventory", []).append(
+                {"name": str(_it.get("name") or "")[:16],
+                 "detail": str(_it.get("detail") or "")[:60]})
+    if state.get("powers"):
+        state["powers"] = state["powers"][:6]
     # 🌱 NG+ perk: earned by reaching any ending of THIS story once; applied at the start
     if body.perk:
         if body.perk not in runtime.PERKS:
@@ -504,6 +681,14 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
 def get_run(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     r = _own_run(run_id, user, db)
     out = _to_run(r)
+    # 🖼 丢单自愈: 图片队列在内存里, 重启会吞掉在途的背景渲染 (实弹: 领航塔永远
+    # 停在关键词兜底图)。恢复存档时补一枪当前地点 — 幂等, 文件在就直接返回
+    try:
+        _spawn_location_bg(r.pinned_content or {},
+                           runtime.current_location(r.pinned_content or {}, r.state or {}))
+        _spawn_creature_art(r.pinned_content or {})   # 🐲 生物图/立绘同样自愈
+    except Exception:
+        pass
     # 竖屏 App 常驻件: 恢复存档时建议 chips 必须在。新档回合会把它们写进 state；
     # 老档缺这一份就现算一次（含确定性兜底），下一回合起自然走持久化通路。
     st = r.state or {}
@@ -536,6 +721,7 @@ def get_market(run_id: str, user: User = Depends(current_user), db: Session = De
     r.state = st
     flag_modified(r, "state")
     db.commit()
+    _queue_item_icons(st, view.get("items"))   # 🎒 摊上的货第一次亮相 → 排队出图
     return view
 
 
@@ -655,6 +841,18 @@ def play(
     r = _own_run(run_id, user, db)
     if (r.state or {}).get("ended"):
         raise HTTPException(409, "这局已经结束了，开一局新的吧")
+    # ▶ drive 防刷 (⚖️ 无点击不推进): 观剧拍零输入, 一段脚本就能空转无人值守地刷剧情
+    # 刷账单 — 服务端强制两拍最小间隔, 不信任客户端的节流
+    if body.channel == "drive":
+        _dnow = _time_mod.time()
+        if _dnow - float(_DRIVE_LAST.get(run_id, 0.0)) < get_settings().drive_min_seconds:
+            raise HTTPException(429, "看得太快了，喘口气再往下")
+        _DRIVE_LAST[run_id] = _dnow
+    # 🎫 幂等键: 客户端每次点击带唯一 client_turn_id — 网络层重放/重试 bug 重复送达的
+    # 同一次点击, 不再推进第二次剧情 (无点击不推进的服务端底线)
+    if (body.client_turn_id
+            and str((r.state or {}).get("last_client_turn_id") or "") == body.client_turn_id):
+        raise HTTPException(409, "这一拍已经演过了（重复提交）")
     persona = db.get(PersonaModel, r.persona_id)
     next_seq = (r.beats[-1].seq + 1) if r.beats else 0
 
@@ -714,6 +912,8 @@ def play(
 
     # snapshot everything the stream needs, so it doesn't touch the request session
     state0 = r.state or {}
+    if body.client_turn_id:   # 🎫 随 final state 落库 — 重放的同一键在上面被 409
+        state0["last_client_turn_id"] = body.client_turn_id
     persona_dict = _persona_dict(persona) if persona else {}
     start_seq = next_seq
     # pre-turn content snapshot: only PERSISTED if this turn ends up mutating content —
@@ -723,9 +923,13 @@ def play(
 
     # 🔒 one turn at a time per run: a double-submit (double click / two tabs) would race
     # two streams over the same state and silently clobber it — refuse the second.
+    # 双层闸: 进程内 set 快拒, flock 兜住多 worker/多进程 (见 _turn_lock_acquire)。
     # Acquired here (nothing below raises before the stream starts); released in sse().
     with _TURN_GUARD:
         if run_id in _TURN_ACTIVE:
+            raise HTTPException(409, "上一回合还在进行中，等它说完")
+        _turn_lockf = _turn_lock_acquire(run_id)
+        if _turn_lockf is None:
             raise HTTPException(409, "上一回合还在进行中，等它说完")
         _TURN_ACTIVE.add(run_id)
     _turn_t0 = _time_mod.perf_counter()
@@ -760,6 +964,13 @@ def play(
                     # follow as normal "beat" events and are the durable record.
                     yield _event({"event": "token", "t": payload})
                     continue
+                if kind == "peek":
+                    # 📱 查TA的设备: 结构化视图直达手机壳, 正文拍照旧落库
+                    yield _event({"event": "peek", "peek": payload})
+                    continue
+                if kind == "sugg":
+                    yield _event({"event": "sugg", "suggestions": payload})
+                    continue
                 if kind == "beat":
                     eb = BeatModel(
                         run_id=run_id, seq=seq, type=payload.get("type", "description"),
@@ -771,8 +982,9 @@ def play(
                     db2.refresh(eb)
                     seq += 1
                     bd = _to_beat(eb).model_dump()
-                    try:   # 🎬 导演注记 (sfx/flash/expr) 只随流走, 不进库
-                        bd.update(stage.beat_fx(payload.get("text", ""), payload.get("mood")))
+                    try:   # 🎬 导演注记 (sfx/flash/expr/act) 只随流走, 不进库
+                        bd.update(stage.beat_fx(payload.get("text", ""), payload.get("mood"),
+                                                payload.get("act")))
                     except Exception:
                         pass
                     yield _event({"event": "beat", "beat": bd})
@@ -781,6 +993,14 @@ def play(
             # persist final state + emit the trailing meta events
             if final is not None:
                 run.state = final["state"]
+                try:   # 🧭 口味沉淀: 档内分布慢混进账号 (纯风格, 零剧情内容)
+                    _rt = (final["state"] or {}).get("taste") or {}
+                    if _rt:
+                        _uu = db2.get(User, run.owner_id)
+                        if _uu is not None:
+                            _uu.taste = taste_mod.blend_account(_uu.taste or {}, _rt)
+                except Exception:
+                    pass
                 # 🖼 every turn is a backfill chance: runs from before portraits shipped
                 # (or whose renders got throttled) pick their faces up here
                 av_changed = False
@@ -820,6 +1040,7 @@ def play(
                 yield _event({"event": "scene", "scene": final.get("scene")})
                 yield _event({"event": "cast", "cast": final.get("cast", [])})
                 yield _event({"event": "here", "here": final.get("here", []),
+                              "beasts": final.get("beasts", []),
                               "relations": final.get("relations", {}),
                               "following": final.get("following", [])})
                 if final.get("moments") or final.get("rel_deltas"):
@@ -891,6 +1112,7 @@ def play(
         finally:
             with _TURN_GUARD:
                 _TURN_ACTIVE.discard(run_id)
+            _turn_lock_release(_turn_lockf)
             db2.close()
 
     return StreamingResponse(sse(), media_type="text/event-stream")
@@ -947,6 +1169,8 @@ def move(run_id: str, body: MoveIn, user: User = Depends(current_user), db: Sess
             # emergent place: create it for real, wire it in, and move there. This mutates the
             # run's content, so we persist pinned_content below.
             new_loc = runtime.generate_and_move(content, st, body.location)
+            if new_loc is None:
+                raise HTTPException(400, {"not_a_place": "这不像一个具体的去处"})
             _spawn_location_bg(content, new_loc)
             generated = True
         else:
@@ -969,6 +1193,9 @@ def move(run_id: str, body: MoveIn, user: User = Depends(current_user), db: Sess
     discoveries = runtime.discover_on_arrival(content, st)
     if arrival:
         discoveries = [{"text": arrival}] + discoveries
+    _enc = runtime.creature_arrival_beat(content, st)   # 🐲 走进了它的领地
+    if _enc:
+        discoveries = discoveries + [{"text": _enc.get("text", "")}]
     if discoveries:
         seq = (r.beats[-1].seq + 1) if r.beats else 0
         present_ids = [c.get("id") for c in runtime.scene_characters(content, st) if c.get("id")]
@@ -997,7 +1224,20 @@ def get_map(run_id: str, user: User = Depends(current_user), db: Session = Depen
     """The discovered world: unlocked places, current position, who stands where.
     Locked places appear only as an unnamed count."""
     r = _own_run(run_id, user, db)
-    return runtime.map_view(r.pinned_content or {}, r.state or {})
+    view = runtime.map_view(r.pinned_content or {}, r.state or {})
+    # 🖼 地图缩略图补枪: 地图会展示所有已发现地点的缩略图, 但背景只在玩家亲临时
+    # 生成 (实弹: 枢纽地点 404×27)。每次开图最多补 2 张, 排队不阻塞
+    _missing = 0
+    for n in (view.get("nodes") or []):
+        if _missing >= 2:
+            break
+        lid = n.get("id")
+        if lid and not (_BG_DIR / f"{lid}.jpg").exists():
+            loc = runtime._location_by_id(r.pinned_content or {}, lid)
+            if loc:
+                _spawn_location_bg(r.pinned_content or {}, loc)
+                _missing += 1
+    return view
 
 
 @router.post("/{run_id}/bg/regen")
@@ -1029,7 +1269,8 @@ def regen_bg(run_id: str, user: User = Depends(current_user), db: Session = Depe
         path.unlink(missing_ok=True)
     except OSError:
         pass
-    _enqueue_image(_bg_prompt(content, loc), path, "1280*720")
+    _enqueue_image(_bg_prompt(content, loc), path, "1280*720",
+                   negative=_bg_negative(content))
     return {"queued": True, "location_id": lid, "url": f"/scene/bg/{lid}.jpg"}
 
 
@@ -1043,6 +1284,93 @@ def get_character(run_id: str, char_id: str,
     if not prof:
         raise HTTPException(404, "没有这个人")
     return prof
+
+
+@router.patch("/{run_id}/beat/{beat_id}")
+def edit_beat(run_id: str, beat_id: str, body: dict = Body(...),
+              user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """✏️ 编辑对话正史 (Yi 2026-07-23: 自己的话/角色台词/旁白都能改): 只改文本,
+    不重算账本 (好感/解锁/位置都是当时的裁决, 重算走撤回)。改动会进入后续回合的
+    记忆窗口 — 这正是编辑的意义: 把别扭的一句修顺, 故事从更好的文本继续。
+    说话人与拍型不可改 (名单与账本的完整性)。"""
+    r = _own_run(run_id, user, db)
+    text = str(body.get("text") or "").strip()
+    if not text or len(text) > 600:
+        raise HTTPException(400, "内容不能为空，也别超过600字")
+    b = db.query(BeatModel).filter(BeatModel.id == beat_id,
+                                   BeatModel.run_id == r.id).first()
+    if b is None:
+        raise HTTPException(404, "没有这一拍")
+    if b.author != "player":
+        text = runtime.dedash(text)   # 引擎侧文本继续吃标点守卫; 玩家的话保持原样
+    b.text = text
+    db.commit()
+    db.refresh(b)
+    return _to_beat(b)
+
+
+@router.post("/{run_id}/character/{char_id}/rename")
+def rename_character(run_id: str, char_id: str, body: RenameIn,
+                     user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """🪪 rename an EMERGENT character in this run's private copy (fix bad births
+    like「谁看见」). Authored characters keep their author-given names; the new
+    name passes the same guard births do, and promise snapshots follow along."""
+    r = _own_run(run_id, user, db)
+    content = dict(r.pinned_content or {})
+    chars = (content.get("story") or {}).get("characters") or []
+    c = next((x for x in chars if x.get("id") == char_id), None)
+    if not c:
+        raise HTTPException(404, "没有这个人")
+    if not c.get("generated"):
+        raise HTTPException(403, "这是作者写定的角色，名字不能改")
+    nm = (body.name or "").strip().strip("「」\"'")[:12]
+    if not runtime.npc_name_ok(nm):
+        raise HTTPException(400, "这个名字不像人名，换一个吧")
+    if any(x.get("name") == nm and x.get("id") != char_id for x in chars):
+        raise HTTPException(409, "已有同名角色")
+    was = c.get("name") or ""
+    c["name"] = nm
+    r.pinned_content = content
+    flag_modified(r, "pinned_content")
+    st = dict(r.state or {})
+    touched = False
+    for p in st.get("promises") or []:   # 🤝 promises carry a name snapshot
+        if p.get("char_id") == char_id and p.get("char_name") != nm:
+            p["char_name"] = nm
+            touched = True
+    if touched:
+        r.state = st
+        flag_modified(r, "state")
+    db.commit()
+    return {"ok": True, "name": nm, "was": was}
+
+
+@router.post("/{run_id}/location/{loc_id}/rename")
+def rename_location(run_id: str, loc_id: str, body: RenameIn,
+                    user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """📍 给涌现地点改名 (首次落成时的机会, Yi: 生成的名字乱)。授权地图不许改;
+    出口按地名字符串连的 — 改名级联同步全图。"""
+    r = _own_run(run_id, user, db)
+    content = dict(r.pinned_content or {})
+    locs = (content.get("story") or {}).get("locations") or []
+    loc = next((l for l in locs if l.get("id") == loc_id), None)
+    if not loc:
+        raise HTTPException(404, "没有这个地方")
+    if not (loc.get("generated") or str(loc_id).startswith("loc_")):
+        raise HTTPException(403, "这是作者写定的地点，名字不能改")
+    nm = (body.name or "").strip().strip("「」\"'")[:12]
+    if not runtime.npc_name_ok(nm):
+        raise HTTPException(400, "这个名字不像地名，换一个吧")
+    if any(l.get("name") == nm and l.get("id") != loc_id for l in locs):
+        raise HTTPException(409, "已有同名地点")
+    was = loc.get("name") or ""
+    loc["name"] = nm
+    for l in locs:   # 🏷 级联: 出口按地名连的
+        l["exits"] = [nm if e == was else e for e in (l.get("exits") or [])]
+    r.pinned_content = content
+    flag_modified(r, "pinned_content")
+    db.commit()
+    return {"ok": True, "name": nm, "was": was}
 
 
 @router.get("/{run_id}/phone")
@@ -1080,9 +1408,14 @@ def send_phone(run_id: str, char_id: str, body: PhoneSendIn,
     if not runtime.has_contact(st, char_id):
         raise HTTPException(403, "你还没有TA的联系方式。见面聊出交情，或者直接开口要一个。")
     persona = db.get(PersonaModel, r.persona_id)
+    # 📱↔🎭 线上线下通气: 把TA亲历的最近正文喂给短信/来电 (per-char过滤在引擎侧)
+    _cut = int(st.get("history_cut_seq") or 0)
+    _bl = [{"author": b.author, "type": b.type, "text": b.text,
+            "speaker_name": b.speaker_name, "present_ids": b.present_ids}
+           for b in r.beats if b.seq >= _cut][-40:]
     try:
         view = runtime.phone_send(r.pinned_content or {}, st, _persona_dict(persona) if persona else {},
-                                  char_id, body.text)
+                                  char_id, body.text, beat_log=_bl)
     except ValueError as e:
         raise HTTPException(400, str(e))
     _queue_snap(view)  # 📷 the reply may carry a photo — render it off-path
@@ -1103,15 +1436,109 @@ def call_phone(run_id: str, char_id: str, body: PhoneSendIn,
         raise HTTPException(409, "这局已经结束了")
     st = dict(r.state or {})
     persona = db.get(PersonaModel, r.persona_id)
+    # 📱↔🎭 线上线下通气: 把TA亲历的最近正文喂给短信/来电 (per-char过滤在引擎侧)
+    _cut = int(st.get("history_cut_seq") or 0)
+    _bl = [{"author": b.author, "type": b.type, "text": b.text,
+            "speaker_name": b.speaker_name, "present_ids": b.present_ids}
+           for b in r.beats if b.seq >= _cut][-40:]
     try:
         view = runtime.phone_call(r.pinned_content or {}, st, _persona_dict(persona) if persona else {},
-                                  char_id, body.text)
+                                  char_id, body.text, beat_log=_bl)
     except ValueError as e:
         raise HTTPException(400, str(e))
     r.state = st
     flag_modified(r, "state")
     db.commit()
     return view
+
+
+@router.get("/{run_id}/bestiary")
+def get_bestiary(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """📖 生物图鉴: 见过的生物 (血阶/部位伤/习性/图鉴图), 没见过的只给个数。"""
+    r = _own_run(run_id, user, db)
+    if "bestiary" not in runtime.phone_apps(r.pinned_content or {}):
+        raise HTTPException(404, "这个世界没有图鉴")
+    return runtime.bestiary_view(r.pinned_content or {}, r.state or {})
+
+
+@router.get("/{run_id}/bank")
+def get_bank(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """🏦 银行 app: 余额 + 流水 + 可转账的联系人。现代设定 (device=手机) 默认开。"""
+    r = _own_run(run_id, user, db)
+    if "bank" not in runtime.phone_apps(r.pinned_content or {}):
+        raise HTTPException(404, "这个世界没有这种 app")
+    return runtime.bank_view(r.pinned_content or {}, r.state or {})
+
+
+@router.post("/{run_id}/bank/transfer")
+def bank_transfer(run_id: str, body: TransferIn,
+                  user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """💸 给角色转账 — 真钱落账, TA 的记忆和短信都会知道这件事。"""
+    r = _own_run(run_id, user, db)
+    if "bank" not in runtime.phone_apps(r.pinned_content or {}):
+        raise HTTPException(404, "这个世界没有这种 app")
+    if (r.state or {}).get("ended"):
+        raise HTTPException(409, "这局已经结束了")
+    st = dict(r.state or {})
+    persona = db.get(PersonaModel, r.persona_id)
+    try:
+        out = runtime.bank_transfer(r.pinned_content or {}, st,
+                                    _persona_dict(persona) if persona else {},
+                                    body.char_id, body.amount)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    r.state = st
+    flag_modified(r, "state")
+    db.commit()
+    return out
+
+
+@router.get("/{run_id}/social")
+def get_social(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """📸 动态 app: 已认识角色的朋友圈 (账本指纹变了才出新帖, 渲染一次永久缓存)。"""
+    r = _own_run(run_id, user, db)
+    if "social" not in runtime.phone_apps(r.pinned_content or {}):
+        raise HTTPException(404, "这个世界没有这种 app")
+    st = dict(r.state or {})
+    out = runtime.social_feed(r.pinned_content or {}, st)
+    r.state = st
+    flag_modified(r, "state")
+    db.commit()
+    return out
+
+
+@router.post("/{run_id}/social/like")
+def social_like(run_id: str, body: SocialLikeIn,
+                user: User = Depends(current_user), db: Session = Depends(get_db)):
+    r = _own_run(run_id, user, db)
+    st = dict(r.state or {})
+    try:
+        out = runtime.social_like(r.pinned_content or {}, st, body.post_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    r.state = st
+    flag_modified(r, "state")
+    db.commit()
+    return out
+
+
+@router.post("/{run_id}/social/comment")
+def social_comment(run_id: str, body: SocialCommentIn,
+                   user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """💬 评论TA的动态 — TA 用自己的声音回一句 (每游戏日限5条)。"""
+    r = _own_run(run_id, user, db)
+    st = dict(r.state or {})
+    persona = db.get(PersonaModel, r.persona_id)
+    try:
+        out = runtime.social_comment(r.pinned_content or {}, st,
+                                     _persona_dict(persona) if persona else {},
+                                     body.post_id, body.text)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    r.state = st
+    flag_modified(r, "state")
+    db.commit()
+    return out
 
 
 @router.get("/{run_id}/mail")
@@ -1141,7 +1568,11 @@ def get_journal(run_id: str, user: User = Depends(current_user), db: Session = D
     """The run's dossier: unlocked truths (full text), layers still locked (counts only),
     the ending gallery (achieved vs ？？？), decisions made. Locked bodies never leave."""
     r = _own_run(run_id, user, db)
-    return runtime.journal(r.pinned_content or {}, r.state or {})
+    st = r.state or {}
+    # 🎒 背包/收纳里的物件第一次被翻看 → 配图排队 (懒生成, tid 永久缓存)
+    _queue_item_icons(st, list(st.get("inventory") or [])
+                      + [i for rows in (st.get("stashes") or {}).values() for i in rows])
+    return runtime.journal(r.pinned_content or {}, st)
 
 
 @router.post("/{run_id}/confront")
@@ -1167,9 +1598,12 @@ def confront(run_id: str, body: ConfrontIn, user: User = Depends(current_user),
     except ValueError as e:
         raise HTTPException(400, str(e))
     start_seq = (r.beats[-1].seq + 1) if r.beats else 0
-    # 🔒 a confrontation is a turn too — same one-at-a-time rule as /play
+    # 🔒 a confrontation is a turn too — same one-at-a-time rule as /play (双层闸同款)
     with _TURN_GUARD:
         if run_id in _TURN_ACTIVE:
+            raise HTTPException(409, "上一回合还在进行中，等它说完")
+        _turn_lockf = _turn_lock_acquire(run_id)
+        if _turn_lockf is None:
             raise HTTPException(409, "上一回合还在进行中，等它说完")
         _TURN_ACTIVE.add(run_id)
 
@@ -1185,6 +1619,10 @@ def confront(run_id: str, body: ConfrontIn, user: User = Depends(current_user),
                     yield _event({"event": "dice", "dice": payload})
                 elif kind == "token":
                     yield _event({"event": "token", "t": payload})
+                elif kind == "peek":
+                    yield _event({"event": "peek", "peek": payload})
+                elif kind == "sugg":
+                    yield _event({"event": "sugg", "suggestions": payload})
                 elif kind == "beat":
                     eb = BeatModel(run_id=run_id, seq=seq, type=payload.get("type", "description"),
                                    speaker_name=payload.get("speaker_name"),
@@ -1196,8 +1634,9 @@ def confront(run_id: str, body: ConfrontIn, user: User = Depends(current_user),
                     db2.refresh(eb)
                     seq += 1
                     bd = _to_beat(eb).model_dump()
-                    try:   # 🎬 导演注记 (sfx/flash/expr) 只随流走, 不进库
-                        bd.update(stage.beat_fx(payload.get("text", ""), payload.get("mood")))
+                    try:   # 🎬 导演注记 (sfx/flash/expr/act) 只随流走, 不进库
+                        bd.update(stage.beat_fx(payload.get("text", ""), payload.get("mood"),
+                                                payload.get("act")))
                     except Exception:
                         pass
                     yield _event({"event": "beat", "beat": bd})
@@ -1228,6 +1667,7 @@ def confront(run_id: str, body: ConfrontIn, user: User = Depends(current_user),
         finally:
             with _TURN_GUARD:
                 _TURN_ACTIVE.discard(run_id)
+            _turn_lock_release(_turn_lockf)
             db2.close()
 
     return StreamingResponse(sse(), media_type="text/event-stream")
@@ -1305,30 +1745,65 @@ def verdict(run_id: str, body: VerdictIn, user: User = Depends(current_user),
 
 @router.post("/{run_id}/leave", status_code=204)
 def leave(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    """悬念离场: the player is leaving mid-run (page hide / back button beacon). Append ONE
-    cliffhanger narration so the run's last beat is an unfinished hook that pulls them back.
-    Idempotent per leave point — repeated beacons with no new turns add nothing."""
+    """悬念离场: the player is leaving mid-run (page hide / back button beacon).
+    ⚖️ 无点击不推进 (Yi 2026-07-14 定): beacon 不是点击 — 这里只暂存「TA走了」这个
+    事实 (不跑 LLM 不落拍), 悬念钩由下一次玩家亲手点开的回合回放上台 (runtime 的
+    parting_pending 消费点). 顺带修掉了旧版 beacon 与流式回合竞态插拍的隐患。
+    Idempotent — repeated beacons within the window add nothing."""
     r = _own_run(run_id, user, db)
     st = dict(r.state or {})
     if st.get("ended") or not r.beats:
         return
-    if int(st.get("parting_seq") or -1) == len(r.beats):
-        return  # the last beat is already this leave's hook
-    # 📵 mobile visibility events spam beacons — at most one hook per 10 minutes
+    # 📵 mobile visibility events spam beacons — at most one staging per 10 minutes
     now_ts = _time_mod.time()
     if now_ts - float(st.get("parting_ts") or 0) < 600:
         return
     if not any(b.author == "player" for b in r.beats):
         return  # no conversation yet — nothing to hang a hook on
-    persona = db.get(PersonaModel, r.persona_id)
-    content = r.pinned_content or {}
-    present_ids = [c.get("id") for c in runtime.scene_characters(content, st) if c.get("id")]
-    for b in runtime.build_parting_hook(content, st, _persona_dict(persona) if persona else {}):
-        db.add(BeatModel(run_id=r.id, seq=r.beats[-1].seq + 1, type="description",
-                         speaker_name=None, text=b.get("text", ""), author="engine",
-                         present_ids=present_ids))
-    r.state = {**st, "parting_seq": len(r.beats) + 1, "parting_ts": now_ts}
+    st["parting_pending"] = {"ts": now_ts, "act": int(st.get("act", 1) or 1)}
+    st["parting_ts"] = now_ts
+    r.state = st
     db.commit()
+
+
+@router.get("/{run_id}/relweb")
+def get_relweb(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """🕸 关系网视图 (Yi 2026-07-18): 已认识的角色为节点, npc_rel 立场为边 (带演变
+    日志 = 随时间变化可见), 外加玩家↔各角色的关系模式。只读, 不动账本。"""
+    from ..engine import relationships as rel_mod
+    r = _own_run(run_id, user, db)
+    content, st = r.pinned_content or {}, r.state or {}
+    met = set(st.get("met_ids") or [])
+    pcid = st.get("player_character_id")
+    dead = runtime._dead_ids(st)
+    chars = [c for c in runtime._characters(content)
+             if c.get("id") and c["id"] in met and c["id"] != pcid]
+    nodes = [{"id": c["id"], "name": c.get("name") or "", "avatar_url": c.get("avatar_url"),
+              "dead": c["id"] in dead} for c in chars]
+    ids = {n["id"] for n in nodes}
+    edges = []
+    for key, e in (st.get("npc_rel") or {}).items():
+        a, _, b = key.partition("|")
+        stance = int(e.get("stance") or 0)
+        if a in ids and b in ids and stance:
+            edges.append({"a": a, "b": b, "stance": stance,
+                          "label": e.get("label")
+                          or runtime._STANCE_LABEL.get(stance, ""),
+                          "log": list(e.get("log") or [])[-4:]})
+    tun = runtime.tuning_for(content)
+    rel_all = st.get("rel") or {}
+    player = []
+    for c in chars:
+        sc = rel_all.get(c["id"])
+        if not sc:
+            continue
+        view = rel_mod.state_for(c, sc, tun, lang=runtime.lang_of(content)) or {}
+        player.append({"id": c["id"], "mode_name": view.get("mode_name") or "",
+                       "closeness": int(sc.get("closeness", 0) or 0),
+                       "romance": int(sc.get("romance", 0) or 0)})
+    return {"nodes": nodes, "edges": edges, "player": player,
+            "player_name": (st.get("player_character_id") and
+                            runtime._char_name(content, pcid)) or None}
 
 
 @router.post("/{run_id}/follow", response_model=Run)
@@ -1375,7 +1850,7 @@ def living_tick_now(run_id: str, user: User = Depends(current_user),
     scheduler runs, minus the due() wait."""
     r = _own_run(run_id, user, db)
     st = dict(r.state or {})
-    out = living.world_tick(r.pinned_content or {}, st, get_llm())
+    out = living.world_tick(r.pinned_content or {}, st)
     r.state = st
     db.commit()
     return {"tick": out, "living": living.cfg(st),
@@ -1449,18 +1924,21 @@ _VN_FLAG_CACHE: dict = {}   # story_id → (vn_mode, ts) — 旗几乎不变, �
 def build_expr_sprites(run_id: str, body: dict = Body(default={}),
                        user: User = Depends(current_user),
                        db: Session = Depends(get_db)):
-    """🎭 表情差分包: 给这局已登场的角色生成 喜/怒/哀/惊 改脸差分 (后台线程,
-    编辑既有底图不重画, 幂等可重跑补齐). body.force=true 全部重做
-    (调整表情幅度标准后重刷用). 客户端按 beat.expr 换脸."""
+    """🎭 差分包: 给这局已登场的角色生成 喜/怒/哀/惊 改脸差分 + 挥手/抱臂/低头/伸手
+    动作差分 (后台线程, 编辑既有底图不重画, 幂等可重跑补齐; 崩-gate 拦截变形差分).
+    body.force=true 全部重做 (调整幅度标准后重刷用). 客户端按 beat.expr 换图."""
     r = _own_run(run_id, user, db)
     content = r.pinned_content or {}
     st = r.state or {}
     met = set(st.get("met_ids") or [])
     from ..engine import sprites as sprites_mod
-    cids = [c.get("id") for c in runtime._characters(content)
-            if c.get("id") and (not met or c.get("id") in met)
-            and c.get("id") != st.get("player_character_id")
-            and sprites_mod.base_of(c.get("id"))][:6]
+    _cast = [c for c in runtime._characters(content)
+             if c.get("id") and (not met or c.get("id") in met)
+             and c.get("id") != st.get("player_character_id")
+             and sprites_mod.base_of(c.get("id"))][:6]
+    cids = [c.get("id") for c in _cast]
+    # 🐾 非人形角色不做人类肢体动作差分 (布偶猫抱臂 = 崩), 表情照做
+    no_pose = {c.get("id") for c in _cast if str(c.get("species") or "").strip()}
     if not cids:
         raise HTTPException(400, "还没有可用的角色底图")
     with _IMG_LOCK:
@@ -1472,13 +1950,13 @@ def build_expr_sprites(run_id: str, body: dict = Body(default={}),
 
     def _work():
         try:
-            sprites_mod.build_expr_pack(cids, force=_force)
+            sprites_mod.build_expr_pack(cids, force=_force, no_pose_cids=no_pose)
         finally:
             with _IMG_LOCK:
                 _EXPR_BUILDING.discard(run_id)
 
     _imgthreading.Thread(target=_work, daemon=True).start()
-    return {"queued": cids, "exprs": list(sprites_mod.EXPRS.keys())}
+    return {"queued": cids, "exprs": list(sprites_mod.DIFFS.keys())}
 
 
 def _push_heartbeat_news(db, run, tick_out: dict) -> None:
@@ -1498,9 +1976,9 @@ def _push_heartbeat_news(db, run, tick_out: dict) -> None:
         return
     ev = tick_out.get("event")
     if ev:
+        # ⚖️ 邀约本体是词债还没写 (无点击不生成) — 推送只报人名, 用模板句
         webpush.push_to_user(db, run.owner_id, ev.get("name") or "有人找你",
-                             ev.get("invite") or f"{ev.get('when', '')}：{ev.get('what', '')}",
-                             url="/play", tag=tag)
+                             "给你捎了句话，进来看看。", url="/play", tag=tag)
         return
     ab = tick_out.get("absent") or []
     if ab:
@@ -1532,11 +2010,11 @@ def living_heartbeat_pass() -> int:
             st = copy.deepcopy(st0)
             rid = r.id
             try:
-                # world_tick 内含多次 LLM 调用, 可跑一分钟以上; 玩家恰在此窗口内玩了
-                # 一回合, 提交的 state 会被心跳的陈旧副本整档覆盖 (审计实弹: 丢档级)。
-                # LLM 全程不持锁, 写回前重读并比对指纹, 变了就丢弃本次 tick (下轮重排)。
+                # ⚖️ 无点击不推进: world_tick 只做状态数学, 不跑 LLM (词债押后到玩家
+                # 回归的回合由 settle_pending 补演)。窗口虽小仍防覆盖: 写回前重读并
+                # 比对指纹, 玩家在 tick 期间动过档就丢弃本次 tick (下轮重排)。
                 fp0 = _state_fingerprint(st0)
-                out = living.world_tick(r.pinned_content or {}, st, get_llm())
+                out = living.world_tick(r.pinned_content or {}, st)
                 db.expire_all()
                 fresh = db.get(RunModel, rid)
                 if fresh is None or _state_fingerprint(fresh.state or {}) != fp0:

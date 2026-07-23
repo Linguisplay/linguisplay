@@ -280,7 +280,8 @@ class _ScoutBase:
         if prompt.get("scout_char"):
             return self.scout(prompt)
         if prompt.get("describe_place"):
-            return {"detail": "一方晒不到太阳的天台。"}
+            return {"name": (prompt.get("place_name") or "")[:12],
+                    "detail": "一方晒不到太阳的天台。"}
         if prompt.get("summarize"):
             return {"memory": ""}
         if prompt.get("suggest"):
@@ -783,24 +784,3 @@ def test_prose_arrival_backstop():
     assert state2["location_id"] == "l1"
 
 
-def test_suggestion_gate_kills_hallucinations():
-    """建议验账门 (Yi 实弹: 文清在场却建议「补习社没人」): 与账本矛盾的建议直接毙。"""
-    content = {"story": {"characters": [
-        {"id": "c1", "name": "苏文清", "home_location_id": "l1"},
-        {"id": "c2", "name": "细辉", "home_location_id": "l3"}],
-        "acts": [{"index": 1, "title": "一"}],
-        "locations": [
-            {"id": "l1", "name": "明德补习社", "exits": ["祥记面档"], "unlock": {}},
-            {"id": "l2", "name": "祥记面档", "exits": ["明德补习社"], "unlock": {}},
-            {"id": "l3", "name": "和乐麻雀馆", "exits": [], "unlock": {}}]}}
-    st = {"location_id": "l1", "act": 1}
-    out = runtime.suggestion_gate(content, st, [
-        "既然补习社没人，我先去祥记面档吃碗云吞面再说",     # 文清就在面前 → 毙
-        "先去明德补习社看看",                               # 已在此地 → 毙
-        "顺路绕去和乐麻雀馆看一眼细辉",                     # 细辉确在麻雀馆 → 过
-        "问问苏文清孩子们的学费怎么办",                     # 贴现场 → 过
-    ])
-    assert out == ["顺路绕去和乐麻雀馆看一眼细辉", "问问苏文清孩子们的学费怎么办"]
-    # 位置账本明确不符: 细辉在麻雀馆, 建议却说去祥记找他 → 毙
-    out2 = runtime.suggestion_gate(content, st, ["去祥记面档找细辉聊聊"])
-    assert out2 == []

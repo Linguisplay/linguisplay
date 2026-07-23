@@ -107,6 +107,26 @@
   /* 📱 小手机 */
   #phoneBtn { position: relative; }
   .pbadge { position: absolute; top: -4px; right: -5px; background: #e0574f; color: #fff; border-radius: 9px; font-size: 10px; line-height: 1; padding: 2px 5px; font-weight: 700; }
+  /* 📱 小手机悬浮键 (Yi: 要在更明显的地方) — 右上角独立圆钮, 顶栏下方不与其争地 */
+  #phoneFab { position: fixed; top: 96px; right: 10px; z-index: 30;
+    width: 44px; height: 44px; border-radius: 50%; font-size: 20px; cursor: pointer;
+    background: rgba(20,20,36,.92); border: 1px solid #45456a; color: #e7eaf3;
+    box-shadow: 0 4px 14px rgba(0,0,0,.45); }
+  #phoneFab.hidden { display: none; }
+  #phoneFab .pbadge { top: -2px; right: -2px; }
+  /* 📱🔍 TA的设备 (查手机 P1 壳): 偷来的屏幕 — 比自己的手机更暗, 边框冷色 */
+  #peekov { position: fixed; inset: 0; z-index: 76; background: rgba(0,0,0,.62); display: grid; place-items: center; }
+  #peekov .pkcard { width: min(380px, 92vw); max-height: 80vh; overflow-y: auto; background: #0b0c13;
+    border: 1px solid #31405c; border-radius: 22px; padding: 14px 14px 16px; box-shadow: 0 14px 56px rgba(0,0,0,.75); }
+  #peekov .pkhead { display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    padding-bottom: 9px; border-bottom: 1px solid #1c2130; }
+  #peekov .pkhead b { font-size: 14px; color: #c6d0e8; }
+  #peekov .pknick { background: #141828; border-radius: 10px; padding: 8px 10px; font-size: 13px;
+    color: #d8b57a; margin: 10px 0 2px; }
+  #peekov .pkwith { font-size: 12px; color: #7f88a8; margin: 12px 0 4px; }
+  #peekov .pkmsg { background: #181c2c; border-radius: 12px; padding: 6px 10px; font-size: 13px;
+    color: #d5dbec; margin: 4px 0; width: fit-content; max-width: 88%; }
+  #peekov .pkhint { margin-top: 12px; font-size: 12px; color: #7f88a8; text-align: center; }
   #phoneov { position: fixed; inset: 0; z-index: 75; background: rgba(0,0,0,.55); display: grid; place-items: center; }
   #phoneov .pcard { width: min(400px, 94vw); height: min(620px, 88vh); display: flex; flex-direction: column; background: #101018; border: 1px solid #34344a; border-radius: 22px; padding: 14px 14px 12px; box-shadow: 0 14px 56px rgba(0,0,0,.65); }
   #phoneov .pbar { display: flex; align-items: center; gap: 10px; padding-bottom: 9px; border-bottom: 1px solid #23232f; }
@@ -121,6 +141,10 @@
   .pthread { display: flex; align-items: center; gap: 10px; padding: 9px 6px; border-bottom: 1px solid #1d1d28; cursor: pointer; }
   .pthread:hover { background: #171722; }
   .pav { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex: 0 0 40px; }
+  /* 🎒 物品图标 (实体化 第5题): 图挂模板, 盖在 emoji 上; 加载失败自移除露出 emoji */
+  .pav.plet { position: relative; overflow: hidden; }
+  .itmicon { position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; border-radius: inherit; }
   .plet { display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 17px; }
   .pmeta { flex: 1; min-width: 0; }
   .pname { font-size: 13.5px; color: #e6e9f2; display: flex; align-items: center; gap: 6px; }
@@ -277,7 +301,9 @@
 #mapov .mnode.cango:hover { border-color:#5b8a6c; background:#1a2a20; }
 /* 🗺 图与线 (Yi 定): 地点=缩略图节点, 连通=连线; 你在=绿圈, 可去=亮圈可点 */
 #mapov .mstage { position:relative; width:100%; height:58vh; min-height:340px;
-  background:#0d1115; border-radius:12px; border:1px solid #1d242b; overflow:hidden; }
+  background:#0d1115; border-radius:12px; border:1px solid #1d242b; overflow:hidden;
+  touch-action:none; }
+#mapov #mzwrap { position:absolute; inset:0; will-change:transform; }
 #mapov .mstage svg { position:absolute; inset:0; width:100%; height:100%; }
 #mapov .medge { stroke:#2c3a44; stroke-width:2; }
 #mapov .medge.live { stroke:#d8b57a; stroke-width:2.5; stroke-dasharray:none;
@@ -415,6 +441,9 @@ body.vn { touch-action: pan-y; }
   transform: translateX(-50%) translateZ(var(--z)) rotateY(var(--ty));
   transition: transform .55s cubic-bezier(.22,.8,.3,1), opacity .4s ease;
   transform-style: preserve-3d; }
+.standee.beast { z-index: 1 !important; }
+.standee.beast img { height: 76vh; max-width: 92vw; filter: brightness(.9) saturate(1.05); }
+.standee.beast.raging img { filter: brightness(.96) saturate(1.25) drop-shadow(0 0 18px rgba(224,87,79,.35)); }
 .standee[data-tilt="l"] { --ty: 6deg; }
 .standee[data-tilt="r"] { --ty: -6deg; }
 .standee.lit { --z: 55px; --ty: 0deg; }
@@ -471,7 +500,11 @@ body.vn { touch-action: pan-y; }
 #vnnext { position: absolute; right: 8%; bottom: 12px; color: #d8b57a; font-size: 11px;
   animation: vnpulse 1.6s ease-in-out infinite; visibility: hidden; }
 @keyframes vnpulse { 50% { opacity: .15; transform: translateY(2px); } }
+/* 🎛 控制条默认收起 (Yi: 太挡角色) — 只露一枚把手紧贴框沿, 点开才弹全功能 */
 #vnctl { position: absolute; top: 12px; right: 8%; display: flex; gap: 15px; }
+#vnctl:not(.open) span:not(#vnctlh) { display: none; }
+#vnctlh { opacity: .75; }
+#vnctl.open #vnctlh { color: #d8b57a; }
 #vnctl span { background: none; border: 0; padding: 4px 1px; font-size: 11px;
   letter-spacing: 2px; cursor: pointer; color: rgba(236,233,226,.52);
   text-shadow: 0 1px 3px rgba(0,0,0,.9); }
@@ -495,6 +528,16 @@ body.vnhide #vnui { pointer-events: auto; }
 #vnbox, #vnchoices, body.vn footer { transition: opacity .3s ease; }
 body.vn #chat { visibility: hidden; }
 body.vn.vnlog #chat { visibility: visible; position: fixed; inset: 56px 0 0 0; z-index: 60; background: rgba(8,8,14,.97); padding: 12px 16px 80px; overflow-y: auto; overflow-x: hidden; max-width: 100vw; box-sizing: border-box; }
+/* ✏️ 编辑正史: 回想行右上小铅笔, 常态半隐 */
+#chat .bedit { position: absolute; right: 4px; top: 2px; opacity: .35; cursor: pointer;
+  font-size: 13px; padding: 4px 6px; z-index: 2; }
+#chat .bedit:active, #chat .bedit:hover { opacity: 1; }
+#chat .desc, #chat .beat, #chat .row { position: relative; }
+#chat .bedit-box { margin-top: 6px; }
+#chat .bedit-box textarea { width: 100%; min-height: 64px; background: #0d0d15;
+  color: #e8e8f0; border: 1px solid rgba(216,181,122,.4); border-radius: 8px;
+  padding: 8px; font-size: 13.5px; box-sizing: border-box; }
+#chat .bedit-box button { margin: 6px 6px 0 0; }
 /* 📜 回想页不许比屏幕宽 (Yi 报障): 一切内容锁进视口, 长词强断 */
 body.vn.vnlog #chat > * { max-width: 100% !important; box-sizing: border-box; overflow-wrap: break-word; word-break: break-word; }
 /* 📜 回想页的返回键 (Yi 报障: 没有返回键) */
@@ -559,6 +602,9 @@ body.dread #dread { opacity:1; }
 
 /* ── 🖼 竖屏画框 (最终形态=手机 App): 宽屏下 VN 收进居中竖版舞台, 两侧留黑 ── */
 @media (min-width: 800px) {
+  /* 📱 悬浮手机键锚进游戏栏 (Yi 报障 MacBook: 手机功能不在「屏幕」内 — 宽屏上
+     游戏居中一栏, 钉在窗口右缘的键离画面隔着几百像素黑场, 像掉出了游戏) */
+  body.vn #phoneFab { right: calc(var(--sx, 0px) + 10px); }
   body.vn { --sw: min(100vw, 47vh); --sx: max(0px, calc((100vw - var(--sw)) / 2));
     background: #000; }
   body.vn #bg, body.vn #dread, body.vn #vntint, body.vn #vnflash,
@@ -577,14 +623,20 @@ body.dread #dread { opacity:1; }
 #barsToggle { display: none; }  /* mobile-only strip; desktop keeps the full bars */
 @media (max-width: 640px) {
   header { padding: 8px 10px; }
-  header b { font-size: 14px; }
+  header b { font-size: 14px; white-space: nowrap; }
   /* 📱 顶栏防溢出 (Yi 报障: 好多东西在屏幕外面 — 🌍 上排后按钮串挤出屏):
      右侧按钮串允许换行、账号邮箱在手机上不占地, ←剧本/退出 永远在屏内 */
   header > span { flex-wrap: wrap; justify-content: flex-end; row-gap: 4px;
-    gap: 5px !important; min-width: 0; }
-  header .iconbtn { padding: 3px 5px; font-size: 15px; }
+    gap: 4px !important; min-width: 0; }
+  header .iconbtn { padding: 2px 4px; font-size: 14px; }
   header #who { display: none; }
   header #backBtn { padding: 4px 8px !important; }
+  /* 🎮 游戏中窄屏顶栏收成一行 (Yi 报障: 按键展示不全 — 两排叠得像被裁):
+     品牌字让位给按键 (AI 虚构标识保留), 登出键回选本页再见 */
+  body.vn #brandName { display: none; }
+  body.vn #logoutBtn { display: none; }
+  body.vn #langBtn { display: none; }   /* 语言开关选本页还有, 局中让位 */
+  body.vn header b { font-size: 12px; opacity: .8; }
   #cast { padding: 5px 8px; gap: 5px; }
   .castitem { min-width: 38px; }
   .castitem small { font-size: 10px; }
@@ -623,7 +675,9 @@ body.dread #dread { opacity:1; }
      腿脚藏在面板后面 (gal 正统排法; 悬浮半空和被整个吞掉都是错) */
   .standee img { height: 60vh; max-width: 84vw; }
   .standee.lit img { height: 66vh; }
-  body.vn.vnfree #vnbox { max-height: 50vh; }
+  /* 📱 控制条悬浮在框顶上方 (top:-40px) — vnfree 的 overflow:hidden 会把它整条裁掉
+     (Yi 报障: 手机上没有自动播放/好感): 文字滚动由 #vntext 自己管, 框放开裁切无害 */
+  body.vn.vnfree #vnbox { max-height: 50vh; overflow: visible; }
   #vnctl { top: -40px; right: 10px; gap: 7px; }
   #vnctl span { background: rgba(6,7,12,.74); border-radius: 999px; padding: 7px 11px; }
   /* iOS: 输入框字号 <16px 会触发聚焦自动放大 — 竖屏 App 铁律 */
@@ -673,13 +727,16 @@ body.dread #dread { opacity:1; }
   <div id="vnwbg"></div>
   <div id="vnpan"></div>
 </div>
+<!-- 📱 小手机悬浮键: 右上角独立入口 (Yi: 要在更明显的地方) -->
+<button id="phoneFab" class="hidden" title="小手机：消息、日历、通讯录"
+        onclick="openPhone()">📱<span id="phoneFabBadge" class="pbadge hidden"></span></button>
 <!-- 🎀 VN window (galgame 演出): 场景HUD + dialogue box + click-to-advance + choices -->
 <div id="vnui" class="hidden" onclick="vnUnhide()">
   <div id="scenehud" onclick="event.stopPropagation();vnHudToggle()"></div>
   <div id="scenehudlist" class="hidden"></div>
   <div id="vnbox" onclick="vnAdvance()">
     <div id="vnname" class="hidden"></div>
-    <div id="vnctl"><span onclick="event.stopPropagation();vnHearts()" title="好感度">好感</span><span onclick="event.stopPropagation();vnToggleStat()" title="目标/理智/警觉等状态">状态</span><span onclick="event.stopPropagation();vnHide()" title="隐藏界面看立绘">隐藏</span><span id="vnauto" onclick="event.stopPropagation();vnToggleAuto()" title="自动播放">自动</span><span onclick="event.stopPropagation();vnToggleLog()" title="回想">记录</span></div>
+    <div id="vnctl"><span id="vnctlh" onclick="event.stopPropagation();vnCtlToggle()" title="菜单">☰</span><span onclick="event.stopPropagation();vnHearts()" title="好感度">好感</span><span onclick="event.stopPropagation();vnToggleStat()" title="目标/理智/警觉等状态">状态</span><span onclick="event.stopPropagation();vnHide()" title="隐藏界面看立绘">隐藏</span><span id="vnauto" onclick="event.stopPropagation();vnToggleAuto()" title="自动播放">自动</span><span onclick="event.stopPropagation();vnToggleLog()" title="回想">记录</span><span onclick="event.stopPropagation();vnRewindLast()" title="撤回上一个回合">⏪</span></div>
     <div id="vntext"></div>
     <!-- 选项住在对话面板内部: 文字和选项同一个流, 物理上不可能互相遮挡 -->
     <div id="vnchoices" class="hidden" onclick="event.stopPropagation()"></div>
@@ -690,7 +747,7 @@ body.dread #dread { opacity:1; }
 <audio id="sfx"></audio>
 <div id="app">
   <header>
-    <b>LinguisPlay <span class="muted" style="font-weight:400">· AI 虚构内容</span></b>
+    <b><span id="brandName">LinguisPlay ·</span> <span class="muted" style="font-weight:400">AI 虚构内容</span></b>
     <span style="display:flex; gap:8px; align-items:center">
       <button id="langBtn" class="iconbtn" title="界面语言 / UI language" onclick="toggleLang()">🌐</button>
       <button id="helpBtn" class="iconbtn" title="怎么玩 / How to play" onclick="openTutorial()">❓</button>
@@ -939,7 +996,7 @@ let avatarMap = {};
 function mergeAvatars(list) {
   (list || []).forEach(c => { if (c && c.name && c.avatar_url) avatarMap[c.name] = c.avatar_url; });
 }
-let curScene = null, curLocId = null;  // for backdrop: last scene + current place id
+let curScene = null, curLocId = null; let beasts = [];  // for backdrop: last scene + current place id
 let curClock = null, curLocData = null; // ⏳ the diegetic clock + last place (placebar redraws)
 let cast = [], target = null;  // target = character_id the player is addressing (null = auto)
 let relations = {}, following = [];  // {cid:{mode,mode_name,romance,...}} ; ids traveling with you
@@ -995,6 +1052,14 @@ async function afterAuth() {
     `${B("自己做的可玩本子都在这里 →", "Your playable galgames →")}</span>`;
   galCard.onclick = () => location.href = "/gal";
   stories.appendChild(galCard);
+  // ✍️ 创作入口 (创作 UX 首期 D): 从前必须手敲 /studio 网址 — 断链治理
+  const makeCard = document.createElement("div");
+  makeCard.className = "card runcard";
+  makeCard.style.cssText = "margin:8px 0; cursor:pointer";
+  makeCard.innerHTML = `<b>✍️ ${B("创作剧本", "Create a story")}</b> <span class="muted">` +
+    `${B("AI 起草或从模板开工，做一个你自己的世界 →", "Draft with AI or start from a template →")}</span>`;
+  makeCard.onclick = () => location.href = "/studio";
+  stories.appendChild(makeCard);
   // 继续你的故事: existing runs come FIRST — the relationships you built are the game
   try {
     const runs = await j("/runs");
@@ -1110,7 +1175,41 @@ async function chooseRole(storyId) {
     ? `<p class='muted'>${B("这个世界的人物，会在你踏入之后才诞生。", "This world's people will be born only after you step in.")}</p>`
     : `<p class='muted'>${B("这个剧本还没有可扮演的角色。", "This story has no playable roles yet.")}</p>`;
   renderStoryMeta(storyId);
+  renderStoryPacks(storyId);
   hide("pick"); show("role");
+}
+// 💎 收费包 (平台币 P1): 开档前一屏展示 — 已拥有打勾, 未拥有一键购
+async function renderStoryPacks(storyId) {
+  let host = document.getElementById("storyPacks");
+  if (!host) {
+    host = document.createElement("div"); host.id = "storyPacks";
+    const meta = document.getElementById("storyMeta");
+    meta.parentNode.insertBefore(host, meta.nextSibling);
+  }
+  host.innerHTML = "";
+  let pv, w;
+  try { pv = await j(`/stories/${storyId}/packs`); } catch (e) { return; }
+  if (!(pv.packs || []).length) return;
+  try { w = await j(`/wallet`); } catch (e) { w = { balance: 0, currency: "月石" }; }
+  const rows = pv.packs.map(p => {
+    const tag = (p.grants||{}).access ? `🎫` : `🎁`;
+    const buy = p.owned
+      ? `<span class="badge">✓ ${B("已拥有","Owned")}</span>`
+      : `<button class="sm" onclick="buyPack('${p.id}','${storyId}')">💎 ${p.price}</button>`;
+    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #1a1c28">
+      <span>${tag}</span><div style="flex:1"><b style="font-size:13px">${escapeHtml(p.name)}</b>
+      <div class="muted" style="font-size:11px">${escapeHtml(p.desc||"")}</div></div>${buy}</div>`;
+  }).join("");
+  host.innerHTML = `<div class="smeta"><div style="display:flex;justify-content:space-between;align-items:center">
+    <span class="muted">💎 ${B("这本的增益包","Packs")}</span>
+    <span class="muted" style="font-size:12px">${B("钱包","Wallet")}: <b>${w.balance}</b> ${escapeHtml(w.currency)}</span></div>${rows}</div>`;
+}
+async function buyPack(pid, storyId) {
+  try {
+    const out = await j(`/packs/${pid}/buy`, { method: "POST" });
+    pushToast(`💎 ${B("已购入","Purchased")} · ${B("余额","Balance")} ${out.balance}`, "t-unlock");
+    renderStoryPacks(storyId);
+  } catch (e) { pushToast("⚠️ " + escapeHtml(e.message)); }
 }
 // 🌱 cross-run progress: the persistent ending gallery + achievements + NG+ perk picker
 let chosenPerk = null, chosenCarry = null;
@@ -1292,7 +1391,8 @@ async function enterRun(run) {
   try { if (!localStorage.getItem("lp_tut_v1")) { openTutorial(); tutOpen = true; } } catch (e) {}
   document.getElementById("driveBtn").classList.toggle("hidden", !isSandbox || playMode === "god");
   maybeShowHowto(st0, run, tutOpen);
-  hide("pick"); show("play"); show("backBtn"); show("soundBtn"); show("journalBtn"); show("mapBtn"); show("phoneBtn"); show("spdBtn"); applySpeedIcon();
+  // 📱 小手机走右上角悬浮键 (Yi 定); 顶栏 phoneBtn 退役, 顺带给按钮串减负
+  hide("pick"); show("play"); show("backBtn"); show("soundBtn"); show("journalBtn"); show("mapBtn"); show("phoneFab"); show("spdBtn"); applySpeedIcon();
   // 🌍 活世界开关: 沙盒且有钟的故事才有 (世界心跳挂在游戏内时钟上)
   livingCfg = (run.state && run.state.living) || null;
   if (isSandbox) { show("worldBtn"); applyWorldIcon(); }
@@ -1301,6 +1401,7 @@ async function enterRun(run) {
   curBgmMood = null; curScene = null; curLocId = null;
   target = null;
   cast = (run.state && run.state.here) || run.cast || [];
+  beasts = (run.state && run.state.beasts) || [];
   mergeAvatars(cast); mergeAvatars(run.cast);
   relations = (run.state && run.state.relations) || {};
   following = (run.state && run.state.following) || [];
@@ -1309,6 +1410,9 @@ async function enterRun(run) {
   channel.style.display = playMode === "god" ? "none" : "";
   updatePlaceholder();
   applyScene(run.state && run.state.scene);
+  // 📍 地点先落位: 背景要用地点实景图, 不能等 VN 开场点完才轮到 renderState
+  // (实弹: 新档整段开场挂在关键词兜底图上 — 虚空巨舰配了片海滩)
+  if (run.state && run.state.location) renderPlace(run.state.location);
   const beats = await j(`/runs/${runId}/play`);
   beats.forEach(renderBeat);
   if (vnMode) {   // 🎀 the window plays, not the log; a VN-layer crash degrades to chat
@@ -1323,6 +1427,11 @@ async function enterRun(run) {
       if (n > 0) pushToast(B(`🔒 这个故事里藏着 <b>${n}</b> 个秘密，没有人会主动告诉你。`, `🔒 This story hides <b>${n}</b> secrets. No one will volunteer them.`), "t-unlock", 1500);
     } catch (e) {}
   }
+  // 📖 剧本出了新版: 本档钉在创建时的版本 (护档设计 — 半路换剧本会弄坏存档)。
+  // 说给玩家听, 别让TA以为「编辑了还都是旧的剧情和设定」是坏了 (实弹 2026-07-19)
+  if (st0 && st0.version && run.story_version && st0.version > run.story_version)
+    pushToast(B(`📖 这个剧本已更新到 v${st0.version}，本档仍演开档时的 v${run.story_version}——想体验新剧情设定，回选本页开个新档。`,
+                `📖 This story is now v${st0.version}; this run stays on v${run.story_version} it opened with. Start a new run for the new version.`), "t-act", 2000);
   curClock = (run.state && run.state.clock) || null;
   // 建议 chips 常驻: 聊天模式的续档也要回位 (VN 由 vnBootstrap 负责)
   if (!vnMode) renderSuggest(((run.state || {}).suggestions) || run.suggestions || []);
@@ -1341,12 +1450,12 @@ function sendLeave() { if (runId) { try { navigator.sendBeacon(`${API}/runs/${ru
 window.addEventListener("pagehide", sendLeave);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") sendLeave(); });
 
-function backToPick() { sendLeave(); runId = null; stopBgm(); vnShow(false); vnMode = false; hide("play"); hide("backBtn"); hide("soundBtn"); hide("journalBtn"); hide("mapBtn"); hide("phoneBtn"); hide("worldBtn"); show("pick"); }
+function backToPick() { sendLeave(); runId = null; stopBgm(); vnShow(false); vnMode = false; hide("play"); hide("backBtn"); hide("soundBtn"); hide("journalBtn"); hide("mapBtn"); hide("phoneBtn"); hide("phoneFab"); hide("worldBtn"); show("pick"); }
 async function doLogout() {
   sendLeave();  // must fire while the session cookie is still valid
   try { await j("/auth/logout", { method:"POST" }); } catch(e){}
   runId = null; stopBgm();
-  hide("play"); hide("pick"); hide("role"); hide("backBtn"); hide("soundBtn"); hide("journalBtn"); hide("mapBtn"); hide("logoutBtn");
+  hide("play"); hide("pick"); hide("role"); hide("backBtn"); hide("soundBtn"); hide("journalBtn"); hide("mapBtn"); hide("phoneFab"); hide("logoutBtn");
   show("auth");
 }
 
@@ -1375,11 +1484,57 @@ function renderBeat(b) {
     node = makeRow("left", b.speaker_name || "", b.text, true, true);
     if (b.mood) attachMood(node, b.mood);
   }
+  if (b.id) armEdit(node, b);   // ✏️ 回想里可编辑正史 (自己的话/台词/旁白)
   chat.appendChild(node); chat.scrollTop = chat.scrollHeight;
   return node;
 }
+// ✏️ 编辑对话正史 (Yi 2026-07-23): 只改文本不重算账本; 改动进入后续回合的记忆。
+function armEdit(node, b) {
+  const btn = document.createElement("span");
+  btn.className = "bedit"; btn.textContent = "✎"; btn.title = B("编辑这一句", "Edit");
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    if (turnInFlight) { pushToast(B("剧情推进中，稍等再改", "Wait for the turn to finish"), "", 2000); return; }
+    if (node.querySelector(".bedit-box")) return;
+    const target = node.querySelector(".bubble") || node;
+    const orig = b.text;
+    const box = document.createElement("div"); box.className = "bedit-box";
+    const ta = document.createElement("textarea"); ta.value = orig; ta.maxLength = 600;
+    const ok = document.createElement("button"); ok.textContent = B("保存", "Save");
+    const no = document.createElement("button"); no.className = "ghost"; no.textContent = B("取消", "Cancel");
+    box.append(ta, ok, no);
+    target.style.display = "none"; node.appendChild(box); ta.focus();
+    no.onclick = () => { box.remove(); target.style.display = ""; };
+    ok.onclick = async () => {
+      const t = ta.value.trim();
+      if (!t) return;
+      try {
+        const nb = await j(`/runs/${runId}/beat/${b.id}`, { method: "PATCH", body: JSON.stringify({ text: t }) });
+        b.text = nb.text;
+        if (target.classList && target.classList.contains("bubble")) target.textContent = nb.text;
+        else if (b.author === "player" && b.type === "think") target.textContent = B("（观察）", "(Observing) ") + nb.text;
+        else target.textContent = nb.text;
+        box.remove(); target.style.display = "";
+        pushToast(B("✏️ 已改写正史", "✏️ History rewritten"), "t-act", 1800);
+      } catch (e2) { pushToast("⚠️ " + escapeHtml(e2.message), "", 2600); }
+    };
+  };
+  node.appendChild(btn);
+}
 // ⏪ 重说/回溯 (docs/ux-design.md P1): a bad beat needs an exit that isn't a bug report.
 let lastTurnBody = null;
+// ⏪ VN 入口 (Yi: 要能撤回退回对话 — 长按聊天流在 VN 里摸不到): 一键回到上一回合之前
+async function vnRewindLast() {
+  if (!runId || ended || turnInFlight) return;
+  if (!confirm(B("撤回上一个回合？你刚说的话和之后的剧情都会被抹掉。",
+                 "Undo the last turn? Your line and everything after will be erased."))) return;
+  try {
+    await j(`/runs/${runId}/rewind`, { method: "POST", body: JSON.stringify({}) });
+    lastTurnBody = null;
+    await reloadChat();
+    pushToast(B("⏪ 已撤回——换个说法或走向", "⏪ Undone — try a different take"), "t-act", 2400);
+  } catch (e) { pushToast("⚠️ " + escapeHtml(e.message), "", 2800); }
+}
 function armRewind(node, seq) {
   let t = null;
   const start = () => { t = setTimeout(() => {
@@ -1557,6 +1712,25 @@ async function moveTo(name) {
                run.discoveries, run.suggestions);
   } catch(e) { renderBeat({ author:"engine", type:"description", text:`（${e.message}）` }); }
 }
+// 🪪 rename an emergent NPC (fix bad births like「谁看见」) — engine chars only
+async function renameChar(cid) {
+  const nv = prompt(B("给TA改个名字（1~12字）：", "New name (1–12 chars):"));
+  if (nv == null || !nv.trim()) return;
+  try {
+    await j(`/runs/${runId}/character/${cid}/rename`, { method: "POST", body: JSON.stringify({ name: nv.trim() }) });
+    openCharCard(cid);           // the card redraws with the new name; other views fetch fresh
+  } catch (e) { alert(e.message); }
+}
+// 📍 涌现地点改名 (级联出口在服务端)
+async function renameLoc(lid) {
+  const nv = prompt(B("给这个地方起个名字（1~12字）：", "Name this place (1–12 chars):"));
+  if (nv == null || !nv.trim()) return;
+  try {
+    const out = await j(`/runs/${runId}/location/${lid}/rename`, { method: "POST", body: JSON.stringify({ name: nv.trim() }) });
+    if (curLocData && curLocData.id === lid) { curLocData.name = out.name; renderPlace(curLocData); }
+    pushToast(`📍 ${escapeHtml(out.was)} → ${escapeHtml(out.name)}`, "t-act");
+  } catch (e) { pushToast("⚠️ " + escapeHtml(e.message)); }
+}
 async function toggleFollow(id, want) {
   if (!runId || ended) return;
   try {
@@ -1575,8 +1749,18 @@ function renderMoveAsk(req) {
     t.innerHTML = B(`📍 <b>${escapeHtml(req.by_name||"")}</b> 此刻在 <b>${escapeHtml(req.to_name||"")}</b>，要去找 TA 吗？`,
                     `📍 <b>${escapeHtml(req.by_name||"")}</b> is at <b>${escapeHtml(req.to_name||"")}</b> right now — go find them?`);
   } else if (req.self_go) {
-    t.innerHTML = B(`🧭 <b>${escapeHtml(req.to_name||"")}</b> 还不在你已知的地图上${tail}，动身去吗？`,
-                    `🧭 <b>${escapeHtml(req.to_name||"")}</b> isn't on your map yet${tail} — set out?`);
+    // 提及即立档 / 近似命中改道: 地点已真实在册 — 说人话, 别喊"不在地图上"
+    t.innerHTML = req.minted
+      ? B(`📍 「<b>${escapeHtml(req.to_name||"")}</b>」记上你的地图了——现在过去吗？（不去也随时能去）`,
+          `📍 <b>${escapeHtml(req.to_name||"")}</b> is on your map now — head over?`)
+      : (req.to && !req.generate
+      ? B(`🧭 你说的应该是 <b>${escapeHtml(req.to_name||"")}</b>——动身去吗？`,
+          `🧭 You mean <b>${escapeHtml(req.to_name||"")}</b>? — set out?`)
+      : B(`🧭 <b>${escapeHtml(req.to_name||"")}</b> 还不在你已知的地图上${tail}，动身去吗？`,
+          `🧭 <b>${escapeHtml(req.to_name||"")}</b> isn't on your map yet${tail} — set out?`));
+  } else if (req.minted) {
+    t.innerHTML = B(`🚪 <b>${escapeHtml(req.by_name||"对方")}</b> 说起了 <b>${escapeHtml(req.to_name||"")}</b>——已记上地图。跟TA去看看吗？`,
+                    `🚪 <b>${escapeHtml(req.by_name||"They")}</b> mentioned <b>${escapeHtml(req.to_name||"")}</b> — it's on your map. Go see it?`);
   } else {
     t.innerHTML = B(`🚪 <b>${escapeHtml(req.by_name||"对方")}</b> 想带你去 <b>${escapeHtml(req.to_name||"")}</b>${tail}`,
                     `🚪 <b>${escapeHtml(req.by_name||"They")}</b> wants to take you to <b>${escapeHtml(req.to_name||"")}</b>${tail}`);
@@ -1600,6 +1784,12 @@ async function acceptMove(req) {
         : B(`（你跟着${req.by_name||"对方"}来到了 ${req.to_name}。）`,
             `(You follow ${req.by_name||"them"} to ${req.to_name}.)`) }],
       run.discoveries, run.suggestions);
+    // 📍 新地方刚落成: 给玩家一次当场定名的机会 (Yi: 生成的名字乱)
+    if (req.generate) {
+      const nl = (run.state || {}).location || {};
+      if (nl.id) pushToast(B(`📍 新地方「${escapeHtml(nl.name||"")}」落成 <a style="color:#8ea2ff;cursor:pointer" onclick="renameLoc('${nl.id}')">✏️改个名</a>`,
+                             `📍 New place founded: ${escapeHtml(nl.name||"")}`), "t-act", 900);
+    }
   } catch(e) { renderBeat({ author:"engine", type:"description", text:`（${e.message}）` }); }
 }
 // 关键节点抉择 (VN choice): an authored decision card. Picking applies its effects
@@ -1695,10 +1885,12 @@ async function openJournal() {
 let phoneUnread = 0, phoneDevice = "手机", phoneOn = true;
 function setPhoneBadge(n) {
   phoneUnread = Math.max(0, n | 0);
-  const b = document.getElementById("phoneBadge");
-  if (!b) return;
-  if (phoneUnread > 0) { b.textContent = phoneUnread > 9 ? "9+" : phoneUnread; b.classList.remove("hidden"); }
-  else b.classList.add("hidden");
+  for (const id of ["phoneBadge", "phoneFabBadge"]) {   // 顶栏角标 + 悬浮键角标同步
+    const b = document.getElementById(id);
+    if (!b) continue;
+    if (phoneUnread > 0) { b.textContent = phoneUnread > 9 ? "9+" : phoneUnread; b.classList.remove("hidden"); }
+    else b.classList.add("hidden");
+  }
 }
 function phoneShell(inner, title, backTo) {
   let ov = document.getElementById("phoneov");
@@ -1717,6 +1909,103 @@ function phoneShell(inner, title, backTo) {
 }
 function noSignal() {
   pushToast(B("📵 没有信号。这个世界里，电波传不出去。", "📵 No signal — nothing gets out of this world."), "t-press", 0);
+}
+// 📖 生物图鉴: 见过的生物 — 血阶/部位伤/习性/图鉴图
+async function openBestiary() {
+  let v; try { v = await j(`/runs/${runId}/bestiary`); } catch(e) { pushToast(escapeHtml(e.message)); return; }
+  const HPC = { "完好":"#9dd89d","带伤":"#e8d9a0","重创":"#ffb37a","濒死":"#ff9d9d","讨伐":"#8f97b3" };
+  const rows = (v.rows||[]).map(c => `<div style="display:flex;gap:10px;border:1px solid #23232f;border-radius:14px;padding:10px;margin-bottom:10px">
+      <img src="${c.img}?v=${Date.now()>>14}" style="width:74px;height:74px;object-fit:cover;border-radius:10px" onerror="this.style.opacity=.15">
+      <div style="flex:1"><b>${escapeHtml(c.name)}</b> <span class="muted" style="font-size:11px">${escapeHtml(c.kind)} · ${B("威胁","Menace")}${"★".repeat(Math.min(5,c.menace))}</span>
+        <div style="font-size:12px;margin:3px 0"><span style="color:${HPC[c.hp]||"#ccc"}">●</span> ${escapeHtml(c.hp)}${(c.wounds||[]).length?` · ${B("部位破坏","Broken")}: ${c.wounds.map(escapeHtml).join("/")}`:""}</div>
+        <div class="muted" style="font-size:11px">${escapeHtml(c.habits||c.desc||"")}</div></div></div>`).join("");
+  const un = v.unseen ? `<p class="muted">${B(`这个世界还有 ${v.unseen} 种你未曾遭遇的生物…`, `${v.unseen} creature(s) not yet encountered…`)}</p>` : "";
+  phoneShell((rows||"")+un || `<p class="muted">${B("还没有遭遇过任何生物。","No encounters yet.")}</p>`, `📖 ${B("图鉴","Bestiary")}`, "phone");
+}
+// 🏦 银行 app: 余额 + 流水 + 转账 (真钱落账, TA 短信里真会回应)
+async function openBank() {
+  let v; try { v = await j(`/runs/${runId}/bank`); } catch(e) { pushToast(escapeHtml(e.message)); return; }
+  const rows = (v.log||[]).map(l =>
+    `<div style="display:flex;justify-content:space-between;padding:7px 2px;border-bottom:1px solid #1a1c28;font-size:13px">
+      <span>${escapeHtml(l.why||"")} <span class="muted" style="font-size:11px">${escapeHtml(l.label||"")}</span></span>
+      <b style="color:${l.delta>0?"#9dd89d":"#ff9d9d"}">${l.delta>0?"+":""}${l.delta}</b></div>`).join("")
+    || `<p class="muted">${B("还没有流水。","No transactions yet.")}</p>`;
+  const opts = (v.contacts||[]).map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("");
+  const xfer = opts ? `<div style="display:flex;gap:8px;margin:10px 0 4px">
+      <select id="bkWho" style="flex:1">${opts}</select>
+      <input id="bkAmt" type="number" inputmode="numeric" placeholder="${B("金额","Amount")}" style="width:88px">
+      <button class="sm" onclick="bankSend()">${B("转账","Send")}</button></div>`
+    : `<p class="muted" style="margin-top:8px">${B("通讯录里还没有能收款的人——联系方式要靠剧情挣。","No payees yet.")}</p>`;
+  phoneShell(`<div style="text-align:center;padding:14px 0 6px">
+      <div class="muted" style="font-size:12px">${B("余额","Balance")}</div>
+      <div style="font-size:30px;font-weight:700">${v.balance} <span style="font-size:14px">${escapeHtml(v.currency||"")}</span></div></div>
+    ${xfer}<div class="muted" style="margin:10px 0 4px;font-size:12px">${B("流水","History")}</div>${rows}`,
+    `🏦 ${B("银行","Bank")}`, "phone");
+}
+async function bankSend() {
+  const who = document.getElementById("bkWho")?.value, amt = parseInt(document.getElementById("bkAmt")?.value, 10);
+  if (!who || !Number.isFinite(amt) || amt <= 0) { pushToast(B("金额不对","Bad amount")); return; }
+  try {
+    const out = await j(`/runs/${runId}/bank/transfer`, { method:"POST", body: JSON.stringify({ char_id: who, amount: amt }) });
+    const rp = out.reply || {};
+    pushToast(`💸 ${B("已转出","Sent")} ${amt}${(rp.msgs||[]).length?` · ${escapeHtml(rp.name||"")}: ${escapeHtml((rp.msgs||[""])[0])}`:""}`, "t-unlock");
+    openBank();
+  } catch(e) { pushToast("⚠️ " + escapeHtml(e.message)); }
+}
+// 📸 动态 app: 角色的朋友圈 — 账本长出来的帖子, 点赞回好感, 评论TA会回
+async function openSocial() {
+  let v; try { v = await j(`/runs/${runId}/social`); } catch(e) { pushToast(escapeHtml(e.message)); return; }
+  const cards = (v.posts||[]).map(p => {
+    const av = `/scene/avatar/${encodeURIComponent(p.cid)}.jpg`;
+    const cms = (p.comments||[]).map(c =>
+      `<div style="font-size:12px;margin-top:4px;color:${c.from==="me"?"#8ea2ff":"#d5dbec"}">${c.from==="me"?B("你","You"):escapeHtml(p.name)}：${escapeHtml(c.text)}</div>`).join("");
+    return `<div style="border:1px solid #23232f;border-radius:14px;padding:10px 12px;margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <img src="${av}" style="width:30px;height:30px;border-radius:50%;object-fit:cover" onerror="this.style.display='none'">
+        <b style="font-size:13px">${escapeHtml(p.name)}</b><span class="muted" style="font-size:11px">${escapeHtml(p.label||"")}</span></div>
+      <div style="margin:8px 0 6px;font-size:14px;line-height:1.6">${escapeHtml(p.text)}</div>
+      ${cms}
+      <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+        <button class="sm ghost" style="padding:3px 10px" onclick="socLike('${p.id}',this)">${p.liked?"❤️":"🤍"}</button>
+        <input id="sc_${p.id}" placeholder="${B("评论…","Comment…")}" style="flex:1;font-size:12px;padding:5px 8px">
+        <button class="sm ghost" style="padding:3px 10px" onclick="socComment('${p.id}')">${B("发","Go")}</button></div></div>`;
+  }).join("") || `<p class="muted">${B("还没有动态——认识的人多了、事情发生了，这里就热闹了。","Quiet for now.")}</p>`;
+  phoneShell(cards, `📸 ${B("动态","Feed")}`, "phone");
+}
+async function socLike(pid, btn) {
+  try { await j(`/runs/${runId}/social/like`, { method:"POST", body: JSON.stringify({ post_id: pid }) });
+    if (btn) btn.textContent = "❤️"; } catch(e) { pushToast(escapeHtml(e.message)); }
+}
+async function socComment(pid) {
+  const inp = document.getElementById(`sc_${pid}`);
+  const text = (inp?.value || "").trim();
+  if (!text) return;
+  try {
+    const out = await j(`/runs/${runId}/social/comment`, { method:"POST", body: JSON.stringify({ post_id: pid, text }) });
+    pushToast(`💬 ${escapeHtml(out.reply||"")}`, "t-rel");
+    openSocial();
+  } catch(e) { pushToast("⚠️ " + escapeHtml(e.message)); }
+}
+// 📱🔍 TA的设备界面 (查手机 P1 壳): 偷看结果的"屏幕感" — 正文拍照旧进记录
+function renderPeek(v) {
+  if (!v) return;
+  let ov = document.getElementById("peekov");
+  if (ov) ov.remove();
+  ov = document.createElement("div"); ov.id = "peekov";
+  ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+  const nick = v.nickname ? `<div class="pknick">📇 ${B("TA给你的备注：", "Their name for you: ")}「${escapeHtml(v.nickname)}」</div>` : "";
+  const mine = v.mine_last ? `<div class="pkwith">${B("和你的对话（置顶）", "Thread with you (pinned)")}</div><div class="pkmsg">${escapeHtml(v.mine_last)}</div>` : "";
+  const ths = (v.threads || []).map(t =>
+    `<div class="pkwith">${B("和", "With ")}${escapeHtml(t.with || "?")}${B("的对话", "")}</div>` +
+    (t.msgs || []).map(m => `<div class="pkmsg">${escapeHtml(m)}</div>`).join("")).join("");
+  const hint = v.mode === "shallow"
+    ? `<div class="pkhint">${B("屏幕还亮着——再翻一次就是深翻（风险更高）", "Screen's still on — go again to dig deeper (riskier)")}</div>`
+    : `<div class="pkhint">${B("你把能看的都看了。放回去之前，别留下痕迹。", "You saw it all. Leave no trace.")}</div>`;
+  ov.innerHTML = `<div class="pkcard" onclick="event.stopPropagation()">
+    <div class="pkhead"><b>📱 ${escapeHtml((v.owner || {}).name || "")}${B("的", "'s ")}${escapeHtml(v.device || "手机")}</b>
+      <button class="ghost" onclick="document.getElementById('peekov').remove()">${B("放回去", "Put it back")}</button></div>
+    ${nick}${mine}${ths}${hint}</div>`;
+  document.body.appendChild(ov);
 }
 async function openPhone() {
   if (!runId) return;
@@ -1738,10 +2027,15 @@ async function openPhone() {
     : `<div class="papp poff" onclick="noSignal()">💬<small>信息</small></div>
        <div class="papp poff" onclick="noSignal()">📮<small>信箱</small></div>
        <div class="papp poff" onclick="noSignal()">👥<small>通讯录</small></div>`;
+  const apps = inbox.apps || [];
   const inner = `${phoneOn ? "" : `<div class="mhint">📵 ${B("没有信号", "No signal")}</div>`}<div class="papps">
     ${comm}
+    ${apps.includes("bestiary") ? `<div class="papp" onclick="openBestiary()">📖<small>${B("图鉴","Bestiary")}</small></div>` : ""}
+    ${apps.includes("bank") && phoneOn ? `<div class="papp" onclick="openBank()">🏦<small>${B("银行","Bank")}</small></div>` : ""}
+    ${apps.includes("social") && phoneOn ? `<div class="papp" onclick="openSocial()">📸<small>${B("动态","Feed")}</small></div>` : ""}
     ${curMoney != null ? `<div class="papp" onclick="openMarket()">🛒<small>集市</small></div>` : ""}
     <div class="papp" onclick="openAlbum()">📸<small>回忆册</small></div>
+    <div class="papp" onclick="document.getElementById('phoneov').remove(); openRelWeb()">🕸<small>关系网</small></div>
     <div class="papp" onclick="openBag()">🎒<small>背包</small></div>
     <div class="papp" onclick="openCalendar()">🗓<small>日历</small></div>
     <div class="papp" onclick="document.getElementById('phoneov').remove(); openJournal()">📔<small>备忘录</small></div>
@@ -1894,7 +2188,7 @@ async function openMarket() {
 }
 function renderMarket(mv) {
   const rows = (mv.items || []).map(it =>
-    `<div class="pthread mkrow"><div class="pmeta">
+    `<div class="pthread mkrow">${it.tid ? `<span class="pav plet" style="background:#3a3350">🛒<img class="itmicon" src="/scene/item/${escapeHtml(it.tid)}.jpg" onerror="this.remove()"></span>` : ""}<div class="pmeta">
        <div class="pname">${escapeHtml(it.name)} <span class="mprice">${it.price} ${escapeHtml(mv.currency)}</span></div>
        <div class="plast">${escapeHtml(it.detail || "")}</div></div>
      <button class="mbuy" data-mid="${escapeHtml(it.id)}" ${mv.money < it.price ? "disabled" : ""}>${B("买下", "Buy")}</button></div>`
@@ -2005,10 +2299,16 @@ async function openContacts() {
 async function openBag() {
   let jd = null;
   try { jd = await j(`/runs/${runId}/journal`); } catch (e) { return; }
-  const inv = (jd.inventory || []).map(i =>
-    `<div class="pthread"><span class="pav plet" style="background:#3a3350">🎒</span><div class="pmeta">
-      <div class="pname">${escapeHtml(i.name||"")}</div>
-      <div class="plast">${escapeHtml(i.detail||"")}</div></div></div>`).join("")
+  // 🎒 堆叠行显示数量 (物品实体化 P0: 三枚铜钱一行 ×3); 有籍的特殊件带个体状态一句;
+  // 模板图标懒加载 (第5题: 图挂 tid, 加载失败自移除露出 emoji)
+  const inv = (jd.inventory || []).map(i => {
+    const qty = (i.qty || 1) > 1 ? ` <span class="jwho">×${i.qty}</span>` : "";
+    const indiv = i.indiv ? Object.values(i.indiv).filter(Boolean).join("，") : "";
+    const icon = i.tid ? `<img class="itmicon" src="/scene/item/${escapeHtml(i.tid)}.jpg" onerror="this.remove()">` : "";
+    return `<div class="pthread"><span class="pav plet" style="background:#3a3350">🎒${icon}</span><div class="pmeta">
+      <div class="pname">${escapeHtml(i.name||"")}${qty}</div>
+      <div class="plast">${escapeHtml(indiv || i.detail || "")}</div></div></div>`;
+  }).join("")
     || `<div class="jempty">身上空空如也。</div>`;
   const stash = (jd.stashes || []).map(s =>
     `<div class="jsec" style="margin-top:6px"><div class="jtitle">${B(`📦 存放在「${escapeHtml(s.location||"")}」`, `📦 Stashed at “${escapeHtml(s.location||"")}”`)}</div>${
@@ -2117,7 +2417,7 @@ async function openMap() {
   const lines = edges.map(([a, b]) => {
     const live = curNode && (a === curNode.id || b === curNode.id)
       && (reachable.has(a) || reachable.has(b));
-    return `<line class="medge${live ? " live" : ""}" x1="${nx(pos[a].x)}%" y1="${ny(pos[a].y)}%" x2="${nx(pos[b].x)}%" y2="${ny(pos[b].y)}%"/>`;
+    return `<line class="medge${live ? " live" : ""}" data-a="${escapeHtml(a)}" data-b="${escapeHtml(b)}" x1="${nx(pos[a].x)}%" y1="${ny(pos[a].y)}%" x2="${nx(pos[b].x)}%" y2="${ny(pos[b].y)}%"/>`;
   }).join("");
   const dots = nodes.map(n => {
     const canGo = !n.here && reachable.has(n.id);
@@ -2126,20 +2426,65 @@ async function openMap() {
     const sub = n.chars && n.chars.length
       ? `<span class="sub">👤 ${n.chars.slice(0, 3).map(escapeHtml).join("、")}${n.chars.length > 3 ? "…" : ""}</span>` : "";
     const pin = n.here ? `<span class="mpin">📍 ${B("你在这里", "you are here")}</span>` : "";
-    return `<div class="${cls}" ${go} style="left:${nx(pos[n.id].x)}%;top:${ny(pos[n.id].y)}%">
+    return `<div class="${cls}" ${go} data-id="${escapeHtml(n.id)}" style="left:${nx(pos[n.id].x)}%;top:${ny(pos[n.id].y)}%">
       <div class="mthumb" style="background-image:url('/scene/bg/${encodeURIComponent(n.id)}.jpg')"></div>
       <div class="mplabel">${escapeHtml(n.name)} ${pin}${sub}</div></div>`;
   }).join("");
   const regen = curNode ? `<button class="ghost" data-regen="1" style="margin:8px 0 0; font-size:12px; padding:3px 8px">🖼 ${B("重画当前地点的背景", "Redraw this background")}</button>` : "";
   const hidden = mp.hidden > 0 ? `<div class="mhidden">${B(`还有 ${mp.hidden} 处地方，你尚未打听到…`, `${mp.hidden} more place(s) you haven't heard of yet…`)}</div>` : "";
   ov.innerHTML = `<div class="mcard" onclick="event.stopPropagation()">
-    <div class="jbar"><b>${B("🗺 地图", "🗺 Map")}</b><button class="ghost" onclick="document.getElementById('mapov').remove()">${B("关闭", "Close")}</button></div>
-    ${nodes.length ? `<div class="mstage"><svg>${lines}</svg>${dots}</div>` : `<div class="jempty">${B("这个故事没有标注地图。", "This story has no map.")}</div>`}
+    <div class="jbar"><b>${B("🗺 地图", "🗺 Map")}</b><span>
+      <button class="ghost" id="mzin">＋</button> <button class="ghost" id="mzout">－</button>
+      <button class="ghost" onclick="document.getElementById('mapov').remove()">${B("关闭", "Close")}</button></span></div>
+    ${nodes.length ? `<div class="mstage"><div id="mzwrap"><svg>${lines}</svg>${dots}</div></div>` : `<div class="jempty">${B("这个故事没有标注地图。", "This story has no map.")}</div>`}
     ${regen}${hidden}
   </div>`;
   ov.querySelectorAll("[data-go]").forEach(el => {
     el.onclick = async () => { ov.remove(); await moveTo(el.getAttribute("data-go")); };
   });
+  // 🔍 内容级缩放 (与关系网同一套语言): 放大=把地点拉开, 缩略图与字号保持原大;
+  // 拖动=平移 (wrap translate 快路径), 捏合/滚轮/＋－=缩放 (rAF 重排位置)
+  const stage = ov.querySelector(".mstage");
+  if (stage) {
+    const wrap = ov.querySelector("#mzwrap");
+    const bp = {}; nodes.forEach(n => bp[n.id] = { x: nx(pos[n.id].x), y: ny(pos[n.id].y) });
+    const mz = { s: 1, x: 0, y: 0 };
+    let raf = false, moved = false, downPt = null;
+    const redraw = () => { if (raf) return; raf = true; requestAnimationFrame(() => { raf = false;
+      const X = v => 50 + (v - 50) * mz.s, Y = v => 43 + (v - 43) * mz.s;
+      wrap.querySelectorAll(".mpnode").forEach(el => { const b = bp[el.dataset.id]; if (!b) return;
+        el.style.left = X(b.x) + "%"; el.style.top = Y(b.y) + "%"; });
+      wrap.querySelectorAll("line").forEach(el => { const a = bp[el.dataset.a], b = bp[el.dataset.b]; if (!a || !b) return;
+        el.setAttribute("x1", X(a.x) + "%"); el.setAttribute("y1", Y(a.y) + "%");
+        el.setAttribute("x2", X(b.x) + "%"); el.setAttribute("y2", Y(b.y) + "%"); });
+    }); };
+    const zoom = f => { mz.s = Math.max(.6, Math.min(2.5, mz.s * f)); redraw(); };
+    ov.querySelector("#mzin").onclick = () => zoom(1.25);
+    ov.querySelector("#mzout").onclick = () => zoom(.8);
+    stage.addEventListener("wheel", e => { e.preventDefault(); zoom(e.deltaY < 0 ? 1.15 : .87); }, { passive: false });
+    const pts = new Map(); let pinch0 = 0, s0 = 1, drag0 = null;
+    stage.addEventListener("pointerdown", e => {
+      pts.set(e.pointerId, [e.clientX, e.clientY]); moved = false; downPt = [e.clientX, e.clientY];
+      if (pts.size === 1) drag0 = { x: e.clientX - mz.x, y: e.clientY - mz.y };
+      if (pts.size === 2) { const [a, b] = [...pts.values()];
+        pinch0 = Math.hypot(a[0] - b[0], a[1] - b[1]); s0 = mz.s; drag0 = null; }
+    });
+    stage.addEventListener("pointermove", e => {
+      if (!pts.has(e.pointerId)) return;
+      pts.set(e.pointerId, [e.clientX, e.clientY]);
+      if (pts.size === 2 && pinch0) { const [a, b] = [...pts.values()];
+        mz.s = Math.max(.6, Math.min(2.5, s0 * Math.hypot(a[0] - b[0], a[1] - b[1]) / pinch0));
+        moved = true; redraw(); }
+      else if (pts.size === 1 && drag0) {
+        if (downPt && Math.hypot(e.clientX - downPt[0], e.clientY - downPt[1]) > 6) moved = true;
+        mz.x = e.clientX - drag0.x; mz.y = e.clientY - drag0.y;
+        wrap.style.transform = `translate(${mz.x}px,${mz.y}px)`; }
+    });
+    const mup = e => { pts.delete(e.pointerId); pinch0 = 0; drag0 = null; };
+    stage.addEventListener("pointerup", mup); stage.addEventListener("pointercancel", mup);
+    // 拖过就不算点: 捏合/平移松手时按在地名上也不许触发移动
+    stage.addEventListener("click", e => { if (moved) { e.stopPropagation(); moved = false; } }, true);
+  }
   const rb = ov.querySelector("[data-regen]");
   if (rb) rb.onclick = async (e) => {
     e.stopPropagation();
@@ -2328,7 +2673,7 @@ async function openCharCard(cid) {
     ? `<button class="ghost" style="font-size:12px;padding:5px 10px" onclick="toggleFollow('${p.id}', ${!p.following}); document.getElementById('charcard').remove()">${p.following ? B("🚶同行中 · 分开走", "🚶Together · part ways") : (p.can_follow ? B("邀TA同行", "Invite along") : B("🔒关系不够", "🔒Not close enough"))}</button>` : "";
   const uploadBtn = `<button class="ghost" style="font-size:12px;padding:5px 10px" onclick="pickCharImage('${p.id}')">🖼 ${B("上传形象", "Upload look")}</button>`;
   ov.innerHTML = `<div class="jcard" onclick="event.stopPropagation()">
-    <div class="jbar"><b>${p.dead ? "🕯 " : ""}${escapeHtml(p.name)}</b>
+    <div class="jbar"><b>${p.dead ? "🕯 " : ""}${escapeHtml(p.name)}${p.generated ? ` <button class="ghost" style="font-size:11px;padding:2px 7px;margin-left:6px" onclick="renameChar('${p.id}')">✏️${B("改名", "rename")}</button>` : ""}</b>
       <button class="ghost" onclick="document.getElementById('charcard').remove()">${B("关闭", "Close")}</button></div>
     <div class="chead">${av}<div class="cmeta">
       ${p.role ? `<div class="jwho">${escapeHtml(p.role)}</div>` : ""}
@@ -2498,7 +2843,10 @@ function renderPlace(loc) {
 let barsOpen = false, lastPressure = null;
 function toggleBars() {
   barsOpen = !barsOpen;
-  document.getElementById("bars").classList.toggle("open", barsOpen);
+  // 🎀 VN 里 body.vn #bars (1-1-1) 特异性压过 #bars.open (1-1-0), 点了白点
+  // (Yi 报障: 手机详情/收起点不开) — VN 下「详情」直接复用 vnstat 状态浮层
+  if (vnMode) document.body.classList.toggle("vnstat", barsOpen);
+  else document.getElementById("bars").classList.toggle("open", barsOpen);
   refreshStrip();
 }
 function refreshStrip() {
@@ -2761,6 +3109,8 @@ function vnToggleAuto() {
   document.getElementById("vnauto").classList.toggle("on", vnAutoOn);
   if (vnAutoOn) vnAdvance();
 }
+// 🎛 控制条把手 (Yi: 收起别挡角色, 点开再弹功能)
+function vnCtlToggle() { document.getElementById("vnctl").classList.toggle("open"); }
 function vnToggleLog() { document.body.classList.toggle("vnlog"); }
 // 🧭 状态提示 (Yi: 什么时候点/选/打字不能模糊) — 输入框的占位符就是路标
 const _defPlaceholder = () => B("对所有人说…（点上方头像可单独对一个人说）",
@@ -2822,7 +3172,11 @@ function _stageCast() {
 function vnStageSync() {
   const pan = document.getElementById("vnpan");
   if (!pan) return;
-  const roster = vnMode ? _stageCast() : [];
+  let roster = vnMode ? _stageCast() : [];
+  // 🐲 巨兽上台: 未讨伐的在场生物站后排 (它是狩猎场面的视觉核心)
+  if (vnMode) roster = roster.concat((beasts || [])   // let 变量不在 window 上 (实弹: 兽台从没亮过)
+    .filter(b => b.hp !== "讨伐")
+    .map(b => ({ id: "cr_" + b.id, name: b.name, beast: true, crid: b.id, enraged: b.enraged })));
   const keep = new Set(roster.map(c => c.id));
   pan.querySelectorAll(".standee").forEach(el => {
     if (!keep.has(el.dataset.cid)) el.remove();
@@ -2836,14 +3190,18 @@ function vnStageSync() {
     let el = pan.querySelector(`.standee[data-cid="${c.id}"]`);
     if (!el) {
       el = document.createElement("div");
-      el.className = "standee enter"; el.dataset.cid = c.id; el.dataset.name = c.name;
+      el.className = "standee enter" + (c.beast ? " beast" : "");
+      el.dataset.cid = c.id; el.dataset.name = c.name;
       const img = document.createElement("img"); img.alt = c.name;
       const sh = document.createElement("i"); sh.className = "shade";
       el.append(img, sh);
       pan.appendChild(el);
-      _vnSet(img, c.id, null);
+      if (c.beast) { img.src = `/scene/sprite/${encodeURIComponent(c.crid)}.webp?v=${Date.now()>>15}`;
+                     img.onerror = () => { el.style.display = "none"; }; }
+      else _vnSet(img, c.id, null);
       setTimeout(() => el.classList.remove("enter"), 800);
     }
+    if (c.beast) el.classList.toggle("raging", !!c.enraged);
     el.style.left = (n <= 1 ? 50 : (26 + i * 52)) + "vw";
     el.style.zIndex = String(2 + i);
     // 🃏 纸板斜角: 左右交替微侧 (弹丸论破的立牌不是正贴的), 说话者回正
@@ -3120,6 +3478,114 @@ function applyDirect(d) {
   if (d.tint !== undefined) vnTint(d.tint);
   if (d.bgm && d.bgm !== curBgmMood) { curBgmMood = d.bgm; swapBgm(d.bgm); }
 }
+// 🕸 关系网 (Yi 2026-07-18: 角色间关系可见且随时间变化): 环形布局 SVG —
+// 我在中心, 认识的人围一圈; NPC 立场连线 (红仇/金厚, 粗细=浓度), 点线看渊源与演变
+async function openRelWeb() {
+  let ov = document.getElementById("relwebov");
+  if (ov) { ov.remove(); return; }
+  let d;
+  try { d = await j(`/runs/${runId}/relweb`); }
+  catch (e) { pushToast("⚠️ " + escapeHtml(e.message), "", 2400); return; }
+  ov = document.createElement("div"); ov.id = "relwebov";
+  ov.style.cssText = "position:fixed;inset:0;z-index:70;background:rgba(6,7,12,.94);display:flex;flex-direction:column";
+  ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+  const W = Math.min(innerWidth, 520), H = Math.min(innerHeight - 120, 520);
+  const nodes = (d.nodes || []).slice(0, 12);
+  const modeById = {}; (d.player || []).forEach(p => modeById[p.id] = p);
+  // 🔍 内容级缩放 (Yi: 放大=布局拉开而不是整图吹大): s 只放大半径/间距,
+  // 头像与文字保持原大 — 像地图, 越放大越疏朗
+  const z = { s: 1, x: 0, y: 0 };
+  ov.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px">`
+    + `<b>🕸 ${B("关系网", "Relations")}</b><span>`
+    + `<button class="ghost" id="rwzin">＋</button> <button class="ghost" id="rwzout">－</button> `
+    + `<button class="ghost" onclick="document.getElementById('relwebov').remove()">${B("关闭", "Close")}</button></span></div>`
+    + `<svg id="rwsvg" width="${W}" height="${H}" style="margin:0 auto;display:block;touch-action:none">`
+    + `<g id="rwpan"></g></svg>`
+    + `<div id="rwinfo" class="muted" style="padding:10px 18px;font-size:12.5px;min-height:56px">`
+    + `${(d.edges || []).length ? B("点一条线或它的标签，看他们之间的渊源与变化。", "Tap an edge for their history.")
+                               : B("他们之间还没有值得记的立场——故事会写出来的。", "No charged relations yet.")}</div>`;
+  document.body.appendChild(ov);
+  const gEl = ov.querySelector("#rwpan"), svEl = ov.querySelector("#rwsvg");
+  const showEdge = (i) => {
+    const e = d.edges[i];
+    const nm = id => (nodes.find(n => n.id === id) || {}).name || "?";
+    const logs = (e.log || []).map(l =>
+      `<div>· ${B(`第${l.act}幕`, `Act ${l.act}`)} ${l.delta > 0 ? "↑" : "↓"} ${escapeHtml(l.why || "")}</div>`).join("");
+    document.getElementById("rwinfo").innerHTML =
+      `<b>${escapeHtml(nm(e.a))} ↔ ${escapeHtml(nm(e.b))}</b>：`
+      + `<span style="color:${e.stance > 0 ? "#d8b57a" : "#ff9d9d"}">${escapeHtml(e.label || "")}</span>`
+      + (logs ? `<div style="margin-top:4px">${logs}</div>` : `<div class="muted" style="margin-top:4px">${B("（开局便是如此）", "(As authored)")}</div>`);
+  };
+  // 🏷 独立文字框 (Yi: 词不许和线/头像糊在一起): 圆角小牌, 深底, 描边随立场色
+  const chip = (x, y, word, col, attrs) => {
+    const w = word.length * 11.5 + 16;
+    return `<g transform="translate(${x},${y})" style="cursor:pointer" ${attrs || ""}>`
+      + `<rect x="${-w / 2}" y="-10" width="${w}" height="20" rx="10" fill="#0f1018" stroke="${col}" stroke-opacity=".7"/>`
+      + `<text y="4" text-anchor="middle" font-size="11" fill="${col}">${escapeHtml(word)}</text></g>`;
+  };
+  function draw() {
+    const cx = W / 2, cy = H / 2, R = (Math.min(cx, cy) - 56) * z.s;
+    const pos = { "_me": { x: cx, y: cy } };
+    nodes.forEach((n, i) => {
+      const a = -Math.PI / 2 + i * 2 * Math.PI / Math.max(1, nodes.length);
+      pos[n.id] = { x: cx + R * Math.cos(a), y: cy + R * Math.sin(a) };
+    });
+    let svg = "";
+    (d.player || []).forEach(p => {   // 玩家边 (细淡虚线)
+      const q = pos[p.id]; if (!q) return;
+      svg += `<line x1="${cx}" y1="${cy}" x2="${q.x}" y2="${q.y}" stroke="#3a4160" stroke-width="1.5" stroke-dasharray="4 4"/>`;
+    });
+    (d.edges || []).forEach((e, i) => {   // NPC 立场边 + 独立词牌
+      const a = pos[e.a], b = pos[e.b]; if (!a || !b) return;
+      const col = e.stance > 0 ? "#d8b57a" : "#e0574f";
+      svg += `<line class="rw-edge" data-i="${i}" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"`
+        + ` stroke="${col}" stroke-width="${Math.abs(e.stance) * 2.5}" stroke-opacity=".8" style="cursor:pointer"/>`;
+      const word = (e.label || "").slice(0, 8);
+      if (word) svg += chip((a.x + b.x) / 2, (a.y + b.y) / 2, word, col,
+                            `class="rw-edge" data-i="${i}"`);
+    });
+    const nodeHtml = (id, name, av, dead) => {
+      const p = pos[id];
+      return `<g transform="translate(${p.x},${p.y})" ${dead ? 'opacity=".38"' : ""}>`
+        + `<circle r="24" fill="#191a26" stroke="${id === "_me" ? "#8ea2ff" : "#45456a"}" stroke-width="2"/>`
+        + (av ? `<image href="${av}${id !== "_me" ? _sv(id) : ""}" x="-24" y="-24" width="48" height="48" clip-path="circle(24px at 24px 24px)" preserveAspectRatio="xMidYMid slice"/>` : "")
+        + `<text y="40" text-anchor="middle" fill="#cfd4e6" font-size="11">${escapeHtml((name || "").slice(0, 5))}${dead ? "†" : ""}</text>`
+        + (modeById[id] && modeById[id].mode_name ? `<text y="53" text-anchor="middle" fill="#7f88a8" font-size="9">${escapeHtml(modeById[id].mode_name)}</text>` : "")
+        + `</g>`;
+    };
+    let nodesSvg = nodes.map(n => nodeHtml(n.id, n.name, n.avatar_url, n.dead)).join("");
+    nodesSvg += nodeHtml("_me", d.player_name || myName || "我", null, false);
+    gEl.innerHTML = svg + nodesSvg;
+    gEl.setAttribute("transform", `translate(${z.x},${z.y})`);
+    gEl.querySelectorAll(".rw-edge").forEach(el =>
+      el.addEventListener("click", () => showEdge(+el.dataset.i)));
+  }
+  let _raf = false;
+  const redraw = () => { if (_raf) return; _raf = true;
+    requestAnimationFrame(() => { _raf = false; draw(); }); };
+  const zoom = f => { z.s = Math.max(.6, Math.min(2.5, z.s * f)); redraw(); };
+  ov.querySelector("#rwzin").onclick = () => zoom(1.25);
+  ov.querySelector("#rwzout").onclick = () => zoom(.8);
+  svEl.addEventListener("wheel", e => { e.preventDefault(); zoom(e.deltaY < 0 ? 1.15 : .87); }, { passive: false });
+  const pts = new Map(); let pinch0 = 0, s0 = 1, drag0 = null;
+  svEl.addEventListener("pointerdown", e => {
+    pts.set(e.pointerId, [e.clientX, e.clientY]);
+    if (pts.size === 1) drag0 = { x: e.clientX - z.x, y: e.clientY - z.y };
+    if (pts.size === 2) { const [a, b] = [...pts.values()];
+      pinch0 = Math.hypot(a[0]-b[0], a[1]-b[1]); s0 = z.s; drag0 = null; }
+  });
+  svEl.addEventListener("pointermove", e => {
+    if (!pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, [e.clientX, e.clientY]);
+    if (pts.size === 2 && pinch0) { const [a, b] = [...pts.values()];
+      z.s = Math.max(.6, Math.min(2.5, s0 * Math.hypot(a[0]-b[0], a[1]-b[1]) / pinch0)); redraw(); }
+    else if (pts.size === 1 && drag0) { z.x = e.clientX - drag0.x; z.y = e.clientY - drag0.y;
+      gEl.setAttribute("transform", `translate(${z.x},${z.y})`); }
+  });
+  const up = e => { pts.delete(e.pointerId); pinch0 = 0; drag0 = null; };
+  svEl.addEventListener("pointerup", up); svEl.addEventListener("pointercancel", up);
+  draw();
+}
 // 💗 好感面板 (Yi: 要有好感度): 全员关系一屏速览; 点行进档案卡看细账
 async function vnHearts() {
   let ov = document.getElementById("vnhearts");
@@ -3127,7 +3593,8 @@ async function vnHearts() {
   ov = document.createElement("div"); ov.id = "vnhearts";
   ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
   ov.innerHTML = `<div class="hcard"><div class="hbar"><b>💗 ${B("好感度", "Hearts")}</b>`
-    + `<button class="ghost" onclick="document.getElementById('vnhearts').remove()">${B("关闭", "Close")}</button></div>`
+    + `<span><button class="ghost" onclick="document.getElementById('vnhearts').remove();openRelWeb()">🕸 ${B("关系网", "Web")}</button>`
+    + `<button class="ghost" onclick="document.getElementById('vnhearts').remove()">${B("关闭", "Close")}</button></span></div>`
     + `<div class="hrows">${B("加载中…", "Loading…")}</div></div>`;
   document.body.appendChild(ov);
   const ids = (cast || []).map(c => c.id).filter(Boolean).slice(0, 8);
@@ -3145,13 +3612,28 @@ async function vnHearts() {
       + barHtml(B("心动", "Heart"), p.romance || 0, 0, 100, "#ff8fb3")
       + `</div></div>`;
   }).join("") || `<div class="jempty">${B("这座城还没人认识你。", "No one knows you yet.")}</div>`;
+  // 🏛 阵营名声 (权谋地基): 玩家已有风评的势力一行速览
+  let facs = [];
+  try { facs = ((await j(`/runs/${runId}`)).state || {}).factions || []; } catch (e) {}
+  const fhtml = facs.length
+    ? `<div style="margin-top:10px;padding-top:8px;border-top:1px solid #22222c">`
+      + `<div style="font-size:12px;color:#8b93a7;margin-bottom:6px">🏛 ${B("江湖名声", "Reputation")}</div>`
+      + facs.map(f => `<span class="hmode" style="margin:0 6px 6px 0;display:inline-block;`
+        + `border-color:${f.value > 0 ? "rgba(216,181,122,.5)" : "rgba(224,87,79,.5)"};`
+        + `color:${f.value > 0 ? "#d8b57a" : "#e0736b"}">`
+        + `${escapeHtml(f.name)}·${escapeHtml(f.label)} ${f.value > 0 ? "+" : ""}${f.value}</span>`).join("")
+      + `</div>` : "";
   const wrap = ov.querySelector(".hrows");
-  if (wrap) wrap.innerHTML = rows;
+  if (wrap) wrap.innerHTML = rows + fhtml;
 }
 // 🫥 隐藏界面 (gal 移植): 欣赏立绘, 点任意处恢复
 function vnHide() { document.body.classList.add("vnhide"); }
-// 📊 状态浮层: 收纳的头像栏+状态条按需查看
-function vnToggleStat() { document.body.classList.toggle("vnstat"); }
+// 📊 状态浮层: 收纳的头像栏+状态条按需查看 (与 barsToggle 详情条共用, 状态要同步)
+function vnToggleStat() {
+  document.body.classList.toggle("vnstat");
+  barsOpen = document.body.classList.contains("vnstat");
+  refreshStrip();
+}
 function vnUnhide() {
   if (document.body.classList.contains("vnhide"))
     document.body.classList.remove("vnhide");
@@ -3202,8 +3684,8 @@ async function playBeatVN(b, skipLog) {
   box.className = isNarr ? "narr" : "";
   // 📖 分页 (Yi: 一页字太多): 长拍按句读切成 ≤76 字的页, 逐页点击翻
   for (const page of paginate(b.text)) {
-    if (vnLiveBuf && vnLiveBuf.includes(page)) {
-      // 这一页流式时已经读过 — 秒出 + 短驻留, 不再逐字重打
+    if (vnLiveSeen && vnLiveSeen.includes(page)) {
+      // 这一页流式时玩家真读过 (直播只演第一页, 只有它配秒出) — 短驻留不重打
       box.textContent = page;
       if (box.scrollHeight > box.clientHeight + 2) box.scrollTop = box.scrollHeight;
       await vnWait(500 + page.length * 22);
@@ -3352,9 +3834,10 @@ function paintBackground() {
     im.onload = () => { if (seq === bgPaintSeq) bg.style.backgroundImage = `url(${locUrl})`; };
     im.onerror = () => {
       paintKeywordBg(scene, seq);  // no AI image for this place (yet) → fall back
-      // an emergent place (or a just-requested redraw) renders server-side — check back
+      // the place's art may still be rendering server-side (授权地点也一样 —
+      // 恢复存档会补枪排队, 这里对所有地点都回头再看) — check back
       const lid = curLocId;
-      if ((/^loc_(gen|start)_/.test(lid) || bgVer[lid]) && (bgRetry[lid] || 0) < 8) {
+      if ((bgRetry[lid] || 0) < 8) {
         bgRetry[lid] = (bgRetry[lid] || 0) + 1;
         setTimeout(() => { if (curLocId === lid) paintBackground(); }, 22000);
       }
@@ -3424,14 +3907,23 @@ async function send(chOverride) {
 async function streamTurn(url, bodyObj) {
   turnInFlight = true;   // 🔒 在途门闩置起, finishTurn 落定后才释放
   playQ = []; playing = false; streamDone = false; firstBeat = true;
-  clearLive(); liveText = ""; vnLiveBuf = ""; skipType = false;
+  clearLive(); liveText = ""; vnLiveBuf = ""; vnLiveSeen = ""; vnLiveDone = false; skipType = false;
   if (url.endsWith("/play") && bodyObj && (bodyObj.input || "").trim()) lastTurnBody = bodyObj;
   afterPlay = { suggest: null, ending: undefined, moveReq: null, moments: null, relDeltas: null, choice: null };
   renderMoveAsk(null);  // clear any prior pending move prompt
+  // ⏳ 旧建议是上一拍的: 压暗禁点, 防止读着新回复点着旧选项 (新的一到就整组换新)
+  document.querySelectorAll("#vnchoices button, #suggest .chip").forEach(b => {
+    b.style.opacity = ".38"; b.style.pointerEvents = "none"; });
   try {
+    // 🎫 幂等键: 每次真实提交配一个新 id (在 lastTurnBody 缓存之后打, 重说是新点击拿新键);
+    // 网络层把同一请求送达两次时, 服务端只演第一次 (无点击不推进)
+    const payload = url.endsWith("/play")
+      ? { ...bodyObj, client_turn_id: (crypto.randomUUID ? crypto.randomUUID()
+                                       : Date.now() + "-" + Math.random().toString(36).slice(2)) }
+      : bodyObj;
     const r = await fetch(url, {
       method:"POST", credentials:"include", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify(bodyObj) });
+      body: JSON.stringify(payload) });
     if (!r.ok) { let d = ""; try { d = (await r.json()).detail || ""; } catch(e){} throw new Error(d || ("HTTP " + r.status)); }
     const reader = r.body.getReader(); const dec = new TextDecoder();
     let buf = "";
@@ -3458,9 +3950,11 @@ async function streamTurn(url, bodyObj) {
                                  B("新的一天 · 自由活动", "A new day · free time"));
         }
         else if (ev.event === "cast") { updateCast(ev.cast); }
-        else if (ev.event === "here") { relations = ev.relations || {}; following = ev.following || []; updateCast(ev.here || []); }
+        else if (ev.event === "here") { relations = ev.relations || {}; following = ev.following || []; beasts = ev.beasts || []; updateCast(ev.here || []); }
         else if (ev.event === "goal") { renderGoal(ev.goal); }
         else if (ev.event === "place") { renderPlace(ev.location); }
+        else if (ev.event === "peek") { renderPeek(ev.peek); }
+        else if (ev.event === "sugg") { renderSuggest(ev.suggestions || []); }
         else if (ev.event === "promises") { renderPromises(ev.promises); }
         else if (ev.event === "verdict") { renderVerdictBar(ev.verdict); }
         else if (ev.event === "progress") { renderProgress(ev.progress); }
@@ -3518,6 +4012,7 @@ let turnInFlight = false;   // 🔒 一回合从发起到落定期间为 true �
 // the moment each is written (旁白与台词分家，从第一个字就分). The canonical beats then
 // replace the live draft (matched → instant, so nothing reads twice).
 let liveEls = [], liveCur = null, liveKind = null, liveText = "", vnLiveBuf = "";
+let vnLiveSeen = "", vnLiveDone = false;   // 直播只演第一页: 玩家读过的 + 封版闩
 const _normLive = s => (s || "").replace(/[「」『』——…—，。！？；：、\s]/g, "");
 function clearLive() {
   liveEls.forEach(el => el.remove());
@@ -3544,11 +4039,14 @@ function onToken(t) {
   liveCur.textContent += t.text;
   chat.scrollTop = chat.scrollHeight;
 }
-// VN 流式实况: 只演「正在成形的最后一句」— 完整回放交给正式拍 (已读的不重打)
+// VN 流式实况: 只演【第一页】边生成边打 (TTFT 的意义所在), 写满即封版谢幕 —
+// 后面的页一律等正式拍逐页点击 (⚖️ Yi 铁律: 一个句号一次点击; 旧版演「最后一句」
+// = 模型写多快页翻多快, 玩家根本没看完 — 2026-07-15 实弹).
 function vnToken(t) {
   vnLiveBuf += t.text;
   if (vnLocked() || document.getElementById("loadov")) return;   // 幕布后面不上屏
   if (playing || (typeof playQ !== "undefined" && playQ.length)) return; // 正式拍在台上, 不抢
+  if (vnLiveDone) return;   // 第一页已封版 — 直播结束, 只攒 buf 供快通道对账
   const box = document.getElementById("vntext");
   const nameEl = document.getElementById("vnname");
   if (!box) return;
@@ -3557,7 +4055,9 @@ function vnToken(t) {
   else if (!isSpeech) nameEl.classList.add("hidden");
   box.className = isSpeech ? "" : "narr";
   const segs = paginate(vnLiveBuf);
-  box.textContent = segs[segs.length - 1] || "";
+  box.textContent = segs[0] || "";
+  vnLiveSeen = segs[0] || "";   // 玩家在直播里真读过的, 只有它配正式拍的秒出
+  if (segs.length > 1) vnLiveDone = true;   // 第一页完整落定 (segs[0] 已是全句), 封版
   if (box.scrollHeight > box.clientHeight + 2) box.scrollTop = box.scrollHeight;
 }
 async function pump() {
@@ -3594,7 +4094,14 @@ function showMoments(moments, relDeltas) {
     else if (m.kind === "ending" && !m.terminal) pushToast(B(`🏆 达成结局：「${m.title || m.ending_kind}」`, `🏆 Ending reached: “${m.title || m.ending_kind}”`), "t-end", i++ * 650);
     else if (m.kind === "pressure") pushToast(`⚠️ ${m.note || ""}`, "t-press", i++ * 650);
     else if (m.kind === "death") pushToast(B(`☠️ ${m.name || "有人"} 死了`, `☠️ ${m.name || "Someone"} is dead`), "t-press", i++ * 650);
-    else if (m.kind === "arrival") pushToast(B(`👋 新面孔登场：${m.name || ""}`, `👋 A new face: ${m.name || ""}`), "t-act", i++ * 650);
+    else if (m.kind === "arrival") pushToast(B(`👋 新面孔登场：${escapeHtml(m.name || "")}${m.id ? ` <a style="color:#8ea2ff;cursor:pointer" onclick="renameChar('${m.id}')">✏️改名</a>` : ""}`, `👋 A new face: ${escapeHtml(m.name || "")}`), "t-act", i++ * 650);
+    else if (m.kind === "peek_window") pushToast(B(`📱 ${m.name || ""}的${m.device || "手机"}就搁在手边…（做：翻${m.name || "TA"}的${m.device || "手机"}）`, `📱 ${m.name || ""}'s ${m.device || "phone"} is right there…`), "t-unlock", i++ * 650);
+    else if (m.kind === "creature" && m.slain) pushToast(`🏆 ${B(`讨伐完成：${m.name}`, `${m.name} slain`)}`, "t-end", i++ * 650);
+    else if (m.kind === "creature" && m.fled) pushToast(`🩸 ${escapeHtml(m.name)} ${B(`濒死，逃往${m.fled}`, `flees to ${m.fled}`)}`, "t-press", i++ * 650);
+    else if (m.kind === "creature" && m.enraged) pushToast(`💢 ${escapeHtml(m.name)} ${B("被激怒了", "is enraged")}`, "t-press", i++ * 650);
+    else if (m.kind === "creature" && m.no_dent) pushToast(`🛡 ${B("段位碾压——它毫发无伤", "It shrugs you off")}`, "t-press", i++ * 650);
+    else if (m.kind === "creature" && m.ghost) pushToast(`👻 ${B("攻击穿了过去——这不是能被杀死的东西", "Your strike passes through")}`, "t-press", i++ * 650);
+    else if (m.kind === "peek_caught") pushToast(B(`🚨 ${m.name || "TA"} 当场抓住了你`, `🚨 ${m.name || "They"} caught you red-handed`), "t-press", i++ * 650);
     else if (m.kind === "identity") pushToast(B(`🎖 你的身份变了：${m.text || ""}`, `🎖 Your standing changed: ${m.text || ""}`), "t-end", i++ * 650);
     else if (m.kind === "world") pushToast(B(`🌍 世界记住了：${m.text || ""}`, `🌍 The world remembers: ${m.text || ""}`), "t-unlock", i++ * 650);
     else if (m.kind === "money") pushToast(

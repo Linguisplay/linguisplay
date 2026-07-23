@@ -1,4 +1,5 @@
-"""Daily-return hooks: 悬念离场 (parting cliffhanger beat via /runs/{id}/leave) and
+"""Daily-return hooks: 悬念离场 (⚖️ 无点击不推进后: /runs/{id}/leave 只暂存
+parting_pending, 钩子在归来的点击回合以〔上回〕闪回上台) and
 回归问候 (returning flag reaches the primary speaker's prompt)."""
 
 import os
@@ -56,7 +57,8 @@ def test_returning_flag_reaches_primary_prompt():
     assert got_beat
 
 
-def test_leave_endpoint_appends_hook_once():
+def test_leave_endpoint_stages_without_beat():
+    """⚖️ 无点击不推进: beacon 不是点击 — /leave 一拍都不许加, 只暂存离场事实."""
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     with TestClient(app) as c:
@@ -73,14 +75,30 @@ def test_leave_endpoint_appends_hook_once():
                      json={"story_id": sid, "persona_id": persona["id"]}).json()["id"]
 
         n0 = len(c.get(f"/api/v1/runs/{rid}/play").json())
-        # leaving BEFORE any conversation adds nothing (no thread to hang a hook on)
+        # leaving BEFORE any conversation stages nothing (no thread to hang a hook on)
         assert c.post(f"/api/v1/runs/{rid}/leave").status_code == 204
         assert len(c.get(f"/api/v1/runs/{rid}/play").json()) == n0
 
         c.post(f"/api/v1/runs/{rid}/play", json={"input": "你好", "channel": "say"})
         n1 = len(c.get(f"/api/v1/runs/{rid}/play").json())
-        assert c.post(f"/api/v1/runs/{rid}/leave").status_code == 204
-        n2 = len(c.get(f"/api/v1/runs/{rid}/play").json())
-        assert n2 == n1 + 1                     # exactly one cliffhanger beat appended
-        assert c.post(f"/api/v1/runs/{rid}/leave").status_code == 204
-        assert len(c.get(f"/api/v1/runs/{rid}/play").json()) == n2  # idempotent per leave point
+        for _ in range(3):   # beacons never append beats — staging only, idempotent
+            assert c.post(f"/api/v1/runs/{rid}/leave").status_code == 204
+            assert len(c.get(f"/api/v1/runs/{rid}/play").json()) == n1
+
+
+def test_parting_hook_replays_on_comeback_turn():
+    """暂存的钩子在真正回归 (returning) 的点击回合以〔上回〕闪回上台, 只回放一次."""
+    st = runtime.default_state()
+    st["parting_pending"] = {"ts": 0, "act": 1}
+    out = runtime.run_turn(STORY, st, {"name": "我"}, "我回来了",
+                           channel="say", returning=True)
+    hooks = [b for b in out["beats"] if "〔上回〕" in (b.get("text") or "")]
+    assert len(hooks) == 1 and "那本账" in hooks[0]["text"]
+    assert "BODY" not in hooks[0]["text"]           # spoiler-safe 照旧
+    assert "parting_pending" not in out["state"]    # 用掉即焚
+    # 只是切了下标签页 (没到回归门槛) → 钩子作废, 不上台
+    st2 = runtime.default_state()
+    st2["parting_pending"] = {"ts": 0, "act": 1}
+    out2 = runtime.run_turn(STORY, st2, {"name": "我"}, "继续", channel="say")
+    assert not any("〔上回〕" in (b.get("text") or "") for b in out2["beats"])
+    assert "parting_pending" not in out2["state"]
