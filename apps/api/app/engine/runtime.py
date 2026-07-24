@@ -19,6 +19,7 @@ from typing import Any
 from ..config import get_settings
 from . import actions as actions_mod
 from . import factions as factions_mod
+from . import growth as growth_mod
 from . import taste as taste_mod
 from . import gating
 from . import heat as heat_mod
@@ -210,6 +211,8 @@ DEFAULT_TUNING = {
     "rom_taper_den": 110,       # per-char 心动 gain taper denominator
     "min_turns_per_act": 6,     # soft acts: no advance (model OR backstop) before this many turns
     "max_new_characters": 4,    # 👋 emergent mid-story characters a run may accumulate
+    # 🌱 growth_every: 生长预算周期 (回合)。缺省: 沙盒 8, 授权本 0 (关) — 见 growth.period_of;
+    # 这里不给键, 让「作者显式设置」与「缺省」可区分
     "key_choice_min": 0,        # ⚖️ 命运抉择 window: fires at a RANDOM turn count in
     "key_choice_max": 12,       #    [min, max] (min 0 = off; Yi 2026-07-21 定: 默认关, 剧本级可开)
     "fate_auto_resolve": 0,     # ⚖️ 宽限耗尽引擎替玩家落子 (0 = off; Yi 2026-07-14 定:
@@ -1912,7 +1915,7 @@ def goal_for(content: dict[str, Any], state: dict[str, Any],
 # ── 🎯 目标栈 (剧组重建 P0, 治「goal 单槽四写手」) ────────────────────────────
 # 幕目标/差事/玩家自立目标各归各层, UI 目标条读栈顶; state["goal"] 只是栈顶镜像
 # (客户端零改动)。差事两天不办自动过期 (免得目标条钉着一件旧事)。
-_GOAL_RANK = {"errand": 3, "self": 2, "act": 1}
+_GOAL_RANK = {"player": 4, "errand": 3, "self": 2, "act": 1}  # player=玩家亲手定的, 压过一切
 _ERRAND_TTL = 6            # time_index 单位 (一天 3 时段 → 两天)
 
 
@@ -2063,6 +2066,21 @@ def goals_of(state: dict[str, Any]) -> list[dict[str, Any]]:
     return g
 
 
+def _trim_ledger(rows: list[dict[str, Any]], cap: int = 8) -> list[dict[str, Any]]:
+    """账本裁剪家法: open 条目永不静默消失 — 超额时先裁最老的非 open 历史
+    (裸 [-cap:] 会把早年 open 的自立目标/任务冲掉, 无 audit 无痕)。"""
+    extra = len(rows) - cap
+    if extra <= 0:
+        return rows
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        if extra > 0 and r.get("status") != "open":
+            extra -= 1
+            continue
+        out.append(r)
+    return out
+
+
 def goal_push(state: dict[str, Any], kind: str, text: str, src: str = "") -> None:
     """Book a goal onto its layer. Same-layer open goal is REPLACED (一层只挂一件事);
     the retired one lands in the audit, never silently vanishes."""
@@ -2077,7 +2095,7 @@ def goal_push(state: dict[str, Any], kind: str, text: str, src: str = "") -> Non
             g["status"] = "replaced"
     gs.append({"kind": kind, "text": text, "from": str(src)[:20],
                "status": "open", "at": _time_index(state)})
-    del gs[:-8]
+    gs[:] = _trim_ledger(gs)
     _audit(state, f"goal.{kind}", True, text[:24])
 
 
@@ -2104,6 +2122,49 @@ def goal_top(content: dict[str, Any], state: dict[str, Any]) -> str:
         if r > best_rank:
             best_rank, best_text = r, str(g.get("text") or "")
     return best_text or goal_for(content, state)
+
+
+def player_goal_set(content: dict[str, Any], state: dict[str, Any], text: str) -> str:
+    """🎯 沙盒: 玩家亲手定当前目标 (player 层, 压过差事)。空文本 = 撤下玩家目标。"""
+    text = dedash(str(text or "").strip())[:40]
+    if text:
+        goal_push(state, "player", text, src="player")
+    else:
+        goal_settle(state, "player", "dropped")
+    state["goal"] = goal_top(content, state)
+    return state["goal"]
+
+
+def player_goal_suggest(content: dict[str, Any], state: dict[str, Any]) -> str:
+    """🎲 随机推荐一个目标: 确定性产地, 从活世界的真实账本里长出来 (不花 LLM)。"""
+    pcid = state.get("player_character_id")
+    met = set(state.get("met_ids") or [])
+    dead = _dead_ids(state)
+    pool: list[str] = []
+    for l in _locations(content):
+        if l.get("name") and location_available(content, state, l) \
+                and l.get("id") != state.get("location_id"):
+            pool.append(f"去{l.get('name')}走一趟，看看那边的光景")
+    warm = sorted(((c, (state.get("rel") or {}).get(c.get("id")) or {})
+                   for c in _characters(content)
+                   if c.get("id") in met and c.get("id") not in dead and c.get("id") != pcid),
+                  key=lambda x: int(x[1].get("closeness", 0) or 0), reverse=True)
+    if warm:
+        pool.append(f"跟{warm[0][0].get('name')}把关系处得更近一步")
+        if len(warm) > 1:
+            pool.append(f"弄清楚{warm[-1][0].get('name')}最近在忙什么")
+    for q in (state.get("quests") or []):
+        if q.get("status") == "open" and q.get("title"):
+            pool.append(f"把「{q.get('title')}」办妥")
+    cult = state.get("cultivation") or {}
+    if cult.get("ready"):
+        pool.append("闭关一场，冲一冲下一个境界")
+    if economy_on(state):
+        pool.append("想个来钱的路子，攒一笔身家")
+    pool.append("找个没去过的角落，看看这世界还藏着什么")
+    cur = goal_top(content, state)
+    picks = [p for p in pool if p != cur] or pool
+    return dedash(random.choice(picks))[:40]
 
 
 def _frag_title_map(content: dict[str, Any]) -> dict[str, str]:
@@ -2276,9 +2337,14 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
     _hook_court = bool(lead) and relationships.initial_mode(lead) in ("stranger", "peer") \
         and relationships._romance_capable(lead)
     out = {}
+    # 🎬 作者亲笔开场白: 提前算好 — 既要一字不落上台, 也要喂给开场生成
+    # (Yi 实弹: 只上台不喂生成 → 旁白在演暴雨夜, 角色却像没读过剧本)
+    # dedash 留给逐拍的 dedash_beat: 整串跑会把段末破折号改成逗号, 破坏一字不落 (审计实弹)
+    _auth_open = str((content.get("story") or {}).get("opening") or "").strip()[:10000]
     try:
         out = llm.generate({
             "intro_vignettes": True,
+            "auth_opening": _auth_open[:2000],
             "hook_court": _hook_court,
             "clock": (clock_view(content, state) or {}).get("label", ""),
             "player": {"name": (player_char or {}).get("name") or "你",
@@ -2302,9 +2368,14 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
     except Exception:
         out = {}
     beats: list[dict[str, Any]] = []
-    scene_txt = dedash(str(out.get("scene") or "").strip())[:110] \
-        or opening_narration(content)[:110]
-    beats.append({"type": "description", "speaker_name": None, "text": scene_txt})
+    # 【一字不落】上台: 长文按段落拆拍念完, 不截断不改写 (上限与 studio maxlength 同步 1 万)
+    if _auth_open:
+        for _para in [p.strip() for p in _auth_open.splitlines() if p.strip()]:
+            beats.append({"type": "description", "speaker_name": None, "text": _para})
+    else:
+        scene_txt = dedash(str(out.get("scene") or "").strip())[:110] \
+            or opening_narration(content)[:110]
+        beats.append({"type": "description", "speaker_name": None, "text": scene_txt})
     by_name = {c.get("name"): c for c in present_chars}
     seen = set()
     for v in (out.get("cast") or []):
@@ -3277,6 +3348,81 @@ def discover_on_arrival(content: dict[str, Any], state: dict[str, Any]) -> list[
     return out
 
 
+# 🎼 情绪→节奏带 (Spec A, 2026-07-25): 乐师的平滑判断 (bgm_led.track, 12样本抽查92%)
+# 反哺台词形状 — 引擎查表下发, 模型只管措辞。default 档 = 原 2~4 句现状兜底。
+PACE_BANDS = {
+    "default": {"line": "台词口语化（2~4句）",
+                "short": "2~4句，自然口语"},
+    "taut":    {"line": "此刻气氛绷着——台词要短促：1~2个短句，甚至一个词、半句就够；快而硬，不解释",
+                "short": "1~2个短句，可以只有一个词；快而硬"},
+    "open":    {"line": "此刻是掏心的时候——话可以放长（4~6句），慢下来讲完整的心事，允许停顿与回忆",
+                "short": "4~6句，慢下来，讲完整"},
+    "charged": {"line": "此刻空气是暧昧的——话说一半就咽回去，欲言又止；短句加停顿，绝不说透",
+                "short": "短句，话说一半就停，绝不说透"},
+}
+_PACE_BY_KEY = {"tense": "taut", "battle": "taut", "eerie": "taut",
+                "romantic": "charged",
+                "warm": "open", "sad": "open", "lonely": "open"}
+
+
+def pace_band(state: dict[str, Any], tun: dict[str, Any] | None = None) -> dict[str, str]:
+    """本轮节奏带: 乐师账本优先, 场面情绪兜底; tuning.pace_bands 可整表覆盖。"""
+    key = str((state.get("bgm_led") or {}).get("track") or "")         or str(((state.get("scene") or {}).get("mood")) or "")
+    heat = state.get("heat")
+    if isinstance(heat, dict) and int(heat.get("stage", 0) or 0) >= 1:
+        band = "charged"
+    else:
+        band = _PACE_BY_KEY.get(key.rstrip("23456789"), "default")
+    table = dict(PACE_BANDS)
+    if isinstance((tun or {}).get("pace_bands"), dict):
+        for k, v in tun["pace_bands"].items():
+            if isinstance(v, dict) and v.get("line"):
+                table[k] = {"line": str(v["line"])[:80],
+                            "short": str(v.get("short") or v["line"])[:40]}
+    return {"band": band, **table.get(band, table["default"])}
+
+
+# 📔 回忆标签面 (Yi: 开心的/甜甜的/搞笑的… 互动总结打标签)
+_MEM_TAGS = {"心动": "💗", "甜蜜": "🍬", "开心": "😄", "搞笑": "🤣",
+             "惊险": "😨", "平常": "📖"}
+
+
+def _heart_candidate(content: dict[str, Any], state: dict[str, Any],
+                     beat_log=None, history=None) -> dict[str, Any] | None:
+    """📔 每日回忆结算的主角: 今天互动材料最多的活人 (线下句数+手机往来) —
+    回忆不只有浪漫, 谁陪你过了这一天谁上日记。一晚一位 (稀缺+成本)。"""
+    pcid = state.get("player_character_id")
+    dead = _dead_ids(state)
+    best, bscore = None, 3   # 材料≥4 才够记一笔
+    for c in _characters(content):
+        cid = c.get("id")
+        if not cid or cid == pcid or cid in dead:
+            continue
+        n = len((history_for(beat_log, cid) if beat_log is not None
+                 else (history or []))[-20:])
+        # 只读探视: _thread() 会 setdefault 建空线程 → has_contact 把全通讯录判成已解锁 (审计实弹)
+        n += len(((((state.get("phone") or {}).get("threads") or {}).get(cid) or {})
+                  .get("msgs", []))[-10:])
+        if n > bscore:
+            best, bscore = c, n
+    return best
+
+
+def note_visit_tick(state: dict[str, Any]) -> None:
+    """🗺 热度小账本 (Yi 2026-07-24 地图收纳): 到访次数+最后到访日。单点侦测 —
+    位置和上次记账时不同就记一笔, 不管玩家是走的哪条移动机制来的。"""
+    lid = state.get("location_id")
+    if not lid or state.get("_visit_noted") == lid:
+        return
+    book = state.setdefault("loc_visits", {})
+    # 账本诞生日: 零访问地点的休眠从这天起算 (老档迁移不许开图即全员沉睡)
+    book.setdefault("_since", int((state.get("clock") or {}).get("day", 1) or 1))
+    ent = book.setdefault(lid, {"n": 0, "day": 0})
+    ent["n"] = int(ent.get("n", 0) or 0) + 1
+    ent["day"] = int((state.get("clock") or {}).get("day", 1) or 1)
+    state["_visit_noted"] = lid
+
+
 def map_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
     """The discovered world for the 🗺 map panel: unlocked places as nodes (current one
     flagged), exits filtered to unlocked destinations, who stands where right now.
@@ -3297,6 +3443,12 @@ def map_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
         lid = cur if c.get("id") in following else char_position(content, state, c)
         if lid and lid != AWAY and avail.get(lid) and c.get("name"):
             at.setdefault(lid, []).append(c["name"])
+    # 🗺 分层收纳 (Yi 2026-07-24: 地点多了地图乱): 热度/置顶/休眠随节点下发,
+    # 客户端据此决定谁上图谁进抽屉。休眠=生成的+至多来过一次+14天没来 (授权地点永不休眠)。
+    visits = state.get("loc_visits") or {}
+    pins = set(state.get("map_pins") or [])
+    tucked = set(state.get("map_hidden") or [])
+    today = int((state.get("clock") or {}).get("day", 1) or 1)
     nodes = []
     for l in locs:
         lid = l.get("id")
@@ -3304,8 +3456,18 @@ def map_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
             continue
         exits = [{"id": name_to_id[en], "name": en}
                  for en in (l.get("exits") or []) if avail.get(name_to_id.get(en))]
+        v = visits.get(lid) or {}
+        vn, vday = int(v.get("n", 0) or 0), int(v.get("day", 0) or 0)
         nodes.append({"id": lid, "name": l.get("name") or "", "here": lid == cur,
-                      "chars": at.get(lid, []), "exits": exits})
+                      "chars": at.get(lid, []), "exits": exits,
+                      "kind": "gen" if l.get("generated") else "auth",
+                      "heat": vn, "pinned": lid in pins, "tucked": lid in tucked,
+                      # 零访问按账本诞生日 _since 起算 (审计实弹: 缺 loc_visits 的老档
+                      # 开图即全员💤; 新档铸而不访满14天仍照常沉睡)
+                      "dormant": bool(l.get("generated")) and vn <= 1
+                      and (today - (vday or int((state.get("loc_visits") or {})
+                                                .get("_since") or today))) >= 14
+                      and lid not in pins and lid != cur})
     return {"nodes": nodes, "hidden": sum(1 for v in avail.values() if not v), "current": cur}
 
 
@@ -4859,7 +5021,9 @@ def _phone_exchange(content: dict[str, Any], state: dict[str, Any], persona: dic
     ctx = gating.build_context(char_id, gating.iter_fragments(content), state, newly_ids=newly)
     pcid = state.get("player_character_id")
     pc = _char_by_id(content, pcid) if pcid else None
+    _th_lr = (_thread(state, char_id).get("last_read") or {}).get("reason") or ""
     out = llm.generate({"phone_reply": True, "call": bool(call), "same_room": bool(same_room),
+                        "last_ignored": _th_lr,   # 📱 上次晾过要认账 (Spec C)
                         "device": phone_device(content),
                         "char": {"name": c.get("name"), "role": c.get("role") or "",
                                  "persona_text": (c.get("persona_text") or "")[:200],
@@ -4921,6 +5085,29 @@ def _digest_phone_overflow(state: dict[str, Any], cid: str, llm: LLM) -> None:
         th["digested_upto"] = len(msgs) - keep
 
 
+def deliver_due_phone(content: dict[str, Any], state: dict[str, Any]) -> int:
+    """📬 延迟消息投递扫描 (Spec D): pending 里 deliver_at 到点的搬进正式消息并计未读。
+    单点扫描 — 回合起点与玩家打开线程时各扫一次, 幂等。"""
+    now = _time_index(state)
+    label = (clock_view(content, state) or {}).get("label", "")
+    moved = 0
+    for cid, th in ((state.get("phone") or {}).get("threads") or {}).items():
+        pend = th.get("pending") or []
+        due = [p for p in pend if int(p.get("deliver_at", 0) or 0) <= now]
+        if not due:
+            continue
+        for p in due:
+            th.setdefault("msgs", []).append({"from": "them",
+                                              "text": str(p.get("text") or "")[:120],
+                                              "at": label})
+        th["pending"] = [p for p in pend if p not in due]
+        th["unread"] = int(th.get("unread", 0) or 0) + len(due)
+        th.pop("last_read", None)   # 补偿送达 = 晾着的债清了
+        _thread_cap(th)
+        moved += len(due)
+    return moved
+
+
 def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str, Any],
                char_id: str, text: str, llm: LLM | None = None,
                beat_log: list[dict[str, Any]] | None = None) -> dict[str, Any]:
@@ -4936,13 +5123,43 @@ def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str
     # an error — they get to react to the absurdity in voice（「我人不就在这？」）
     here = any(ch.get("id") == char_id for ch in scene_characters(content, state))
     now_label = (clock_view(content, state) or {}).get("label", "")
+    deliver_due_phone(content, state)   # 📬 打开线程先收到期的延迟消息 (Spec D)
     th = _thread(state, char_id)
     th["msgs"].append({"from": "me", "text": text[:200], "at": now_label})
     _thread_cap(th)
     newly, cracked = _phone_probe(content, state, char_id, text)
     out = _phone_exchange(content, state, persona, c, text, llm, newly, same_room=here,
                           beat_log=beat_log)
-    msgs = [dedash(str(m).strip()[:120]) for m in (out.get("msgs") or []) if str(m).strip()][:3]
+    msgs = [dedash(str(m).strip()[:120]) for m in (out.get("msgs") or []) if str(m).strip()][:5]
+    # 📱 形状④【已读：原因】晾着 (Spec C): 记账可追问, 「稍后：」补偿走延迟投递 (Spec D)
+    _shape = "normal"
+    if msgs and msgs[0].startswith("【已读"):
+        _reason = msgs[0].split("：", 1)[-1].split(":", 1)[-1].strip("】 ")[:12]
+        th["last_read"] = {"reason": _reason or _t(content, "现在不想说", "not now"),
+                           "at": _time_index(state)}
+        th["msgs"].append({"from": "them", "kind": "read", "text": "已读", "at": now_label})
+        for m in msgs[1:]:
+            if m.startswith(("稍后：", "稍后:")):
+                _mk = m.split("：", 1)[-1].split(":", 1)[-1].strip()[:120]
+                if _mk:
+                    th.setdefault("pending", []).append(
+                        {"text": _mk, "deliver_at": _time_index(state) + 1})
+        _audit(state, "phone.shape", True, f"{c.get('name')}·已读晾着", _reason)
+        msgs = []
+        _shape = "read"
+    elif len(msgs) >= 4:
+        _shape = "burst"
+    elif len(msgs) == 1 and len(msgs[0]) <= 6:
+        _shape = "word"
+    elif len(msgs) == 1 and len(msgs[0]) >= 45:
+        _shape = "long"
+    if _shape != "read":
+        th.pop("last_read", None)   # 正常回了 = 认过账翻篇
+    try:
+        from .. import metrics as _phm
+        _phm.log("phone_shape", shape=_shape)
+    except Exception:
+        pass
     snap = None
     if msgs:
         # 📷 a reply may come with a photo — what TA sees right now, or a selfie
@@ -6828,6 +7045,11 @@ def _confront_gen(content, state, persona, secret, frag, next_locked, target, ll
         "memory": (state.get("memory_by_char", {}) or {}).get(char_id) or "",
         "world_facts": (content.get("story") or {}).get("world_facts") or "",
         "world": ((content.get("story") or {}).get("world_long") or "")[:600],
+        # 🎯 玩家亲手定的目标 (沙盒): 世界要向它倾斜
+        "player_goal": next((g.get("text") for g in reversed(goals_of(state))
+                             if g.get("status") == "open" and g.get("kind") == "player"), ""),
+        # 🎬 作者开场白进每回合 (Yi: 是给模型学习的重要材料, 文风与事实之锚)
+        "auth_opening": ((content.get("story") or {}).get("opening") or "")[:1200],
         "style": (content.get("story") or {}).get("style") or "",  # ✍️ 文风
         "roster": _physical_roster(content, state, persona),
         "creatures_here": creatures_here(content, state),
@@ -7000,8 +7222,11 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
         # visible — a strong reward + come-back hook. Only on an UPGRADE, never a downgrade.
         if mode_after != mode_before and _RANK.get(mode_after, 0) > _RANK.get(mode_before, 0):
             mn = relationships.name_of(mode_after, lang_of(content))
-            moments.append({"kind": "rel_up", "character_id": sp_id, "name": sp_name,
-                            "mode": mode_after, "mode_name": mn})
+            # 💗 机械弹窗软化 (Yi: 账本过线突然蹦心动瞬间不合逻辑): 只有「成为恋人」
+            # 当场亮牌; 其余档位静默入账 (面板数值照常), 戏交给每日浪漫结算的袒露心声
+            if mode_after == "lover":
+                moments.append({"kind": "rel_up", "character_id": sp_id, "name": sp_name,
+                                "mode": mode_after, "mode_name": mn})
             # 💘 a tier-up is a warm spike — a styled character will pull back next time
             if relationships.love_style_of(sp):
                 _sim(state, sp_id)["warm_peak"] = {"t": _time_index(state), "served": False}
@@ -7013,12 +7238,13 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
                       or _t(content, f"你和{sp_name}成了「{mn}」。",
                             f"You and {sp_name} became “{mn}”."), sp,
                       rarity=3 if mode_after == "lover" else 2)
-            yield emit({"type": "description", "speaker_name": None,
-                        "text": _t(content,
-                                   f"💗（你感觉到，和{sp_name}的关系又近了一层。现在你们是"
-                                   f"「{mn}」了。）",
-                                   f"💗 (You can feel it — something between you and {sp_name} "
-                                   f"has shifted closer. You are now “{mn}”.)")})
+            if mode_after == "lover":
+                yield emit({"type": "description", "speaker_name": None,
+                            "text": _t(content,
+                                       f"💗（你感觉到，和{sp_name}的关系又近了一层。现在你们是"
+                                       f"「{mn}」了。）",
+                                       f"💗 (You can feel it — something between you and {sp_name} "
+                                       f"has shifted closer. You are now “{mn}”.)")})
             # 📮 crossing into 恋人 earns a LETTER: some things TA can only write down
             if mode_after == "lover" and phone_enabled(content):
                 lm = compose_letter(content, state, sp, "love_letter",
@@ -7264,6 +7490,7 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
             if nc_name and not exists:
                 nc_id = f"gen_{_uuid.uuid4().hex[:8]}"
                 emergent_ids.add(nc_id)
+                growth_mod.note_mint(state)   # 🌱 出生也吃生长额度 (双通道共享)
                 (content.get("story") or {}).setdefault("characters", []).append({
                     "id": nc_id,
                     "name": nc_name,
@@ -7295,6 +7522,8 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
         # 🛠 CRAFT: the player made something with their own materials — every
         # material must be in the pocket; a failed fate roll voids the attempt
         # ⚡ 主拍自带的建议 chips (提速: 免掉独立小调用)
+        if is_primary:
+            flags["dir_ran"] = True   # 主拍在场证明: world_seed 结算凭它区分「真填无」与「没问过」
         if is_primary and directed.get("suggestions"):
             flags["dir_suggestions"] = [str(x).strip()[:20]
                                         for x in directed["suggestions"] if str(x).strip()][:2]
@@ -7432,7 +7661,7 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
                                "reward": q_reward, "giver": sp_name, "status": "open",
                                "kind": "job" if q_reward else "lead",  # 🧭 无酬=线索任务
                                "deadline_day": (day_now_q + q_days) if q_days else None})
-                state["quests"] = quests[-8:]
+                state["quests"] = _trim_ledger(quests)
                 moments.append({"kind": "quest", "status": "open", "title": q_title,
                                 "reward": q_reward, "days": q_days})
                 yield emit({"type": "description", "speaker_name": None,
@@ -7795,6 +8024,21 @@ def run_turn_stream(
     # 1. probing → asks counters (per secret); also note which characters are probed.
     #    Keyword hits are PROVISIONAL (they keep same-turn reveals working) — the primary
     #    director call judges what the player truly probed, and we reconcile after it.
+    note_visit_tick(state)   # 🗺 热度账本: 上一回合挪过窝这里落账
+    # 🌱 世界生长预算 (节奏归引擎): 本回合是否向主拍下发生长字段, 起点定死
+    _ws_mode = ""
+    if (state.get("mode") or "character") != "god":
+        growth_mod.tick(state)
+        _ws_mode = growth_mod.due(content, state, taste_mod.top(state))
+        if _ws_mode:
+            try:
+                from .. import metrics as _gm
+                _gm.log("growth", ev="due", mode=_ws_mode)
+            except Exception:
+                pass
+    _pace = pace_band(state, tun)   # 🎼 本轮节奏带 (乐师账本→台词形状, Spec A)
+    if (state.get("mode") or "character") != "god":
+        deliver_due_phone(content, state)   # 📬 到期的延迟消息随回合送达 (Spec D)
     asks = dict(state.get("asks") or {})
     probed_secret_ids = _detect_asks(content, player_input)
     for sid in probed_secret_ids:
@@ -8856,12 +9100,25 @@ def run_turn_stream(
             "world_facts": (content.get("story") or {}).get("world_facts") or "",
             # 🌍 世界书 (Yi: 角色不尊重世界观 — world_long 从前只到开场旁白为止)
             "world": ((content.get("story") or {}).get("world_long") or "")[:600],
+            # 🎯 玩家亲手定的目标 (沙盒): 世界要向它倾斜
+            "player_goal": next((g.get("text") for g in reversed(goals_of(state))
+                                 if g.get("status") == "open" and g.get("kind") == "player"), ""),
+            # 🎬 作者开场白进每回合 (文风与事实之锚)
+            "auth_opening": ((content.get("story") or {}).get("opening") or "")[:1200],
             # 🏛 阵营底色 (权谋地基): 归属 + 玩家在本阵营的风评
             "faction_block": factions_mod.block(content, state, sp,
                                                 zh=lang_of(content) != "en"),
             # 🧭 口味罗盘: 只给主答者, 样本够了才有内容 (倾斜不转向)
             **({"taste_line": taste_mod.prompt_line(state, lang_of(content) != "en")}
                if idx == 0 else {}),
+            # 🌱 生长预算到期: 主拍必填 world_seed (软邀请/硬指令两档)
+            **({"world_seed": _ws_mode} if idx == 0 and _ws_mode else {}),
+            # 🎼 节奏带 (Spec A): 引擎按乐师账本查表, 全体发言者同一拍点
+            "pace": _pace,
+            # 🤐 沉默权阶梯归引擎 (Spec B): 被点名/秘密被戳/上轮已沉默 → 必须开口
+            "must_speak": bool(sp_id in probed_char_ids
+                               or (target_character_id and target_character_id == sp_id)
+                               or int(_sim(state, sp_id).get("silent_streak", 0) or 0) >= 1),
             "speaker_faction": (factions_mod.of_char(content, sp) or {}).get("name", ""),
             "style": (content.get("story") or {}).get("style") or "",  # ✍️ 文风
             "fate_log": list(state.get("fate_log") or [])[-3:],  # 📜 命运的既定轨迹
@@ -9092,6 +9349,24 @@ def run_turn_stream(
                 if b.get("type") == "dialogue":
                     b["act"] = _act
                     break
+        # 🤐 沉默账 (Spec B): 没说话但有动作拍 = 合法沉默, 记类审计+连续计数
+        _spoke = any(b.get("type") == "dialogue" and (b.get("text") or "").strip()
+                     for b in d_beats)
+        if sp_id:
+            _ssim = _sim(state, sp_id)
+            if _spoke:
+                _ssim["silent_streak"] = 0
+            elif any((b.get("text") or "").strip() for b in d_beats):
+                _ssim["silent_streak"] = int(_ssim.get("silent_streak", 0) or 0) + 1
+                _audit(state, "beat.silence", True, sp_name,
+                       f"连续{_ssim['silent_streak']}轮")
+        # 🌱 生长种子收卷第一步: 人物种子并入 new_char 出生管线 (守卫/配额原样),
+        # 地点种子暂存 — 铸造与确认条在回合尾统一处理 (move_request 在那里才定)
+        if is_primary and _ws_mode:
+            _wso = str(directed.get("world_seed") or "").strip().strip("「」\"'")
+            flags["world_seed_out"] = _wso
+            if _wso.startswith(("人物：", "人物:")) and not (directed.get("new_char") or "").strip():
+                directed["new_char"] = _wso.split("：", 1)[-1].split(":", 1)[-1].strip()
         # 🎼 乐师起卷 (Yi 2026-07-22: 高精度观察情绪切 BGM): 主拍一结算就开线程读
         # 这一回合的实际文字判情绪 — 跑在配角发言/结算的影子里, 不占关键路径;
         # 流末收卷 (direct 事件本来就在流末发, 音乐不差这一拍)
@@ -9858,11 +10133,82 @@ def run_turn_stream(
                 if _mint and _mint.get("id"):
                     flags["content_mutated"] = True
                     content_mutated = True   # 局部快照在 9238 已定格, 这里要直写
+                    growth_mod.note_mint(state)   # 🌱 双通道共享额度
                     _audit(state, "place.mint", True, _mint.get("name", ""), "听说的去处已立档")
                     move_request = {"to": _mint["id"], "to_name": _mint.get("name"),
                                     "by_id": primary_id, "by_name": primary_name_for_invite,
                                     "minted": True}
             # near exists but locked/unconnected → no chip: 不造垃圾, 也不带人去不可达处
+    # 🌱 生长收卷第二步 (Yi 四条拍板): 地点种子过判官铸造; 填无入账升级档;
+    # 铸造成功共享额度 (note_mint), 确认条与提及即立档同款 (只立档不落脚)
+    if _ws_mode and not observer:
+        _wso = str(flags.get("world_seed_out") or "").strip()
+        try:
+            from .. import metrics as _gm2
+        except Exception:
+            _gm2 = None
+        if _wso.startswith(("地点：", "地点:")):
+            _wsn = _wso.split("：", 1)[-1].split(":", 1)[-1].strip().strip("「」\"'")[:12]
+            try:
+                _wsl = generate_and_move(content, state, _wsn, llm=llm, move=False)
+            except ValueError:
+                _wsl = None
+            if _wsl and _wsl.get("id"):
+                flags["content_mutated"] = True
+                content_mutated = True
+                growth_mod.note_mint(state)
+                _audit(state, "growth.seed", True, _wsl.get("name", ""), "预算铸造·地点")
+                if _gm2:
+                    _gm2.log("growth", ev="mint", ch="seed_place")
+                if move_request is None:
+                    move_request = {"to": _wsl["id"], "to_name": _wsl.get("name"),
+                                    "by_id": None, "by_name": None, "self_go": True,
+                                    "minted": True}
+            else:
+                _audit(state, "growth.seed", False, _wsn, "判官驳回")
+                if _gm2:
+                    _gm2.log("growth", ev="reject", ch="seed_place")
+        elif _wso.startswith(("人物：", "人物:")):
+            # 出生已并入 new_char 管线; 出生成功与否看 emergent_ids
+            if emergent_ids:
+                growth_mod.note_mint(state)
+                _audit(state, "growth.seed", True, _wso[:16], "预算铸造·人物")
+                if _gm2:
+                    _gm2.log("growth", ev="mint", ch="seed_char")
+            else:
+                _audit(state, "growth.seed", False, _wso[:16], "出生管线驳回")
+                if _gm2:
+                    _gm2.log("growth", ev="reject", ch="seed_char")
+        elif flags.get("dir_ran"):
+            # 只有主拍真跑过才算「填无」—— think 轮/空场轮根本没问过 world_seed,
+            # 不许记空账升硬指令 (审计实弹: 死亡玩家每轮被记一次幻影拒绝)
+            _bl = growth_mod.note_blank(state)
+            _audit(state, "growth.seed", False, "无",
+                   f"连续第{_bl}次{'·下次升硬指令' if _bl >= growth_mod.BLANK_ESCALATE else ''}")
+            if _gm2:
+                _gm2.log("growth", ev="blank", n=_bl, mode=_ws_mode)
+    # 🚶 探索硬出口 (②): 玩家亲口要「出去走走」却没有目的地 → 判官发明一个贴世界观
+    # 的去处, 确认条自去; 吃同一本生长额度
+    if move_request is None and not observer and sandbox_on(content) \
+            and growth_mod.explore_intent(player_input):
+        try:
+            _expl = generate_and_move(content, state, "附近随便走走能撞见的去处",
+                                      llm=llm, move=False, invent=True)
+        except ValueError:
+            _expl = None
+        if _expl and _expl.get("id"):
+            flags["content_mutated"] = True
+            content_mutated = True
+            growth_mod.note_mint(state)
+            _audit(state, "growth.explore", True, _expl.get("name", ""), "探索发明")
+            try:
+                from .. import metrics as _gm3
+                _gm3.log("growth", ev="mint", ch="explore")
+            except Exception:
+                pass
+            move_request = {"to": _expl["id"], "to_name": _expl.get("name"),
+                            "by_id": None, "by_name": None, "self_go": True,
+                            "minted": True}
     if move_request is None and emergent_dest and not observer \
             and not resolve_location(content, emergent_dest):
         # the PLAYER named the off-map place themselves — same chip, no inviter.
@@ -9883,6 +10229,7 @@ def run_turn_stream(
             if _mint2 and _mint2.get("id"):
                 flags["content_mutated"] = True
                 content_mutated = True
+                growth_mod.note_mint(state)   # 🌱 双通道共享额度
                 _audit(state, "place.mint", True, _mint2.get("name", ""), "你说起的去处已立档")
                 move_request = {"to": _mint2["id"], "to_name": _mint2.get("name"),
                                 "by_id": None, "by_name": None, "self_go": True,
@@ -10017,6 +10364,16 @@ def run_turn_stream(
     }
     yield ("final", _final_payload)
 
+    # 📊 节奏验收三数 (Spec): 句长分布/沉默率/节奏带 — metrics "pace" 事件
+    try:
+        from .. import metrics as _pm
+        _dl = [len((b.get("text") or "")) for b in all_beats
+               if b.get("type") == "dialogue"][:10]
+        _pm.log("pace", band=_pace["band"], dlens=_dl,
+                silence=bool(not _dl and any(b.get("type") == "description"
+                                             for b in all_beats)))
+    except Exception:
+        pass
     # 🎼 乐师收卷 (post-final): 主拍时起的判官线程此刻多半早已回卷 — join≈0;
     # 万一没回, 最多等 6s (音乐迟到一拍不伤, 抢戏才伤)。router 与 run_turn 包装器
     # 都在流耗尽后才读 final 引用, 这里的回填照样落地。
@@ -10025,6 +10382,49 @@ def run_turn_stream(
             _music_job["thread"].join(timeout=6.0)
             _final_payload["music"] = settle_music(
                 state, (_music_job.get("box") or {}).get("out"))
+        except Exception:
+            pass
+    # 📔 每日回忆结算 (Yi 2026-07-25 二改: 回忆不能只有一种 — 通盘总结当天互动
+    # 打标签, 收进小手机回忆册, 零弹窗零打扰, 翻天定时更新)。
+    if new_day and not observer:
+        try:
+            _hc = _heart_candidate(content, state, beat_log, history)
+            if _hc is not None:
+                _hcid = _hc.get("id")
+                # assistant 拍已自带「说话人：台词」前缀, 再包主角名会把别人的话
+                # 错记到日记主角头上 (审计实弹: 群戏日记张冠李戴)
+                _off = [f"对方：{b.get('content', '')[:60]}" if b.get('role') == 'user'
+                        else str(b.get('content') or '')[:60]
+                        for b in (history_for(beat_log, _hcid) if beat_log is not None
+                                  else (history or []))[-20:]]
+                _pho = [f"{'对方' if m.get('from') == 'me' else _hc.get('name')}：{str(m.get('text') or '')[:60]}"
+                        for m in _thread(state, _hcid).get("msgs", [])[-10:]]
+                if len(_off) + len(_pho) >= 4:   # 相处太少就别硬袒露
+                    _sc = (state.get("rel") or {}).get(_hcid) or {}
+                    _hd = llm.generate({"heart_digest": True,
+                                        "who": {"名字": _hc.get("name"),
+                                                "人设": (_hc.get("persona_text") or "")[:160],
+                                                "表达方式": _hc.get("eq_style") or ""},
+                                        "relation": relationships.name_of(
+                                            relationships.derive_mode(_hc, _sc, tun),
+                                            lang_of(content)),
+                                        "offline": _off, "phone": _pho}) or {}
+                    _tag = str(_hd.get("tag") or "").strip()
+                    _txt = dedash(str(_hd.get("text") or "").strip())[:130]
+                    if _tag in _MEM_TAGS and _txt:
+                        _ttl = dedash(str(_hd.get("title") or "").strip())[:10]
+                        _hh = dedash(str(_hd.get("heart") or "").strip())[:80] \
+                            if _tag in ("心动", "甜蜜") else ""
+                        _day_no = int((state.get("clock") or {}).get("day", 1) or 1) - 1
+                        album_add(content, state, "daily",
+                                  f"{_MEM_TAGS[_tag]}{_tag}·{_ttl or _t(content, '这一天', 'the day')}",
+                                  (_txt + (("\n" + _hh) if _hh else ""))[:200], _hc,
+                                  rarity=2 if _tag in ("心动", "甜蜜") else 1)
+                        _audit(state, "day.memory", True,
+                               f"day{_day_no}·{_tag}·{_hc.get('name')}")
+                    else:
+                        _audit(state, "day.memory", False, _hc.get("name", ""),
+                               "今天没记（判官没给出合规标签）")
         except Exception:
             pass
     # 🎥 场记 (post-final): re-derives every frame from THIS turn's prose. Runs after the

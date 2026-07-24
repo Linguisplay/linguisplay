@@ -54,3 +54,47 @@ def test_world_book_reaches_turn_system():
     txt = qwen._build_system({**base, "world": "蒸汽龙骨城，飞艇靠鲸油航行"})
     assert "蒸汽龙骨城" in txt and "世界观·这个世界的底色" in txt
     assert "蒸汽龙骨城" not in qwen._build_system(base)
+
+
+def test_authored_opening_and_act_script():
+    """🎬 作者亲笔开场白原样上台压过模型即兴; 幕情节底稿进导演 system (路标不轨道)。"""
+    from app.engine import qwen
+    story2 = {"story": {**STORY["story"],
+                        "opening": "暴雨拍在铁皮棚上——你攥着那封没有署名的信。",
+                        "acts": [{"index": 1, "title": "一",
+                                  "script": "细辉借钱被拒；深夜仓库起火"}]},
+              "secrets": []}
+    beats = runtime.build_opening(story2, runtime.default_state(), llm=IntroLLM())
+    assert beats[0]["text"] == "暴雨拍在铁皮棚上，你攥着那封没有署名的信。"   # 原样(过标点守卫)
+    txt = qwen._build_system({"speaker": {"name": "甲"}, "persona": {"name": "我"},
+                              "channel": "say",
+                              "scene": {"index": 1, "title": "一",
+                                        "script": "细辉借钱被拒；深夜仓库起火"}})
+    assert "情节底稿" in txt and "仓库起火" in txt and "路标不是轨道" in txt
+
+
+class CaptureLLM:
+    """记录 build_opening 喂给开场生成的 payload"""
+    def __init__(self):
+        self.seen = None
+
+    def generate(self, prompt):
+        if prompt.get("intro_vignettes"):
+            self.seen = prompt
+        return {}
+
+
+def test_authored_opening_feeds_cast_generation_and_stages_verbatim():
+    # 🎬 (Yi 实弹: 角色也得跟着开场白演) 开场白必须: ①喂进开场生成 payload
+    # ②一字不落按段落上台
+    story = {k: (dict(v) if isinstance(v, dict) else v) for k, v in STORY.items()}
+    story["story"] = dict(STORY["story"])
+    story["story"]["opening"] = "暴雨拍在铁皮棚上。\n你攥着那封没有署名的信，站在牌坊底下。"
+    llm = CaptureLLM()
+    beats = runtime.build_opening(story, runtime.default_state(), llm=llm)
+    assert llm.seen is not None and \
+        llm.seen.get("auth_opening", "").startswith("暴雨拍在铁皮棚上"), \
+        "开场白没喂给开场生成 — 角色会像没读过剧本"
+    texts = [b.get("text") for b in beats if b.get("type") == "description"]
+    assert "暴雨拍在铁皮棚上。" in texts and \
+        "你攥着那封没有署名的信，站在牌坊底下。" in texts, "开场白没有一字不落分段上台"

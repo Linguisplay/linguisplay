@@ -167,6 +167,7 @@ class Story(Base):
     # 🐲 生物账本 (第三实体类, Yi 拍板 2026-07-20): 兽/龙/鬼 — 行为实体非社交实体
     creatures: Mapped[list] = mapped_column(JSON, default=list)
     factions: Mapped[list] = mapped_column(JSON, default=list)   # 🏛 阵营
+    opening: Mapped[str | None] = mapped_column(Text, nullable=True)   # 🎬 作者开场白
     # 🎀 galgame 生成器 (docs/galgame-maker.md): kind="gal" marks a compiled work;
     # gal = {status, progress, source_text, characters, scenes, script{pov:{chapters}},
     #        manifest, protagonist_id, art_style_preset}

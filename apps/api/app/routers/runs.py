@@ -23,7 +23,7 @@ from ..models import Persona as PersonaModel
 from ..models import Run as RunModel
 from ..models import Story as StoryModel
 from ..models import StoryMeta, StorySnapshot, User
-from ..schemas import (Beat, ChooseIn, ConfrontIn, FollowIn, MarketBuyIn, MoveIn, PhoneSendIn, RenameIn,
+from ..schemas import (Beat, ChooseIn, ConfrontIn, FollowIn, GoalIn, MarketBuyIn, MoveIn, PhoneSendIn, RenameIn,
                        SocialCommentIn, SocialLikeIn, TransferIn,
                        PlayIn, RewindIn, Run, RunCreate, RunState, RunSummary, VerdictIn)
 from .stories import _to_secret, _to_story
@@ -181,8 +181,13 @@ def _bg_prompt(content: dict, loc: dict) -> str:
     # 以生物为主体 (猫咪摄影), 直接喂背景就画出猫; 缺省回落统一画风
     art = str((story.get("tuning") or {}).get("bg_style") or "").strip()         or _story_art(content)[0]
     # 空镜铁律放句尾压轴 (地名/描述常自带生物名 — 铁律必须是模型读到的最后一句)
-    return (f"{art}。场景概念图，强烈氛围与光影，景深，横构图宽幅。{era} "
-            f"场景：{loc.get('name', '')}。{(loc.get('detail') or '')[:200]}"
+    # 🎥 广角纵深 (Yi 2026-07-23: 场景要更宽更3D): 镜头语言给宽, 三层景深给立体 —
+    # 竖屏只露横图一条缝, 空间感全靠透视与层次撑
+    return (f"{art}。全景式场景概念图，超广角镜头，空间开阔纵深感强："
+            f"前景有入画沿的实物（桌角、廊柱、枝叶、器物）拉出近景层，"
+            f"中景是场景主体，远景沿透视线延伸出去（门洞、街巷、地平线、天际），"
+            f"三层景深分明；体积光与空气透视（远处略朦胧），强烈氛围与光影，横构图宽幅。"
+            f"{era} 场景：{loc.get('name', '')}。{(loc.get('detail') or '')[:200]}"
             f"。铁律：空镜，画面里没有任何人物也没有任何生物——人、兽、龙、猫狗、鸟、"
             f"怪物一概不出现；哪怕场景名或描述里提到了它们，也只画它们不在场时的空舞台"
             f"（住处、痕迹、器物照画，活物本身绝不入画）；没有文字、字幕或水印")
@@ -1175,6 +1180,7 @@ def move(run_id: str, body: MoveIn, user: User = Depends(current_user), db: Sess
             generated = True
         else:
             runtime.apply_move(content, st, body.location)
+        runtime.note_visit_tick(st)   # 🗺 热度账本: 移动即落账
     except ValueError as e:
         raise HTTPException(400, {"unknown location": "去不了这个地方",
                                   "not reachable from here": "从这里没法直接过去",
@@ -1238,6 +1244,34 @@ def get_map(run_id: str, user: User = Depends(current_user), db: Session = Depen
                 _spawn_location_bg(r.pinned_content or {}, loc)
                 _missing += 1
     return view
+
+
+@router.post("/{run_id}/map/mark")
+def map_mark(run_id: str, body: dict = Body(...),
+             user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """🗺 地图收纳 (Yi 2026-07-24): 置顶=常驻图上; 隐藏=收进抽屉 (只藏不删,
+    当前所在地点藏不掉)。"""
+    r = _own_run(run_id, user, db)
+    st = dict(r.state or {})
+    lid = str(body.get("location_id") or "").strip()
+    op = str(body.get("op") or "").strip()
+    if op not in ("pin", "unpin", "hide", "show"):
+        raise HTTPException(400, "op 只认 pin/unpin/hide/show")
+    if not runtime._location_by_id(r.pinned_content or {}, lid):
+        raise HTTPException(404, "没有这个地点")
+    pins = [x for x in (st.get("map_pins") or []) if x != lid]
+    hides = [x for x in (st.get("map_hidden") or []) if x != lid]
+    if op == "pin":
+        pins.append(lid)
+    elif op == "hide":
+        if lid == st.get("location_id"):
+            raise HTTPException(400, "你就站在这儿，藏不掉")
+        hides.append(lid)
+    st["map_pins"], st["map_hidden"] = pins, hides
+    r.state = st
+    flag_modified(r, "state")
+    db.commit()
+    return {"pins": pins, "hidden": hides}
 
 
 @router.post("/{run_id}/bg/regen")
@@ -1307,6 +1341,26 @@ def edit_beat(run_id: str, beat_id: str, body: dict = Body(...),
     db.commit()
     db.refresh(b)
     return _to_beat(b)
+
+
+@router.post("/{run_id}/goal")
+def set_player_goal(run_id: str, body: GoalIn,
+                    user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """🎯 沙盒: 玩家亲手定当前目标 / 随机推荐一个 (player 层, 压过差事层)。
+    世界会跟着它发展 — 目标进导演提示词, 事件与 NPC 向它倾斜。"""
+    r = _own_run(run_id, user, db)
+    content = r.pinned_content or {}
+    if not runtime.sandbox_on(content):
+        raise HTTPException(400, "只有沙盒世界能自定目标——有剧本的故事目标由幕推进")
+    st = dict(r.state or {})
+    if (st.get("mode") or "character") == "god":
+        raise HTTPException(403, "旁观模式没有自己的目标")
+    text = runtime.player_goal_suggest(content, st) if body.roll else (body.text or "")
+    goal = runtime.player_goal_set(content, st, text)
+    r.state = st
+    flag_modified(r, "state")  # 浅拷贝共享内层 goals 列表, 不打标 SQLAlchemy 会漏 UPDATE (审计实弹)
+    db.commit()
+    return {"goal": goal}
 
 
 @router.post("/{run_id}/character/{char_id}/rename")

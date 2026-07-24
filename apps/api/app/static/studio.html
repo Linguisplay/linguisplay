@@ -135,6 +135,7 @@ body.simple details.sec > summary::before { content:""; }
       <label>一句话简介（发现页卡片用）</label><input id="f_oneliner" oninput="story.one_liner=this.value" />
       <label>剧情梗概</label><textarea id="f_synopsis" oninput="story.synopsis=this.value"></textarea>
       <label>世界观 / 场景设定（AI 每回合都会看：时代、规矩、气味，角色言行不越界）</label><textarea id="f_world" oninput="story.world_long=this.value"></textarea>
+      <label>🎬 开场白（玩家进入故事看到的第一段旁白，写了就原样上台，可写长文；留空由 AI 即兴）</label><textarea id="f_opening" maxlength="10000" placeholder="例：暴雨拍在铁皮棚上。你攥着那封没有署名的信，站在牌坊底下——城寨的灯一盏一盏灭了。" oninput="story.opening=this.value"></textarea>
       <div class="row3">
         <div><label>可见性</label><select id="f_vis" onchange="story.visibility=this.value"><option value="private">私密</option><option value="public">公开</option></select></div>
         <div><label>演出语言</label><select id="f_lang" onchange="story.language=this.value"><option value="zh">中文</option><option value="en">English</option></select></div>
@@ -326,7 +327,7 @@ const TUNING_KNOBS = [
   ["affinity_clamp_min", -3, "好感单回合最大跌幅（负数，往0调更抗跌）"],
   ["act_backstop_div", 12, "好感兜底推幕除数"],
 ];
-function blankStory(){ return { id:null, title:"", language:"zh", one_liner:"", synopsis:"", world_long:"", world_facts:"", relations_overview:"",
+function blankStory(){ return { id:null, title:"", language:"zh", one_liner:"", synopsis:"", world_long:"", opening:"", world_facts:"", relations_overview:"",
   trope_tags:[], visibility:"private", mature:false, characters:[], acts:[], endings:[], locations:[],
   tuning:{}, pressure:null, clock:null, phone:null, verdict:null, sandbox:null }; }
 function gid(p){ return p + Math.random().toString(36).slice(2,8); }
@@ -419,7 +420,7 @@ async function editStory(id){
 function openEditor(){
   hide("list"); show("editor"); saveMsg.textContent=""; lintBox.innerHTML="";
   f_title.value=story.title||""; f_oneliner.value=story.one_liner||""; f_synopsis.value=story.synopsis||"";
-  f_world.value=story.world_long||""; f_facts.value=story.world_facts||""; f_rel.value=story.relations_overview||"";
+  f_world.value=story.world_long||""; f_opening.value=story.opening||""; f_facts.value=story.world_facts||""; f_rel.value=story.relations_overview||"";
   f_tropes.value=(story.trope_tags||[]).join(", "); f_vis.value=story.visibility||"private";
   f_lang.value=story.language||"zh";
   f_mature.checked=!!story.mature;
@@ -1055,6 +1056,7 @@ function renderActs(){
     d.innerHTML=`<div class="bar" style="justify-content:space-between"><h3>第 ${a.index} 幕</h3><button class="sm del" onclick="delAct(${i})">删这幕</button></div>
       <label>幕标题</label><input value="${esc(a.title)}" oninput="setAct(${i},'title',this.value)">
       <label>🎯 这一幕玩家的小目标（指引显示给玩家）</label><input value="${esc(a.goal||"")}" oninput="setAct(${i},'goal',this.value)" placeholder="例：弄清楚停电的真正原因">
+      <label>🎬 情节底稿（这一幕你想发生的情节走向——AI 会顺着玩家的回应把它们自然引出来，玩家不接就换个方式再引，不会硬拽）</label><textarea maxlength="400" placeholder="例：细辉先来借钱被拒；深夜仓库起火；有人看见阿彩从后门离开——三件事的顺序随玩家的动作变。" oninput="setAct(${i},'script',this.value)">${esc(a.script||"")}</textarea>
       <div class="sub"><h3>⏳ 时间锚点（这场戏发生在故事的什么时候；进幕时钟只进不退。留空=不锚）</h3>
         <div class="row2">
           <div><span class="muted">第几天（0=不指定）</span><input type="number" value="${t.day||0}" oninput="setActTime(${i},'day',this.value)"></div>
@@ -1411,7 +1413,7 @@ async function save(publish){
     const sys=_cleanup();
     const payload = { if_rev: story.updated_at || null,
       title:story.title, language:story.language||"zh",
-      one_liner:story.one_liner, synopsis:story.synopsis, world_long:story.world_long,
+      one_liner:story.one_liner, synopsis:story.synopsis, world_long:story.world_long, opening:story.opening||"",
       world_facts:story.world_facts, relations_overview:story.relations_overview,
       trope_tags:story.trope_tags, visibility:story.visibility, mature:!!story.mature,
       characters:story.characters, acts:story.acts, endings:story.endings, locations:story.locations,

@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     llm_model: str = "qwen-max"
     dashscope_api_key: str = ""
     deepseek_api_key: str = ""
-    deepseek_model: str = "deepseek-chat"
+    deepseek_model: str = "deepseek-v4-flash"   # 旧名 deepseek-chat 2026-07-24 弃用
 
     # 智能增强: when set, character enrichment grounds itself in live web search
     # (Tavily) instead of the model's own knowledge.

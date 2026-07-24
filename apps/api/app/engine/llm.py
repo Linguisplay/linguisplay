@@ -228,6 +228,8 @@ class MockLLM:
         # emergent location: deterministic stub description (real model writes the prose).
         if prompt.get("music_judge"):
             return {"track": "", "pivot": 0, "feel": ""}   # 🎼 孪生: 保持当前曲目
+        if prompt.get("heart_digest"):
+            return {"tag": "", "title": "", "text": ""}   # 📔 孪生: 今天不记 (测试零扰动)
         if prompt.get("describe_place"):
             name = (prompt.get("place_name") or "").strip()
             generic = (name.strip("一那这某换找个再的 ") in ("别处", "外面", "")

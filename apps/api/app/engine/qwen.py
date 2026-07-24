@@ -49,6 +49,10 @@ def _post_chat(url: str, key: str, body: dict, timeout: int = 25,
     transient failure, one metrics line per call. Raises on final failure — call sites
     keep their own degrade-to-default except blocks, so fallback semantics are untouched."""
     t0 = _time.perf_counter()
+    if str(body.get("model") or "").startswith("deepseek-v4"):
+        # 🧠 v4 系默认思考模式 (正文为空, reasoning 吃光 token — 实测) → 显式关闭;
+        # 旧名 deepseek-chat 2026-07-24 弃用, 全站已迁 v4-flash
+        body.setdefault("thinking", {"type": "disabled"})
     try:   # 📏 提示词体重秤 (瘦身按数据裁, 不盲删): 每次调用记录喂进去的总字数
         _pc = sum(len(str(m.get("content") or "")) for m in (body.get("messages") or []))
     except Exception:
@@ -84,6 +88,8 @@ def _post_chat_stream(url: str, key: str, body: dict, timeout: int = 60,
     import json
     t0 = _time.perf_counter()
     ttft = 0
+    if str(body.get("model") or "").startswith("deepseek-v4"):
+        body.setdefault("thinking", {"type": "disabled"})
     try:
         with httpx.stream("POST", url,
                           headers={"Authorization": f"Bearer {key}",
@@ -388,7 +394,8 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append(f"你正在与「{player_name}」对话。{player_bg}")
     lines += [
         _ANTI_ASSISTANT,
-        "用中文。台词口语化（2~4句）；旁白更长、有文学性且【具体、详尽、可感】——"
+        "用中文。" + (((prompt.get("pace") or {}).get("line")) or "台词口语化（2~4句）")
+        + "；旁白更长、有文学性且【具体、详尽、可感】——"
         "玩家看不到任何画面，环境、动作、神情全靠你的文字。",
     ]
     if cast:
@@ -532,6 +539,18 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append("")
         lines.append("【世界观·这个世界的底色】时代、规矩、气味与常识都从这里来——"
                      "你的言行、称谓、提到的物件与常识绝不能越出这个世界：\n" + _wlong)
+    _ao = (prompt.get("auth_opening") or "").strip()
+    if _ao:
+        # 🎬 作者开场白 = 最高优先级的文风与事实之锚 (Yi: 模型甚至不尊重 — 现在必须尊重)
+        lines.append("【作者开场白·文风与事实之锚】这是作者亲笔的开场白，享有最高尊重："
+                     "其中交代的时间、地点、人物、关系与既成事实全部为真，你的每一拍都不得与之矛盾；"
+                     "它的语气、用词与节奏就是本作文风的范本，写作时向它看齐：\n" + _ao)
+    _pg = (prompt.get("player_goal") or "").strip()
+    if _pg:
+        # 🎯 沙盒玩家目标铁律: 世界围绕它发展, 但不代办
+        lines.append("【玩家当前目标·世界向它倾斜】" + _pg +
+                     "——每拍都要给出与它相关的进展、阻力或回应线索；NPC 言行与事件向它靠拢，"
+                     "但绝不代替玩家完成它，也不许无关事件抢戏。")
     facts = (prompt.get("world_facts") or "").strip()
     roster = (prompt.get("roster") or "").strip()
     if facts or roster:
@@ -584,6 +603,13 @@ def _build_system(prompt: dict[str, Any]) -> str:
         scene_events = " ".join(e.get("what_happens", "") for e in (scene.get("events") or []))
         lines.append("")
         lines.append(f"【当前场景：第{scene.get('index','')}幕 {scene.get('title','')}】{scene_events}")
+        _scr = str(scene.get("script") or "").strip()[:400]
+        if _scr:
+            # 🎬 情节底稿 (Yi: 基于玩家的回应发展故事) — 路标不是轨道
+            lines.append("【本幕的情节底稿·路标不是轨道】作者希望这一幕里自然发生："
+                         f"{_scr}。顺着玩家此刻的回应把这些情节一步步引出来——玩家不接茬"
+                         "就换个方式、换个时机再引；已经演过的部分绝不复读；"
+                         "绝不无视玩家的选择硬拽剧情。")
 
     ck = (prompt.get("clock") or "").strip()
     if ck:
@@ -953,9 +979,21 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
         elif channel == "do":
             sd = "你这一轮亲口说出的原话（第一人称）；只用动作神态回应、不开口就填空字符串"
         elif observer:
-            sd = f"「{speaker}」对在场其他人说出口的原话（第一人称，2~4句）"
+            _pcs = ((prompt.get("pace") or {}).get("short")) or "2~4句，自然口语"
+            sd = f"「{speaker}」对在场其他人说出口的原话（第一人称，{_pcs}）"
         else:
-            sd = "你这一轮亲口说出的原话（第一人称，2~4句，自然口语）；你正被直接搭话，必须开口，哪怕冷淡敷衍也用话说出来，不要留空"
+            _pcs = ((prompt.get("pace") or {}).get("short")) or "2~4句，自然口语"
+            if prompt.get("must_speak"):
+                sd = (f"你这一轮亲口说出的原话（第一人称，{_pcs}）；"
+                      "你被直接问到了话头上，必须开口——哪怕冷淡敷衍也用话说出来，不要留空")
+            else:
+                # 🤐 沉默权 (Spec B): 阶梯由引擎判 (must_speak 旗), 这里只管沉默的戏
+                sd = (f"你这一轮亲口说出的原话（第一人称，{_pcs}）。"
+                      "你也有沉默权：不想说、被噎住、话到嘴边咽下时，可以一言不发"
+                      "（本字段留空）——但 narration 必须写出你沉默那一拍在做什么，"
+                      "动作只从此刻场景里【真实在场】的物件与环境取材"
+                      "（手边的、桌上的、【此地在册物件】里的），绝不凭空生造道具；"
+                      "沉默要有戏，不是省略。")
         props["speech"] = {"type": "string", "description": sd}
         required.append("speech")
     if not observer and not is_member and not is_think:
@@ -971,6 +1009,17 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
         props["romance"] = {"type": "integer", "description":
                             "默认0；对方调情/示好/情话且你真被触动才给正分；油腻、越界、"
                             "廉价套路让你不适→-1~-2。范围-2~5，恋爱线"}
+    _ws = prompt.get("world_seed")
+    if _ws and not is_member and not is_think:
+        _soft = _ws == "soft"
+        props["world_seed"] = {"type": "string", "description":
+            "这个世界该长点新东西了。这一轮找机会【自然地】带出一个新去处或一个新面孔"
+            "（顺着此刻的对话与场景，绝不硬转）：新去处填「地点：名字」（2~8字实名，"
+            "如 地点：竹棚渡口）；新面孔填「人物：名字|一句身份」（如 人物：陈皮|收保护费的瘦子）。"
+            + ("实在不合时宜就只填：无" if _soft else
+               "这一轮【必须】带出一个——选当前场景里最不突兀的方式（远处的招牌、"
+               "路过的一张生面孔、别人嘴里提到的去处都算），不许填无")}
+        required.append("world_seed")   # 必填 — 可选字段会被「只输出有内容的字段」省略
     if prompt.get("speaker_faction") and not is_think:
         props["faction_rep"] = {"type": "integer", "description":
                                 f"默认0。这一轮对方的言行让你的阵营【{prompt['speaker_faction']}】"
@@ -1332,6 +1381,10 @@ def _build_observe_system(prompt: dict[str, Any]) -> str:
     scene = prompt.get("scene") or {}
     scene_events = " ".join(e.get("what_happens", "") for e in (scene.get("events") or []))
     scene_line = f"【当前场景：第{scene.get('index','')}幕 {scene.get('title','')}】{scene_events}".strip()
+    _pscr = str((scene or {}).get("script") or "").strip()[:400]
+    if _pscr:
+        scene_line += ("\n【本幕的情节底稿·路标不是轨道】作者希望这一幕里自然发生："
+                       f"{_pscr}。顺着玩家的回应引出来，不接茬就换方式再引，绝不硬拽。")
     world = prompt.get("world") or ""
     focus = (prompt.get("player_input") or "").strip()
     target = prompt.get("observe_target")
@@ -1639,6 +1692,7 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
         "affinity_delta": 0 if is_think else _i(d.get("affinity"), -3, 8),
         "romance_delta": 0 if is_think else _i(d.get("romance"), -3, 6),
         "rep_delta": 0 if is_think else _i(d.get("faction_rep"), -3, 3),
+        "world_seed": str(d.get("world_seed") or "").strip(),
         "advance_act": bool(d.get("advance")),
         "ending": ending,
         "move_invite": mv,
@@ -2919,6 +2973,40 @@ class QwenLLM:
         except Exception:
             return {}
 
+    def _heart_digest(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """📔 每日回忆结算 (Yi 2026-07-25 二改: 回忆不能只有一种 — 通盘总结当天互动
+        并打标签, 收进小手机回忆册, 零弹窗)。Degrades to {} (今天就不记, 明天再看)。"""
+        import json as _json
+        sys = ("你就是这个角色本人。夜深了，你独自回想今天和对方的相处，在心里给这一天"
+               "记一笔。只输出严格JSON："
+               '{"tag":"","title":"","text":"","heart":""}。'
+               "tag：这一天的底色，只能从这里选一个：心动/甜蜜/开心/搞笑/惊险/平常——"
+               "按真实发生的相处诚实定调，别拔高（普通的一天就是平常）。"
+               "title：≤10字，给这一天起个小标题（像相册里的一行字）。"
+               "text：≤90字，这一天你们之间最值得记住的片段——必须引用今天【真实发生】的"
+               "细节（对方的某句话、某个动作、手机里的某条消息），绝不编造；"
+               "用你自己的视角和口吻写，像日记。"
+               "heart：仅当 tag 是 心动 或 甜蜜 时填，≤60字，你没说出口的那句心里话，"
+               "贴你的人设口吻（傲娇的绝不说直白，闷的人话少而重）；其余 tag 留空。"
+               "不用破折号。")
+        u = _json.dumps({"你是": prompt.get("who") or {},
+                         "你们现在的关系": prompt.get("relation") or "",
+                         "今天线下的相处": prompt.get("offline") or [],
+                         "今天手机上的往来": prompt.get("phone") or []},
+                        ensure_ascii=False)
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model,
+                               "messages": [{"role": "system", "content": sys},
+                                            {"role": "user", "content": u}],
+                               "max_tokens": 220, "temperature": 0.85,
+                               "response_format": {"type": "json_object"}},
+                              timeout=25, kind="heart")
+            data = _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
     def _describe_place(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """Concrete, people-free description for an EMERGENT location (a place that came up in
         play and the player agreed to go to). Grounds it in the world + where they came from."""
@@ -3255,6 +3343,9 @@ class QwenLLM:
              if call else
              f"TA不在你身边，是通过{device}给你捎话。你在忙你自己的事，回不回、回多少、什么语气，"
              "全凭你此刻的心情和你们的关系。"),
+            (f"【上次你已读没回】原因是：{prompt.get('last_ignored')}。对方若追问，认账，"
+             "别装失忆；这口气顺没顺，由你此刻的心情决定。"
+             if prompt.get("last_ignored") else ""),
             ("【通话铁律】对方【看不见】你：挑眉、摆手、扬下巴这些一概不存在，绝不写任何动作神态、"
              "绝不用（括号）描述自己；能被听见的动静（火柴声、风声、你把东西放下）只写进「背景」那一行。"
              if call else
@@ -3281,8 +3372,14 @@ class QwenLLM:
              "声响或动静，10~20字（环境音、你的动作声，不含你的台词）。如果你不想接这个话，"
              "可以只说一两个字，或输出【沉默】表示你握着听筒没出声。"
              if call else
-             "输出格式：写0~3条短消息，每条一行（口语，短，像真的在发消息；可以只回一个字，也可以连发两三条）。"
-             "如果你此刻不想回（心情/性格/在气头上），就只输出：【已读】"),
+             "输出格式：写0~5条短消息，每条一行。【形状随心情】——回复的形状由你此刻的"
+             "心情和你们的关系决定，四种都是你的武器，别把一种用成习惯："
+             "①一个字/一个词回（「滚」「好耶」「？」）；"
+             "②认真的长回（一条几十字，把一件事说清楚）；"
+             "③连环刷屏（四五条短的连着发——兴奋、急了、憋不住才这样）；"
+             "④【已读】晾着——你看了但现在不想回：第一行只输出「【已读：原因】」"
+             "（原因≤12字，如 在气你昨天的事），第二行输出「稍后：」加你过阵子会补发的那句话"
+             "（它会晚些才送到对方手机上）。"),
         ]
         sys = "\n".join(l for l in sys_lines if l) + _lang_rule(prompt)
         judgeline = ("最后另起一行，写：好感：一个整数-2~2（这几句话让你对TA更近还是更远）；"
@@ -3679,10 +3776,18 @@ class QwenLLM:
                "action 要写出TA上门/出现的样子；"
                "带 opening_line 的角色，line 必须一字不改照抄 opening_line，"
                "action 围绕这句话此刻的说出而写；不用破折号。")
+        # 🎬 作者开场白 = 此刻的现场本身 (Yi 实弹: 只上台不喂生成 → 角色像没读过剧本)
+        _ao = (prompt.get("auth_opening") or "").strip()
+        if _ao:
+            sys += ("特别注意【作者开场白】：那段旁白玩家已经原文读到，就是此刻的现场。"
+                    "scene 只写一句衔接、绝不复述它；每个角色的 action 与 line 必须从"
+                    "开场白交代的时间、地点、氛围与正在发生的事接着演——TA们身处其中，"
+                    "不得与之矛盾，不得表现得没读过它。")
         import json as _json
         u = _json.dumps({"时刻": prompt.get("clock"), "地点": prompt.get("place"),
                          "玩家": prompt.get("player"), "世界": prompt.get("world"),
                          "文风": prompt.get("style"), "开局目标": prompt.get("goal"),
+                         "作者开场白(玩家已读到, 就是此刻现场)": _ao,
                          "tease(主角有话没说的由头)": prompt.get("tease") or "",
                          "在场角色": prompt.get("chars")}, ensure_ascii=False)
         try:
@@ -4248,6 +4353,8 @@ class QwenLLM:
             return self._rank_judge(prompt)
         if prompt.get("gen_market"):
             return self._gen_market(prompt)
+        if prompt.get("heart_digest"):
+            return self._heart_digest(prompt)
         if prompt.get("music_judge"):
             return self._music_judge(prompt)
         if prompt.get("describe_place"):

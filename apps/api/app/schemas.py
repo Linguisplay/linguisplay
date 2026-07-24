@@ -261,6 +261,9 @@ class Act(BaseModel):
     index: LaxInt = 0
     title: str = ""
     goal: str = ""  # the player's small objective during this act (shown as 🎯 guidance)
+    # 🎬 情节底稿 (Yi 2026-07-25): 作者想让这一幕发生的情节走向 (自由文本) —
+    # 喂给导演当路标不当轨道: 顺着玩家的回应自然引出, 玩家不接就换个方式再引
+    script: str = ""
     advance: AdvanceCondition = AdvanceCondition()  # hard requirements to leave this act
     events: list[StoryEvent] = []
     choice: Optional[ActChoice] = None  # key-moment explicit decision on entering this act
@@ -358,6 +361,8 @@ class StoryInput(BaseModel):
     creatures: Optional[list] = None
     # 🏛 阵营: [{id,name,detail,rivals:[id]}] — 权谋/宫斗/帮派的声望地基
     factions: Optional[list] = None
+    # 🎬 作者亲笔开场白 (Yi 2026-07-25): 开场的第一段旁白原样上台; 空 = AI 即兴
+    opening: Optional[str] = None
 
 
 class Story(BaseModel):
@@ -395,6 +400,7 @@ class Story(BaseModel):
     sandbox: Optional[dict] = None
     creatures: Optional[list] = None   # 🐲 生物账本
     factions: Optional[list] = None    # 🏛 阵营声望
+    opening: Optional[str] = None      # 🎬 作者亲笔开场白
     completion: float = 0.0
 
 
@@ -542,6 +548,12 @@ class RunSummary(BaseModel):
     mode: str = "character"
     player_character_name: Optional[str] = None
     ended: bool = False
+
+
+class GoalIn(BaseModel):
+    """🎯 沙盒玩家目标: text=自己写 (空串=撤下), roll=让引擎随机推荐一个"""
+    text: Optional[str] = None
+    roll: bool = False
 
 
 class RunCreate(BaseModel):

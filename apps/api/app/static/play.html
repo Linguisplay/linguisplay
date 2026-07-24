@@ -12,7 +12,11 @@
   * { box-sizing: border-box; }
   body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", "Source Han Sans SC", sans-serif; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; background: #0d0d12; color: #e8e8ee; }
   /* immersive background layer + readability vignette */
-  #bg { position: fixed; inset: 0; z-index: -2; background: linear-gradient(135deg,#15151c,#0d0d12); background-size: cover; background-position: center; transition: background-image .6s ease, background .6s ease; }
+  #bg { position: fixed; inset: -3vh -3vw; z-index: -2; background: linear-gradient(135deg,#15151c,#0d0d12); background-size: cover; background-position: center; transition: background-image .6s ease, background .6s ease; animation: bgdrift 64s ease-in-out infinite alternate; will-change: transform; }
+  /* 🎥 镜头漂移: 超广角背景在竖屏里只露一条缝 — 缓慢横移+微缩放让静图长出纵深 */
+  @keyframes bgdrift { from { transform: scale(1.04) translate(-1.6%, -0.6%); }
+                       to   { transform: scale(1.1)  translate(1.6%, 0.8%); } }
+  @media (prefers-reduced-motion: reduce) { #bg { animation: none; } }
   #bg::after { content: ""; position: fixed; inset: 0; z-index: -1; background: radial-gradient(ellipse at center, rgba(0,0,0,.15), rgba(0,0,0,.62)); }
   /* fixed-height app so ONLY #chat scrolls — header + cast + goal stay pinned on top */
   #app { max-width: 760px; margin: 0 auto; height: 100vh; height: 100dvh; display: flex; flex-direction: column; background: transparent; overflow: hidden; }
@@ -57,6 +61,8 @@
   footer input { margin: 0; }
   #goalbar { flex: 0 0 auto; margin: 8px 16px 0; padding: 8px 12px; border-radius: 10px; background: #1a2030cc; border: 1px solid #2a3350; color: #d8e0ff; font-size: 13px; line-height: 1.5; }
   #goalbar b { color: #ffd479; }
+  #goalbar .gbtn { margin-left: 10px; cursor: pointer; opacity: .8; }
+  #goalbar .gbtn:active { opacity: 1; }
   #goalbar .qline { margin-top: 4px; padding-top: 4px; border-top: 1px dashed #2a3350; color: #b9c3e2; font-size: 12.5px; }
   #hintbar { flex: 0 0 auto; margin: 6px 16px 0; padding: 7px 12px; border-radius: 10px; background: #2a2410cc; border: 1px solid #4a3d18; color: #ecd9a6; font-size: 12.5px; line-height: 1.5; }
   #hintbar b { color: #ffd479; }
@@ -254,7 +260,9 @@
   .chip:hover { background: #243056; }
   #state { flex: 0 0 auto; font-size: 12px; color: #b6b6c2; padding: 6px 16px; border-top: 1px dashed #23232c66; background: rgba(13,13,18,.4); }
   #state b { color: #8ea2ff; }
-  .hidden { display: none; }
+  /* 铁律收口: .hidden 必赢一切 ID display 规则 — 此前 #tutov/#moveask/#vnchoices/#barsToggle
+     各打过一次点修, #verdictbar/#pressurebar 又漏网 (vnstat 浮层里现形成空壳药丸) — 根治 */
+  .hidden { display: none !important; }
   a { color: #8ea2ff; cursor: pointer; }
   /* ending card shown inline at the end of the chat */
   .ending { align-self: center; max-width: 92%; margin: 18px 0 6px; padding: 18px 20px; border-radius: 14px;
@@ -528,6 +536,18 @@ body.vnhide #vnui { pointer-events: auto; }
 #vnbox, #vnchoices, body.vn footer { transition: opacity .3s ease; }
 body.vn #chat { visibility: hidden; }
 body.vn.vnlog #chat { visibility: visible; position: fixed; inset: 56px 0 0 0; z-index: 60; background: rgba(8,8,14,.97); padding: 12px 16px 80px; overflow-y: auto; overflow-x: hidden; max-width: 100vw; box-sizing: border-box; }
+/* 📱 已读小灰条 */
+.pread { text-align: center; color: #6b7280; font-size: 11px; padding: 4px 0; opacity: .85; }
+/* 🗺 地图收纳: 生成地点小节点 + 抽屉 */
+.mpnode.gennode .mthumb { width: 34px; height: 34px; opacity: .85; }
+.mpnode.gennode .mplabel { font-size: 10px; }
+.mdrawer { margin-top: 8px; border-top: 1px solid #22222c; padding-top: 6px; }
+.mdrawer summary { cursor: pointer; color: #8b93a7; font-size: 12.5px; padding: 4px 0; }
+.mdrow { display: flex; justify-content: space-between; align-items: center;
+  padding: 6px 2px; border-bottom: 1px solid #1a1a24; font-size: 13px; gap: 8px; }
+.mdrow .mdname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mdrow .sub { color: #8b93a7; font-size: 11px; }
+.mdrow .mdops button { font-size: 11.5px; padding: 3px 7px; margin-left: 4px; }
 /* ✏️ 编辑正史: 回想行右上小铅笔, 常态半隐 */
 #chat .bedit { position: absolute; right: 4px; top: 2px; opacity: .35; cursor: pointer;
   font-size: 13px; padding: 4px 6px; z-index: 2; }
@@ -548,11 +568,12 @@ body.vn footer { display: none; }
 /* VN 整页接管 (Yi: 电脑端两套布局叠穿没法玩): 头像栏+状态条默认收纳,
    vnctl「状态」键按需弹出浮层 */
 body.vn #cast, body.vn #bars { display: none; }
+/* 浮层从 strip 底下 (top:84) 开始, 别盖住「▼详情」条本身 — 盖住 = 点第二下永远收不起来 (Yi 报障) */
 body.vn.vnstat #cast { display: block; position: fixed; z-index: 62;
-  left: 50%; transform: translateX(-50%); top: 54px; width: min(720px, 94vw);
+  left: 50%; transform: translateX(-50%); top: 84px; width: min(720px, 94vw);
   background: rgba(6,7,12,.97); border-radius: 12px 12px 0 0; padding: 10px 12px 4px; }
 body.vn.vnstat #bars { display: block; position: fixed; z-index: 62;
-  left: 50%; transform: translateX(-50%); top: 148px; width: min(720px, 94vw);
+  left: 50%; transform: translateX(-50%); top: 178px; width: min(720px, 94vw);
   background: rgba(6,7,12,.97); border-radius: 0 0 12px 12px; padding: 4px 12px 12px;
   max-height: 62vh; overflow-y: auto; }
 /* 打字为主 (Yi 定): 输入栏常驻置底(z 60), 对话面板上移让位 — 不许重叠 (Yi 报障) */
@@ -663,7 +684,8 @@ body.dread #dread { opacity:1; }
   #bars.open { display: block; }
   #barsToggle { display: flex; align-items: center; gap: 6px; margin: 3px 8px 0;
     padding: 5px 10px; border-radius: 9px; background: #14141bcc; border: 1px solid #26262f;
-    color: #aeb6c8; font-size: 11.5px; cursor: pointer; }
+    color: #aeb6c8; font-size: 11.5px; cursor: pointer;
+    position: relative; z-index: 63; }  /* 压过 vnstat 浮层 (z-62): 展开后仍可点它收起 */
   #barsToggle.hidden { display: none; }
   #barsToggle .stripbits { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #barsToggle .chev { color: #5d647a; flex: 0 0 auto; }
@@ -2166,6 +2188,11 @@ function toastUnlocked(th) {
   for (const t of (th.unlocked || [])) pushToast(B(`🔓 TA在${escapeHtml(th.device||"消息")}里松了口：「${escapeHtml(t)}」`, `🔓 They let it slip over the ${escapeHtml(th.device||"phone")}: “${escapeHtml(t)}”`), "t-unlock", 500);
 }
 function pmsgEl(m) {
+  if (m.kind === "read") {   // 📱 已读晾着 (Spec C): 小灰条, 不是气泡 — 晾你本身就是戏
+    const r = document.createElement("div"); r.className = "pread";
+    r.textContent = B("对方已读", "Read");
+    return r;
+  }
   const who = m.from === "me" ? "me" : m.from === "sys" ? "sys" : "them";
   const d = document.createElement("div"); d.className = `pmsg ${who}${m.call ? " call" : ""}`;
   d.innerHTML = `<span>${escapeHtml(m.text)}</span><small>${escapeHtml(m.at||"")}</small>`;
@@ -2335,7 +2362,8 @@ function openCalendar() {
   const qs = (curQuests || []).filter(q => q.status === "open").map(q =>
     `<div class="pcalitem">📋 ${escapeHtml(q.title||"")}${q.reward ? B(`（酬 ${q.reward}${escapeHtml(curCurrency)}）`, ` (pay ${q.reward}${escapeHtml(curCurrency)})`) : ""}${q.deadline_day ? B(` · 限第${q.deadline_day}天内`, ` · by day ${q.deadline_day}`) : ""}<span class="jwho">（${escapeHtml(q.giver||"")}）</span></div>`
   ).join("");
-  phoneShell(`${now}${ddl}<div class="jh">${B("约定", "Promises")}</div>${prs}${qs ? `<div class="jh">${B("在办的差事", "Open jobs")}</div>${qs}` : ""}`, "🗓 日历", "openPhone()");
+  const g = lastGoal ? `<div class="jh">🎯 ${B("当前目标", "Current goal")}</div><div class="pcalitem">${escapeHtml(lastGoal)}</div>` : "";
+  phoneShell(`${now}${ddl}${g}<div class="jh">${B("约定", "Promises")}</div>${prs}${qs ? `<div class="jh">${B("在办的差事", "Open jobs")}</div>${qs}` : ""}`, "🗓 日历", "openPhone()");
 }
 // 到达即发现: physical truths that unlocked the moment we arrived
 function renderDiscoveries(list) {
@@ -2375,9 +2403,26 @@ async function openMap() {
     ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
     document.body.appendChild(ov);
   }
-  const nodes = mp.nodes || [];
-  const curNode = nodes.find(n => n.here);
+  const all = mp.nodes || [];
+  const curNode = all.find(n => n.here);
   const reachable = new Set(((curNode || {}).exits || []).map(x => x.id));
+  // 🗺 分层收纳 (Yi 2026-07-24): 图只画「我在哪+附近+置顶+有人+常去」, 长尾进抽屉
+  const byId = {}; all.forEach(n => byId[n.id] = n);
+  const prio = [];
+  if (curNode) prio.push(curNode.id);
+  ((curNode || {}).exits || []).forEach(x => prio.push(x.id));
+  all.filter(n => n.pinned).forEach(n => prio.push(n.id));
+  all.filter(n => n.chars && n.chars.length).forEach(n => prio.push(n.id));
+  all.slice().sort((a, b) => (b.heat || 0) - (a.heat || 0)).slice(0, 4).forEach(n => prio.push(n.id));
+  const seenIds = new Set(); const nodes = [];
+  for (const id of prio) {
+    const n = byId[id];
+    if (!n || seenIds.has(id)) continue;
+    if ((n.tucked || n.dormant) && !n.here && !n.pinned) continue;
+    seenIds.add(id); nodes.push(n);
+    if (nodes.length >= 12) break;
+  }
+  const drawer = all.filter(n => !seenIds.has(n.id));
   // 🗺 图与线 (Yi 定): 小型力导向布局 — 种子按 id 定死, 同一张图永远同一个样子
   const hash = s => { let h = 0; for (const ch of String(s)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; };
   const pos = {};
@@ -2421,15 +2466,30 @@ async function openMap() {
   }).join("");
   const dots = nodes.map(n => {
     const canGo = !n.here && reachable.has(n.id);
-    const cls = "mpnode" + (n.here ? " here" : "") + (canGo ? " cango" : "") + (!n.here && !canGo ? " far" : "");
+    const cls = "mpnode" + (n.here ? " here" : "") + (canGo ? " cango" : "") + (!n.here && !canGo ? " far" : "")
+      + (n.kind === "gen" && !n.here ? " gennode" : "");
     const go = canGo ? `data-go="${escapeHtml(n.name)}"` : "";
     const sub = n.chars && n.chars.length
       ? `<span class="sub">👤 ${n.chars.slice(0, 3).map(escapeHtml).join("、")}${n.chars.length > 3 ? "…" : ""}</span>` : "";
-    const pin = n.here ? `<span class="mpin">📍 ${B("你在这里", "you are here")}</span>` : "";
+    const pin = n.here ? `<span class="mpin">📍 ${B("你在这里", "you are here")}</span>`
+      : (n.pinned ? `<span class="mpin">📌</span>` : "");
     return `<div class="${cls}" ${go} data-id="${escapeHtml(n.id)}" style="left:${nx(pos[n.id].x)}%;top:${ny(pos[n.id].y)}%">
       <div class="mthumb" style="background-image:url('/scene/bg/${encodeURIComponent(n.id)}.jpg')"></div>
       <div class="mplabel">${escapeHtml(n.name)} ${pin}${sub}</div></div>`;
   }).join("");
+  const drawerRows = drawer.map(n => {
+    const who = n.chars && n.chars.length ? ` <span class="sub">👤${n.chars.slice(0, 2).map(escapeHtml).join("、")}</span>` : "";
+    const badge = n.dormant && !n.tucked ? " 💤" : "";
+    return `<div class="mdrow" data-id="${escapeHtml(n.id)}">
+      <span class="mdname">${escapeHtml(n.name)}${badge}${who}</span>
+      <span class="mdops">
+        <button class="ghost" data-mgo="${escapeHtml(n.name)}">${B("前往", "Go")}</button>
+        <button class="ghost" data-mpin="${escapeHtml(n.id)}">📌</button>
+        <button class="ghost" data-mtuck="${escapeHtml(n.id)}" data-tucked="${n.tucked ? 1 : 0}">${n.tucked ? "👁" : "🙈"}</button>
+      </span></div>`;
+  }).join("");
+  const drawerHtml = drawer.length
+    ? `<details class="mdrawer"><summary>🗂 ${B(`更多去处（${drawer.length}）`, `More places (${drawer.length})`)}</summary>${drawerRows}</details>` : "";
   const regen = curNode ? `<button class="ghost" data-regen="1" style="margin:8px 0 0; font-size:12px; padding:3px 8px">🖼 ${B("重画当前地点的背景", "Redraw this background")}</button>` : "";
   const hidden = mp.hidden > 0 ? `<div class="mhidden">${B(`还有 ${mp.hidden} 处地方，你尚未打听到…`, `${mp.hidden} more place(s) you haven't heard of yet…`)}</div>` : "";
   ov.innerHTML = `<div class="mcard" onclick="event.stopPropagation()">
@@ -2437,10 +2497,26 @@ async function openMap() {
       <button class="ghost" id="mzin">＋</button> <button class="ghost" id="mzout">－</button>
       <button class="ghost" onclick="document.getElementById('mapov').remove()">${B("关闭", "Close")}</button></span></div>
     ${nodes.length ? `<div class="mstage"><div id="mzwrap"><svg>${lines}</svg>${dots}</div></div>` : `<div class="jempty">${B("这个故事没有标注地图。", "This story has no map.")}</div>`}
-    ${regen}${hidden}
+    ${drawerHtml}${regen}${hidden}
   </div>`;
   ov.querySelectorAll("[data-go]").forEach(el => {
     el.onclick = async () => { ov.remove(); await moveTo(el.getAttribute("data-go")); };
+  });
+  ov.querySelectorAll("[data-mgo]").forEach(el => {
+    el.onclick = async () => { ov.remove(); await moveTo(el.getAttribute("data-mgo")); };
+  });
+  ov.querySelectorAll("[data-mpin]").forEach(el => {
+    el.onclick = async () => {
+      try { await j(`/runs/${runId}/map/mark`, { method: "POST", body: JSON.stringify({ location_id: el.getAttribute("data-mpin"), op: "pin" }) }); openMap(); }
+      catch (e) { pushToast("⚠️ " + escapeHtml(e.message), "", 2200); }
+    };
+  });
+  ov.querySelectorAll("[data-mtuck]").forEach(el => {
+    el.onclick = async () => {
+      const op = el.getAttribute("data-tucked") === "1" ? "show" : "hide";
+      try { await j(`/runs/${runId}/map/mark`, { method: "POST", body: JSON.stringify({ location_id: el.getAttribute("data-mtuck"), op }) }); openMap(); }
+      catch (e) { pushToast("⚠️ " + escapeHtml(e.message), "", 2200); }
+    };
   });
   // 🔍 内容级缩放 (与关系网同一套语言): 放大=把地点拉开, 缩略图与字号保持原大;
   // 拖动=平移 (wrap translate 快路径), 捏合/滚轮/＋－=缩放 (rAF 重排位置)
@@ -2860,8 +2936,17 @@ function refreshStrip() {
     bits.push(escapeHtml(t));
   }
   if (curLocData && curLocData.name) bits.push("📍" + escapeHtml(curLocData.name));
-  const goal = (document.getElementById("goalbar").textContent || "").replace(/^🎯?\s*/, "").trim();
-  if (goal) bits.push("🎯" + escapeHtml(goal.slice(0, 14)) + (goal.length > 14 ? "…" : ""));
+  // 目标位读数据 (lastGoal) 不抄 DOM — 抄 textContent 会把「当前目标：」标签/幕前缀/
+  // 任务行一起吃进 14 字预算, 目标清空后还残影旧文 (Yi 实弹: 14 字里真目标只剩 9 个)
+  const gchars = Array.from((lastGoal || "").trim());
+  if (gchars.length) bits.push("🎯" + escapeHtml(gchars.slice(0, 14).join("")) + (gchars.length > 14 ? "…" : ""));
+  else {
+    const q0 = (curQuests || []).find(q => q.status === "open");
+    if (q0) {
+      const qc = Array.from((q0.title || "").trim());
+      bits.push((q0.reward ? "📋" : "🧭") + escapeHtml(qc.slice(0, 14).join("")) + (qc.length > 14 ? "…" : ""));
+    }
+  }
   if (lastPromises && lastPromises.length) bits.push("🤝" + lastPromises.length);
   if (lastPressure && lastPressure.name) bits.push("⚠️" + escapeHtml(String(lastPressure.value || 0)));
   if (!document.getElementById("hintbar").classList.contains("hidden")) bits.push("💡");
@@ -2946,14 +3031,36 @@ function renderGoal(goal) {
     `<div class="qline">${q.reward ? "📋" : "🧭"} ${escapeHtml(q.title||"")}` +
     `${q.reward ? B(`（酬 ${q.reward}${escapeHtml(curCurrency)}）`, ` (pay ${q.reward}${escapeHtml(curCurrency)})`) : ""}` +
     `${q.deadline_day ? B(` · 限第${q.deadline_day}天内`, ` · by day ${q.deadline_day}`) : ""}</div>`).join("");
-  if (goal || qrows) {
+  // 🎯 沙盒: 目标由玩家做主 — ✏️ 自己写 / 🎲 让命运抽一个 (god 模式旁观无目标)
+  const gbtns = (isSandbox && playMode !== "god" && runId)
+    ? `<span class="gbtn" onclick="event.stopPropagation();setMyGoal()" title="${B("自己定目标", "Set your goal")}">✏️</span>`
+      + `<span class="gbtn" onclick="event.stopPropagation();rollMyGoal()" title="${B("随机推荐一个", "Roll a goal")}">🎲</span>` : "";
+  if (goal || qrows || gbtns) {
     // 追求条: an authored story anchors the goal to its act (第2幕 ▸ …) — the player
     // always knows which chapter of the climb they're on
     const pre = (!isSandbox && curActNum) ? B(`第${curActNum}幕 ▸ `, `Act ${curActNum} ▸ `) : "";
-    el.innerHTML = (goal ? `🎯 <b>${B("当前目标", "Current goal")}</b>${B("：", ": ")}${pre}${escapeHtml(goal)}` : "") + qrows;
+    const body = goal ? `${pre}${escapeHtml(goal)}`
+                      : `<span style="opacity:.6">${B("还没定——写一个，或让命运抽一个", "None yet — write one, or roll")}</span>`;
+    el.innerHTML = `🎯 <b>${B("当前目标", "Current goal")}</b>${B("：", ": ")}${body}${gbtns}` + qrows;
     el.classList.remove("hidden");
   }
-  else el.classList.add("hidden");
+  else { el.innerHTML = ""; el.classList.add("hidden"); }  // 清空防残影: 摘要条/换档不许读到旧目标
+}
+async function setMyGoal() {
+  const t = prompt(B("这段日子，你想做什么？（留空 = 撤下目标）", "What do you want to pursue? (empty = drop)"), lastGoal || "");
+  if (t === null) return;
+  try {
+    const d = await j(`/runs/${runId}/goal`, { method: "POST", body: JSON.stringify({ text: t.trim() }) });
+    renderGoal(d.goal);
+    pushToast(d.goal ? "🎯 " + B("目标已立：", "Goal set: ") + escapeHtml(d.goal) : B("目标已撤下", "Goal dropped"), "t-act", 2400);
+  } catch (e) { pushToast("⚠️ " + escapeHtml(e.message), "", 2600); }
+}
+async function rollMyGoal() {
+  try {
+    const d = await j(`/runs/${runId}/goal`, { method: "POST", body: JSON.stringify({ roll: true }) });
+    renderGoal(d.goal);
+    pushToast("🎲 " + escapeHtml(d.goal), "t-act", 2600);
+  } catch (e) { pushToast("⚠️ " + escapeHtml(e.message), "", 2600); }
 }
 function renderHint(hint) {
   queueMicrotask(refreshStrip);

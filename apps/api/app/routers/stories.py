@@ -73,6 +73,7 @@ def _to_story(s: StoryModel) -> Story:
         sandbox=s.sandbox,
         creatures=s.creatures or [],
         factions=s.factions or [],
+        opening=s.opening,
         completion=_completion(s),
     )
 
@@ -594,6 +595,8 @@ def update_story(
         s.creatures = data.pop("creatures") or []
     if "factions" in data:
         s.factions = data.pop("factions") or []
+    if "opening" in data:
+        s.opening = data.pop("opening") or None
     for k, v in data.items():
         setattr(s, k, v)
     db.commit()
