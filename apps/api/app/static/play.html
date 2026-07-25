@@ -38,7 +38,12 @@
   button { padding: 9px 14px; border: 0; border-radius: 8px; background: #d8b57a; color: #241c0e; cursor: pointer; font-weight: 600; }
   button.ghost { background: #201c15; color: #a79e8c; }
   button:disabled { opacity: .5; cursor: default; }
-  .iconbtn { background: transparent; padding: 4px 6px; font-size: 16px; }
+  .iconbtn { background: transparent; padding: 4px 6px; font-size: 16px;
+    /* 🎬 片场: emoji 图标统一钨丝金单色调 (线性图标集之前的过渡工艺) — 彩色 emoji
+       各说各话是廉价感的源头之一; sound/speed 等按钮由 JS 换字, 滤镜法零破坏 */
+    filter: grayscale(1) sepia(.4) saturate(2.4) hue-rotate(-18deg) brightness(1.08);
+    opacity: .82; }
+  .iconbtn:active { opacity: 1; }
   #cast { flex: 0 0 auto; display: flex; gap: 8px; overflow-x: auto; padding: 8px 16px; border-bottom: 1px solid #201c1544; background: rgba(20,16,11,.45); }
   .castitem { display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer; opacity: .6; min-width: 46px; }
   .castitem.sel { opacity: 1; }
@@ -572,6 +577,15 @@ body.vn.vnlog #chat > * { max-width: 100% !important; box-sizing: border-box; ov
 body.vn.vnlog #vnlogClose { display: block; position: fixed; top: calc(env(safe-area-inset-top, 0px) + 8px); right: 10px; z-index: 70; background: #353027; color: #fff9ed; border: 1px solid #60584b; border-radius: 999px; padding: 8px 16px; font-size: 14px; }
 body.vn #suggest { display: none; }
 body.vn footer { display: none; }
+/* 🎬 片场二刀b · 顶部三条合一挂: header 与详情条不再是两块不透明门板 —
+   悬浮进舞台顶部的同一片渐变里, 场景画面一直顶到屏幕最上沿 */
+body.vn header { position: absolute; top: 0; left: 0; right: 0; z-index: 30;
+  background: linear-gradient(rgba(13,11,7,.78), rgba(13,11,7,0)); border-bottom: none;
+  backdrop-filter: none; }
+body.vn #barsToggle { position: absolute; top: 40px; left: 8px; right: 8px; z-index: 30;
+  margin: 0; background: transparent; border: none; }
+body.vn #scenehud { top: 72px; }
+body.vn #scenehudlist { top: 108px; }
 /* VN 整页接管 (Yi: 电脑端两套布局叠穿没法玩): 头像栏+状态条默认收纳,
    vnctl「状态」键按需弹出浮层 */
 body.vn #cast, body.vn #bars { display: none; }
@@ -2946,7 +2960,8 @@ function refreshStrip() {
       t += " ⏳" + (curClock.deadline.days_left === 0 ? B("今天", "today") : curClock.deadline.days_left + B("天", "d"));
     bits.push(escapeHtml(t));
   }
-  if (curLocData && curLocData.name) bits.push("📍" + escapeHtml(curLocData.name));
+  // 🎬 片场: VN 下地点由 scenehud 场景牌独家播报 — 详情条不再重复报站 (顶部去重)
+  if (curLocData && curLocData.name && !vnMode) bits.push("📍" + escapeHtml(curLocData.name));
   // 目标位读数据 (lastGoal) 不抄 DOM — 抄 textContent 会把「当前目标：」标签/幕前缀/
   // 任务行一起吃进 14 字预算, 目标清空后还残影旧文 (Yi 实弹: 14 字里真目标只剩 9 个)
   const gchars = Array.from((lastGoal || "").trim());

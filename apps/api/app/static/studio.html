@@ -15,7 +15,7 @@
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
   body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", "Source Han Sans SC", sans-serif; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; background: #14100b; color: #e8e8ee; }
-  #app { max-width: 900px; margin: 0 auto; padding: 0 16px 60px; }
+  #app { max-width: 1080px; margin: 0 auto; padding: 0 16px 60px; }  /* 🎬 宽屏别浪费 */
   header { display: flex; justify-content: space-between; align-items: center; padding: 14px 0; border-bottom: 1px solid #201c15; position: sticky; top: 0; background: #14100b; z-index: 5; }
   h1 { font-size: 17px; margin: 0; } h2 { font-size: 15px; margin: 22px 0 8px; color: #d8b57a; border-bottom: 1px solid #201c15; padding-bottom: 5px; }
   h3 { font-size: 13px; margin: 0 0 6px; color: #a79e8c; }
@@ -380,7 +380,12 @@ afterAuth().catch(()=>{ show("auth"); });
 // ── story list ──
 async function loadList(){
   const rows = await j("/me/stories");
-  stories.innerHTML = rows.length ? "" : "<p class='muted'>还没有剧本，点「新建剧本」开始。</p>";
+  // 🎬 片场: 空态不再是一片黑 — 给第一次进门的作者铺条路
+  stories.innerHTML = rows.length ? "" : `<div class="card" style="text-align:center;padding:44px 24px;margin-top:18px">
+    <div style="font-family:'Songti SC','Noto Serif CJK SC',serif;font-size:22px;color:#d8b57a;letter-spacing:.08em">这里还是一片空场</div>
+    <div class="muted" style="margin:10px 0 20px">每个好故事都从第一块布景开始。写一个剧情本，或者开一片沙盒让玩家自己闯。</div>
+    <span><button onclick="newStory()">+ 新建剧本</button>
+    <button class="ghost" style="margin-left:8px" onclick="location.href='/maker'">🪄 让 AI 起草</button></span></div>`;
   rows.forEach(s=>{
     const d=document.createElement("div"); d.className="card listitem";
     const st = s.status==="published" ? `已发布 v${s.version}` : "草稿";
