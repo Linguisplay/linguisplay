@@ -484,6 +484,14 @@ def _build_system(prompt: dict[str, Any]) -> str:
     if _facb:
         lines.append("")
         lines.append(_facb)
+    _ppl = (prompt.get("pushpull") or "").strip()
+    if _ppl:
+        lines.append("")
+        lines.append(_ppl)
+    _neg = (prompt.get("negatives") or "").strip()
+    if _neg:
+        lines.append("")
+        lines.append(_neg)
     _tl = (prompt.get("taste_line") or "").strip()
     if _tl:
         lines.append("")
@@ -1009,6 +1017,26 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
         props["romance"] = {"type": "integer", "description":
                             "默认0；对方调情/示好/情话且你真被触动才给正分；油腻、越界、"
                             "廉价套路让你不适→-1~-2。范围-2~5，恋爱线"}
+    _cb = prompt.get("callback") or {}
+    if _cb.get("material") and not is_member and not is_think:
+        _cb_soft = _cb.get("mode") == "soft"
+        lines.append("")
+        lines.append("【回扣旧事】你们之间真实发生过这件事：「" + str(_cb["material"])[:80]
+                     + "」。" + ("这一轮找机会自然地引用它——不着痕迹，像随口想起"
+                                 "（共同的小典故比十句恭维值钱）；实在不合时宜就算了。"
+                                 if _cb_soft else
+                                 "这一轮【必须】把它织进你的话里——选最不突兀的角度，"
+                                 "一句带过也行，但必须让对方听出你记得。"))
+        props["callback_done"] = {"type": "string", "description":
+            "你这一轮把那件旧事织进去的那句话（从你自己的台词或旁白里【原样摘录】一小段，"
+            "8~20字）；" + ("实在没织进就填：无" if _cb_soft else "必须织入，不许填无")}
+        required.append("callback_done")   # 必填 — 可选字段会被省略铁律吃掉
+    _dd = (prompt.get("disclose") or "").strip()
+    if _dd and not is_member and not is_think:
+        lines.append("")
+        lines.append("【对等回礼】刚才对方对你打开了一扇小窗（说了件自己的事）。"
+                     f"这一轮你也要交换一块自己：{_dd}——要贴你的人设，说完就说完，"
+                     "别追问对方细节；只收不给就是查户口，最败好感。")
     _ws = prompt.get("world_seed")
     if _ws and not is_member and not is_think:
         _soft = _ws == "soft"
@@ -1693,6 +1721,7 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
         "romance_delta": 0 if is_think else _i(d.get("romance"), -3, 6),
         "rep_delta": 0 if is_think else _i(d.get("faction_rep"), -3, 3),
         "world_seed": str(d.get("world_seed") or "").strip(),
+        "callback_done": str(d.get("callback_done") or "").strip(),
         "advance_act": bool(d.get("advance")),
         "ending": ending,
         "move_invite": mv,

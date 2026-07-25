@@ -450,3 +450,69 @@ def state_for(char: dict[str, Any], scores: dict[str, int], tuning: dict | None 
             "closeness": int(scores.get("closeness", START_CLOSENESS)),
             "romance": int(scores.get("romance", START_ROMANCE)),
             "next": next_tier(char, scores, tuning, lang)}
+
+# ── 🔥 推拉节拍 (Spec F, 2026-07-25): 引擎控制的张弛序列 ─────────────────────
+# 禁止模型自己权衡冷热 (必然趋同讨好) — 相位归引擎, 措辞归模型。
+PUSHPULL_GIVE = 3   # 给糖连续轮数 (tuning.pushpull_give)
+PUSHPULL_HOLD = 1   # 收着连续轮数 (tuning.pushpull_hold)
+
+_PP_LINES = {
+    "give": "【推拉·糖】此刻你在给糖的节拍上：主动一点、接得满一点、话可以暖，"
+            "眼神与小动作都往前送半步。",
+    "hold": "【推拉·收】此刻你在收的节拍上：回短、慢半拍、别接太满——不是生气，"
+            "是让对方来追这半步；损可以，甜不行。",
+    "comp": "【推拉·偿】前两拍你收着，这一轮补回来：比平时更主动更暖半分，"
+            "让对方明白刚才的冷不是真冷。",
+}
+
+
+def pushpull_tick(pp: dict, active: bool, give: int = PUSHPULL_GIVE,
+                  hold: int = PUSHPULL_HOLD) -> str:
+    """推进状态机一拍, 返回本轮相位 ("" = 未激活)。pp 由调用方持有 (state 内)。
+    序列: give×N → hold×M → comp(1) → give…; 不激活时状态冻结不清零。"""
+    if not active:
+        return ""
+    phase = pp.get("phase") or "give"
+    n = int(pp.get("n", 0) or 0) + 1
+    if phase == "give" and n > max(1, give):
+        phase, n = "hold", 1
+    elif phase == "hold" and n > max(1, hold):
+        phase, n = "comp", 1
+    elif phase == "comp" and n > 1:
+        phase, n = "give", 1
+    pp["phase"], pp["n"] = phase, n
+    return phase
+
+
+def pushpull_line(phase: str) -> str:
+    return _PP_LINES.get(phase, "")
+
+
+# ── 🚫 负面清单 (Spec J, 2026-07-25): 模型默认失败模式是热情过载 — 负面约束
+# 比正面指令有效; 称呼亲密度按好感档查表写死上限。 ─────────────────────────
+_ADDRESS_CAP = {
+    "stranger": "只许用姓名、客气称呼或身份称呼（先生/警官/老板），绝不许起昵称",
+    "enemy": "只许用姓名或冷称，绝不许亲昵",
+    "peer": "姓名或普通外号，绝不许亲昵称呼",
+    "junior": "姓名或普通外号，绝不许亲昵称呼",
+    "elder": "得体的敬称，绝不许亲昵称呼",
+    "friend": "名字、外号都行，但「亲爱的/宝宝/宝贝」这类情侣称呼绝不许出口",
+    "flirt": "可以有你们之间的专属称呼，但「宝宝/宝贝/老公/老婆」这类还轮不到——"
+             "亲密称呼是关系的奖赏，不是撩拨的工具",
+    "lover": "都解禁了——但最动人的还是只属于你们的那一个",
+}
+
+
+def negative_list(mode_id: str, zh: bool = True) -> str:
+    """按关系档下发的负面清单: 禁查户口/禁堆糖/禁摊牌 + 称呼上限。"""
+    cap = _ADDRESS_CAP.get(mode_id, _ADDRESS_CAP["stranger"])
+    no_confess = "" if mode_id == "lover" else         "绝不主动摊牌式表白（「我喜欢你/做我女朋友」这类）——张力一旦兑现就死了，让它悬着；"
+    if not zh:
+        return ("[Don'ts] At most ONE question per turn; no emoji/tilde pileups; "
+                + ("" if mode_id == "lover" else "never confess outright; ")
+                + "keep pet names within the current relationship stage.")
+    return ("【这几件事绝不许做】"
+            "① 查户口式连环提问——每轮至多问一个问题，其余用陈述和自我分享去接；"
+            "② 每句都带「~」或堆表情堆语气词——腻死人的甜是廉价的；"
+            f"③ {no_confess}"
+            f"④ 称呼有上限：{cap}。")

@@ -211,6 +211,10 @@ DEFAULT_TUNING = {
     "rom_taper_den": 110,       # per-char 心动 gain taper denominator
     "min_turns_per_act": 6,     # soft acts: no advance (model OR backstop) before this many turns
     "max_new_characters": 4,    # 👋 emergent mid-story characters a run may accumulate
+    "callback_every": 10,       # 🪃 记忆回调周期 (Spec E; 暧昧节拍下加急到 3)
+    "pushpull_give": 3,         # 🔥 推拉: 给糖连续轮数 (Spec F)
+    "pushpull_hold": 1,         # 🔥 推拉: 收着连续轮数
+    "initiate_cooldown": 1,     # 🎰 主动发起: 单角色冷却天数 (Spec H)
     # 🌱 growth_every: 生长预算周期 (回合)。缺省: 沙盒 8, 授权本 0 (关) — 见 growth.period_of;
     # 这里不给键, 让「作者显式设置」与「缺省」可区分
     "key_choice_min": 0,        # ⚖️ 命运抉择 window: fires at a RANDOM turn count in
@@ -3382,6 +3386,72 @@ def pace_band(state: dict[str, Any], tun: dict[str, Any] | None = None) -> dict[
     return {"band": band, **table.get(band, table["default"])}
 
 
+# 🎁 自我暴露递进 (Spec G, 2026-07-25): Aron 递进+对等 — 深度归引擎查表,
+# 内容归模型 (贴人设即兴或授权碎片)。玩家先开窗, 角色下一轮必须回礼同深度。
+_SELF_DISCLOSE_RE = re.compile(
+    r"我小时候|我其实|我从来没跟人说过|我最怕|我一直不敢|我爸|我妈|我家里"
+    r"|说实话我|老实说我|我以前.{0,6}(过|是)|我做过最")
+_DISCLOSE_DEPTH = {
+    "stranger": "一件无伤大雅的小偏好（爱吃什么、受不了什么）",
+    "peer": "一件无伤大雅的小偏好或小习惯",
+    "junior": "一件小偏好或最近的小烦恼",
+    "elder": "一段往昔的小感慨",
+    "friend": "一件有点丢人的糗事或一个小执念",
+    "flirt": "一段没对别人讲过的脆弱往事（点到即止, 别把最深的底一次掏空）",
+    "lover": "心里最深处的一块（怕失去什么、悔过什么）",
+}
+
+
+def disclose_depth(mode_id: str) -> str:
+    return _DISCLOSE_DEPTH.get(mode_id, _DISCLOSE_DEPTH["stranger"])
+
+
+# 🪃 记忆回调触发器 (Spec E, 2026-07-25): 感知回应性的落地 — 引擎记回调账,
+# 到期从真实账本抽旧事作必填素材 (素材引擎给, 模型只织入 — 幻觉引用无从谈起),
+# 防敷衍沿用生长预算同款: 连续无计数 + 逾期升硬。
+CALLBACK_EVERY = 10       # 距上次回调 N 轮到期 (tuning.callback_every)
+CALLBACK_CHARGED_MIN = 3  # 暧昧节拍下的加急到期线
+
+
+def callback_due(state: dict[str, Any], tun: dict[str, Any], band: str) -> str:
+    cb = state.setdefault("callback", {"last": 0, "blanks": 0, "used": []})
+    turn = int((state.get("growth") or {}).get("turn", 0) or 0)
+    period = int(tun.get("callback_every", CALLBACK_EVERY) or 0)
+    if not period:
+        return ""
+    gap = turn - int(cb.get("last", 0) or 0)
+    if gap < (CALLBACK_CHARGED_MIN if band == "charged" else period):
+        return ""
+    return "hard" if int(cb.get("blanks", 0) or 0) >= 3 else "soft"
+
+
+def pick_callback_material(content: dict[str, Any], state: dict[str, Any],
+                           cid: str | None) -> str:
+    """从这个角色的真实账本抽一条旧事 (未用过的优先): 关系大事记 → 守过的约定 →
+    TA 的印象 → TA 的记忆摘要。全确定性, 引擎背书素材真实性。"""
+    if not cid:
+        return ""
+    cb = state.setdefault("callback", {"last": 0, "blanks": 0, "used": []})
+    used = set(cb.get("used") or [])
+    cands: list[str] = []
+    entries = (state.get("rel_log") or {}).get(cid) or []
+    cands += [e.get("text", "") for e in entries[:-1]]        # 旧事优先 (掐掉最新一条)
+    cands += [f"你们约过：{p.get('what', '')}（后来{'兑现了' if p.get('status') == 'kept' else '还悬着'}）"
+              for p in (state.get("promises") or [])
+              if p.get("char_id") == cid and p.get("what")]
+    imp = profile_mod.impression_of(state, cid)
+    if imp:
+        cands.append(f"你相处出的印象：{imp}")
+    mem = ((state.get("memory_by_char") or {}).get(cid) or "")[:80]
+    if mem:
+        cands.append(f"你记得：{mem}")
+    fresh = [c for c in cands if c and c.strip() and c not in used]
+    if not fresh:
+        cb["used"] = []
+        fresh = [c for c in cands if c and c.strip()]
+    return fresh[0][:80] if fresh else ""
+
+
 # 📔 回忆标签面 (Yi: 开心的/甜甜的/搞笑的… 互动总结打标签)
 _MEM_TAGS = {"心动": "💗", "甜蜜": "🍬", "开心": "😄", "搞笑": "🤣",
              "惊险": "😨", "平常": "📖"}
@@ -5377,9 +5447,28 @@ def offline_pulse(content: dict[str, Any], state: dict[str, Any], here_ids: set,
         elif mode == "friend":
             ranked.append((3, c, "TA这些天遇到点事，想找你说说，顺口问你去哪了"))
     ranked.sort(key=lambda t: t[0])
+    # 🎰 变率强化 (Spec H): 谁发不发是掷出来的 — 越暖概率越高但【永不保证】,
+    # 不确定性本身是钩子; 单角色冷却防轰炸 (initiate_cooldown 天, tuning)
+    _init = state.setdefault("initiate", {})
+    _today = int((state.get("clock") or {}).get("day", 1) or 1)
+    _cool = int(tun.get("initiate_cooldown", 1) or 1)
+    _P_BY_RANK = {0: 0.75, 1: 0.55, 2: 0.5, 3: 0.3}
+    _picked: list[tuple[int, dict[str, Any], str]] = []
+    _letter_due = away_hours >= tun["letter_away_hours"]
+    for rank, c, hint in ranked:
+        _cid = c.get("id")
+        if _today - int((_init.get(_cid) or {}).get("day", -99) or -99) < _cool:
+            continue
+        # 💌 超长离别的信是情感兑付, 免掷 (骰子只管日常问候的不确定性)
+        if not (_letter_due and rank <= 1 and not _picked) \
+                and _rng.random() >= _P_BY_RANK.get(rank, 0.3):
+            _audit(state, "reach.skip", True, c.get("name", ""), "这次没舍得发")
+            continue
+        _init[_cid] = {"day": _today}
+        _picked.append((rank, c, hint))
     now_label = (clock_view(content, state) or {}).get("label", "")
     out: list[dict[str, Any]] = []
-    for rank, c, hint in ranked[:PHONE_MAX_PER_TURN]:
+    for rank, c, hint in _picked[:PHONE_MAX_PER_TURN]:
         # a LONG absence: the warmest one writes a letter instead of a text
         if not out and away_hours >= tun["letter_away_hours"] and rank <= 1:
             m = compose_letter(content, state, c,
@@ -8037,6 +8126,14 @@ def run_turn_stream(
             except Exception:
                 pass
     _pace = pace_band(state, tun)   # 🎼 本轮节奏带 (乐师账本→台词形状, Spec A)
+    _cb_mode = "" if (state.get("mode") or "character") == "god" \
+        else callback_due(state, tun, _pace["band"])   # 🪃 回调到期? (Spec E)
+    # 🎁 对等回礼 (Spec G): 上一轮玩家开了窗 → 这一轮主答者欠一块同深度的自己
+    _owe_disclose = bool(state.pop("owe_disclosure", None))
+    if (state.get("mode") or "character") != "god" and channel in ("say", "do") \
+            and _SELF_DISCLOSE_RE.search(player_input or ""):
+        state["owe_disclosure"] = True
+        _audit(state, "disclose.player", True, (player_input or "")[:16])
     if (state.get("mode") or "character") != "god":
         deliver_due_phone(content, state)   # 📬 到期的延迟消息随回合送达 (Spec D)
     asks = dict(state.get("asks") or {})
@@ -9115,6 +9212,30 @@ def run_turn_stream(
             **({"world_seed": _ws_mode} if idx == 0 and _ws_mode else {}),
             # 🎼 节奏带 (Spec A): 引擎按乐师账本查表, 全体发言者同一拍点
             "pace": _pace,
+            # 🪃 记忆回调 (Spec E): 到期时引擎抽真实旧事作必填素材, 只给主答者
+            **({"callback": {"mode": _cb_mode,
+                             "material": pick_callback_material(content, state, sp_id)}}
+               if idx == 0 and _cb_mode and sp_id else {}),
+            # 🔥 推拉节拍 (Spec F): 暧昧档的张弛相位归引擎, 措辞归模型
+            **({"pushpull": relationships.pushpull_line(
+                    relationships.pushpull_tick(
+                        state.setdefault("pushpull", {}).setdefault(sp_id or "?", {}),
+                        active=bool(sp_id and relationships.derive_mode(
+                            sp, (state.get("rel") or {}).get(sp_id)
+                            or relationships.new_scores(), tun) == "flirt"),
+                        give=int(tun.get("pushpull_give", relationships.PUSHPULL_GIVE) or 3),
+                        hold=int(tun.get("pushpull_hold", relationships.PUSHPULL_HOLD) or 1)))}
+               if idx == 0 and sp_id else {}),
+            # 🎁 对等回礼 (Spec G): 深度由引擎按档查表, 只问不答=查户口
+            **({"disclose": disclose_depth(relationships.derive_mode(
+                    sp, (state.get("rel") or {}).get(sp_id)
+                    or relationships.new_scores(), tun) if sp_id else "stranger")}
+               if idx == 0 and _owe_disclose else {}),
+            # 🚫 负面清单 (Spec J): 按好感档查表 — 热情过载的缰绳
+            "negatives": relationships.negative_list(
+                relationships.derive_mode(sp, (state.get("rel") or {}).get(sp_id)
+                                          or relationships.new_scores(), tun)
+                if sp_id else "stranger", lang_of(content) != "en"),
             # 🤐 沉默权阶梯归引擎 (Spec B): 被点名/秘密被戳/上轮已沉默 → 必须开口
             "must_speak": bool(sp_id in probed_char_ids
                                or (target_character_id and target_character_id == sp_id)
@@ -9349,6 +9470,23 @@ def run_turn_stream(
                 if b.get("type") == "dialogue":
                     b["act"] = _act
                     break
+        # 🪃 回调收卷 (Spec E): 报审+验真 — 报的摘录必须真出现在这一轮的拍里
+        if is_primary and _cb_mode:
+            _cbq = str(directed.get("callback_done") or "").strip().strip("「」\"'")
+            _cb = state.setdefault("callback", {"last": 0, "blanks": 0, "used": []})
+            _turn_text = " ".join((b.get("text") or "") for b in d_beats)
+            if _cbq and _cbq not in ("无", "None") and _cbq[:12] in _turn_text:
+                _cb["last"] = int((state.get("growth") or {}).get("turn", 0) or 0)
+                _cb["blanks"] = 0
+                _mat = pick_callback_material(content, state, sp_id)
+                _cb.setdefault("used", []).append(_mat)
+                _cb["used"] = _cb["used"][-12:]
+                _audit(state, "callback", True, f"{sp_name}·{_cbq[:16]}")
+            else:
+                _cb["blanks"] = int(_cb.get("blanks", 0) or 0) + 1
+                _audit(state, "callback", False, sp_name,
+                       "谎报摘录" if _cbq and _cbq not in ("无", "None") else
+                       f"连续第{_cb['blanks']}次无")
         # 🤐 沉默账 (Spec B): 没说话但有动作拍 = 合法沉默, 记类审计+连续计数
         _spoke = any(b.get("type") == "dialogue" and (b.get("text") or "").strip()
                      for b in d_beats)
