@@ -2764,6 +2764,10 @@ async function openCharCard(cid) {
     ${barHtml(B("心动", "Romance"), p.romance, 0, 100, "#ff8fb3")}`}
     ${bio ? `<div class="jh">${B("你所了解的TA", "What you know of them")}</div>${bio}` : ""}
     ${p.impression ? `<div class="jh">${B("🪞 TA眼中的你", "🪞 How they see you")}</div><div class="jfrag">${escapeHtml(p.impression)}</div>` : ""}
+    ${p.diary && p.diary.unlocked && (p.diary.entries||[]).length ? `<div class="jh">📔 ${B("TA的日记", "Their diary")}</div>` +
+      p.diary.entries.slice().reverse().map(d =>
+        `<div class="jfrag"><span class="jwho">${B(`第${d.day}天`, `Day ${d.day}`)} · ${escapeHtml(d.tag||"")} · ${escapeHtml(d.title||"")}</span><br>${escapeHtml(d.text||"")}${d.heart ? `<br><span class="jwho">💗 ${escapeHtml(d.heart)}</span>` : ""}</div>`).join("") : ""}
+    ${p.diary && !p.diary.unlocked && p.diary.count ? `<div class="jlocked">📔 ${B(`TA的日记本里已经有 ${p.diary.count} 篇和你有关的记录——关系到暧昧那一档，TA才会让你看。`, `Their diary holds ${p.diary.count} entries about you — get close enough and they might let you read.`)}</div>` : ""}
     ${(p.carrying||[]).length || (p.keepsakes||[]).length ? `<div class="jh">${B("TA带着的", "What they carry")}</div><div class="clog">${
       (p.carrying||[]).map(escapeHtml).join("、")}${(p.keepsakes||[]).length ? `<span class="jwho">　🎁 ${p.keepsakes.map(escapeHtml).join("、")}${B("（你送的）", " (your gifts)")}</span>` : ""}</div>` : ""}
     ${(p.ties||[]).length ? `<div class="jh">${B("TA与其他人", "Them and the others")}</div>` + p.ties.map(t =>

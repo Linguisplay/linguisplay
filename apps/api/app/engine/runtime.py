@@ -3591,6 +3591,30 @@ def pick_callback_material(content: dict[str, Any], state: dict[str, Any],
 # 📔 回忆标签面 (Yi: 开心的/甜甜的/搞笑的… 互动总结打标签)
 _MEM_TAGS = {"心动": "💗", "甜蜜": "🍬", "开心": "😄", "搞笑": "🤣",
              "惊险": "😨", "平常": "📖"}
+_DIARY_TAGS = ("心动", "甜蜜")   # Yi 定 (2026-07-25): 这两档只住 TA 的日记, 不进回忆册
+_DIARY_CAP = 40
+
+
+def _diary_add(state: dict[str, Any], cid: str, entry: dict[str, Any]) -> None:
+    """📔 角色日记: TA 自己的本子, 一天一篇 (每日回忆结算的心动/甜蜜档住这里)。
+    转生不清 — 日记写的是前世的你, TA 的本子凭什么烧 (跨存档残响同一哲学)。"""
+    rows = state.setdefault("diaries", {}).setdefault(cid, [])
+    rows.append(entry)
+    del rows[:-_DIARY_CAP]
+
+
+def diary_view(content: dict[str, Any], state: dict[str, Any], cid: str,
+               tun: dict[str, int] | None = None) -> dict[str, Any]:
+    """📔 TA的日记视图 (Yi 定: 好感到暧昧/恋人档才解锁 — 日记本身是养成奖励)。
+    锁着时只报条数, 一个字不漏 (和秘密同一家法: 锁住的内容留在服务端)。"""
+    c = _char_by_id(content, cid)
+    rows = (state.get("diaries") or {}).get(cid) or []
+    scores = (state.get("rel") or {}).get(cid) or relationships.new_scores()
+    mode = relationships.derive_mode(c or {}, scores, tun or tuning_for(content))
+    if mode not in ("flirt", "lover"):
+        return {"unlocked": False, "count": len(rows), "entries": []}
+    return {"unlocked": True, "count": len(rows),
+            "entries": [dict(e) for e in rows[-12:]]}
 
 
 def _heart_candidate(content: dict[str, Any], state: dict[str, Any],
@@ -6939,6 +6963,9 @@ def character_profile(content: dict[str, Any], state: dict[str, Any],
         "closeness": closeness, "romance": int(scores.get("romance", 0)),
         # 🪞 TA眼中的你 (活世界 P2): 相处蒸馏出的印象, 档案卡可见
         "impression": profile_mod.impression_of(state, char_id),
+        # 📔 TA的日记 (Yi 2026-07-25: 心动/甜蜜只住这里): 暧昧/恋人档解锁,
+        # 锁着只报条数 — 日记本身是养成奖励
+        "diary": diary_view(content, state, char_id, tun),
     }
 
 
@@ -10749,18 +10776,27 @@ def run_turn_stream(
                                             lang_of(content)),
                                         "offline": _off, "phone": _pho}) or {}
                     _tag = str(_hd.get("tag") or "").strip()
-                    _txt = dedash(str(_hd.get("text") or "").strip())[:130]
+                    _txt = dedash(str(_hd.get("text") or "").strip())[:220]
                     if _tag in _MEM_TAGS and _txt:
                         _ttl = dedash(str(_hd.get("title") or "").strip())[:10]
                         _hh = dedash(str(_hd.get("heart") or "").strip())[:80] \
-                            if _tag in ("心动", "甜蜜") else ""
+                            if _tag in _DIARY_TAGS else ""
                         _day_no = int((state.get("clock") or {}).get("day", 1) or 1) - 1
-                        album_add(content, state, "daily",
-                                  f"{_MEM_TAGS[_tag]}{_tag}·{_ttl or _t(content, '这一天', 'the day')}",
-                                  (_txt + (("\n" + _hh) if _hh else ""))[:200], _hc,
-                                  rarity=2 if _tag in ("心动", "甜蜜") else 1)
-                        _audit(state, "day.memory", True,
-                               f"day{_day_no}·{_tag}·{_hc.get('name')}")
+                        if _tag in _DIARY_TAGS:
+                            # 📔 Yi 定 (2026-07-25): 心动/甜蜜是 TA 的私心话, 只住 TA 的
+                            # 日记本 (好感到暧昧/恋人档才解锁), 不进玩家回忆册
+                            _diary_add(state, _hcid, {
+                                "day": _day_no, "tag": _tag,
+                                "title": _ttl or _t(content, "这一天", "the day"),
+                                "text": _txt, "heart": _hh})
+                            _audit(state, "day.diary", True,
+                                   f"day{_day_no}·{_tag}·{_hc.get('name')}")
+                        else:
+                            album_add(content, state, "daily",
+                                      f"{_MEM_TAGS[_tag]}{_tag}·{_ttl or _t(content, '这一天', 'the day')}",
+                                      _txt[:200], _hc, rarity=1)
+                            _audit(state, "day.memory", True,
+                                   f"day{_day_no}·{_tag}·{_hc.get('name')}")
                     else:
                         _audit(state, "day.memory", False, _hc.get("name", ""),
                                "今天没记（判官没给出合规标签）")

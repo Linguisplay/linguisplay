@@ -48,7 +48,9 @@ class NightLLM:
         return {}
 
 
-def test_sweet_day_books_album_card_quietly():
+def test_sweet_day_goes_to_diary_quietly():
+    """Yi 2026-07-25 改契约: 心动/甜蜜是 TA 的私心话, 只住 TA 的日记本 (档位解锁),
+    不进玩家回忆册; 依旧零弹窗零打扰。"""
     llm = NightLLM({"tag": "甜蜜", "title": "糖水之约",
                     "text": "你说明天一起吃糖水，我答一言为定。",
                     "heart": "其实吃什么都行，见的是你就好。"})
@@ -56,10 +58,11 @@ def test_sweet_day_books_album_card_quietly():
                            llm=llm)
     st = out["state"]
     assert out["new_day"] and llm.digest_prompt
-    card = next(a for a in st["album"] if a["kind"] == "daily")
-    assert card["title"].startswith("🍬甜蜜") and "糖水之约" in card["title"]
-    assert "一言为定" in card["text"] and "见的是你" in card["text"]   # 心里话随卡
-    assert card["rarity"] == 2
+    entry = (st.get("diaries") or {}).get("a")[-1]
+    assert entry["tag"] == "甜蜜" and entry["title"] == "糖水之约"
+    assert "一言为定" in entry["text"] and "见的是你" in entry["heart"]
+    assert not any(a.get("kind") == "daily" for a in st.get("album") or []), \
+        "甜蜜不再进回忆册 (搬家不是复制)"
     # 零弹窗: 不发手机消息、无 moments 横幅
     assert all("见的是你" not in (m.get("text") or "")
                for m in st["phone"]["threads"]["a"]["msgs"])
