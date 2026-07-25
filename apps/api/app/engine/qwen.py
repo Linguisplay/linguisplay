@@ -1030,17 +1030,35 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
         required.append("speech")
     if not observer and not is_member and not is_think:
         props["emotion"] = {"type": "string", "description": "三五个字点出对方此刻言行底下真正的情绪"}
-    props["affinity"] = {"type": "integer", "description":
-                         ("本场人物关系更近(正)/更疏(负)" if observer else
-                          "0(对方不知道你在想什么)" if is_think else
-                          "这一句对你们关系的影响(-3~5)。像真实的人一样诚实起伏：走心/戳中你→+2~3；"
-                          "正常聊得下去→+1；敷衍/说教/自说自话/戳你痛处/冒犯→-1~-3，"
-                          "该扣就扣别客气，一直只涨不掉是假人；只有完全冷场才是0")}
-    required.append("affinity")
-    if not observer and not is_member and not is_think:
-        props["romance"] = {"type": "integer", "description":
-                            "默认0；对方调情/示好/情话且你真被触动才给正分；油腻、越界、"
-                            "廉价套路让你不适→-1~-2。范围-2~5，恋爱线"}
+    if prompt.get("rel_events") and not is_member and not is_think and not observer:
+        # 💞 事件记账制 (Yi 定: 关系由事写成): 只申报事件, 分值/冷却引擎法条说了算。
+        # 可选 + 省略空字段 → 绝大多数回合零成本; 日常寒暄不是事件。
+        # observer 不发 (观剧局玩家不在场, 角色间互动不许记到玩家关系头上 — 审查加固);
+        # kind 上 enum 硬约束 (口语化申报会被法条驳回白丢事件 — 审查加固)。
+        props["rel_event"] = {"type": "object", "description":
+            "默认省略。仅当这一拍【真的发生了关系事件】才填——日常寒暄、正常聊天、"
+            "客套恭维都不是事件，绝大多数回合应省略。kind 只能从这里选："
+            "交心(说出真心话/交换了真实的自己)/帮衬(对方实质帮你办成或扛下一件事)/"
+            "心动(你被这一拍真正打动)/和好(冲突后的修复)/冒犯(踩雷羞辱背弃)/"
+            "争执(正面冲突撕破脸)/越界(油腻廉价冒进让你不适)",
+            "properties": {"kind": {"type": "string",
+                                    "enum": ["交心", "帮衬", "心动", "和好",
+                                             "冒犯", "争执", "越界"]},
+                           "evidence": {"type": "string", "description":
+                                        "≤20字，正文里真实发生的文据（对方的话或动作）"}},
+            "required": ["kind"]}
+    elif not prompt.get("rel_events"):
+        props["affinity"] = {"type": "integer", "description":
+                             ("本场人物关系更近(正)/更疏(负)" if observer else
+                              "0(对方不知道你在想什么)" if is_think else
+                              "这一句对你们关系的影响(-3~5)。像真实的人一样诚实起伏：走心/戳中你→+2~3；"
+                              "正常聊得下去→+1；敷衍/说教/自说自话/戳你痛处/冒犯→-1~-3，"
+                              "该扣就扣别客气，一直只涨不掉是假人；只有完全冷场才是0")}
+        required.append("affinity")
+        if not observer and not is_member and not is_think:
+            props["romance"] = {"type": "integer", "description":
+                                "默认0；对方调情/示好/情话且你真被触动才给正分；油腻、越界、"
+                                "廉价套路让你不适→-1~-2。范围-2~5，恋爱线"}
     _cb = prompt.get("callback") or {}
     if _cb.get("material") and not is_member and not is_think:
         # ⚠️ 指令文本在 _build_system 的【回扣旧事】块 (存量实弹: 这里曾 lines.append
@@ -1742,6 +1760,11 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
         "move_invite": mv,
         "player_emotion": str(d.get("emotion") or "").strip(),
     }
+    # 💞 事件记账制: 只透传 {kind, evidence} 字符串, 分值/冷却是引擎法条的事
+    _rev = d.get("rel_event")
+    if isinstance(_rev, dict) and str(_rev.get("kind") or "").strip():
+        out["rel_event"] = {"kind": str(_rev.get("kind") or "").strip()[:6],
+                            "evidence": str(_rev.get("evidence") or "").strip()[:30]}
     # ask/event judgment: only surface the keys the model actually answered — an absent
     # key means "no judgment" and the engine keeps its provisional keyword result.
     if "probed_topics" in d:

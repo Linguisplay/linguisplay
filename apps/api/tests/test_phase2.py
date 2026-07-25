@@ -174,7 +174,7 @@ def test_rel_up_collects_into_album_and_lover_writes_a_letter():
     st = _met(runtime.default_state(), "a")
     st["location_id"] = "hall"
     st["rel"] = {"a": {"closeness": 58, "romance": 59}}   # one warm beat from 恋人
-    llm = P2LLM(director={"affinity_delta": 3, "romance_delta": 3},
+    llm = P2LLM(director={"rel_event": {"kind": "心动", "evidence": "我心里有你"}},   # 事件记账制: 法条 +2亲近/+4心动 跨过恋人线
                 compose_letter={"subject": "给你", "body": "LOVE_LETTER 甲"})
     out = runtime.run_turn(STORY, st, {"name": "我"}, "我心里有你", channel="say", llm=llm)
     st = out["state"]

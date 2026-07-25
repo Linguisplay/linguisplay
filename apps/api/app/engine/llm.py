@@ -383,4 +383,10 @@ class MockLLM:
         # Deterministic director fields (keep tests reproducible): steady warm-up,
         # never auto-advances the act (the affinity backstop handles progression),
         # never declares a death (authored conditions drive the mock's endings).
-        return {"beats": beats, "affinity_delta": 3, "advance_act": False, "ending": None}
+        out = {"beats": beats, "affinity_delta": 3, "advance_act": False, "ending": None}
+        # 💞 事件记账制孪生 (审查实锤: 孪生不迁移 = 无 key 环境关系永冻 + 新契约
+        # 无覆盖): 旗开时申报确定性「交心」事件 — 引擎冷却让它实际每 ~8 回合入账一次,
+        # 可复现且与真模型同一条结算通路。
+        if prompt.get("rel_events"):
+            out["rel_event"] = {"kind": "交心", "evidence": "认真接了你的话"}
+        return out

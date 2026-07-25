@@ -43,7 +43,7 @@ def test_stuck_hint_threshold_tunable():
 
 
 def test_affinity_clamp_tunable():
-    story = {"story": {"id": "s", "tuning": {"affinity_clamp_max": 2},
+    story = {"story": {"id": "s", "tuning": {"affinity_clamp_max": 2, "rel_events": 0},
                        "characters": [{"id": "c1", "name": "M", "is_lead": True}],
                        "acts": [{"index": 1, "title": "a"}]}, "secrets": []}
 

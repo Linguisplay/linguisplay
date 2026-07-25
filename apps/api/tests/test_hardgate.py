@@ -7,6 +7,7 @@ from app.engine import runtime
 GATED = {
     "story": {
         "id": "st",
+        "tuning": {"rel_events": 0},   # 旧每句打分路径的执法点 (剧本级退出旗受支持)
         "characters": [{"id": "c1", "name": "Mara", "is_lead": True, "persona_text": "a"}],
         "acts": [
             {"index": 1, "title": "一", "advance": {"required_fragment_ids": ["f1"]}},
@@ -54,7 +55,7 @@ def test_can_advance_pure_function():
 
 def test_ungated_act_still_soft_advances():
     ungated = {
-        "story": {"id": "s", "characters": [{"id": "c1", "name": "M", "is_lead": True}],
+        "story": {"id": "s", "tuning": {"rel_events": 0}, "characters": [{"id": "c1", "name": "M", "is_lead": True}],
                   "acts": [{"index": 1, "title": "a"}, {"index": 2, "title": "b"}, {"index": 3, "title": "c"}]},
         "secrets": [],
     }

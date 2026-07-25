@@ -4,7 +4,7 @@ soft acts require dwell time before ANY advance, and a turn moves at most one ac
 from app.engine import relationships, runtime
 
 SOFT = {
-    "story": {"id": "s", "characters": [{"id": "c1", "name": "M", "is_lead": True}],
+    "story": {"id": "s", "tuning": {"rel_events": 0}, "characters": [{"id": "c1", "name": "M", "is_lead": True}],
               "acts": [{"index": 1, "title": "一"}, {"index": 2, "title": "二"},
                        {"index": 3, "title": "三"}]},
     "secrets": [],

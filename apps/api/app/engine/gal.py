@@ -646,13 +646,34 @@ def edge_polish(png_bytes: bytes) -> bytes:
         return png_bytes
 
 
+_REMBG_SESSION = None
+
+
+def _rembg_session():
+    """抠图模型分级 (2026-07-25 立绘发丝残渣实弹, 照片源立绘的卷发嵌背景碎块):
+    缺省 isnet-general-use — 卷发/碎发的分割远胜 2020 年的 u2net (A/B 实测残渣归零)。
+    env REMBG_MODEL 可换; 模型缺失/初始化失败自动退回 rembg 默认 — 永不比旧差。"""
+    global _REMBG_SESSION
+    if _REMBG_SESSION is None:
+        import os
+        try:
+            from rembg import new_session
+            _REMBG_SESSION = new_session(os.environ.get("REMBG_MODEL")
+                                         or "isnet-general-use")
+        except Exception:
+            _REMBG_SESSION = False   # 哨兵: 走 remove() 的内置默认模型
+    return _REMBG_SESSION or None
+
+
 def debg(png_bytes: bytes) -> bytes:
     """rembg 抠底 → transparent PNG (边缘过一道 edge_polish 工艺).
     Degrades to the original on any failure — a sprite with a dark backdrop
     still masks acceptably client-side."""
     try:
         from rembg import remove
-        return edge_polish(remove(png_bytes))
+        s = _rembg_session()
+        return edge_polish(remove(png_bytes, session=s) if s is not None
+                           else remove(png_bytes))
     except Exception:
         return png_bytes
 

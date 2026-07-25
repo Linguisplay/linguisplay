@@ -5,7 +5,7 @@ from app.engine import runtime
 
 STORY = {
     "story": {"id": "s",
-              "tuning": {"friend_t": 6, "close_step_max": 8, "min_turns_per_act": 0},  # tier-up reachable in one turn
+              "tuning": {"friend_t": 6, "close_step_max": 8, "min_turns_per_act": 0, "rel_events": 0},  # tier-up reachable in one turn
               "characters": [{"id": "c1", "name": "M", "is_lead": True}],
               "acts": [{"index": 1, "title": "一"}, {"index": 2, "title": "二"}]},
     "secrets": [{"id": "s1", "character_id": "c1", "title": "那本账",

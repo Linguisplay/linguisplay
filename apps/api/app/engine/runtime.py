@@ -237,6 +237,22 @@ DEFAULT_TUNING = {
     "letter_away_hours": 48,    # 📮 away at least this long → the warmest heart writes a LETTER
     "opening_player_first": 0,  # 🎤 开场由玩家先发言: 开场只亮相不开口, 第一句对话必须来自
                                 #    玩家; 观剧拍同样不许抢 (0 = off; 剧本级可开, studio 开场白卡)
+    "rel_events": 1,            # 💞 好感事件记账制 (Yi 2026-07-25 定: 不许每句话打分, 关系由
+                                #    事写成): 模型只申报关系事件+文据, 分值/冷却引擎说了算
+                                #    (1 = on; 剧本级可关回旧每句判)
+}
+
+# 💞 关系事件分类表 (事件记账制的引擎法条, 故事无关):
+# kind: (亲近Δ, 心动Δ, 正面冷却回合, 是否要求角色可恋)。负面事件零冷却 — 伤害不限流;
+# 正面事件带冷却 — 同一角色同类事件冷却内再申报按刷分驳回。日常寒暄不是事件。
+_REL_EVENTS = {
+    "交心": (4, 0, 8, False),    # 说出真心话/交换了真实的自己
+    "帮衬": (5, 0, 6, False),    # 实质帮TA办成/扛下了一件事
+    "心动": (2, 4, 8, True),     # TA被这一拍真正打动
+    "和好": (3, 1, 10, False),   # 冲突后的修复
+    "冒犯": (-5, 0, 0, False),   # 踩雷/羞辱/背弃
+    "争执": (-3, 0, 0, False),   # 正面冲突撕破脸
+    "越界": (0, -3, 0, True),    # 油腻/廉价/冒进
 }
 
 MAX_OPEN_PROMISES = 3  # 🤝 open appointments a run may hold at once (per char: one)
@@ -4952,6 +4968,7 @@ def social_comment(content: dict[str, Any], state: dict[str, Any], persona: dict
         out = {}
     reply = dedash(str(out.get("reply") or "").strip()[:60]) or "（TA看到了，没回。）"
     dc = max(0, min(2, _to_int(out.get("closeness"), 0, 2)))
+    dc, _ = _offscene_rel_budget(state, post.get("cid"), dc, 0, tun)   # 📱 刷分止血带
     if dc:
         state.setdefault("rel", {})[post.get("cid")] = \
             relationships.apply_deltas(scores, dc, 0, tun)
@@ -5275,6 +5292,7 @@ def _phone_exchange(content: dict[str, Any], state: dict[str, Any], persona: dic
                         "text": text}) or {}
     dc = int(out.get("closeness", 0) or 0)
     dr = int(out.get("romance", 0) or 0)
+    dc, dr = _offscene_rel_budget(state, char_id, dc, dr, tun)   # 📱 刷分止血带
     if dc or dr:
         new_scores = relationships.apply_deltas(scores, dc, dr, tun)
         state.setdefault("rel", {})[char_id] = new_scores
@@ -5286,6 +5304,28 @@ def _phone_exchange(content: dict[str, Any], state: dict[str, Any], persona: dic
                            "rel_up": (relationships.name_of(new_mode)
                                       if new_mode != mode else "")}
     return out
+
+
+def _offscene_rel_budget(state: dict[str, Any], cid: str, dc: int, dr: int,
+                         tun: dict[str, int]) -> tuple[int, int]:
+    """📱 场外每句判分通道的日预算 (审查实锤: 事件记账制管住正戏后, 短信/评论的
+    每句打分成了最快刷分通路 — 几十条短信可刷到恋人)。rel_events 开着时, 每角色
+    每天经手机/评论入账的正向合计封顶; 负向照旧零限流 (伤害不设闸)。
+    手机通道的完整事件化申报是下一刀 — 这一手是止血带。"""
+    if not tun.get("rel_events"):
+        return dc, dr
+    day = int((state.get("clock") or {}).get("day", 1) or 1)
+    book = state.setdefault("phone_rel_day", {})
+    if book.get("_day") != day:
+        book.clear()
+        book["_day"] = day
+    used = int(book.get(cid, 0) or 0)
+    room = max(0, 4 - used)
+    dc2 = min(dc, room) if dc > 0 else dc
+    room -= max(0, dc2)
+    dr2 = min(dr, room) if dr > 0 else dr
+    book[cid] = used + max(0, dc2) + max(0, dr2)
+    return dc2, dr2
 
 
 def _digest_phone_overflow(state: dict[str, Any], cid: str, llm: LLM) -> None:
@@ -7472,8 +7512,43 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
     characters, identity, craft/take/trade/gift, money, quests, world facts, items.
     Scalar outcomes ride `flags`; every rejection lands on the audit sheet.
     Extracted verbatim from run_turn_stream (管线刀1)."""
-    this_delta = int(directed.get("affinity_delta", 0) or 0)
-    flags["affinity_delta"] += this_delta
+    if tun.get("rel_events"):
+        # 💞 事件记账制 (Yi 定: 关系由事写成, 每句话打分作废): 模型只申报
+        # {kind, evidence}, 分值查引擎法条; 正面事件按 (角色,类别) 冷却防刷,
+        # 负面零冷却; 无事件 = 关系纹丝不动 (闲聊就是闲聊)。
+        this_delta, _rd_event = 0, 0
+        _ev = directed.get("rel_event")
+        if isinstance(_ev, dict) and sp_id and sp_id != pcid:
+            _kind = str(_ev.get("kind") or "").strip()
+            _evid = dedash(str(_ev.get("evidence") or "").strip())[:20]
+            _law = _REL_EVENTS.get(_kind)
+            if not _law:
+                if _kind:
+                    _audit(state, "rel.event", False, _kind[:8], "不在法条里")
+            elif _law[3] and not any(m in ("flirt", "lover")
+                                     for m in relationships.allowed_modes(sp or {})):
+                # 与 derive_mode 同一部法: relation_allowed 没排除恋爱线就算可恋
+                # (未配置 = 全模式可达; _romance_capable 是更严的显式白名单, 不用它)
+                _audit(state, "rel.event", False, f"{sp_name}:{_kind}", "这条线TA不走")
+            else:
+                _cdb = state.setdefault("rel_ev_cd", {})
+                _seq = int(state.get("turn_seq") or 0)
+                _key = f"{sp_id}:{_kind}"
+                if _law[2] and _seq - int(_cdb.get(_key) or -999) < _law[2]:
+                    _audit(state, "rel.event", False, f"{sp_name}:{_kind}", "冷却中(刷分驳回)")
+                else:
+                    this_delta, _rd_event = _law[0], _law[1]
+                    if _law[2]:
+                        _cdb[_key] = _seq
+                        if len(_cdb) > 60:
+                            for _k in list(_cdb)[:-40]:
+                                _cdb.pop(_k, None)
+                    _audit(state, "rel.event", True, f"{sp_name}:{_kind}·{_evid[:12]}")
+        flags["affinity_delta"] += this_delta
+    else:
+        this_delta = int(directed.get("affinity_delta", 0) or 0)
+        _rd_event = None
+        flags["affinity_delta"] += this_delta
     # ✍️ 编剧拍落账 (剧组 P2): 情绪申报 / 伏笔埋收 / 人生目标推进 — 主答者一人申报。
     # 申报消毒 (实弹: 模型把 schema 碎片回显进 setup_plant): 带结构符号的值一律驳回
     def _claim(v: Any, cap: int) -> str:
@@ -7521,9 +7596,10 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
         # 🎭 今日心气上色 (Yi: 好感要像真实的人一样忽高忽低): 心气差的日子
         # 好话打折坏话加倍, 心气好反之 — 当天稳定, 跨天翻面
         _mood_day = relationships.day_mood(sp_id, int((state.get("clock") or {}).get("day", 1) or 1))
-        _cd_in, _rd_in = relationships.temper(
-            this_delta, int(directed.get("romance_delta", 0) or 0), _mood_day)
-        if _mood_day and (_cd_in, _rd_in) != (this_delta, int(directed.get("romance_delta", 0) or 0)):
+        _rd_raw = (_rd_event if _rd_event is not None
+                   else int(directed.get("romance_delta", 0) or 0))
+        _cd_in, _rd_in = relationships.temper(this_delta, _rd_raw, _mood_day)
+        if _mood_day and (_cd_in, _rd_in) != (this_delta, _rd_raw):
             _audit(state, "rel.mood", True, f"{sp_name}:{'差' if _mood_day < 0 else '好'}")
         rel_all[sp_id] = relationships.apply_deltas(old_scores, _cd_in, _rd_in, tun)
         mode_after = relationships.derive_mode(sp, rel_all[sp_id], tun)
@@ -8303,6 +8379,8 @@ def run_turn_stream(
     # 入账; audit 在 P2 才重置, 这里不记账)
     apply_pending_folds(state)
     apply_pending_track(state)
+    # 💞 全局回合序号 (事件记账制的冷却时钟 — turns_in_act 换幕会清零, 不能用)
+    state["turn_seq"] = int(state.get("turn_seq") or 0) + 1
     old_act = int(state.get("act", 1))
     # 🌅 日翻页哨兵 (Yi: 每天要给玩家自由活动的时间) — 回合末对账, 翻了天就发自由活动菜单
     _day0 = int((state.get("clock") or {}).get("day", 1) or 1)
@@ -9428,6 +9506,8 @@ def run_turn_stream(
             "persona": persona_for_prompt,
             "player_input": player_input,
             "channel": channel,
+            # 💞 事件记账制旗 (Yi 定): 开着 = 契约只收 rel_event 申报, 不收每句打分
+            "rel_events": bool(tun.get("rel_events")),
             "context": ctx,
             "history": sp_hist,
             "memory": sp_mem,   # THIS character's private rolling digest
@@ -9780,10 +9860,9 @@ def run_turn_stream(
                                     moments, rel_deltas, rel_all, rel_active,
                                     said_this_turn, dead_names, emergent_ids,
                                     emit, llm, flags)
-        # ⚡ 建议提前上桌 (Yi: 总是慢半拍): 主拍一结算就推给前端, 不等全回合收尾
-        # (配角发言/辅助结算还在后面跑); final 里的权威版随后照旧覆盖
-        if is_primary and flags.get("dir_suggestions"):
-            yield ("sugg", ensure_three_suggestions(flags["dir_suggestions"], [], content))
+        # 🚫 建议不抢跑 (Yi 2026-07-25 改令, 覆盖早前的「提前上桌」): 选项要等剧情
+        # 演完才出来 — 早推的 sugg 事件会在配角还在说话时就亮 chips。撤掉早推,
+        # chips 随 final 的权威版走, 客户端在正文播完的 finishTurn 才上桌。
         # WHO ELSE speaks this turn: the primary judged who'd naturally chime in
         # (varies 0~2 by context/personality — not everyone, not a fixed order);
         # characters named by the player or whose secret was probed always get to
