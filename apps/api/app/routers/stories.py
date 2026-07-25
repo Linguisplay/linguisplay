@@ -78,6 +78,19 @@ def _to_story(s: StoryModel) -> Story:
     )
 
 
+def _card_art(s: StoryModel) -> str | None:
+    """🎬 卡面图: 作者封面优先; 没有就用第一个已有背景图的地点 (大厅 hero 卡)."""
+    if s.cover_url:
+        return s.cover_url
+    import pathlib
+    bg = pathlib.Path(__file__).resolve().parents[1] / "static" / "scene" / "bg"
+    for l in (s.locations or []):
+        lid = (l or {}).get("id")
+        if lid and (bg / f"{lid}.jpg").exists():
+            return f"/scene/bg/{lid}.jpg"
+    return None
+
+
 def _to_card(s: StoryModel, secrets_count: int = 0) -> StoryCard:
     sandbox = bool((s.sandbox or {}).get("enabled"))
     ranks = ((s.sandbox or {}).get("progression") or {}).get("ranks") or []
@@ -94,6 +107,8 @@ def _to_card(s: StoryModel, secrets_count: int = 0) -> StoryCard:
         sandbox=sandbox,
         acts_count=len(s.acts or []),
         progression=ladder[:60] or None,
+        art_url=_card_art(s),
+        opening_tease=((s.opening or "").strip().splitlines() or [""])[0][:64] or None,
     )
 
 

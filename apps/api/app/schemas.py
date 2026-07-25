@@ -410,6 +410,9 @@ class StoryCard(BaseModel):
     cover_url: Optional[str] = None
     one_liner: Optional[str] = None
     trope_tags: list[str] = []
+    # 🎬 大厅门面 (hero 卡): 卡面图 (封面→首个有图地点兜底) 与开场白引子
+    art_url: Optional[str] = None
+    opening_tease: Optional[str] = None
     # the mystery affordance up front: how much is LOCKED in here (counts only, no titles)
     secrets_count: int = 0
     endings_count: int = 0

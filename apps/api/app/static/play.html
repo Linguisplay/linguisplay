@@ -47,6 +47,27 @@
   .iconbtn { background: transparent; padding: 5px 7px; font-size: 16px; color: #c9bfa9; }
   .iconbtn:active { color: #d8b57a; }
   .ic { vertical-align: -3.5px; }
+  /* 🎬 大厅 hero 卡: 剧本的场景图即门面, 宋体题压图, 徽章毛玻璃胶囊 */
+  .scard { position: relative; margin: 14px 0; border-radius: 20px; overflow: hidden; cursor: pointer;
+    border: .5px solid rgba(216,181,122,.22); aspect-ratio: 16/9.6; background: #201c15; }
+  .scard .art { position: absolute; inset: 0; background-size: cover; background-position: center;
+    transform: scale(1.001); transition: transform .6s ease; }
+  .scard:active .art { transform: scale(1.045); }
+  .scard.noart .art { background: radial-gradient(120% 130% at 20% 0%, #2e2820, #171410); }
+  .scard .scrim { position: absolute; inset: 0;
+    background: linear-gradient(180deg, rgba(16,13,9,.04) 32%, rgba(16,13,9,.9) 84%); }
+  .scard .body { position: absolute; left: 15px; right: 15px; bottom: 13px; }
+  .scard .t { font-family: "Source Han Serif SC","Noto Serif CJK SC","Songti SC",Georgia,serif;
+    font-size: 21px; color: #f2ead9; letter-spacing: .05em; text-shadow: 0 1px 8px rgba(0,0,0,.65); }
+  .scard .tease { font-size: 12.5px; color: #d5ccba; margin-top: 3px; line-height: 1.6;
+    overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .scard .meta { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .scard .meta span { font-size: 11px; padding: 3px 10px; border-radius: 999px;
+    background: rgba(24,20,14,.62); border: .5px solid rgba(216,181,122,.3); color: #dcccaa;
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+  #vnname.pop { animation: nmpop .38s ease; }
+  @keyframes nmpop { from { opacity: 0; transform: translateY(6px); } }
+  #vntext.hang { text-indent: -.62em; }
   #tunebox { position: fixed; left: 10px; bottom: calc(84px + env(safe-area-inset-bottom, 0px));
     z-index: 95; width: 232px; padding: 12px 14px; border-radius: 16px;
     background: rgba(24,20,14,.9); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
@@ -1274,25 +1295,27 @@ async function afterAuth() {
   // 糊回运行中的游戏上 (实弹: 冷启动后 show("pick") 盖住了整局)
   if (!page.items.length) { stories.innerHTML += `<p class='muted'>${t("还没有已发布的剧本。")}</p>`; if (!runId) show("pick"); return; }
   page.items.forEach(s => {
+    // 🎬 hero 卡: 场景图即门面, 开场白引子即演出 (设计稿「开场白即演出」)
     const div = document.createElement("div");
-    div.className = "card"; div.style.margin = "10px 0"; div.style.cursor = "pointer";
-    // 分型即玩法: a story card and a sandbox card are DIFFERENT games — say so up front
-    const badge = s.sandbox
-      ? `<span class="stype sb">🏖 ${B("无尽沙盒", "Endless sandbox")}</span>`
-      : `<span class="stype st">📖 ${B(`${s.acts_count || "?"}幕 · 主线`, `${s.acts_count || "?"} acts · story`)}</span>`;
-    const stats = [];
+    div.className = "scard" + (s.art_url ? "" : " noart");
+    const meta = [];
+    meta.push(s.sandbox ? B("🏖 无尽沙盒", "🏖 Endless sandbox")
+                        : B(`📖 ${s.acts_count || "?"}幕 · 主线`, `📖 ${s.acts_count || "?"} acts`));
     if (s.sandbox) {
-      if (s.progression) stats.push(`🪜 ${escapeHtml(s.progression)}`);
-      stats.push(B("🌱 无主线 · 世界随你生长", "🌱 no main plot · the world grows with you"));
-      if (s.characters_count) stats.push(B(`👥 ${s.characters_count} 个角色起步`, `👥 starts with ${s.characters_count} characters`));
+      if (s.progression) meta.push(`🪜 ${escapeHtml(s.progression.split(" → ").slice(0,3).join("→"))}`);
+      if (s.characters_count) meta.push(B(`👥 ${s.characters_count}`, `👥 ${s.characters_count}`));
     } else {
-      if (s.secrets_count) stats.push(B(`🔒 ${s.secrets_count} 个秘密`, `🔒 ${s.secrets_count} secrets`));
-      if (s.endings_count) stats.push(B(`🏆 ${s.endings_count} 种结局`, `🏆 ${s.endings_count} endings`));
-      if (s.characters_count) stats.push(B(`👥 ${s.characters_count} 个角色`, `👥 ${s.characters_count} characters`));
+      if (s.secrets_count) meta.push(B(`🔒 ${s.secrets_count} 个秘密`, `🔒 ${s.secrets_count}`));
+      if (s.endings_count) meta.push(B(`🏆 ${s.endings_count} 种结局`, `🏆 ${s.endings_count}`));
+      if (s.characters_count) meta.push(`👥 ${s.characters_count}`);
     }
-    div.innerHTML = `<b>${escapeHtml(s.title)}</b> ${badge}` +
-      (stats.length ? `<div class="scStats">${stats.join("　")}</div>` : "") +
-      `<div class="muted" style="margin-top:4px">${escapeHtml(s.one_liner||"")}</div>`;
+    const tease = s.opening_tease
+      ? `「${escapeHtml(s.opening_tease)}…」`
+      : escapeHtml(s.one_liner || "");
+    div.innerHTML = `<div class="art"${s.art_url ? ` style="background-image:url('${s.art_url}')"` : ""}></div>` +
+      `<div class="scrim"></div><div class="body"><div class="t">${escapeHtml(s.title)}</div>` +
+      (tease ? `<div class="tease">${tease}</div>` : "") +
+      `<div class="meta">${meta.map(m => `<span>${m}</span>`).join("")}</div></div>`;
     div.onclick = () => chooseRole(s.id);
     stories.appendChild(div);
   });
@@ -3331,8 +3354,9 @@ async function typeInto(el, text, ms=22) {
     if (skipType) { el.textContent = text; break; }
     el.textContent += ch;
     follow();
-    // a touch of cadence: linger on punctuation so it reads like real typing
-    await sleep(("，。！？…、—".includes(ch) ? ms*5 : ms) / f);
+    // 呼吸分级 (Yi: 高级感): 句末重顿×7, 逗顿×3.5, 破折×5 — 匀速滴答是廉价感
+    const pz = "。！？…".includes(ch) ? 7 : "，、；：".includes(ch) ? 3.5 : (ch === "—" ? 5 : 1);
+    await sleep(ms * pz / f);
   }
   follow();
 }
@@ -3935,8 +3959,13 @@ async function playBeatVN(b, skipLog) {
   if (b.fx === "flash") vnFlash();
   if (b.sfx) { if (pendingSfx === b.sfx) pendingSfx = null; playSfx(b.sfx); }
   else if (pendingSfx) { const n = pendingSfx; pendingSfx = null; playSfx(n); }
+  if (nameEl.textContent !== (b.speaker_name || "") && !isNarr) {
+    nameEl.classList.remove("pop"); void nameEl.offsetWidth; nameEl.classList.add("pop");
+  }
   nameEl.textContent = b.speaker_name || "";
   nameEl.classList.toggle("hidden", isNarr);
+  // 「 起头的台词悬挂缩进 — 引号吊在版心外, 行首齐(中文排印工艺)
+  box.classList.toggle("hang", !isNarr && /^[「『]/.test(b.text || ""));
   vnSprite(isNarr ? null : b.speaker_name, isNarr ? undefined : b.expr);
   box.className = isNarr ? "narr" : "";
   // 📖 分页 (Yi: 一页字太多): 长拍按句读切成 ≤76 字的页, 逐页点击翻
