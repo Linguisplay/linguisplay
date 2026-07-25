@@ -5,72 +5,79 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>LinguisPlay · 剧本工坊</title>
 <style>
+/* ═══ 🎬 片场法典 (2026-07-25 Yi 拍板): 影棚黑/暖纸白/钨丝金一主色, 靛蓝退役,
+   语义色四档(成86c48e/险d9a441/败c96a5e/心动d98a9c), 圆角三档(6/14/胶囊)。
+   色值经就近归化映射落地为字面量 (JS 画布也吃), 新组件一律引用下方变量。 ═══ */
+:root{--stage:#14100b;--stage2:#171410;--panel:#201c15;--raise:#292217;--line:rgba(216,181,122,.26);
+--paper:#ede6d8;--dim:#a79e8c;--gold:#d8b57a;--gold-hi:#e3c795;--gold-ink:#241c0e;
+--ok:#86c48e;--risk:#d9a441;--bad:#c96a5e;--love:#d98a9c}
+
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
-  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", "Source Han Sans SC", sans-serif; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; background: #0d0d12; color: #e8e8ee; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", "Source Han Sans SC", sans-serif; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; background: #14100b; color: #e8e8ee; }
   #app { max-width: 900px; margin: 0 auto; padding: 0 16px 60px; }
-  header { display: flex; justify-content: space-between; align-items: center; padding: 14px 0; border-bottom: 1px solid #23232c; position: sticky; top: 0; background: #0d0d12; z-index: 5; }
-  h1 { font-size: 17px; margin: 0; } h2 { font-size: 15px; margin: 22px 0 8px; color: #8ea2ff; border-bottom: 1px solid #23232c; padding-bottom: 5px; }
-  h3 { font-size: 13px; margin: 0 0 6px; color: #bbb; }
+  header { display: flex; justify-content: space-between; align-items: center; padding: 14px 0; border-bottom: 1px solid #201c15; position: sticky; top: 0; background: #14100b; z-index: 5; }
+  h1 { font-size: 17px; margin: 0; } h2 { font-size: 15px; margin: 22px 0 8px; color: #d8b57a; border-bottom: 1px solid #201c15; padding-bottom: 5px; }
+  h3 { font-size: 13px; margin: 0 0 6px; color: #a79e8c; }
   label { display: block; font-size: 12px; color: #999; margin: 8px 0 2px; }
-  input, textarea, select { width: 100%; padding: 8px; border-radius: 7px; border: 1px solid #333; background: #14141a; color: #eee; font: inherit; }
+  input, textarea, select { width: 100%; padding: 8px; border-radius: 7px; border: 1px solid #333; background: #171410; color: #ede6d8; font: inherit; }
   textarea { resize: vertical; min-height: 54px; }
-  button { padding: 8px 14px; border: 0; border-radius: 7px; background: #5b6cff; color: #fff; cursor: pointer; font-weight: 600; }
-  button.ghost { background: #23232c; color: #bbb; } button.sm { padding: 4px 9px; font-size: 12px; }
+  button { padding: 8px 14px; border: 0; border-radius: 6px; background: #d8b57a; color: #241c0e; cursor: pointer; font-weight: 600; }
+  button.ghost { background: #201c15; color: #a79e8c; } button.sm { padding: 4px 9px; font-size: 12px; }
   button.del { background: #3a1c1c; color: #e88; }
-  .card { background: #16161d; border: 1px solid #23232c; border-radius: 10px; padding: 14px; margin: 10px 0; }
-  .sub { margin: 8px 0; padding: 8px; border-left: 2px solid #2a3350; background: #12121a; border-radius: 0 8px 8px 0; }
+  .card { background: #1d1c19; border: 1px solid #201c15; border-radius: 10px; padding: 14px; margin: 10px 0; }
+  .sub { margin: 8px 0; padding: 8px; border-left: 2px solid #2a2418; background: #1a1816; border-radius: 0 8px 8px 0; }
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
   .row4 { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-  .chk { font-size: 12px; padding: 4px 8px; border-radius: 12px; border: 1px solid #2a3350; background: #14141a; color: #9fb0ff; cursor: pointer; }
-  .chk.on { background: #2a3356; }
+  .chk { font-size: 12px; padding: 4px 8px; border-radius: 12px; border: 1px solid #2a2418; background: #171410; color: #e3c795; cursor: pointer; }
+  .chk.on { background: #564d3e; }
   .muted { color: #888; font-size: 12px; }
   .hidden { display: none; }
   .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .listitem { display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
-  .tag { font-size: 11px; padding: 1px 7px; border-radius: 8px; background: #23232c; color: #aaa; }
-  a { color: #8ea2ff; cursor: pointer; }
+  .tag { font-size: 11px; padding: 1px 7px; border-radius: 8px; background: #201c15; color: #aaa; }
+  a { color: #d8b57a; cursor: pointer; }
   .fold > .foldbody { display: none; }
   .fold.open > .foldbody { display: block; }
   .foldhead { cursor: pointer; user-select: none; }
   .issue { padding: 6px 10px; border-radius: 8px; margin: 4px 0; font-size: 12.5px; }
-  .issue.error { background: #2a1416; border: 1px solid #57272b; color: #ff9d9d; }
+  .issue.error { background: #2a1416; border: 1px solid #57272b; color: #e0968b; }
   .issue.warn { background: #262112; border: 1px solid #55491f; color: #e8cf7a; }
   .issue.ok { background: #14231a; border: 1px solid #275737; color: #9de8b3; }
-  code.id { font-size: 11px; color: #6d7590; background: #101017; padding: 1px 5px; border-radius: 5px; }
+  code.id { font-size: 11px; color: #90897d; background: #171613; padding: 1px 5px; border-radius: 5px; }
   /* 📚 角色卡库 overlay */
   #cardlib { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.6); display: grid; place-items: center; }
-  #cardlib .libcard { width: min(680px, 94vw); max-height: 88vh; overflow-y: auto; background: #101018;
-                      border: 1px solid #34344a; border-radius: 16px; padding: 16px 18px; }
-  .cardrow { display: flex; align-items: center; gap: 10px; padding: 8px 6px; border-bottom: 1px solid #1c1c26; }
-  .cardrow .cav { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; background: #23232f;
+  #cardlib .libcard { width: min(680px, 94vw); max-height: 88vh; overflow-y: auto; background: #14100b;
+                      border: 1px solid #2e2820; border-radius: 16px; padding: 16px 18px; }
+  .cardrow { display: flex; align-items: center; gap: 10px; padding: 8px 6px; border-bottom: 1px solid #262420; }
+  .cardrow .cav { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; background: #201c15;
                   display: grid; place-items: center; font-weight: 700; flex: none; }
   .cardrow .cmeta { flex: 1; min-width: 0; }
   .cardrow .cname { font-weight: 600; font-size: 13.5px; }
   .cardrow .crole { color: #888; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 👤 角色卡照片 (Yi: 有照片会好很多) */
 .cav { position:relative; width:44px; height:44px; border-radius:50%; overflow:hidden;
-  background:#191a26; border:1px solid #45456a; flex:0 0 44px; }
+  background:#26231f; border:1px solid #6a6356; flex:0 0 44px; }
 .cav img { width:100%; height:100%; object-fit:cover; }
 .cav .cavf { position:absolute; inset:0; display:flex; align-items:center;
-  justify-content:center; color:#aab2cc; font-size:18px; }
+  justify-content:center; color:#b3aa97; font-size:18px; }
 /* ✍️ 折叠卡 + 分页简单模式 (Yi: 编辑要简单易懂, 多界面但不乱) */
-details.sec { border:1px solid #26262f; border-radius:12px; margin:10px 0; background:#101016; }
+details.sec { border:1px solid #201c15; border-radius:12px; margin:10px 0; background:#161513; }
 details.sec > summary { cursor:pointer; padding:11px 14px; list-style:none;
   display:flex; align-items:center; gap:8px; font-weight:700; font-size:15px; }
 details.sec > summary::-webkit-details-marker { display:none; }
-details.sec > summary::before { content:"▸"; color:#5d647a; font-weight:400; }
+details.sec > summary::before { content:"▸"; color:#7a746a; font-weight:400; }
 details.sec[open] > summary::before { content:"▾"; }
 details.sec > .secbody { padding:0 14px 12px; }
-.seccount { color:#7f88a8; font-size:12px; font-weight:400; margin-left:auto; }
-.sectabs { display:none; position:sticky; top:0; z-index:5; background:#0b0b10;
+.seccount { color:#a8a091; font-size:12px; font-weight:400; margin-left:auto; }
+.sectabs { display:none; position:sticky; top:0; z-index:5; background:#100f0d;
   padding:8px 0 6px; gap:6px; flex-wrap:wrap; }
-.sectabs button { background:#15151d; border:1px solid #2a2a36; color:#aab2cc;
+.sectabs button { background:#1d1b19; border:1px solid #292217; color:#b3aa97;
   border-radius:999px; padding:6px 12px; font-size:13px; cursor:pointer; }
-.sectabs button.on { border-color:#8ea2ff; color:#e7eaf3; background:#1b1e30; }
-.sectabs .tbadge { color:#7f88a8; font-size:11px; margin-left:3px; }
+.sectabs button.on { border-color:#d8b57a; color:#241c0e; background:#d8b57a; font-weight:600; }
+.sectabs .tbadge { color:#a8a091; font-size:11px; margin-left:3px; }
 /* 简单模式: 分页 — 只显示激活区, 标题行变页头不可折叠 */
 body.simple .sectabs { display:flex; }
 body.simple details.sec { display:none; }
@@ -589,7 +596,7 @@ function renderRelGraph(){
     const a = pos[p.a], b = pos[p.b];
     if(!a || !b) return;
     const key = _pairK(p.a, p.b), sel = key === _rgEditKey, s = p.stance | 0;
-    const col = s > 0 ? "#d8b57a" : s < 0 ? "#e0574f" : "#3a4160";
+    const col = s > 0 ? "#d8b57a" : s < 0 ? "#c96a5e" : "#60584b";
     edges += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${col}"`
       + ` stroke-width="${(s ? Math.abs(s) * 2.5 : 1.5) + (sel ? 1.5 : 0)}"`
       + ` stroke-opacity="${sel ? 1 : .8}" ${s ? "" : 'stroke-dasharray="4 4"'}`
@@ -600,10 +607,10 @@ function renderRelGraph(){
     const word = (p.label || "").trim().slice(0, 8)
       || (STANCES.find(([v]) => v === s) || [0, ""])[1].replace(/[（）]/g, "");
     if(word){
-      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, wc = s ? col : "#8a93b0";
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, wc = s ? col : "#b0a89b";
       const w = word.length * 11 + 16;
       edges += `<g transform="translate(${mx},${my})" style="cursor:pointer" onclick="_rgEditOpen('${key}')">`
-        + `<rect x="${-w/2}" y="-10" width="${w}" height="20" rx="10" fill="#0f1018" stroke="${wc}" stroke-opacity=".7"/>`
+        + `<rect x="${-w/2}" y="-10" width="${w}" height="20" rx="10" fill="#181613" stroke="${wc}" stroke-opacity=".7"/>`
         + `<text y="4" text-anchor="middle" font-size="10.5" fill="${wc}">${esc(word)}</text></g>`;
     }
   });
@@ -611,9 +618,9 @@ function renderRelGraph(){
     const p = pos[c.id], sel = _rgSel === c.id;
     const av = (c.avatar_url || "").trim();
     return `<g transform="translate(${p.x},${p.y})" style="cursor:pointer" onclick="_rgPick('${c.id}')">`
-      + `<circle r="20" fill="#191a26" stroke="${sel ? "#8ea2ff" : "#45456a"}" stroke-width="${sel ? 3 : 2}"/>`
+      + `<circle r="20" fill="#26231f" stroke="${sel ? "#d8b57a" : "#6a6356"}" stroke-width="${sel ? 3 : 2}"/>`
       + (av ? `<image href="${esc(av)}" x="-20" y="-20" width="40" height="40" clip-path="circle(20px at 20px 20px)" preserveAspectRatio="xMidYMid slice"/>`
-            : `<text y="5" text-anchor="middle" fill="#aab2cc" font-size="14">${esc((c.name || "?").slice(0, 1))}</text>`)
+            : `<text y="5" text-anchor="middle" fill="#b3aa97" font-size="14">${esc((c.name || "?").slice(0, 1))}</text>`)
       + `<text y="34" text-anchor="middle" fill="#cfd4e6" font-size="11">${esc((c.name || "").slice(0, 5))}</text></g>`;
   }).join("");
   // 🖊 就地编辑卡 (Yi: 直接在可视化里编辑): 立场点选即生效, 渊源即改即存
@@ -795,9 +802,9 @@ function renderLocs(){
       </div>
       <div class="bar" style="margin-top:8px;align-items:center;gap:10px;flex-wrap:wrap">
         <img src="/scene/bg/${encodeURIComponent(l.id)}.jpg${_bgBust[l.id]?`?v=${_bgBust[l.id]}`:""}" alt=""
-             style="width:128px;height:72px;object-fit:cover;border-radius:8px;border:1px solid #2a2a36"
+             style="width:128px;height:72px;object-fit:cover;border-radius:8px;border:1px solid #292217"
              onerror="this.style.opacity=.18;this.title='尚未有背景图'">
-        <label class="sm ghost" style="cursor:pointer;margin:0;padding:4px 10px;border:1px solid #2a2a36;border-radius:8px">📷 上传背景<input type="file" accept="image/*" style="display:none" onchange="uploadLocBg(${i},this)"></label>
+        <label class="sm ghost" style="cursor:pointer;margin:0;padding:4px 10px;border:1px solid #292217;border-radius:8px">📷 上传背景<input type="file" accept="image/*" style="display:none" onchange="uploadLocBg(${i},this)"></label>
         <button class="sm ghost" onclick="genLocBg(${i})">🎨 AI 画背景（跟剧本画风）</button>
         <span class="muted" id="bgmsg_${i}" style="font-size:12px"></span>
       </div>
@@ -967,7 +974,7 @@ function renderChars(){
       </div>
       <div class="foldbody">
       <div class="bar" style="margin:2px 0 8px">
-        <label class="sm ghost" style="cursor:pointer;margin:0;padding:4px 10px;border:1px solid #2a2a36;border-radius:8px">📷 上传照片<input type="file" accept="image/*" style="display:none" onchange="uploadCharPhoto(${i},this)"></label>
+        <label class="sm ghost" style="cursor:pointer;margin:0;padding:4px 10px;border:1px solid #292217;border-radius:8px">📷 上传照片<input type="file" accept="image/*" style="display:none" onchange="uploadCharPhoto(${i},this)"></label>
         <button class="sm ghost" onclick="genCharAvatar(${i})">🎨 AI 画一张（跟剧本画风）</button>
         <span class="muted" id="avmsg_${i}" style="font-size:12px"></span>
       </div>
@@ -1104,7 +1111,7 @@ function renderSecrets(){
     s.fragments.forEach((f,fi)=>{
       const known = story.characters.map(c=>`<span class="chk ${f.known_by_character_ids.includes(c.id)?"on":""}" onclick="toggleKnown(${i},${fi},'${c.id}')">${esc(c.name||"?")}</span>`).join("");
       const evs = allEvents().map(e=>`<span class="chk ${((f.unlock.trigger_event_ids)||[]).includes(e.id)?"on":""}" onclick="toggleUnlockEvent(${i},${fi},'${e.id}')">${esc(e.label)}</span>`).join("") || "<span class='muted'>（无事件可选）</span>";
-      frs+=`<div class="sub" style="border-left-color:#3a3270">
+      frs+=`<div class="sub" style="border-left-color:#70634e">
         <div class="bar" style="justify-content:space-between"><h3>第 ${f.layer} 层碎片 <code class="id">${esc(f.id||"（保存后生成）")}</code></h3><button class="sm del" onclick="delFrag(${i},${fi})">删碎片</button></div>
         <label>内容（真相正文，解锁后才会被角色说出，绝不进向量库）</label><textarea oninput="setFrag(${i},${fi},'content',this.value)">${esc(f.content)}</textarea>
         <label>🗣 谎言口径（cover，可选：真相解锁前，知情者统一说的假话；对峙成功当场戳穿）</label><textarea oninput="setFrag(${i},${fi},'cover',this.value)">${esc(f.cover||"")}</textarea>
@@ -1440,7 +1447,7 @@ async function save(publish){
         const list = (d.lint_errors||[]).map(m=>`<li>${esc(m)}</li>`).join("");
         // 🧹 失效引用类错误全是机械修 (删出口/置空) — 给一键, 别让作者手工扫26条
         const sweepable = (d.lint_errors||[]).some(m=>/指向|不存在|不是已知/.test(m));
-        saveMsg.innerHTML = `<span style="color:#ff9d9d">🧪 体检未过（${d.count||"?"} 处），修好才能发布：</span>`+
+        saveMsg.innerHTML = `<span style="color:#e0968b">🧪 体检未过（${d.count||"?"} 处），修好才能发布：</span>`+
           `<ul style="margin:6px 0 0 18px;color:#ffb9b9">${list}</ul>`+
           (sweepable?`<button class="sm" style="margin-top:8px" onclick="sweepAndPublish()">🧹 一键清理失效引用并重新发布</button>`:"");
         return;
@@ -1551,7 +1558,7 @@ function editCardForm(id){
     <div class="bar" style="margin-top:10px">
       <button onclick="saveCardForm('${id||""}')">保存</button>
       ${id?`<button class="ghost sm" onclick="enrichCardBtn('${id}')">🔍 智能增强</button>
-      <label class="ghost sm" style="margin:0;padding:4px 9px;background:#23232c;border-radius:7px;cursor:pointer;color:#bbb;font-size:12px">
+      <label class="ghost sm" style="margin:0;padding:4px 9px;background:#201c15;border-radius:7px;cursor:pointer;color:#a79e8c;font-size:12px">
         🖼 上传头像<input type="file" accept="image/*" style="display:none" onchange="uploadCardAvatar('${id}',this)"></label>`:""}
       <span id="cc_msg" class="muted"></span></div>`;
 }
