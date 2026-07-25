@@ -36,16 +36,15 @@
   input, button, select { font: inherit; }
   input { width: 100%; padding: 11px 12px; margin: 6px 0; border-radius: 12px; border: .5px solid rgba(216,181,122,.22); background: rgba(20,16,11,.6); color: #ede6d8; }
   input:focus { outline: none; border-color: rgba(216,181,122,.55); box-shadow: 0 0 0 3px rgba(216,181,122,.12); }
-  button { padding: 9px 16px; border: 0; border-radius: 12px; background: #d8b57a; color: #241c0e; cursor: pointer; font-weight: 600; transition: transform .12s ease, opacity .12s ease; }
+  button { padding: 9px 16px; border: 0; border-radius: 12px; background: linear-gradient(180deg,#e6cb99,#cfa965); box-shadow: inset 0 1px 0 rgba(255,255,255,.38), 0 1px 3px rgba(0,0,0,.32); color: #241c0e; cursor: pointer; font-weight: 600; transition: transform .12s ease, opacity .12s ease; }
   button:active { transform: scale(.96); }
   button.ghost { background: #201c15; color: #a79e8c; }
   button:disabled { opacity: .5; cursor: default; }
-  .iconbtn { background: transparent; padding: 4px 6px; font-size: 16px;
-    /* 🎬 片场: emoji 图标统一钨丝金单色调 (线性图标集之前的过渡工艺) — 彩色 emoji
-       各说各话是廉价感的源头之一; sound/speed 等按钮由 JS 换字, 滤镜法零破坏 */
-    filter: grayscale(1) sepia(.4) saturate(2.4) hue-rotate(-18deg) brightness(1.08);
-    opacity: .82; }
-  .iconbtn:active { opacity: 1; }
+  .iconbtn { background: transparent; padding: 5px 7px; font-size: 16px; color: #c9bfa9; }
+  .iconbtn:active { color: #d8b57a; }
+  .ic { vertical-align: -3.5px; }
+  #scenehud b { font-family: "Source Han Serif SC","Noto Serif CJK SC","Songti SC",Georgia,serif;
+    letter-spacing: .08em; }
   #cast { flex: 0 0 auto; display: flex; gap: 8px; overflow-x: auto; padding: 8px 16px; border-bottom: 1px solid #201c1544; background: rgba(20,16,11,.45); }
   .castitem { display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer; opacity: .6; min-width: 46px; }
   .castitem.sel { opacity: 1; }
@@ -71,7 +70,7 @@
   .typing .bubble span:nth-child(2){ animation-delay:.2s } .typing .bubble span:nth-child(3){ animation-delay:.4s }
   @keyframes blink { 0%,60%,100%{opacity:.2} 30%{opacity:1} }
   footer { flex: 0 0 auto; padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px)); border-top: .5px solid rgba(216,181,122,.22); display: flex; gap: 8px; align-items: center; background: rgba(24,20,14,.62); backdrop-filter: blur(24px) saturate(1.5); -webkit-backdrop-filter: blur(24px) saturate(1.5); }
-  footer select { background: rgba(46,40,32,.6); color: #ede6d8; border: .5px solid rgba(216,181,122,.25); border-radius: 12px; padding: 0 10px; height: 44px; }
+  footer select { background: rgba(46,40,32,.6); color: #ede6d8; border: .5px solid rgba(216,181,122,.25); border-radius: 12px; padding: 0 26px 0 12px; height: 44px; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%23c9bfa9' stroke-width='1.6' stroke-linecap='round'/></svg>"); background-repeat: no-repeat; background-position: right 9px center; }
   footer input { margin: 0; }
   #goalbar { flex: 0 0 auto; margin: 8px 16px 0; padding: 8px 12px; border-radius: 10px; background: #302c24cc; border: 1px solid #2a2418; color: #fff7ea; font-size: 13px; line-height: 1.5; }
   #goalbar b { color: #e0b45c; }
@@ -544,7 +543,7 @@ body.vn { touch-action: pan-y; }
   white-space: normal; line-height: 1.55; display: -webkit-box; -webkit-line-clamp: 2;
   -webkit-box-orient: vertical; overflow: hidden; }
 #vnchoices button:hover { color: #d8b57a; border-color: #d8b57a; }
-#vnchoices button.prime { background: #d8b57a; border-color: #d8b57a; color: #241c0e; font-weight: 600; }
+#vnchoices button.prime { background: linear-gradient(180deg,#e6cb99,#cfa965); box-shadow: inset 0 1px 0 rgba(255,255,255,.38), 0 1px 3px rgba(0,0,0,.32); border-color: #cfa965; color: #241c0e; font-weight: 600; }
 #vnchoices button:active { transform: scale(.97); }
 body.vnhide #vnbox, body.vnhide #vnchoices, body.vn.vnhide footer
   { opacity: 0; pointer-events: none; }
@@ -648,7 +647,7 @@ body.dread #dread { opacity:1; }
 .dice.mix .roll { animation: dshake .5s ease 1; }
 @keyframes dshake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-3px)} 75%{transform:translateX(3px)} }
 /* chip 分型: chip 1 follows the player's intent — it reads louder */
-#suggest .chip.prime { border-color:#c9b38c; background:#383329; color:#fff4e1; }
+#suggest .chip.prime { border-color:#cfa965; background: linear-gradient(180deg,#e6cb99,#cfa965); color:#241c0e; font-weight:600; box-shadow: inset 0 1px 0 rgba(255,255,255,.38); }
 #suggest .chip.redo { border-color:#6a5b2c; color:#e8d9a0; }
 
 /* ── 🖼 竖屏画框 (最终形态=手机 App): 宽屏下 VN 收进居中竖版舞台, 两侧留黑 ── */
@@ -788,7 +787,7 @@ body.dread #dread { opacity:1; }
   <div id="scenehudlist" class="hidden"></div>
   <div id="vnbox" onclick="vnAdvance()">
     <div id="vnname" class="hidden"></div>
-    <div id="vnctl"><span id="vnctlh" onclick="event.stopPropagation();vnCtlToggle()" title="菜单">☰</span><span onclick="event.stopPropagation();vnHearts()" title="好感度">好感</span><span onclick="event.stopPropagation();vnToggleStat()" title="目标/理智/警觉等状态">状态</span><span onclick="event.stopPropagation();vnHide()" title="隐藏界面看立绘">隐藏</span><span id="vnauto" onclick="event.stopPropagation();vnToggleAuto()" title="自动播放">自动</span><span onclick="event.stopPropagation();vnToggleLog()" title="回想">记录</span><span onclick="event.stopPropagation();vnRewindLast()" title="撤回上一个回合">⏪</span></div>
+    <div id="vnctl"><span id="vnctlh" onclick="event.stopPropagation();vnCtlToggle()" title="菜单">☰</span><span onclick="event.stopPropagation();vnHearts()" title="好感度">好感</span><span onclick="event.stopPropagation();vnToggleStat()" title="目标/理智/警觉等状态">状态</span><span onclick="event.stopPropagation();vnHide()" title="隐藏界面看立绘">隐藏</span><span id="vnauto" onclick="event.stopPropagation();vnToggleAuto()" title="自动播放">自动</span><span onclick="event.stopPropagation();vnToggleLog()" title="回想">记录</span><span onclick="event.stopPropagation();vnRewindLast()" title="撤回上一个回合">撤回</span></div>
     <div id="vntext"></div>
     <!-- 选项住在对话面板内部: 文字和选项同一个流, 物理上不可能互相遮挡 -->
     <div id="vnchoices" class="hidden" onclick="event.stopPropagation()"></div>
@@ -1073,6 +1072,40 @@ async function j(path, opts={}) {
 const show = (id) => document.getElementById(id).classList.remove("hidden");
 const hide = (id) => document.getElementById(id).classList.add("hidden");
 function escapeHtml(s){ return (s||"").replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+// 🎬 片场图标集: 手绘线性 24 网格, currentColor 单色 — emoji 图标全面退役 (高级感的地基)
+const ICONS = {
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.2 9a2.9 2.9 0 0 1 5.6 1c0 1.8-2.4 2.2-2.8 3.6"/><circle cx="12" cy="17.3" r=".6" fill="currentColor" stroke="none"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.8 2.6 4 5.7 4 9s-1.2 6.4-4 9c-2.8-2.6-4-5.7-4-9s1.2-6.4 4-9z"/>',
+  phone: '<rect x="7" y="3" width="10" height="18" rx="2.5"/><path d="M11 17.5h2"/>',
+  map: '<path d="M9 4 3.5 6v14L9 18l6 2 5.5-2V4L15 6 9 4zM9 4v14M15 6v14"/>',
+  book: '<path d="M5 4.5A2.5 2.5 0 0 1 7.5 2H19v17.5H7.5A2.5 2.5 0 0 0 5 22V4.5z"/><path d="M19 19.5H7.5A2.5 2.5 0 0 0 5 22"/>',
+  world: '<circle cx="12" cy="12" r="9.2"/><path d="M4 12h3l2-4 3 8 2.5-6 1.5 2h4"/>',
+  vol: '<path d="M4 9.5v5h3.5L12 18V6L7.5 9.5H4z"/><path d="M15.5 9a4.5 4.5 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11"/>',
+  volx: '<path d="M4 9.5v5h3.5L12 18V6L7.5 9.5H4z"/><path d="m16 9.5 5 5m0-5-5 5"/>',
+  play: '<path d="M8 5.5v13l10-6.5-10-6.5z"/>',
+  menu: '<path d="M4.5 7h15M4.5 12h15M4.5 17h15"/>',
+  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  sand: '<path d="M7 3h10M7 21h10M8 3c0 7 8 7 8 11v7M16 3c0 7-8 7-8 11v7"/>',
+  pin: '<path d="M12 21s-6.5-5.4-6.5-10.2a6.5 6.5 0 0 1 13 0C18.5 15.6 12 21 12 21z"/><circle cx="12" cy="10.5" r="2.2"/>',
+  target: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r=".8" fill="currentColor" stroke="none"/>',
+  flag: '<path d="M6 21V4.5M6 5c4-2.4 8 2.2 12-.3V13c-4 2.4-8-2.2-12 .3"/>',
+  alert: '<path d="M12 4 2.8 19.5h18.4L12 4z"/><path d="M12 10v4.5"/><circle cx="12" cy="17" r=".7" fill="currentColor" stroke="none"/>',
+  bulb: '<path d="M9 18.5h6M10 21h4M12 3a6 6 0 0 1 3.5 10.9c-.8.6-1 1.6-1 2.6h-5c0-1-.2-2-1-2.6A6 6 0 0 1 12 3z"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.4-4.4"/>',
+  cal: '<rect x="4" y="6" width="16" height="15" rx="2.5"/><path d="M4 10.5h16M8.5 3.5v4M15.5 3.5v4"/>',
+  gauge1: '<path d="M4 17a9 9 0 0 1 16 0"/><path d="M12 15 8.5 11"/><circle cx="12" cy="15" r="1.2" fill="currentColor" stroke="none"/>',
+  gauge2: '<path d="M4 17a9 9 0 0 1 16 0"/><path d="M12 15v-5"/><circle cx="12" cy="15" r="1.2" fill="currentColor" stroke="none"/>',
+  gauge3: '<path d="M4 17a9 9 0 0 1 16 0"/><path d="m12 15 3.5-4"/><circle cx="12" cy="15" r="1.2" fill="currentColor" stroke="none"/>',
+};
+const IC = (n, s = 17) => `<svg class="ic" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n] || ""}</svg>`;
+(function initIcons() {
+  const set = (id, name, size) => { const el = document.getElementById(id); if (!el) return;
+    const badge = el.querySelector(".pbadge"); el.innerHTML = IC(name, size || 18); if (badge) el.appendChild(badge); };
+  set("helpBtn", "help"); set("langBtn", "globe"); set("phoneBtn", "phone");
+  set("mapBtn", "map"); set("journalBtn", "book"); set("worldBtn", "world");
+  set("soundBtn", "vol"); set("phoneFab", "phone", 20); set("driveBtn", "play");
+  const h = document.getElementById("vnctlh"); if (h) h.innerHTML = IC("menu", 16);
+})();
 
 // ── auth ──────────────────────────────────────────────
 async function signup() {
@@ -2964,27 +2997,27 @@ function refreshStrip() {
   if (!el) return;
   const bits = [];
   if (curClock && curClock.label) {
-    let t = "🕐" + curClock.label;
+    let t = IC("clock", 13) + curClock.label;
     if (curClock.deadline && curClock.deadline.days_left >= 0)
-      t += " ⏳" + (curClock.deadline.days_left === 0 ? B("今天", "today") : curClock.deadline.days_left + B("天", "d"));
+      t += " " + IC("sand", 13) + (curClock.deadline.days_left === 0 ? B("今天", "today") : curClock.deadline.days_left + B("天", "d"));
     bits.push(escapeHtml(t));
   }
   // 🎬 片场: VN 下地点由 scenehud 场景牌独家播报 — 详情条不再重复报站 (顶部去重)
-  if (curLocData && curLocData.name && !vnMode) bits.push("📍" + escapeHtml(curLocData.name));
+  if (curLocData && curLocData.name && !vnMode) bits.push(IC("pin", 13) + escapeHtml(curLocData.name));
   // 目标位读数据 (lastGoal) 不抄 DOM — 抄 textContent 会把「当前目标：」标签/幕前缀/
   // 任务行一起吃进 14 字预算, 目标清空后还残影旧文 (Yi 实弹: 14 字里真目标只剩 9 个)
   const gchars = Array.from((lastGoal || "").trim());
-  if (gchars.length) bits.push("🎯" + escapeHtml(gchars.slice(0, 14).join("")) + (gchars.length > 14 ? "…" : ""));
+  if (gchars.length) bits.push(IC("target", 13) + escapeHtml(gchars.slice(0, 14).join("")) + (gchars.length > 14 ? "…" : ""));
   else {
     const q0 = (curQuests || []).find(q => q.status === "open");
     if (q0) {
       const qc = Array.from((q0.title || "").trim());
-      bits.push((q0.reward ? "📋" : "🧭") + escapeHtml(qc.slice(0, 14).join("")) + (qc.length > 14 ? "…" : ""));
+      bits.push(IC("flag", 13) + escapeHtml(qc.slice(0, 14).join("")) + (qc.length > 14 ? "…" : ""));
     }
   }
-  if (lastPromises && lastPromises.length) bits.push("🤝" + lastPromises.length);
-  if (lastPressure && lastPressure.name) bits.push("⚠️" + escapeHtml(String(lastPressure.value || 0)));
-  if (!document.getElementById("hintbar").classList.contains("hidden")) bits.push("💡");
+  if (lastPromises && lastPromises.length) bits.push(IC("cal", 13) + lastPromises.length);
+  if (lastPressure && lastPressure.name) bits.push(IC("alert", 13) + escapeHtml(String(lastPressure.value || 0)));
+  if (!document.getElementById("hintbar").classList.contains("hidden")) bits.push(IC("bulb", 13));
   if (curVerdict && !curVerdict.solved && !curVerdict.failed && curVerdict.attempts_left)
     bits.push(`<span class="alert">${B("🔍 可结案", "🔍 Case ready")}</span>`);
   if (!bits.length) { el.classList.add("hidden"); return; }
@@ -3211,7 +3244,7 @@ function makeTypingRow(side, name) {
 const SPEEDS = [{ f: 1, icon: "🐢", label: "慢" }, { f: 1.8, icon: "🐇", label: "中" }, { f: 3.4, icon: "⚡", label: "快" }];
 let spdIdx = Math.min(2, parseInt(localStorage.getItem("lp_speed") || "1", 10) || 1);
 let skipType = false;   // set by tapping the chat while a turn is playing out
-function applySpeedIcon() { const b = document.getElementById("spdBtn"); if (b) { b.textContent = SPEEDS[spdIdx].icon; b.title = B(`文字速度：${SPEEDS[spdIdx].label}`, `Text speed: ${SPEEDS[spdIdx].icon}`); } }
+function applySpeedIcon() { const b = document.getElementById("spdBtn"); if (b) { b.innerHTML = IC(["gauge1","gauge2","gauge3"][spdIdx] || "gauge2", 18); b.title = B(`文字速度：${SPEEDS[spdIdx].label}`, `Text speed: ${SPEEDS[spdIdx].label}`); } }
 function cycleSpeed() {
   spdIdx = (spdIdx + 1) % SPEEDS.length;
   try { localStorage.setItem("lp_speed", String(spdIdx)); } catch (e) {}
@@ -3262,8 +3295,8 @@ function vnCue(mode) {
   if (!vnMode) return;
   if (mode === "play") { msg.placeholder = B("剧情推进中…（点对话框继续）", "Playing… tap the box to advance"); return; }
   const has = !document.getElementById("vnchoices").classList.contains("hidden");
-  msg.placeholder = has ? B("轮到你了：打字行动，或点上面的选项", "Your move: type, or tap an option above")
-                        : B("轮到你了：打字行动…", "Your move: type an action…");
+  msg.placeholder = has ? B("轮到你了…", "Your move…")
+                        : B("轮到你了…", "Your move…");
 }
 function vnAdvance() {
   if (vnLocked()) return;   // 🔒 过场在放: 乱点不许把台下的剧情点跑
@@ -3461,7 +3494,7 @@ function vnHudRender() {
   const place = (curLocData && curLocData.name) || "";
   if (!vnMode || (!place && !roster.length)) { hud.classList.add("hidden"); return; }
   const names = roster.map(c => c.name).join("、");
-  hud.innerHTML = `📍 <b>${escapeHtml(place || B("此处", "here"))}</b> · ` +
+  hud.innerHTML = `${IC("pin", 13)} <b>${escapeHtml(place || B("此处", "here"))}</b> · ` +
     (roster.length ? B(`在场 ${roster.length} 人`, `${roster.length} here`)
                    : B("这里只有你", "just you")) +
     (names ? ` <span style="opacity:.75">${escapeHtml(names)}</span>` : "");
@@ -4023,7 +4056,7 @@ document.addEventListener("keydown", kickAudio, true);
 
 function toggleSound() {
   soundOn = !soundOn;
-  soundBtn.textContent = soundOn ? "🔊" : "🔇";
+  soundBtn.innerHTML = IC(soundOn ? "vol" : "volx", 18);
   if (soundOn) { bgm.volume = 0; bgm.play().catch(()=>{}); _ramp(bgm, BGM_VOL, 2000); } else { bgm.pause(); }
 }
 function stopBgm(){ try { bgm.pause(); bgm.removeAttribute("src"); curBgmMood=null; } catch(e){} }
