@@ -97,3 +97,39 @@ def test_cursor_never_regresses():
     runtime.apply_pending_folds(st)
     assert st["memory_by_char"]["c1"] == "新账", "过期折叠不许倒灌"
     assert st["memcov_by_char"]["c1"] == 99
+
+
+# ── 场记同款 pending (4秒军令第二刀) ─────────────────────────────────────────
+
+def test_track_async_lands_next_turn():
+    st = runtime.default_state()
+    st["location_id"] = None
+
+    class TrackLLM:
+        def generate(self, prompt):
+            assert prompt.get("track_scene")
+            return {"frames": [], "player": {"pos": "靠窗坐着", "doing": "翻账本"},
+                    "progressed": True}
+
+    content = {"story": {"id": "s", "characters": [], "acts": [{"index": 1, "title": "一"}]},
+               "secrets": []}
+    runtime.track_frames_async(content, st, {"name": "我"},
+                               [{"type": "description", "text": "你靠窗坐下翻起账本。"}],
+                               TrackLLM())
+    tok = st.get("track_pending")
+    assert tok
+    for _ in range(150):
+        if tok in runtime._TRACK_PENDING:
+            break
+        time.sleep(0.02)
+    assert not (st.get("player_pos") or {}).get("text"), "本回合不动账"
+    assert runtime.apply_pending_track(st) is True
+    assert "靠窗坐着" in (st.get("player_pos") or {}).get("text", "")
+    assert runtime.apply_pending_track(st) is False
+
+
+def test_track_unfinished_keeps_ticket():
+    st = runtime.default_state()
+    st["track_pending"] = "slowtrack000"
+    assert runtime.apply_pending_track(st) is False
+    assert st["track_pending"] == "slowtrack000"

@@ -6423,18 +6423,12 @@ def book_scene_frame(content: dict[str, Any], state: dict[str, Any],
     return booked
 
 
-def track_scene_frames(content: dict[str, Any], state: dict[str, Any],
-                       persona: dict[str, Any], all_beats: list[dict[str, Any]],
-                       llm) -> None:
-    """🎥 场记 (turn-end tracker pass): one small extraction call reads THIS turn's prose
-    and re-derives every present body's frame (pos·doing·wear). The ledger follows the
-    text — declarations and twins remain fast-path hints, the tracker is the authority.
-    Hard contradictions against last frame land in state.track_note (next turn's anchor
-    tells the model the ledger wins) + the audit sheet. Fail-open: any error keeps the
-    previous frames."""
+def _track_prep(content: dict[str, Any], state: dict[str, Any],
+                persona: dict[str, Any], all_beats: list[dict[str, Any]]):
+    """场记备料 (主线程): 提示词素材 + 合账上下文快照。无戏可记返回 None。"""
     txt = " ".join((b.get("text") or "") for b in all_beats if b.get("text")).strip()[:1500]
     if not txt:
-        return
+        return None
     here = scene_characters(content, state)
     lid = state.get("location_id")
     pcid = state.get("player_character_id")
@@ -6458,7 +6452,35 @@ def track_scene_frames(content: dict[str, Any], state: dict[str, Any],
            "mature": bool(state.get("mature"))}
     if lang_of(content) == "en":      # the language stamp rides EN runs only (convention)
         _tp["language"] = "en"
+    ctx = {"lid": lid,
+           "name2id": {c.get("name"): c.get("id") for c in here if c.get("id") != pcid}}
+    return _tp, ctx
+
+
+def track_scene_frames(content: dict[str, Any], state: dict[str, Any],
+                       persona: dict[str, Any], all_beats: list[dict[str, Any]],
+                       llm) -> None:
+    """🎥 场记 (turn-end tracker pass): one small extraction call reads THIS turn's prose
+    and re-derives every present body's frame (pos·doing·wear). The ledger follows the
+    text — declarations and twins remain fast-path hints, the tracker is the authority.
+    Hard contradictions against last frame land in state.track_note (next turn's anchor
+    tells the model the ledger wins) + the audit sheet. Fail-open: any error keeps the
+    previous frames. (同步版: 测试与 run_turn 包装器用; 回合流水线走 track_frames_async)"""
+    prep = _track_prep(content, state, persona, all_beats)
+    if not prep:
+        return
+    _tp, ctx = prep
     out = llm.generate(_tp) or {}
+    _track_apply(state, out, ctx)
+
+
+def _track_apply(state: dict[str, Any], out: dict[str, Any], ctx: dict[str, Any]) -> None:
+    """场记合账 (主线程): 帧上台账。帧钉着记账时的地点 id — 玩家换过场自动作废
+    (char_position 只认 at==当前地点的帧), 迟一回合入账依旧安全。"""
+    lid = ctx.get("lid")
+    name2id = ctx.get("name2id") or {}
+    sim = state.get("char_sim", {}) or {}
+    pp = state.get("player_pos") if isinstance(state.get("player_pos"), dict) else {}
 
     def _entry(f, old):
         pos = str((f or {}).get("pos") or "").strip()[:14]
@@ -6473,7 +6495,6 @@ def track_scene_frames(content: dict[str, Any], state: dict[str, Any],
             e["wear"] = w
         return e if e["text"] or e.get("wear") else None
 
-    name2id = {c.get("name"): c.get("id") for c in here if c.get("id") != pcid}
     booked = 0
     for f in (out.get("frames") or [])[:8]:
         nm = str((f or {}).get("name") or "").strip()
@@ -6513,6 +6534,55 @@ def track_scene_frames(content: dict[str, Any], state: dict[str, Any],
         _metrics.log("track", booked=booked, conflict=len(cons))
     except Exception:
         pass
+
+
+_TRACK_PENDING: dict = {}   # 一次性票据 → {"out": 模型产出, "ctx": 记账上下文}
+_TRACK_CAP = 30
+
+
+def track_frames_async(content: dict[str, Any], state: dict[str, Any],
+                       persona: dict[str, Any], all_beats: list[dict[str, Any]],
+                       llm) -> None:
+    """⚡ 场记出关键路径 (4秒军令): 注释一直说「玩家不用等」, 但收尾事件与落库
+    都排在生成器耗尽之后 — 场记那 ~1.5s 实际一直挡着输入框解锁。同折叠家法:
+    备料主线程 / 模型后台 / 下一回合 apply_pending_track 合账。帧钉记账时地点,
+    换场自动作废; 丢单 = 保留旧帧 (fail-open 语义不变)。"""
+    prep = _track_prep(content, state, persona, all_beats)
+    if not prep:
+        return
+    payload, ctx = prep
+    import threading
+    import uuid
+    tok = uuid.uuid4().hex[:12]
+    state["track_pending"] = tok
+
+    def _work():
+        try:
+            out = llm.generate(payload) or {}
+        except Exception:
+            out = {}
+        while len(_TRACK_PENDING) >= _TRACK_CAP:
+            _TRACK_PENDING.pop(next(iter(_TRACK_PENDING)), None)
+        _TRACK_PENDING[tok] = {"out": out, "ctx": ctx}
+
+    threading.Thread(target=_work, daemon=True).start()
+
+
+def apply_pending_track(state: dict[str, Any]) -> bool:
+    """回合开演前把后台记好的场记帧合进账 (主线程)。没记完票不烧 (折叠同款)。"""
+    tok = state.get("track_pending")
+    if not tok:
+        return False
+    got = _TRACK_PENDING.pop(tok, None)
+    if got is None:
+        return False               # 后台还没记完: 票留着, 下回合再收
+    state.pop("track_pending", None)
+    if got.get("out"):
+        try:
+            _track_apply(state, got["out"], got.get("ctx") or {})
+        except Exception:
+            pass
+    return True
 
 
 def unframed_names(content: dict[str, Any], state: dict[str, Any],
@@ -8202,9 +8272,10 @@ def run_turn_stream(
     state = {**default_state(), **(state or {})}
     # 🎒 懒迁移 (物品实体化 P0): 旧档物品行在被加载的这一刻补籍, 幂等零感知
     items_mod.migrate_state(state)
-    # ⚡ 上一回合后台折好的记忆先合账 (4秒军令: 折叠出关键路径, 迟一回合入账;
-    # audit 在 P2 才重置, 这里不记账)
+    # ⚡ 上一回合后台折好的记忆/场记先合账 (4秒军令: 两者都出关键路径, 迟一回合
+    # 入账; audit 在 P2 才重置, 这里不记账)
     apply_pending_folds(state)
+    apply_pending_track(state)
     old_act = int(state.get("act", 1))
     # 🌅 日翻页哨兵 (Yi: 每天要给玩家自由活动的时间) — 回合末对账, 翻了天就发自由活动菜单
     _day0 = int((state.get("clock") or {}).get("day", 1) or 1)
@@ -10695,11 +10766,10 @@ def run_turn_stream(
                                "今天没记（判官没给出合规标签）")
         except Exception:
             pass
-    # 🎥 场记 (post-final): re-derives every frame from THIS turn's prose. Runs after the
-    # final event so the player never waits on it; the router persists state at stream
-    # end, so the bookings still land in this turn's save.
+    # 🎥 场记: 后台记帧, 下一回合合账 (4秒军令 — 旧注释说 post-final 玩家不用等,
+    # 但收尾事件/落库都排在生成器耗尽之后, 这 ~1.5s 一直挡着输入框解锁)
     try:
-        track_scene_frames(content, state, persona, all_beats, llm)
+        track_frames_async(content, state, persona, all_beats, llm)
     except Exception:
         pass
 
