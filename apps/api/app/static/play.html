@@ -449,9 +449,10 @@ body.vn { touch-action: pan-y; }
   transform-style: preserve-3d; z-index: 2; }
 #vnpan.dragging { transition: none; }
 /* 背景独立成层, 比屏宽 24%: 横滑时以 0.35x 速度视差跟随 — 深度感的第一要素 */
-#vnwbg { position: absolute; top: 0; bottom: 0; left: -12%; width: 124%;
+#vnwbg { position: absolute; top: 0; bottom: 0; left: -12vw; width: 124vw;
   background: linear-gradient(135deg,#171410,#14100b);
   background-size: cover; background-position: center bottom;
+  transform: translateZ(-120px) scale(1.13);  /* 🎥 房间退进纵深, 与 clamp 写的复合变换同基线 */
   transition: background-image .6s ease, transform .6s cubic-bezier(.22,.8,.3,1);
   will-change: transform; z-index: 1; }
 #vnwbg.dragging { transition: background-image .6s ease; }
@@ -3328,6 +3329,14 @@ function vnStageSync() {
   const w = n <= 1 ? 100 : (n * 52 + 26);
   stagePan.w = w;
   pan.style.width = w + "vw";
+  // 🎥 背景视差预算随画布配给 (Yi 实弹: 宽班底滑到边上背景滑出露底 — 12% 固定
+  // 余量兜不住 0.35×(画布-屏宽) 的位移); +6vw 呼吸边
+  const wbg0 = document.getElementById("vnwbg");
+  if (wbg0) {
+    const extra = Math.max(12, (w - 100) * 0.35 + 6);
+    wbg0.style.left = "-12vw";
+    wbg0.style.width = (112 + extra) + "vw";
+  }
   roster.forEach((c, i) => {
     let el = pan.querySelector(`.standee[data-cid="${c.id}"]`);
     if (!el) {
@@ -3368,10 +3377,12 @@ function vnStageClamp() {
   stagePan.x = Math.max(min, Math.min(0, stagePan.x));
   const pan = document.getElementById("vnpan");
   if (pan) pan.style.transform = `translateX(${stagePan.x}px)`;
-  // 🎥 视差: 背景以 0.35x 跟随 — 立牌与房间分层, 距离感的第一要素
+  // 🎥 视差: 背景以 0.35x 跟随 — 立牌与房间分层, 距离感的第一要素;
+  // 叠一层真 3D 纵深 (translateZ 退后 + 等比放大): 相机横移时背景吃透视,
+  // 房间不再是平贴的一张图 (弹丸论破布景感第一件)
   const wbg = document.getElementById("vnwbg");
   if (wbg) {
-    wbg.style.transform = `translateX(${stagePan.x * 0.35}px)`;
+    wbg.style.transform = `translateX(${stagePan.x * 0.35}px) translateZ(-120px) scale(1.13)`;
     wbg.classList.toggle("dragging", !!(pan && pan.classList.contains("dragging")));
   }
 }
