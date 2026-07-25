@@ -386,6 +386,75 @@ def _update_memory_for(state: dict[str, Any], char_id: str, char_history: list[d
         memcov[char_id] = cutoff
 
 
+_FOLD_PENDING: dict = {}   # 一次性票据 → {char_id: (digest, cutoff)} (后台折叠的成品架)
+_FOLD_CAP = 30
+
+
+def _folds_async(state: dict[str, Any], folds: list[tuple[str, list]], llm: LLM) -> None:
+    """⚡ 记忆折叠出关键路径 (4秒军令: 折叠回合曾 join 1.5~2s 拖住收尾/建议/落库):
+    备料全在主线程 (窗口裁剪+prior 快照), 模型调用在后台线程, 成品下一回合
+    apply_pending_folds 合账 — 与 profile 蒸馏同一家法, 线程绝不碰 state。
+    票据丢失无害: 覆盖游标 memcov 只在合账时前移, 丢单只是下次重折同一段。"""
+    membyc = state.setdefault("memory_by_char", {})
+    memcov = state.setdefault("memcov_by_char", {})
+    jobs = []
+    for cid, ch in folds:
+        covered = int(memcov.get(cid, 0))
+        cutoff = max(0, len(ch) - MEMORY_WINDOW)
+        if cutoff - covered < MEMORY_BATCH:
+            continue
+        jobs.append((cid, membyc.get(cid, ""), list(ch[covered:cutoff]), cutoff))
+    if not jobs:
+        return
+    import threading
+    import uuid
+    tok = uuid.uuid4().hex[:12]
+    state["folds_pending"] = tok
+
+    def _work():
+        got = {}
+        for cid, prior, lines, cutoff in jobs:
+            try:
+                out = llm.generate({"summarize": True, "prior_memory": prior,
+                                    "new_lines": lines})
+                digest = (out or {}).get("memory")
+            except Exception:
+                digest = None
+            if digest:
+                got[cid] = (digest, cutoff, prior)
+        while len(_FOLD_PENDING) >= _FOLD_CAP:
+            _FOLD_PENDING.pop(next(iter(_FOLD_PENDING)), None)
+        _FOLD_PENDING[tok] = got   # 空成品也上架 — 让票据能被销掉, 不留死票
+
+    threading.Thread(target=_work, daemon=True).start()
+
+
+def apply_pending_folds(state: dict[str, Any]) -> bool:
+    """回合开演前把后台折好的记忆合进账 (主线程)。三道闸 (审查实锤):
+    ① 没折完票不烧 (profile 家法) — 快节奏连打不白折;
+    ② prior 等值守卫 — 回合间 bank/手机/定情往 memory_by_char 追的账, 绝不被
+      旧底折出的成品无声覆盖 (文与实不许分家); 底变了就弃单, 游标不动, 重折自愈;
+    ③ 覆盖游标单调不回退。转生清空记忆后, 旧票据也被 ② 自然挡下。"""
+    tok = state.get("folds_pending")
+    if not tok:
+        return False
+    got = _FOLD_PENDING.pop(tok, None)
+    if got is None:
+        return False               # 后台还没折完: 票留着, 下回合再收
+    state.pop("folds_pending", None)
+    membyc = state.setdefault("memory_by_char", {})
+    memcov = state.setdefault("memcov_by_char", {})
+    landed = False
+    for cid, (digest, cutoff, prior) in got.items():
+        if membyc.get(cid, "") != prior:
+            continue               # 底被人动过 (追账/转生/换底): 本单作废
+        if cutoff > int(memcov.get(cid, 0)):
+            membyc[cid] = digest
+            memcov[cid] = cutoff
+            landed = True
+    return landed
+
+
 def _update_memory(state: dict[str, Any], history: list[dict[str, str]] | None, llm: LLM) -> None:
     """Fold turns that have slid out of the verbatim window into the rolling digest.
 
@@ -908,6 +977,10 @@ def reincarnate(content: dict[str, Any], state: dict[str, Any]) -> list[dict[str
     state["phone"] = {"threads": {}}
     state["memory"] = ""
     state["memory_by_char"] = {}
+    # 🔄 折叠账本随记忆一起清: 票据不清会把前世 digest 复活塞回来 (审查实锤,
+    # prior 守卫是第二道闸); 游标不清则新生的折叠永远够不到批量线, 再也不折
+    state["memcov_by_char"] = {}
+    state.pop("folds_pending", None)
     if economy_on(state):
         state["money"] = _to_int(sb.get("start_money"), 0, 99999) or 100
         state["money_log"] = []
@@ -8129,6 +8202,9 @@ def run_turn_stream(
     state = {**default_state(), **(state or {})}
     # 🎒 懒迁移 (物品实体化 P0): 旧档物品行在被加载的这一刻补籍, 幂等零感知
     items_mod.migrate_state(state)
+    # ⚡ 上一回合后台折好的记忆先合账 (4秒军令: 折叠出关键路径, 迟一回合入账;
+    # audit 在 P2 才重置, 这里不记账)
+    apply_pending_folds(state)
     old_act = int(state.get("act", 1))
     # 🌅 日翻页哨兵 (Yi: 每天要给玩家自由活动的时间) — 回合末对账, 翻了天就发自由活动菜单
     _day0 = int((state.get("clock") or {}).get("day", 1) or 1)
@@ -10261,18 +10337,9 @@ def run_turn_stream(
     if beat_log is not None:
         # per-character: each responder folds THEIR OWN witnessed history into THEIR digest
         # (isolation holds long-term). Only present responders this turn need updating.
-        _folds = list(responder_hist.items())
-        if len(_folds) > 1:
-            # ⚡ 各角色的记忆互相独立 — 并行折叠 (串行时多人回合一人 1.7s 全排队)
-            import threading as _mth
-            _mts = [_mth.Thread(target=_update_memory_for, args=(state, cid, ch, llm))
-                    for cid, ch in _folds]
-            for t in _mts:
-                t.start()
-            for t in _mts:
-                t.join()
-        elif _folds:
-            _update_memory_for(state, _folds[0][0], _folds[0][1], llm)
+        # ⚡ 4秒军令: 折叠彻底出关键路径 — 后台折, 下一回合合账 (曾 join 1.5~2s
+        # 拖住建议/收尾/落库, 是整回合 p90 尖刺的元凶之一)
+        _folds_async(state, list(responder_hist.items()), llm)
     else:
         _update_memory(state, history, llm)  # legacy/global (tests, opening)
 

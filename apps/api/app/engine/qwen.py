@@ -1309,9 +1309,10 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
 # plan/render 双拍合同 (docs/plan-render.md): the plan beat judges, the render beat writes.
 # Prose fields leave the plan tool; every judgment field keeps its render_turn name and
 # semantics, so _parse_tool_args and the settle cascade serve both contracts unchanged.
-# 编剧扩展字段只在 render 拍落账 (settle 读 render 输出); plan 拍不背, 省 TTFT
-_PLAN_DROPS = ("inner_read", "narration", "speech",
-               "mood", "setup_plant", "setup_pay", "agenda_step")
+# ⚠️ settle 在双拍路径读的是 plan 的裁决 (render 只写散文) — 剧组 P2 的申报字段
+# (mood/伏笔埋收/agenda) 必须留在 plan 里, 否则全舰开双拍 = 无声弄死三个系统
+# (审查实锤 2026-07-25)。它们是可选字段 + 「省略空字段」铁律 → 非剧组本零 token 成本。
+_PLAN_DROPS = ("inner_read", "narration", "speech")
 
 
 def _plan_tool(prompt: dict[str, Any], speaker: str, observer: bool,
@@ -1329,9 +1330,9 @@ def _plan_tool(prompt: dict[str, Any], speaker: str, observer: bool,
         "grounding": {"type": "string", "description":
                       "两个短语（各≤12字，引擎不展示）：①此刻在场的只有谁；"
                       "②对方情绪+哪件事还不能说破。别把不在场的人排进分镜，别替玩家做决定。"},
-        "outline": {"type": "array", "minItems": 1, "maxItems": 4,
+        "outline": {"type": "array", "minItems": 1, "maxItems": 3,
                     "items": {"type": "string"},
-                    "description": "这一拍的分镜：按顺序1~4条、每条≤20字，写谁做什么/透露什么/"
+                    "description": "这一拍的分镜：按顺序1~3条、每条≤16字，写谁做什么/透露什么/"
                                    "情绪怎么转；开口说话只概括用意，不写台词原文。"
                                    "只排当下这一拍，不预支后续剧情。"
                                    "场上有两名以上角色且给了【这一场】的暗流时，"
@@ -4154,7 +4155,7 @@ class QwenLLM:
                 try:
                     raw = json.loads(args or "{}")
                     outline = [str(x).strip() for x in (raw.get("outline") or [])
-                               if str(x).strip()][:4]
+                               if str(x).strip()][:3]
                 except Exception:
                     outline = []
         except Exception:
