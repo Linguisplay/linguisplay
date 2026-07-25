@@ -2997,10 +2997,11 @@ function refreshStrip() {
   if (!el) return;
   const bits = [];
   if (curClock && curClock.label) {
-    let t = IC("clock", 13) + curClock.label;
+    // 图标别喂 escapeHtml (实弹: SVG 源码被转义直接印在条上) — 文本归转义, 图标归拼接
+    let t = IC("clock", 13) + escapeHtml(curClock.label);
     if (curClock.deadline && curClock.deadline.days_left >= 0)
-      t += " " + IC("sand", 13) + (curClock.deadline.days_left === 0 ? B("今天", "today") : curClock.deadline.days_left + B("天", "d"));
-    bits.push(escapeHtml(t));
+      t += " " + IC("sand", 13) + escapeHtml(curClock.deadline.days_left === 0 ? B("今天", "today") : curClock.deadline.days_left + B("天", "d"));
+    bits.push(t);
   }
   // 🎬 片场: VN 下地点由 scenehud 场景牌独家播报 — 详情条不再重复报站 (顶部去重)
   if (curLocData && curLocData.name && !vnMode) bits.push(IC("pin", 13) + escapeHtml(curLocData.name));
