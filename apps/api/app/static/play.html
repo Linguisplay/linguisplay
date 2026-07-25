@@ -584,11 +584,16 @@ body.vn footer { display: none; }
    悬浮进舞台顶部的同一片渐变里, 场景画面一直顶到屏幕最上沿 */
 body.vn header { position: absolute; top: 0; left: 0; right: 0; z-index: 30;
   background: linear-gradient(rgba(13,11,7,.78), rgba(13,11,7,0)); border-bottom: none;
-  backdrop-filter: none; }
-body.vn #barsToggle { position: absolute; top: 40px; left: 8px; right: 8px; z-index: 30;
-  margin: 0; background: transparent; border: none; }
-body.vn #scenehud { top: 72px; }
-body.vn #scenehudlist { top: 108px; }
+  backdrop-filter: none;
+  padding-top: calc(env(safe-area-inset-top, 0px) + 8px); }
+/* 🍎 热修 (Yi 实弹: 音量/返回键没了): 悬浮化后按钮串一换行, 第二行被详情条压住 —
+   VN 里品牌字让位(舞台即品牌), 按钮串禁止换行, 关键钮永远在第一行屏内 */
+body.vn header > b { display: none; }
+body.vn header > span { flex-wrap: nowrap; }
+body.vn #barsToggle { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 44px);
+  left: 8px; right: 8px; z-index: 30; margin: 0; background: transparent; border: none; }
+body.vn #scenehud { top: calc(env(safe-area-inset-top, 0px) + 76px); }
+body.vn #scenehudlist { top: calc(env(safe-area-inset-top, 0px) + 112px); }
 /* VN 整页接管 (Yi: 电脑端两套布局叠穿没法玩): 头像栏+状态条默认收纳,
    vnctl「状态」键按需弹出浮层 */
 body.vn #cast, body.vn #bars { display: none; }
