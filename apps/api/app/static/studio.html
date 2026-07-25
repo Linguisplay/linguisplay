@@ -20,12 +20,14 @@
   h1 { font-size: 17px; margin: 0; } h2 { font-size: 15px; margin: 22px 0 8px; color: #d8b57a; border-bottom: 1px solid #201c15; padding-bottom: 5px; }
   h3 { font-size: 13px; margin: 0 0 6px; color: #a79e8c; }
   label { display: block; font-size: 12px; color: #999; margin: 8px 0 2px; }
-  input, textarea, select { width: 100%; padding: 8px; border-radius: 7px; border: 1px solid #333; background: #171410; color: #ede6d8; font: inherit; }
+  input, textarea, select { width: 100%; padding: 10px 12px; border-radius: 12px; border: .5px solid rgba(216,181,122,.2); background: rgba(20,16,11,.55); color: #ede6d8; font: inherit; }
+  input:focus, textarea:focus, select:focus { outline: none; border-color: rgba(216,181,122,.55); box-shadow: 0 0 0 3px rgba(216,181,122,.1); }
   textarea { resize: vertical; min-height: 54px; }
-  button { padding: 8px 14px; border: 0; border-radius: 6px; background: #d8b57a; color: #241c0e; cursor: pointer; font-weight: 600; }
+  button { padding: 8px 16px; border: 0; border-radius: 12px; background: #d8b57a; color: #241c0e; cursor: pointer; font-weight: 600; transition: transform .12s ease; }
+  button:active { transform: scale(.96); }
   button.ghost { background: #201c15; color: #a79e8c; } button.sm { padding: 4px 9px; font-size: 12px; }
   button.del { background: #3a1c1c; color: #e88; }
-  .card { background: #1d1c19; border: 1px solid #201c15; border-radius: 10px; padding: 14px; margin: 10px 0; }
+  .card { background: rgba(30,26,19,.66); border: .5px solid rgba(216,181,122,.16); border-radius: 18px; padding: 16px; margin: 12px 0; }
   .sub { margin: 8px 0; padding: 8px; border-left: 2px solid #2a2418; background: #1a1816; border-radius: 0 8px 8px 0; }
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }

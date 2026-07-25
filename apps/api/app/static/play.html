@@ -34,8 +34,10 @@
   .muted { color: #999; font-size: 12px; }
   .card { background: #1d1c19ee; border: 1px solid #201c15; border-radius: 12px; padding: 20px; margin: 24px; }
   input, button, select { font: inherit; }
-  input { width: 100%; padding: 10px; margin: 6px 0; border-radius: 8px; border: 1px solid #333; background: #14100b; color: #ede6d8; }
-  button { padding: 9px 14px; border: 0; border-radius: 8px; background: #d8b57a; color: #241c0e; cursor: pointer; font-weight: 600; }
+  input { width: 100%; padding: 11px 12px; margin: 6px 0; border-radius: 12px; border: .5px solid rgba(216,181,122,.22); background: rgba(20,16,11,.6); color: #ede6d8; }
+  input:focus { outline: none; border-color: rgba(216,181,122,.55); box-shadow: 0 0 0 3px rgba(216,181,122,.12); }
+  button { padding: 9px 16px; border: 0; border-radius: 12px; background: #d8b57a; color: #241c0e; cursor: pointer; font-weight: 600; transition: transform .12s ease, opacity .12s ease; }
+  button:active { transform: scale(.96); }
   button.ghost { background: #201c15; color: #a79e8c; }
   button:disabled { opacity: .5; cursor: default; }
   .iconbtn { background: transparent; padding: 4px 6px; font-size: 16px;
@@ -68,8 +70,8 @@
   .typing .bubble span { animation: blink 1.2s infinite; }
   .typing .bubble span:nth-child(2){ animation-delay:.2s } .typing .bubble span:nth-child(3){ animation-delay:.4s }
   @keyframes blink { 0%,60%,100%{opacity:.2} 30%{opacity:1} }
-  footer { flex: 0 0 auto; padding: 12px 16px; border-top: 1px solid #201c1544; display: flex; gap: 8px; align-items: center; background: rgba(20,16,11,.55); backdrop-filter: blur(8px); }
-  footer select { background: #14100b; color: #ede6d8; border: 1px solid #2e2820; border-radius: 8px; padding: 9px; }
+  footer { flex: 0 0 auto; padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px)); border-top: .5px solid rgba(216,181,122,.22); display: flex; gap: 8px; align-items: center; background: rgba(24,20,14,.62); backdrop-filter: blur(24px) saturate(1.5); -webkit-backdrop-filter: blur(24px) saturate(1.5); }
+  footer select { background: rgba(46,40,32,.6); color: #ede6d8; border: .5px solid rgba(216,181,122,.25); border-radius: 12px; padding: 0 10px; height: 44px; }
   footer input { margin: 0; }
   #goalbar { flex: 0 0 auto; margin: 8px 16px 0; padding: 8px 12px; border-radius: 10px; background: #302c24cc; border: 1px solid #2a2418; color: #fff7ea; font-size: 13px; line-height: 1.5; }
   #goalbar b { color: #e0b45c; }
@@ -90,7 +92,7 @@
   #choiceask button:hover { background: #544c3f; }
   #tutov, #howto { position: fixed; inset: 0; background: #000000b8; z-index: 90; display: grid; place-items: center; }
   #tutov.hidden, #howto.hidden { display: none; }   /* the ID rule outguns .hidden — pin it */
-  #tutov .tcard, #howto .tcard { width: min(560px, 92vw); max-height: 86vh; overflow-y: auto; background: #1d1b18; border: 1px solid #2e2820; border-radius: 16px; padding: 20px 22px; box-shadow: 0 14px 56px rgba(0,0,0,.7); }
+  #tutov .tcard, #howto .tcard { width: min(560px, 92vw); max-height: 86vh; overflow-y: auto; background: rgba(28,24,17,.86); backdrop-filter: blur(28px) saturate(1.4); -webkit-backdrop-filter: blur(28px) saturate(1.4); border: .5px solid rgba(216,181,122,.22); border-radius: 22px; padding: 22px 24px; box-shadow: 0 22px 70px rgba(0,0,0,.6); }
   #tutov h3, #howto h3 { margin: 0 0 4px; color: #e8e9f2; }
   #tutov .tsec, #howto .tsec { margin: 14px 0 0; padding: 10px 12px; background: #26241f; border: 1px solid #3a362f; border-radius: 10px; font-size: 13.5px; line-height: 1.8; color: #cfd4e4; }
   #tutov .tsec b, #howto .tsec b { color: #ffefd2; }
@@ -230,7 +232,7 @@
   #verdictbar { flex: 0 0 auto; margin: 6px 16px 0; padding: 8px 12px; border-radius: 10px; background: #261a1acc; border: 1px solid #573434; color: #f0d9d9; font-size: 13px; display: flex; align-items: center; gap: 8px; }
   #verdictbar button { margin-left: auto; background: #6b2f2f; border: 1px solid #8a4444; color: #ffe3e3; border-radius: 9px; padding: 5px 12px; cursor: pointer; white-space: nowrap; }
   #verdictov { position: fixed; inset: 0; z-index: 80; background: rgba(0,0,0,.6); display: grid; place-items: center; }
-  #verdictov .jcard { width: min(520px, 94vw); max-height: 84vh; overflow-y: auto; background: #1a1216; border: 1px solid #573444; border-radius: 14px; padding: 16px 18px; }
+  #verdictov .jcard { width: min(520px, 94vw); max-height: 84vh; overflow-y: auto; background: rgba(28,24,17,.88); backdrop-filter: blur(28px) saturate(1.4); -webkit-backdrop-filter: blur(28px) saturate(1.4); border: .5px solid rgba(216,181,122,.22); border-radius: 22px; padding: 18px 20px; }
   #verdictov .vprompt { font-size: 15px; color: #f2e6ea; line-height: 1.7; margin: 8px 0 2px; }
   #verdictov .vopts { display: flex; flex-direction: column; gap: 7px; margin-top: 10px; }
   #verdictov .vopt { text-align: left; font-size: 13px; border-radius: 10px; padding: 10px 12px; cursor: pointer; background: #2c2028; border: 1px solid #4a3444; color: #eadfe6; line-height: 1.5; }
@@ -267,7 +269,7 @@
   #clues .hd { color: #e3c795; font-weight: 600; }
   #clues .it { color: #cfc6b4; } #clues .it.done { color: #6fe0a6; }
   #suggest { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 4px; }
-  .chip { font-size: 12px; padding: 5px 10px; border-radius: 14px; background: #302c25cc; border: 1px solid #2a2418; color: #e3c795; cursor: pointer;
+  .chip { font-size: 12.5px; padding: 7px 13px; border-radius: 999px; background: rgba(40,34,25,.72); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: .5px solid rgba(216,181,122,.28); color: #e3c795; cursor: pointer; transition: transform .12s ease;
           max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; }
   .chip:hover { background: #564c3a; }
   #state { flex: 0 0 auto; font-size: 12px; color: #b6b6c2; padding: 6px 16px; border-top: 1px dashed #2c2a2766; background: rgba(20,16,11,.4); }
@@ -493,7 +495,7 @@ body.vn { touch-action: pan-y; }
 @keyframes vnbreathe { 50% { scale: 1 1.006; } }
 /* 🧭 场景 HUD (Yi 定): 这是哪 · 几个人在 · 有谁 — 点开名单, 点名字滑过去看TA;
    住在 #vnui 里 (可点), 位置让开顶栏和状态条 */
-#scenehud { position: absolute; top: 104px; left: 12px; z-index: 5; max-width: 78vw;
+#scenehud { position: absolute; top: 104px; left: 12px; z-index: 5; max-width: 78vw; backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4);
   background: rgba(6,7,12,.72); border: 1px solid rgba(216,181,122,.28);
   border-radius: 999px; padding: 6px 13px; font-size: 12px; color: #e6dfd0;
   letter-spacing: .5px; cursor: pointer; pointer-events: auto;
@@ -535,13 +537,14 @@ body.vn { touch-action: pan-y; }
 #vnchoices { display: flex; flex-direction: column; align-items: stretch; gap: 7px;
   max-width: 860px; margin: 13px auto 0; cursor: default; }
 #vnchoices.hidden { display: none; }
-#vnchoices button { background: rgba(8,9,15,.88); border: 1px solid rgba(216,181,122,.38);
-  border-radius: 12px; color: rgba(236,233,226,.88); padding: 8px 13px;
+#vnchoices button { background: rgba(24,20,14,.78); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border: .5px solid rgba(216,181,122,.34);
+  border-radius: 999px; color: rgba(236,233,226,.9); padding: 10px 16px; transition: transform .12s ease;
   font-size: 12.5px; letter-spacing: .5px; cursor: pointer; text-align: left;
   white-space: normal; line-height: 1.55; display: -webkit-box; -webkit-line-clamp: 2;
   -webkit-box-orient: vertical; overflow: hidden; }
 #vnchoices button:hover { color: #d8b57a; border-color: #d8b57a; }
-#vnchoices button.prime { border-color: #d8b57a; color: #d8b57a; }
+#vnchoices button.prime { background: #d8b57a; border-color: #d8b57a; color: #241c0e; font-weight: 600; }
+#vnchoices button:active { transform: scale(.97); }
 body.vnhide #vnbox, body.vnhide #vnchoices, body.vn.vnhide footer
   { opacity: 0; pointer-events: none; }
 body.vnhide #vnui { pointer-events: auto; }
