@@ -563,6 +563,26 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append("【玩家当前目标·世界向它倾斜】" + _pg +
                      "——每拍都要给出与它相关的进展、阻力或回应线索；NPC 言行与事件向它靠拢，"
                      "但绝不代替玩家完成它，也不许无关事件抢戏。")
+    # 🪃 回扣旧事 / 对等回礼 (Spec E): 指令住 system, 落账字段 callback_done 住 tool
+    # (存量实弹 9c2cee0: 这两段曾误放 _render_tool 引用不存在的 lines → 回扣回合
+    # NameError 静默掉回慢路径, 指令从没到过模型)
+    _mem_cb = prompt.get("callback") or {}
+    _is_mem = prompt.get("group_mode") == "member"
+    _is_thk = (prompt.get("channel") or "say") == "think"
+    if _mem_cb.get("material") and not _is_mem and not _is_thk:
+        lines.append("")
+        lines.append("【回扣旧事】你们之间真实发生过这件事：「" + str(_mem_cb["material"])[:80]
+                     + "」。" + ("这一轮找机会自然地引用它——不着痕迹，像随口想起"
+                                 "（共同的小典故比十句恭维值钱）；实在不合时宜就算了。"
+                                 if _mem_cb.get("mode") == "soft" else
+                                 "这一轮【必须】把它织进你的话里——选最不突兀的角度，"
+                                 "一句带过也行，但必须让对方听出你记得。"))
+    _dd = (prompt.get("disclose") or "").strip()
+    if _dd and not _is_mem and not _is_thk:
+        lines.append("")
+        lines.append("【对等回礼】刚才对方对你打开了一扇小窗（说了件自己的事）。"
+                     f"这一轮你也要交换一块自己：{_dd}——要贴你的人设，说完就说完，"
+                     "别追问对方细节；只收不给就是查户口，最败好感。")
     facts = (prompt.get("world_facts") or "").strip()
     roster = (prompt.get("roster") or "").strip()
     if facts or roster:
@@ -1023,24 +1043,13 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                             "廉价套路让你不适→-1~-2。范围-2~5，恋爱线"}
     _cb = prompt.get("callback") or {}
     if _cb.get("material") and not is_member and not is_think:
+        # ⚠️ 指令文本在 _build_system 的【回扣旧事】块 (存量实弹: 这里曾 lines.append
+        # 引用不存在的局部变量 → 回扣回合 NameError 静默掉回慢路径, 指令也从没到过模型)
         _cb_soft = _cb.get("mode") == "soft"
-        lines.append("")
-        lines.append("【回扣旧事】你们之间真实发生过这件事：「" + str(_cb["material"])[:80]
-                     + "」。" + ("这一轮找机会自然地引用它——不着痕迹，像随口想起"
-                                 "（共同的小典故比十句恭维值钱）；实在不合时宜就算了。"
-                                 if _cb_soft else
-                                 "这一轮【必须】把它织进你的话里——选最不突兀的角度，"
-                                 "一句带过也行，但必须让对方听出你记得。"))
         props["callback_done"] = {"type": "string", "description":
             "你这一轮把那件旧事织进去的那句话（从你自己的台词或旁白里【原样摘录】一小段，"
             "8~20字）；" + ("实在没织进就填：无" if _cb_soft else "必须织入，不许填无")}
         required.append("callback_done")   # 必填 — 可选字段会被省略铁律吃掉
-    _dd = (prompt.get("disclose") or "").strip()
-    if _dd and not is_member and not is_think:
-        lines.append("")
-        lines.append("【对等回礼】刚才对方对你打开了一扇小窗（说了件自己的事）。"
-                     f"这一轮你也要交换一块自己：{_dd}——要贴你的人设，说完就说完，"
-                     "别追问对方细节；只收不给就是查户口，最败好感。")
     _ws = prompt.get("world_seed")
     if _ws and not is_member and not is_think:
         _soft = _ws == "soft"
@@ -1328,8 +1337,9 @@ def _plan_tool(prompt: dict[str, Any], speaker: str, observer: bool,
     required = [r for r in fn["parameters"]["required"] if r not in _PLAN_DROPS]
     head: dict[str, Any] = {
         "grounding": {"type": "string", "description":
-                      "两个短语（各≤12字，引擎不展示）：①此刻在场的只有谁；"
-                      "②对方情绪+哪件事还不能说破。别把不在场的人排进分镜，别替玩家做决定。"},
+                      "一个短语（≤12字，引擎不展示）：此刻在场的只有谁。"
+                      "别把不在场的人排进分镜，别替玩家做决定；"
+                      "尚未挑明的内情这一拍也不许说破。"},
         "outline": {"type": "array", "minItems": 1, "maxItems": 3,
                     "items": {"type": "string"},
                     "description": "这一拍的分镜：按顺序1~3条、每条≤16字，写谁做什么/透露什么/"
@@ -4139,27 +4149,34 @@ class QwenLLM:
         # ── 拍1 · 导演：落实场面 → 分镜 → 结算裁决（整包，但小而快） ──
         plan: dict[str, Any] | None = None
         outline: list[str] = []
-        try:
-            body_p = {"model": self._model, "messages": messages,
-                      "max_tokens": 500, "temperature": 0.4,
-                      "tools": [_plan_tool(prompt, speaker, bool(prompt.get("observer")),
-                                           group_mode, channel, advance_hint)],
-                      "tool_choice": {"type": "function",
-                                      "function": {"name": "plan_turn"}}}
-            resp = _post_chat(self._url, self._key, body_p, timeout=30, kind="plan")
-            msg = resp.json()["choices"][0]["message"]
-            tool_calls = msg.get("tool_calls") or []
-            if tool_calls:
-                args = ((tool_calls[0] or {}).get("function") or {}).get("arguments")
-                plan = _parse_tool_args(args, speaker, channel, group_mode)
-                try:
-                    raw = json.loads(args or "{}")
-                    outline = [str(x).strip() for x in (raw.get("outline") or [])
-                               if str(x).strip()][:3]
-                except Exception:
-                    outline = []
-        except Exception:
-            plan = None
+        # ⚡ 成员快道 (5秒军令): 插话的配角只有嘴 (台词行 1~2 行, 「无」=合法沉默),
+        # 25 项裁决轮不到TA背 — 整个 plan 拍免了 (实测 ~3.2s/人, 双答回合的第二大头)。
+        # 裁决走空骨架缺省 (affinity/推进等由主答者的 plan 定夺); 帧账由场记权威重推,
+        # 不吃亏。成员心象 mood 小幅让位 — 换每个搭话成员省 3 秒, Yi 拍板的 5 秒军令。
+        if group_mode == "member":
+            plan = _parse_tool_args("{}", speaker, channel, group_mode)
+        if plan is None:
+            try:
+                body_p = {"model": self._model, "messages": messages,
+                          "max_tokens": 380, "temperature": 0.4,
+                          "tools": [_plan_tool(prompt, speaker, bool(prompt.get("observer")),
+                                               group_mode, channel, advance_hint)],
+                          "tool_choice": {"type": "function",
+                                          "function": {"name": "plan_turn"}}}
+                resp = _post_chat(self._url, self._key, body_p, timeout=30, kind="plan")
+                msg = resp.json()["choices"][0]["message"]
+                tool_calls = msg.get("tool_calls") or []
+                if tool_calls:
+                    args = ((tool_calls[0] or {}).get("function") or {}).get("arguments")
+                    plan = _parse_tool_args(args, speaker, channel, group_mode)
+                    try:
+                        raw = json.loads(args or "{}")
+                        outline = [str(x).strip() for x in (raw.get("outline") or [])
+                                   if str(x).strip()][:3]
+                    except Exception:
+                        outline = []
+            except Exception:
+                plan = None
         if plan is None:
             yield ("final", self.generate(prompt))
             return
