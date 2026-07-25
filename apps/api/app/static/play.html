@@ -3078,6 +3078,7 @@ function renderProgress(prog) {
   el.classList.remove("hidden");
 }
 function renderSuggest(items) {
+  if ((items || []).length) lastSuggItems = (items || []).slice(0, 2);
   if (vnMode) {
     // 🎀 打字为主 (Yi 定): 输入栏常驻, 选项停靠在对话框和输入栏之间 —
     // 点一个直接行动, 或在下面自己打字; 对话框自动上移让位, 绝不压人物
@@ -3983,9 +3984,11 @@ function toggleSound() {
 function stopBgm(){ try { bgm.pause(); bgm.removeAttribute("src"); curBgmMood=null; } catch(e){} }
 
 // ── send turn (SSE) ───────────────────────────────────
+let driveGhost = null;      // ▶ 的本地观剧拍: 回合被拒 (409/429) 时要能撤回, 不留幻影
+let lastSuggItems = [];     // 最近一组建议: 回合没成立时原样放回 (chips 是闭包, 存数组不存 HTML)
 async function driveTurn() {
   if (!runId || ended || turnInFlight) return;   // 🔒 在途门闩: 双击 ▶ 不叠流
-  renderBeat({ author:"player", type:"think", text: B("▶（你静静看着，让故事自己往前走）", "▶ (You watch — the story moves on its own)") });
+  driveGhost = renderBeat({ author:"player", type:"think", text: B("▶（你静静看着，让故事自己往前走）", "▶ (You watch — the story moves on its own)") });
   await send("drive");
 }
 async function send(chOverride) {
@@ -4097,7 +4100,14 @@ async function streamTurn(url, bodyObj) {
     // nothing streamed yet (e.g. a 400 validation reason) → a toast reads better than a beat
     if (firstBeat) pushToast("⚠️ " + escapeHtml(e.message), "", 3200);
     else { playQ.push({author:"engine",type:"description",text: B("[出错] ", "[error] ") + e.message}); pump(); }
+    // 回合没成立 (409/429 等): ▶ 的本地观剧拍是幻影, 撤掉; 被清空的建议 chips 原样放回
+    // (审查实锤: player_first 局第一次点 ▶ 必踩 409, 不能把「怎么开口」的建议弄丢)
+    if (firstBeat) {
+      if (driveGhost) { try { driveGhost.remove(); } catch (e2) {} }
+      if (lastSuggItems.length) renderSuggest(lastSuggItems);
+    }
   }
+  driveGhost = null;
   hideTyping();
   streamDone = true;
   if (!playing) finishTurn();   // queue already drained (or nothing arrived)

@@ -136,6 +136,7 @@ body.simple details.sec > summary::before { content:""; }
       <label>剧情梗概</label><textarea id="f_synopsis" oninput="story.synopsis=this.value"></textarea>
       <label>世界观 / 场景设定（AI 每回合都会看：时代、规矩、气味，角色言行不越界）</label><textarea id="f_world" oninput="story.world_long=this.value"></textarea>
       <label>🎬 开场白（玩家进入故事看到的第一段旁白，写了就原样上台，可写长文；留空由 AI 即兴）</label><textarea id="f_opening" maxlength="10000" placeholder="例：暴雨拍在铁皮棚上。你攥着那封没有署名的信，站在牌坊底下——城寨的灯一盏一盏灭了。" oninput="story.opening=this.value"></textarea>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:6px;cursor:pointer"><input type="checkbox" id="f_openpf" onchange="setTuning('opening_player_first',this.checked?1:'')" style="width:auto" /> 🎤 开场由玩家先发言（角色开场只亮相不开口，第一句话留给玩家；▶ 观剧也等玩家先开口）</label>
       <div class="row3">
         <div><label>可见性</label><select id="f_vis" onchange="story.visibility=this.value"><option value="private">私密</option><option value="public">公开</option></select></div>
         <div><label>演出语言</label><select id="f_lang" onchange="story.language=this.value"><option value="zh">中文</option><option value="en">English</option></select></div>
@@ -424,6 +425,7 @@ function openEditor(){
   f_tropes.value=(story.trope_tags||[]).join(", "); f_vis.value=story.visibility||"private";
   f_lang.value=story.language||"zh";
   f_mature.checked=!!story.mature;
+  f_openpf.checked=((story.tuning||{}).opening_player_first|0)>0;
   initMode(); activeSec="basic";
   renderAll();
 }

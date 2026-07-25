@@ -123,3 +123,24 @@ def test_journal_lists_the_promise_history():
     jd = runtime.journal(STORY, st)
     assert [(p["status"], p["what"]) for p in jd["promises"]] == \
         [("open", "老地方见"), ("missed", "赔罪酒")]
+
+
+def test_unscheduled_char_shows_up_at_promise_hour():
+    """🤝 无作息角色的约定 (台账实弹): 到点脚必须在约定地 — 老逻辑TA永远站在默认位,
+    没人赴约, 玩家还要吃爽约扣分; 钟点没到/约定已结 都不许提前站桩。"""
+    st = runtime.default_state()
+    st["location_id"] = "hall"
+    char = dict(STORY["story"]["characters"][1])   # 乙: 无作息无 home
+    pr = runtime.make_promise(STORY, st, char,
+                              {"what": "去后巷看样东西", "day_offset": 0,
+                               "slot": "夜", "place": "后巷"},
+                              runtime.tuning_for(STORY))
+    assert pr and pr["location_id"] == "alley"
+    # 还没到钟点: 人在默认位 (门厅), 不提前去后巷站桩
+    assert runtime.char_position(STORY, st, char) == "hall"
+    # 钟拨到约定时段: 如约而至
+    st["clock"] = {"day": 1, "slot": 2, "turns_in_slot": 0}
+    assert runtime.char_position(STORY, st, char) == "alley"
+    # 赴约结清后不再钉着
+    st["promises"][0]["status"] = "kept"
+    assert runtime.char_position(STORY, st, char) == "hall"

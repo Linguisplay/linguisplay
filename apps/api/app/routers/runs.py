@@ -852,6 +852,11 @@ def play(
         _dnow = _time_mod.time()
         if _dnow - float(_DRIVE_LAST.get(run_id, 0.0)) < get_settings().drive_min_seconds:
             raise HTTPException(429, "看得太快了，喘口气再往下")
+        # 🎤 开场玩家先发言 (tuning.opening_player_first): 第一句对话必须来自玩家 —
+        # 观剧拍 ▶ 也不许替玩家开场 (作者开关, 服务端强制; 开过口就恢复正常)
+        if (runtime.tuning_for(r.pinned_content or {}).get("opening_player_first")
+                and not any(b.author == "player" for b in r.beats)):
+            raise HTTPException(409, "这个故事等你先开口")
         _DRIVE_LAST[run_id] = _dnow
     # 🎫 幂等键: 客户端每次点击带唯一 client_turn_id — 网络层重放/重试 bug 重复送达的
     # 同一次点击, 不再推进第二次剧情 (无点击不推进的服务端底线)

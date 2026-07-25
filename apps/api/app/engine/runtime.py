@@ -235,6 +235,8 @@ DEFAULT_TUNING = {
     "snap_chance": 12,          # 📷 随手拍: % chance a character's text carries a photo (0 = off)
     "vn_mode": 0,               # 🎀 galgame 演出: VN window + choice-driven turns (授权本用)
     "letter_away_hours": 48,    # 📮 away at least this long → the warmest heart writes a LETTER
+    "opening_player_first": 0,  # 🎤 开场由玩家先发言: 开场只亮相不开口, 第一句对话必须来自
+                                #    玩家; 观剧拍同样不许抢 (0 = off; 剧本级可开, studio 开场白卡)
 }
 
 MAX_OPEN_PROMISES = 3  # 🤝 open appointments a run may hold at once (per char: one)
@@ -1101,6 +1103,18 @@ def _sim_pos_loc(v: Any) -> str | None:
     return v if isinstance(v, str) and v.strip() else None
 
 
+def _promise_loc_now(state: dict[str, Any], cid: str | None) -> str | None:
+    """该角色此刻有开着的约定、钟点正是现在 → 约定地点。这是无作息角色守约的腿。"""
+    if not cid:
+        return None
+    now = _time_index(state)
+    for pr in state.get("promises") or []:
+        if (pr.get("status") == "open" and pr.get("char_id") == cid
+                and pr.get("location_id") and _promise_index(pr) == now):
+            return pr["location_id"]
+    return None
+
+
 def char_position(content: dict[str, Any], state: dict[str, Any],
                   c: dict[str, Any]) -> str | None:
     """The character's ACTUAL current location id. Resolution order: following the
@@ -1122,6 +1136,12 @@ def char_position(content: dict[str, Any], state: dict[str, Any],
         return state["threat"]["pos"]  # 🦇 the hunter's feet belong to the threat ledger
     if cid in (state.get("taken") or {}):
         return (state.get("taken") or {})[cid]  # 🚪 预定命运: they were carried off
+    # 🤝 约定的钟点到了: TA如约而至。实弹: 无作息角色的约定没人赴, 玩家还吃爽约扣分
+    # (台账 ⬜)。排在 pin 之前 (审查实锤): 离场散文的 AWAY pin 永不释放、seek pin
+    # 跨时段存活 — 长寿钉不许把守约打穿; 也压过作息 = 换幕后班表改了也守约。
+    prloc = _promise_loc_now(state, cid)
+    if prloc:
+        return prloc
     pin = (state.get("char_pins") or {}).get(cid)
     if pin:
         return pin  # 🔎 the engine told the player "TA在那儿" — so they ARE there, waiting
@@ -1988,7 +2008,15 @@ def ensure_scene_brief(content: dict[str, Any], state: dict[str, Any],
     if not roster:
         state.pop("scene_brief", None)
         return {}
-    key = "|".join([str(((content.get("story") or {}).get("id")) or ""),
+    # 🔑 场次键必须认「这一局」: 缓存是进程全局的, 同剧本同地点同时段同班底的两局
+    # 会撞键 → A 局的戏眼/心事指挥 B 局 (串账, 台账 P1)。state 里发一次性命名空间,
+    # 随存档持久 — 命中只在本局之内。
+    ns = state.get("brief_ns")
+    if not ns:
+        import uuid as _uuid
+        ns = state["brief_ns"] = _uuid.uuid4().hex[:8]
+    key = "|".join([ns,
+                    str(((content.get("story") or {}).get("id")) or ""),
                     str(state.get("location_id") or ""),
                     active_slot(content, state) or "",
                     ",".join(sorted(c["id"] for c in roster))])
@@ -2026,21 +2054,27 @@ def ensure_scene_brief(content: dict[str, Any], state: dict[str, Any],
 
     def _work():
         try:
-            out = llm.generate(payload) or {}
-        except Exception:
-            out = {}
-        minds = out.get("minds") if isinstance(out.get("minds"), dict) else {}
-        brief = {"key": key,
-                 "crux": dedash(str(out.get("crux") or "").strip())[:30],
-                 "minds": {n: dedash(str(t).strip())[:24]
-                           for n, t in minds.items() if n in names and str(t).strip()},
-                 "initiative": (str(out.get("initiative") or "").strip()
-                                if str(out.get("initiative") or "").strip() in names else ""),
-                 "spark": dedash(str(out.get("spark") or "").strip())[:36]}
-        while len(_BRIEF_CACHE) >= _BRIEF_CAP:
-            _BRIEF_CACHE.pop(next(iter(_BRIEF_CACHE)), None)
-        _BRIEF_CACHE[key] = brief
-        _BRIEF_INFLIGHT.discard(key)
+            try:
+                out = llm.generate(payload) or {}
+            except Exception:
+                out = {}
+            minds = out.get("minds") if isinstance(out.get("minds"), dict) else {}
+            brief = {"key": key,
+                     "crux": dedash(str(out.get("crux") or "").strip())[:30],
+                     "minds": {n: dedash(str(t).strip())[:24]
+                               for n, t in minds.items() if n in names and str(t).strip()},
+                     "initiative": (str(out.get("initiative") or "").strip()
+                                    if str(out.get("initiative") or "").strip() in names else ""),
+                     "spark": dedash(str(out.get("spark") or "").strip())[:36]}
+            # 空单不入缓存 (模型失手/超时的降级结果缓存住 = 这一场永远没导演),
+            # 放过它让下一回合重试; brief 本就不在关键路径, 重试不伤首字
+            if brief.get("crux") or brief.get("minds") or brief.get("initiative"):
+                while len(_BRIEF_CACHE) >= _BRIEF_CAP:
+                    _BRIEF_CACHE.pop(next(iter(_BRIEF_CACHE)), None)
+                _BRIEF_CACHE[key] = brief
+        finally:
+            # finally 清 inflight (台账实弹: 中途炸了这一场永远挂着「在做」, 再也不试)
+            _BRIEF_INFLIGHT.discard(key)
 
     import threading
     threading.Thread(target=_work, daemon=True).start()
@@ -2325,6 +2359,9 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
             present_chars = [caller]
             _audit(state, "opening.visitor", True, str(caller.get("name"))[:12])
     present = [c.get("name") for c in present_chars]
+    # 🎤 开场玩家先发言 (作者开关 tuning.opening_player_first): 开场演出只让角色亮相,
+    # 不许任何人先对玩家开口 — 第一句对话留给玩家。god 位玩家本就不被搭话, 不适用。
+    player_first = bool(tuning_for(content).get("opening_player_first")) and not is_god
     # ✨ 首局魔法时刻的由头: 主角位那位有话没说 (只给秘密标题, 绝不点破内容)
     lead = next((c for c in present_chars if c.get("is_lead")),
                 present_chars[0] if present_chars else None)
@@ -2349,6 +2386,7 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
         out = llm.generate({
             "intro_vignettes": True,
             "auth_opening": _auth_open[:2000],
+            "player_first": player_first,
             "hook_court": _hook_court,
             "clock": (clock_view(content, state) or {}).get("label", ""),
             "player": {"name": (player_char or {}).get("name") or "你",
@@ -2395,7 +2433,7 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
             line_txt = _auth
         if act_txt:
             beats.append({"type": "description", "speaker_name": None, "text": act_txt})
-        if line_txt:
+        if line_txt and not player_first:
             beats.append({"type": "dialogue", "speaker_name": nm, "text": line_txt})
     # 确定性兜底: 模型没交齐的人, 用人设和台词范例立住 (范例本来就是这张嘴);
     # 主角位带欲言又止的裂缝 (只提秘密标题); 上帝位无人对玩家开口
@@ -2414,11 +2452,27 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
             beats.append({"type": "description", "speaker_name": None,
                           "text": f"{nm}就在不远处，正忙着{(c.get('role') or '自己')[:12]}的事，"
                                   "注意到了你。"})
-        if not is_god:
+        if not is_god and not player_first:
             _auth = dedash(str(c.get("opening_line") or "").strip().strip("「」\"'"))[:80]
             ex = [str(x) for x in (c.get("examples") or []) if str(x).strip()]
             beats.append({"type": "dialogue", "speaker_name": nm,
                           "text": (_auth or (ex[0][:60] if ex else "新来的？"))})
+    # 🎤 玩家先发言: 差事由头也不派 — 没人开过口, 凭空落账就是幻影差事 (文与实分家)。
+    # 建议改发两句「怎么开这个口」的方向, 走单一落账口。
+    if player_first:
+        # 空场开场 (授权本的恐怖片留白等) 没人可打招呼 — 建议跟着实况走, 不许文实分家
+        if present_chars:
+            _sg = (["Walk over and say hello", "Take a quiet look around first"]
+                   if lang_of(content) == "en" else
+                   ["上前打个招呼，自报家门", "先不作声，四下打量一番"])
+        else:
+            _sg = (["Take a look around", "Call out and see if anyone answers"]
+                   if lang_of(content) == "en" else
+                   ["四下看看，摸摸这里的底细", "出声试探一句，看有没有人应"])
+        set_suggestions(state, _sg, content)
+        _audit(state, "opening.player_first", True,
+               ",".join(n for n in present if n)[:24])
+        return [dedash_beat(b) for b in beats]
     # 🎯 开局由头 (Yi: 一开始要给玩家一件具体的事): 主角位亲口交代第一件差事
     # (最好把玩家引向不在场的角色/地点 = 探索钩子); 目标条与首批建议都指向它
     hk = out.get("hook") or {}
@@ -2732,11 +2786,14 @@ def _logic_guard(llm, prompt: dict[str, Any], directed: dict[str, Any], content:
                    if l.get("name") and not location_available(content, state, l)]
     locked_texts = [f.get("content", "") for f in frags
                     if f.get("content") and gating.classify_guard(f, state) != "reveal"]
+    # 🔁 开场白复读检测 (实弹: 锚块每回合在场, 角色不停把开场白再念一遍)
+    _opening = str((content.get("story") or {}).get("opening") or "")
 
     def _check(d):
         return logic.verify_turn(d.get("beats", []), absent_names=absent_names,
                                  locked_location_names=locked_locs,
-                                 locked_fragment_texts=locked_texts, present_names=present_names)
+                                 locked_fragment_texts=locked_texts, present_names=present_names,
+                                 opening_text=_opening)
 
     verdict = _check(directed)
     lang_broke = _lang_break(prompt, directed, content)
@@ -2785,11 +2842,17 @@ def _logic_guard(llm, prompt: dict[str, Any], directed: dict[str, Any], content:
                           "。请重写这一轮，把这些破绽全部修掉：死了的人不能出声，"
                           "时辰景象要贴合当前时段，不许复读上一轮的内容。")
         _audit(state, "director.audit", True, "；".join(dir_finds)[:60], "已强制重写")
+    if any("开场白" in h for h in verdict["hard"]):
+        corr_parts.append("你在复读作者开场白。玩家早已读过那段话，戏也从那一刻往前走了："
+                          "绝不逐句重复、引用或改写开场白里的句子，只写此刻正在发生的新内容。")
+        _audit(state, "opening.echo", True, prompt.get("speaker_name") or "",
+               "复读开场白，已强制重写")
     retry = llm.generate({**prompt, "logic_correction": "\n".join(corr_parts)})
     if not _check(retry)["hard"]:
         return retry  # a lingering language slip is tolerable; a logic break is not
     # still broken → deterministically neutralize the intrusion so it never reaches the player
-    retry["beats"] = logic.scrub_beats(retry.get("beats", []), absent_names)
+    retry["beats"] = logic.scrub_beats(retry.get("beats", []), absent_names,
+                                       opening_text=_opening)
     return retry
 
 

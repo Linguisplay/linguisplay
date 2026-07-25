@@ -518,7 +518,8 @@ _REF_BEFORE = ("提到", "提起", "说起", "说到", "说过", "讲起", "讲�
 
 
 def _norm(s: str) -> str:
-    return re.sub(r"[\s，。、！？…—\-,.!?：:；;\"'「」『』（）()]+", "", s or "")
+    # lower(): 英文换个大小写就逃逸的检测不算检测 (泄密/复读两用)
+    return re.sub(r"[\s，。、！？…—\-,.!?：:；;\"'「」『』（）()]+", "", s or "").lower()
 
 
 def _intrudes(text: str, name: str) -> bool:
@@ -547,9 +548,55 @@ def _leaks_secret(speech: str, locked_texts: list[str], min_run: int = 14) -> bo
     return False
 
 
+_WORD_RE = re.compile(r"[a-z0-9']+")
+
+
+def _open_words(opening_text: str) -> str:
+    """英文开场白的词序列 (空格哨兵包边, 短语查找不许跨词半截命中)。"""
+    ws = _WORD_RE.findall((opening_text or "").lower())
+    return (" " + " ".join(ws) + " ") if ws else ""
+
+
+def _echoes_opening(text: str, opening_norm: str, opening_words: str = "",
+                    min_run: int = 14) -> bool:
+    """True if `text` reproduces the authored opening verbatim. 中文: ≥min_run 归一化
+    连字, 或 ≥8 字整段照搬。英文按字符算密度低 (14 字符 ≈ 2 个单词, 惯用短语必误伤),
+    改用词级: 5 连词命中, 或 ≥3 词的碎片整串照搬。跟演是接着往下演, 复读是再念
+    一遍 — 只有后者算数。"""
+    hay = _norm(text)
+    if not hay:
+        return False
+    if sum(c.isascii() for c in hay) > len(hay) * 0.7:   # 英文/拉丁为主的拍
+        if not opening_words:
+            return False
+        ws = _WORD_RE.findall(text.lower())
+        if len(ws) < 5:
+            return len(ws) >= 3 and (" " + " ".join(ws) + " ") in opening_words
+        return any((" " + " ".join(ws[i: i + 5]) + " ") in opening_words
+                   for i in range(len(ws) - 4))
+    if len(opening_norm) < 8 or len(hay) < 8:
+        return False
+    if len(hay) < min_run:
+        return hay in opening_norm
+    for i in range(0, len(hay) - min_run + 1):
+        if hay[i: i + min_run] in opening_norm:
+            return True
+    return False
+
+
+def _segment_echoes(seg: str, opening_norm: str, opening_words: str = "") -> bool:
+    """句级复读判定: 整句连串命中, 或任一逗号级碎片整段照搬 (模型爱把开场白两句
+    用逗号重组着念 — 连串窗口跨不过重组缝, 碎片包含才抓得住)。"""
+    if _echoes_opening(seg, opening_norm, opening_words):
+        return True
+    return any(_echoes_opening(fr, opening_norm, opening_words)
+               for fr in re.split(r"[，、；,;]", seg) if fr.strip())
+
+
 def verify_turn(beats: list[dict[str, Any]], *, absent_names: list[str],
                 locked_location_names: list[str], locked_fragment_texts: list[str],
-                present_names: list[str] | None = None) -> dict[str, Any]:
+                present_names: list[str] | None = None,
+                opening_text: str = "") -> dict[str, Any]:
     """Deterministic post-generation check. Returns {hard: [...], soft: [...]}: `hard` issues
     are logic breaks worth regenerating for; `soft` are logged nudges. Never raises."""
     hard: list[str] = []
@@ -569,22 +616,46 @@ def verify_turn(beats: list[dict[str, Any]], *, absent_names: list[str],
         if loc and loc in full and re.search(rf"(去|前往|来到|到了|进了|带你(?:去|到)|走向)\s*{re.escape(loc)}", full):
             soft.append(f"疑似把玩家带往尚未解锁的地点「{loc}」")
 
+    # 🔁 开场白复读 (实弹: 锚块每回合都在, 模型把「向它看齐」听成「把它再念一遍」):
+    # 任何一拍逐字重现开场白 (≥14 连字, 或按句拆后整句照搬 — 模型爱把开场白拆两句
+    # 重组着念) → 硬伤重演。开场那一拍是引擎拍, 不过此检。
+    op = _norm(opening_text or "")
+    opw = _open_words(opening_text or "")
+    if op:
+        for b in beats:
+            txt = b.get("text", "")
+            if _echoes_opening(txt, op, opw) or any(
+                    _segment_echoes(seg, op, opw)
+                    for seg in re.split(r"(?<=[。！？…\n.!?])", txt)):
+                hard.append("复读了作者开场白的原文（玩家早已读过，戏要往下演）")
+                break
+
     return {"hard": hard, "soft": soft}
 
 
-def scrub_beats(beats: list[dict[str, Any]], absent_names: list[str]) -> list[dict[str, Any]]:
+def scrub_beats(beats: list[dict[str, Any]], absent_names: list[str],
+                opening_text: str = "") -> list[dict[str, Any]]:
     """Last-resort deterministic repair when a regeneration still intrudes: drop the sentences
-    in narration that put an absent character on stage; drop a description that empties out."""
-    if not absent_names:
+    in narration that put an absent character on stage — and, in ANY beat, the sentences that
+    parrot the authored opening; drop a beat that empties out."""
+    op = _norm(opening_text or "")
+    opw = _open_words(opening_text or "")
+    if not absent_names and not op:
         return beats
     out: list[dict[str, Any]] = []
     for b in beats:
-        if b.get("type") != "description":
+        segs = None
+        if b.get("type") == "description" and absent_names:
+            segs = [seg for seg in re.split(r"(?<=[。！？…\n.!?])", b.get("text", ""))
+                    if not any(_intrudes(seg, n) for n in absent_names)]
+        if op:
+            segs = [seg for seg in (segs if segs is not None
+                                    else re.split(r"(?<=[。！？…\n.!?])", b.get("text", "")))
+                    if not _segment_echoes(seg, op, opw)]
+        if segs is None:
             out.append(b)
             continue
-        kept = [seg for seg in re.split(r"(?<=[。！？…\n])", b.get("text", ""))
-                if not any(_intrudes(seg, n) for n in absent_names)]
-        text = "".join(kept).strip()
+        text = "".join(segs).strip()
         if text:
             out.append({**b, "text": text})
     return out

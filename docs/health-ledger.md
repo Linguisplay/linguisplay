@@ -27,10 +27,10 @@
 - ✅ **编剧拍 P2 字段全空转**（qwen.py）— 我方回归：mood/setup_plant/setup_pay/agenda_step 的 schema 碎片被误贴进解析器返回 dict，从没进 render_tool props。修：解析器改读 `d`，schema 补进 `_render_tool`，加进 `_PLAN_DROPS`。
 - ⬜ **散文离场把角色 pin 成 AWAY 后永久放逐**（runtime.py:5148/991/1368）作息再也拉不回；正则还会误放逐旁观者。修：AWAY pin 带 TTL 或作息优先于 AWAY pin。
 - ⬜ **无主答回合跳过事件对账 → 「想一想」能杀人**（runtime.py:6621/7402/8067）think/猎手截断/seek 无主答者，暂记事件永久 sticky，think 措辞撞事件关键词角色真死。修：kills/事件落账只认已对账触发。
-- ⬜ **导演场次单缓存跨 run/跨用户串账**（runtime.py:1765）_BRIEF_CACHE 键不含 run_id/天，多用户共享故事 id 同键 → A 的戏眼指挥 B 的场；失败结果永久缓存、inflight 不在 finally 清。修：键加 run_id+day，失败不入缓存，inflight finally 清。
+- ✅ **导演场次单缓存跨 run/跨用户串账**（runtime.py ensure_scene_brief）2026-07-25 修：键加 run 级命名空间 state.brief_ns（uuid，随存档持久）→ 命中只在本局内；空单（模型失手降级）不入缓存，下一回合重试；inflight 移进 finally 清。
 - ⬜ **受赠孪生成零成本偷窃通道**（runtime.py:4419/4460）「拿走/取走/抄起」被 accept_item 无条件入包，绕过抢夺判定。修：accept 只认赠予语境，抢夺动词转 taken 判定。
 - ⬜ **强制命运移动丢 content_mutated → 新地点蒸发、玩家静默传送回开场地**（runtime.py:6636/3055）修：强制结算读 `_fres.get("content_mutated")` 写入 final。
-- ⬜ **约定不 pin 对方脚 → 无作息角色结构性爽约还扣玩家分**（runtime.py:3598/7336/8241）修：约定时辰临近把 char_pins[cid]=约定地（同 seek 机制）。
+- ✅ **约定不 pin 对方脚 → 无作息角色结构性爽约还扣玩家分**（runtime.py char_position）2026-07-25 修：不走 char_pins（钉上会提前站桩），char_position 加约定分支——该角色有 open 约定且钟点正是现在 → 脚在约定地（_promise_loc_now，压过作息=换幕改班表也守约；建约已拒 AWAY 时段）。测试 test_promise.py::test_unscheduled_char_shows_up_at_promise_hour。
 - ⬜ **心跳 due() naive 时间串裸抛 TypeError → 卡死全架心跳**（living.py:62 + runs.py:1506 在 per-run try 外）修：due() 整体 try 返回 True 或挪进 per-run try。
 - ⬜ **手机端 VN 控制排被 overflow:hidden 裁掉**（play.html:520/627）好感/状态/隐藏/自动/记录在 ≤640px 全不可见。修：#vnctl 移出 #vnbox。
 - ⬜ **SSE 无重连无超时 → 断流卡死输入框**（play.html:3428）修：catch 调 reloadChat 补拍 + 60-90s 看门狗。
@@ -45,7 +45,7 @@
 
 ## P2（打磨 / 合规 / 死代码）
 
-- ⬜ SQLite 无 WAL 无 busy_timeout（db.py:15）→ 并发写 database is locked。修：PRAGMA WAL+busy_timeout。
+- ✅ SQLite 无 WAL 无 busy_timeout（db.py）2026-07-25 修：connect 事件挂 PRAGMA journal_mode=WAL + busy_timeout=5000 + synchronous=NORMAL（仅 sqlite URL）。
 - ⬜ 进程级全局态假设单 worker（_TURN_ACTIVE/_PARSE_JOBS/_BRIEF_CACHE 等）→ 扩容即失效。修：扩容前移 DB/Redis。
 - ⬜ vnWait 自动推进 setTimeout 从不取消 → 残留定时器快进后续页（play.html:2780）。
 - ⬜ 目标栈 goal_settle 零调用 → 办成的差事在目标条钉两天（runtime.py:1881）。
