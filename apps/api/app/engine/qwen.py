@@ -3873,6 +3873,42 @@ class QwenLLM:
         except Exception:
             return {}
 
+    def _stage_prints(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🎬 存量补表演指纹: 从角色人设批量起草表演指纹三维 (backfill_stage_print.py /
+        Studio「AI补全表演指纹」专用; 提案先验收, 不直接落库)。Degrades to {}."""
+        chars = prompt.get("characters") or []
+        if not chars:
+            return {}
+        sys = ("你给互动剧的角色起草【表演指纹】：TA 动作、感官、描写上的规律 (和语言指纹并列，"
+               "但管怎么动/怎么感/怎么写，不管台词)。只输出JSON："
+               '{"prints":[{"name":"角色名(原样抄写)",'
+               '"act_pace":"≤30字 行动节奏：分阶段推进有确认/利落一步到位/冲动急促/沉重迟缓",'
+               '"sense_focus":"≤30字 感官侧重：触觉/视觉/听觉哪种更敏感更常被写",'
+               '"emote_form":"≤30字 情感表达形式：动作暗示+内心独白/直球说出口/只做事不表达"}]}。'
+               "规矩：三维必须从 TA 的人设、身份、声线里长出来，冷/钝的人就该快就该钝，"
+               "同一批角色之间三维不许雷同，一读就知道是不同的人；写规律不写性格；不用破折号。"
+               + _lang_rule(prompt))
+        import json as _json
+        u = _json.dumps({"世界观": (prompt.get("world") or "")[:400],
+                         "文风": (prompt.get("style") or "")[:160],
+                         "角色": [{"名字": c.get("name"), "身份": c.get("role"),
+                                   "人设": (c.get("persona") or "")[:220],
+                                   "语言指纹": (c.get("voice_print") or "")[:60],
+                                   "台词范例": (c.get("examples") or [])[:3]}
+                                  for c in chars[:8]]}, ensure_ascii=False)
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model,
+                               "messages": [{"role": "system", "content": sys},
+                                            {"role": "user", "content": u}],
+                               "max_tokens": 1200, "temperature": 0.7,
+                               "response_format": {"type": "json_object"}},
+                              timeout=45)
+            data = _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
     def _scene_brief(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """🎬 导演场次单 (剧组 P1): 每场一次的戏剧判断 — 引擎备好全部卡 (含玩家卡)
         与冲突矩阵, 导演只回答「这场戏该怎么活」。Degrades to {} (一切照旧)."""
@@ -4558,6 +4594,8 @@ class QwenLLM:
             return self._char_from_text(prompt)
         if prompt.get("voice_prints"):
             return self._voice_prints(prompt)
+        if prompt.get("stage_prints"):
+            return self._stage_prints(prompt)
         if prompt.get("engine_skeleton"):
             return self._engine_skeleton(prompt)
         if prompt.get("engine_secrets"):

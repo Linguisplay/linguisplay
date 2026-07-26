@@ -2283,7 +2283,6 @@ async function openPhone() {
     ${apps.includes("bank") && phoneOn ? `<div class="papp" onclick="openBank()">🏦<small>${B("银行","Bank")}</small></div>` : ""}
     ${apps.includes("social") && phoneOn ? `<div class="papp" onclick="openSocial()">📸<small>${B("动态","Feed")}</small></div>` : ""}
     ${curMoney != null ? `<div class="papp" onclick="openMarket()">🛒<small>集市</small></div>` : ""}
-    <div class="papp" onclick="openAlbum()">📸<small>回忆册</small></div>
     <div class="papp" onclick="document.getElementById('phoneov').remove(); openRelWeb()">🕸<small>关系网</small></div>
     <div class="papp" onclick="openBag()">🎒<small>背包</small></div>
     <div class="papp" onclick="openCalendar()">🗓<small>日历</small></div>
@@ -4586,10 +4585,10 @@ function showMoments(moments, relDeltas) {
         m.status === "kept" ? `${m.romantic ? "💞 A date, kept" : "🤝 You showed up"}: ${m.what || ""}` :
         `💔 You stood ${m.name || "them"} up (${m.what || ""})`),
       m.status === "missed" ? "t-press" : "t-rel", i++ * 650);
-    else if (m.kind === "golden") pushToast(B(`✨ 金色瞬间：「${m.title || ""}」已存入回忆册`, `✨ A golden moment: “${m.title || ""}” saved to Memories`), "t-end", i++ * 650);
-    else if (m.kind === "breakthrough") pushToast(B(`⚡ 突破：踏入「${m.title || ""}」— 已存入回忆册`, `⚡ Breakthrough: [${m.title || ""}] — saved to Memories`), "t-end", i++ * 650);
-    else if (m.kind === "crit") pushToast(B("🎲 天命一掷·20！这一刻已存入回忆册", "🎲 A natural 20! This moment is saved to Memories"), "t-end", i++ * 650);
-    else if (m.kind === "secret_full") pushToast(B(`🧩 真相拼全：「${m.title || ""}」已存入回忆册`, `🧩 The whole truth of “${m.title || ""}” — saved to Memories`), "t-end", i++ * 650);
+    else if (m.kind === "golden") pushToast(B(`✨ 金色瞬间：「${m.title || ""}」`, `✨ A golden moment: “${m.title || ""}”`), "t-end", i++ * 650);
+    else if (m.kind === "breakthrough") pushToast(B(`⚡ 突破：踏入「${m.title || ""}」`, `⚡ Breakthrough: [${m.title || ""}]`), "t-end", i++ * 650);
+    else if (m.kind === "crit") pushToast(B("🎲 天命一掷·20！", "🎲 A natural 20!"), "t-end", i++ * 650);
+    else if (m.kind === "secret_full") pushToast(B(`🧩 真相拼全：「${m.title || ""}」`, `🧩 The whole truth of “${m.title || ""}”`), "t-end", i++ * 650);
     else if (m.kind === "mail") pushToast(B(`📮 ${m.name || "有人"} 给你写了一封信（去信箱看看）`, `📮 ${m.name || "Someone"} wrote you a letter (check the mailbox)`), "t-rel", i++ * 650);
     else if (m.kind === "doom") pushToast(
       B(m.status === "averted" ? `🕯 ${m.name || "TA"} 躲过了那一夜——因为你` : `🚪 ${m.name || "有人"} 被带走了`,

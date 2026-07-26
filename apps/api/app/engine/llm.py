@@ -116,6 +116,15 @@ class MockLLM:
             return {"prints": [{"name": c.get("name"),
                                 "voice_print": f"短句为主，口头禅「第{i + 1}句」，少客套"}
                                for i, c in enumerate(prompt.get("characters") or [])]}
+        # 🎬 存量补表演指纹孪生: 每人一套确定性、互不相撞的三维
+        if prompt.get("stage_prints"):
+            _p = ["利落一步到位", "分阶段推进有确认", "冲动急促", "沉重迟缓"]
+            _s = ["视觉主导", "触觉最敏感", "听觉敏感", "体感为重"]
+            _e = ["只做事不表达", "动作暗示+内心独白", "直球说出口", "绵里藏针"]
+            return {"prints": [{"name": c.get("name"),
+                                "act_pace": _p[i % 4], "sense_focus": _s[i % 4],
+                                "emote_form": _e[i % 4]}
+                               for i, c in enumerate(prompt.get("characters") or [])]}
         # 🎬 导演场次单孪生 (剧组 P1): 确定性戏眼/心事/主动权 — 引擎裁剪逻辑可测
         if prompt.get("director_brief"):
             cast = [c for c in (prompt.get("cast") or []) if (c or {}).get("name")]
