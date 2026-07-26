@@ -243,6 +243,10 @@ DEFAULT_TUNING = {
     "rel_events": 1,            # 💞 好感事件记账制 (Yi 2026-07-25 定: 不许每句话打分, 关系由
                                 #    事写成): 模型只申报关系事件+文据, 分值/冷却引擎说了算
                                 #    (1 = on; 剧本级可关回旧每句判)
+    "pursue_player": 0,         # 💘 全员追玩家 (Yi 2026-07-26 定: 所有角色主动追你, 反向后宫):
+                                #    行为层, 不碰 voice_print — 各角色【透过自己人设】吊系地追
+                                #    (冷的人冷着追/傲的人嘴硬身诚实), 欲擒故纵不倒贴。默认 0,
+                                #    剧本级开 (恋爱本开, 恐怖/战争本别开; 观剧/成员拍不注入)
 }
 
 # 💞 关系事件分类表 (事件记账制的引擎法条, 故事无关):
@@ -9602,6 +9606,8 @@ def run_turn_stream(
             "auth_opening": ((content.get("story") or {}).get("opening") or "")[:1200],
             # ⏰ 现实时刻 (Yi: 角色也得知道才行): 主答者知道现在真的是几点/星期几/什么季节
             "real_now": real_now_line(content, state),
+            # 💘 全员追玩家 (行为层, 不碰 voice_print): 各角色透过自己人设吊系地追
+            "pursue_player": bool(tun.get("pursue_player")) and not observer,
             # 🏛 阵营底色 (权谋地基): 归属 + 玩家在本阵营的风评
             "faction_block": factions_mod.block(content, state, sp,
                                                 zh=lang_of(content) != "en"),
