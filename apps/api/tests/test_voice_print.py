@@ -31,3 +31,15 @@ def test_speaker_prompt_carries_it():
     runtime.run_turn(story, runtime.default_state(), {"name": "我"}, "你好",
                      channel="say", llm=llm)
     assert any(p.get("voice_print") == "从不说客套话" for p in llm.prompts)
+
+
+def test_voice_whisper_sits_next_to_generation():
+    """🗣 声纹耳语 (考卷实锤: 指纹埋 system 开头写到后面就忘): 贴生成点复读一行。"""
+    a = qwen._depth_anchor({"speaker_name": "阿珍", "voice_print": "短句，句尾带啦",
+                            "clock": "第1天·夜", "channel": "say"})
+    assert "记住你是「阿珍」" in a and "句尾带啦" in a
+
+
+def test_no_whisper_without_print():
+    a = qwen._depth_anchor({"speaker_name": "阿珍", "clock": "第1天·夜", "channel": "say"})
+    assert "记住你是" not in a

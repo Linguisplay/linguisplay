@@ -211,6 +211,12 @@ def _depth_anchor(prompt: dict[str, Any]) -> str:
     up in the system prompt. Returns "" when there's nothing physical to anchor."""
     en = (prompt.get("language") or "zh") == "en"
     bits: list[str] = []
+    # 🗣 声纹耳语 (情商考卷实锤: 指纹埋 system 开头, 写到后面就忘 — 阿珍的「啦」尾
+    # 三张卷全丢)。贴生成点复读一行, 注意力最强处压最容易漂的事。
+    _vp = str(prompt.get("voice_print") or "").strip()
+    _spk = str(prompt.get("speaker_name") or "").strip()
+    if _vp and _spk and not en:
+        bits.append(f"记住你是「{_spk}」，你的说话规律：{_vp[:80]}——这一拍的每句台词都要守住它。")
     ck = (prompt.get("clock") or "").strip()
     if ck:
         bits.append(f"The time right now is [{ck}] — any mention of morning/afternoon/"
