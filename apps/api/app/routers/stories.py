@@ -178,6 +178,10 @@ def _sanitize_cards(out: dict) -> list[dict]:
             continue
         c.pop("id", None)          # id 由编辑器现场铸造
         c["generated"] = False     # 作者亲写的卡: 智能搜图不会乱动它的脸
+        # 🗣 唯一没有代码侧硬截的出生点: 啰嗦模型会把整段性格散文塞进 voice_print,
+        # 其余出生点都 [:60] — 这里对齐, 免得几百字垃圾入库并回显进 studio 表单
+        if c.get("voice_print"):
+            c["voice_print"] = str(c["voice_print"]).strip()[:60]
         try:
             cards.append(Character(**c).model_dump(exclude_none=True))
         except Exception:

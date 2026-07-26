@@ -193,6 +193,7 @@ class CharacterCardInput(BaseModel):
     persona_text: Optional[str] = None
     background: Optional[str] = None
     eq_style: Optional[str] = None
+    voice_print: Optional[str] = None   # 🗣 语言指纹随卡走 (卡库往返不丢腔调)
     agenda: Optional[str] = None
     knowledge: Optional[str] = None
     bio_layers: list[dict[str, Any]] = []
@@ -618,6 +619,9 @@ class MoveIn(BaseModel):
     location: str
     # if a character is leading the player there (accepted a 带去 invite), they travel along
     with_character_id: Optional[str] = None
+    # 🚶 present characters the player chose to bring along on this trip (each gated by 好感
+    # while still in the current scene, before we move); refusers are reported back
+    bring: list[str] = []
     # True = this place is NOT on the authored map yet; it emerged in play and should be
     # generated on the fly (name → concrete detail), wired in, and moved to.
     generate: bool = False

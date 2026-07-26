@@ -103,11 +103,17 @@ class MockLLM:
             return {"characters": [
                 {"name": "码头老陈", "gender": "男", "age_band": "中年",
                  "role": "码头账房 · 算盘比人心准", "persona_text": "在码头管了二十年账。",
+                 "voice_print": "短句，爱用账房话打比方；从不喊人全名",
                  "traits": {"外向": 2, "温度": 3, "主导": 3},
                  "fear": "怕账对不上", "line": "假账不做",
                  "wants": "攒钱回乡下盖房", "life_goal": {"text": "攒钱回乡下盖房"},
                  "examples": ["账就是账，情面是情面。"], "bogus_field": "should be dropped"},
                 {"name": "", "note": "nameless — dropped by the route"}]}
+        # 🗣 存量补票孪生: 每张嘴一个确定性、互不相撞的指纹提案 — 补票脚本可测
+        if prompt.get("voice_prints"):
+            return {"prints": [{"name": c.get("name"),
+                                "voice_print": f"短句为主，口头禅「第{i + 1}句」，少客套"}
+                               for i, c in enumerate(prompt.get("characters") or [])]}
         # 🎬 导演场次单孪生 (剧组 P1): 确定性戏眼/心事/主动权 — 引擎裁剪逻辑可测
         if prompt.get("director_brief"):
             cast = [c for c in (prompt.get("cast") or []) if (c or {}).get("name")]
@@ -212,7 +218,8 @@ class MockLLM:
         # 🔎 character scout: mock says the name fits, with stub whereabouts — the
         # minting twin's tests drive the interesting cases with their own LLMs.
         if prompt.get("scout_char"):
-            return {"fits": True, "who": "打听来的人物", "where": "附近的去处", "persona": ""}
+            return {"fits": True, "who": "打听来的人物", "where": "附近的去处",
+                    "persona": "", "voice": "话不多，句尾总像还留着半句"}
 
         # 🎯 数值账本 aux calls: deterministic mid-band stubs keep tests reproducible.
         if prompt.get("gen_attrs"):

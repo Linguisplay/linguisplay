@@ -1111,6 +1111,8 @@ def seed_sandbox_cast(content: dict[str, Any], llm: LLM | None = None,
         chars.append({"id": f"gen_{_uuid.uuid4().hex[:8]}", "name": nm,
                       "role": str(c.get("role") or "").strip()[:24],
                       "persona_text": str(c.get("persona") or "").strip()[:240],
+                      # 🗣 指纹自动出生: 沙盒班底出生就带说话规律 (speaker prompt 直接吃)
+                      "voice_print": str(c.get("voice") or c.get("voice_print") or "").strip()[:60],
                       "items": items,
                       "relation_default": "stranger", "generated": True,
                       "is_lead": not chars})
@@ -1872,6 +1874,35 @@ def generate_and_move(content: dict[str, Any], state: dict[str, Any], place_name
     if move:
         state["location_id"] = lid
     return new_loc
+
+
+def accept_companion(content: dict[str, Any], state: dict[str, Any],
+                     name: str) -> dict[str, Any] | None:
+    """🚶 对话意向自动同行 (文实不分家): a character verbally agreed IN DIALOGUE to travel
+    with the player, so honor it — TA joins `following`, and any later move carries TA
+    along. Leniency vs the cold UI invite: the dialogue IS the earning, so we only block
+    an ENEMY (a hostility the model shouldn't have had agree). Must be present. Idempotent.
+    Returns {name} on a fresh join, None if not applicable (unknown/absent/enemy/already)."""
+    nm = (name or "").strip()
+    if not nm:
+        return None
+    char = next((c for c in scene_characters(content, state)
+                 if (c.get("name") or "").strip() == nm), None)
+    if not char:
+        _audit(state, "companion.join", False, nm, "不在场，答应同行不作数")
+        return None
+    cid = char.get("id")
+    if cid in (state.get("following") or []):
+        return None
+    scores = (state.get("rel") or {}).get(cid) or relationships.new_scores()
+    if relationships.derive_mode(char, scores, tuning_for(content)) == "enemy":
+        _audit(state, "companion.join", False, nm, "对你满是戒备，不会真跟你走")
+        return None
+    state["following"] = list(state.get("following") or []) + [cid]
+    rel_log(state, cid, int(state.get("act", 1) or 1), "follow",
+            _t(content, f"{nm} 答应与你同行。", f"{nm} agreed to come along."))
+    _audit(state, "companion.join", True, nm)
+    return {"name": nm, "id": cid}
 
 
 def set_follow(content: dict[str, Any], state: dict[str, Any],
@@ -6916,6 +6947,7 @@ def mint_sought_character(content: dict[str, Any], state: dict[str, Any], name: 
         "name": nm,
         "role": clip_sentence(scout.get("who") or "", 24).rstrip("。") or "打听来的人物",
         "persona_text": clip_sentence(scout.get("persona") or scout.get("who") or "", 200),
+        "voice_print": str(scout.get("voice") or "").strip()[:60],
         "relation_default": "stranger",
         "home_location_id": loc.get("id"),
         "generated": True,
@@ -7883,6 +7915,18 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
                     yield emit({"type": "description", "speaker_name": None,
                                 "text": f"（你们约好的（{_vp.get('what','')}），"
                                         "再也没有人来赴了。）"})
+        # 🚶 对话意向自动同行: someone said yes to traveling together — TA joins `following`
+        # now, so the player's next move carries TA along (文与实不分家). Skip if TA is
+        # also booked to walk off this turn (leaving wins — the prose put them elsewhere).
+        cj = (directed.get("companion_join") or "").strip()
+        if cj and not observer:
+            _leaving = {str(m.get("who") or "").strip()
+                        for m in (directed.get("npc_moves") or []) if isinstance(m, dict)}
+            if cj not in _leaving:
+                joined = accept_companion(content, state, cj)
+                if joined:
+                    moments.append({"kind": "follow", "on": True, "name": joined["name"],
+                                    "id": joined["id"]})
         # 🚶 booked NPC moves: the model narrated someone setting off — validate and
         # BOOK it (the turn-end roster diff narrates the departure + destination)
         for mv in (directed.get("npc_moves") or [])[:2]:
@@ -7908,7 +7952,13 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
             import uuid as _uuid
             parts = _re.split(r"[｜|：:，,]", nc_raw, maxsplit=1)
             nc_name = parts[0].strip().strip("「」\"'")[:12]
-            nc_desc = clip_sentence(parts[1].strip() if len(parts) > 1 else "", 140)
+            nc_rest = parts[1].strip() if len(parts) > 1 else ""
+            # 🗣 指纹自动出生: 约定格式「身份与外貌｜说话规律」。说话规律永远是【最末段】，
+            # 身份外貌吃中间全部段——模型把「身份与外貌」再拆成两段(共≥2段)时，外貌仍留在
+            # 人设里，绝不被当成腔调误存进 voice_print。只有一段=只有身份外貌、没给指纹。
+            segs = [s.strip() for s in _re.split(r"[｜|]", nc_rest) if s.strip()]
+            nc_voice = segs[-1][:60] if len(segs) >= 2 else ""
+            nc_desc = clip_sentence("，".join(segs[:-1]) if len(segs) >= 2 else nc_rest, 140)
             if nc_name and not npc_name_ok(nc_name):
                 _audit(state, "new_char", False, nc_name, "名字不像人名（像句子片段），驳回")
                 nc_name = ""
@@ -7924,6 +7974,7 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
                     "name": nc_name,
                     "role": nc_desc[:24] or "新登场的人物",
                     "persona_text": nc_desc,
+                    "voice_print": nc_voice[:60],
                     "relation_default": "stranger",
                     "home_location_id": state.get("location_id"),
                     "generated": True,

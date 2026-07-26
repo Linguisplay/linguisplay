@@ -1541,7 +1541,7 @@ function editCardForm(id){
   const o=document.getElementById("cardlib"); if(!o) return;
   const c = libCards.find(x=>x.id===id) || sqCards.find(x=>x.id===id && x.mine)
     || {name:"",role:"",persona_text:"",background:"",
-        eq_style:"",agenda:"",knowledge:"",examples:[],items:[],bio_layers:[],visibility:"private"};
+        eq_style:"",voice_print:"",agenda:"",knowledge:"",examples:[],items:[],bio_layers:[],visibility:"private"};
   o.querySelector(".libcard").innerHTML = `
     <div class="bar" style="justify-content:space-between">
       <h3 style="margin:0">${id?"编辑角色卡":"新建角色卡"}</h3>
@@ -1556,6 +1556,8 @@ function editCardForm(id){
       <div><label>情绪表达方式（eq_style）</label><input id="cc_eq" value="${esc(c.eq_style||"")}"></div>
       <div><label>TA 自己的目的（agenda）</label><input id="cc_agenda" value="${esc(c.agenda||"")}"></div>
     </div>
+    <label>🗣 语言指纹（句长/口头禅/绝不说的词/标点脾气）</label>
+    <input id="cc_vp" value="${esc(c.voice_print||"")}" placeholder="例：短句居多，句尾爱带「咯」；从不说客套话；心虚时才用省略号">
     <label>台词范例（一行一句，最能代表 TA 声音的原话）</label>
     <textarea id="cc_examples">${esc((c.examples||[]).join("\n"))}</textarea>
     <label>知识库（可选，或用下面的智能增强自动生成）</label><textarea id="cc_kn">${esc(c.knowledge||"")}</textarea>
@@ -1573,7 +1575,7 @@ function editCardForm(id){
 function _ccPayload(){
   const pub = document.getElementById("cc_pub");
   return { name:cc_name.value.trim(), role:cc_role.value.trim(), persona_text:cc_persona.value,
-    background:cc_bg.value, eq_style:cc_eq.value.trim(), agenda:cc_agenda.value.trim(),
+    background:cc_bg.value, eq_style:cc_eq.value.trim(), voice_print:cc_vp.value.trim(), agenda:cc_agenda.value.trim(),
     knowledge:cc_kn.value, examples:cc_examples.value.split("\n").map(s=>s.trim()).filter(Boolean),
     items:[], bio_layers:[], visibility:(pub && pub.checked)?"public":"private" };
 }
@@ -1613,7 +1615,7 @@ function importCard(id){
   const c = libCards.find(x=>x.id===id) || sqCards.find(x=>x.id===id); if(!c) return;
   story.characters.push({ id:gid("c_"), name:c.name, role:c.role||"",
     is_lead:story.characters.length===0, persona_text:c.persona_text||"", background:c.background||"",
-    avatar_url:c.avatar_url||"", eq_style:c.eq_style||"", agenda:c.agenda||"", knowledge:c.knowledge||"",
+    avatar_url:c.avatar_url||"", eq_style:c.eq_style||"", voice_print:c.voice_print||"", agenda:c.agenda||"", knowledge:c.knowledge||"",
     examples:c.examples||[], items:c.items||[], bio_layers:c.bio_layers||[], source_card_id:c.id,
     presence:"present", appears_from_act:0, playable:false, relation_default:"",
     home_location_id:null, schedule:[], ties:[] });
@@ -1626,7 +1628,7 @@ async function saveCharAsCard(i){
   try{
     await j("/cards",{method:"POST",body:JSON.stringify({ name:c.name, role:c.role||"",
       persona_text:c.persona_text||"", background:c.background||"", eq_style:c.eq_style||"",
-      agenda:c.agenda||"", knowledge:c.knowledge||"", examples:c.examples||[],
+      voice_print:c.voice_print||"", agenda:c.agenda||"", knowledge:c.knowledge||"", examples:c.examples||[],
       items:c.items||[], bio_layers:c.bio_layers||[], visibility:"private" })});
     saveMsg.textContent=`「${c.name}」已存入角色卡库 ✓`;
   }catch(e){ alert("存入失败: "+e.message); }

@@ -1963,10 +1963,12 @@ async function toggleFollow(id, want) {
   } catch(e) { renderBeat({ author:"engine", type:"description", text:`（${e.message}）` }); }
 }
 // a character asked to lead the player elsewhere → confirm before moving
+let moveBring = new Set();   // 🚶 present companions the player toggled to bring on this trip
 function renderMoveAsk(req) {
   const el = document.getElementById("moveask");
-  if (!req || ended) { el.classList.add("hidden"); el.innerHTML = ""; return; }
+  if (!req || ended) { el.classList.add("hidden"); el.innerHTML = ""; moveBring = new Set(); return; }
   el.innerHTML = "";
+  moveBring = new Set();
   const t = document.createElement("span");
   const tail = req.generate ? B("（一处新的去处，去了才知道是什么样）", " (somewhere new — you won't know until you go)") : "";
   if (req.seek) {
@@ -1993,13 +1995,34 @@ function renderMoveAsk(req) {
   go.onclick = () => acceptMove(req);
   const stay = document.createElement("button"); stay.className = "stay"; stay.textContent = B("留下", "Stay");
   stay.onclick = () => { renderMoveAsk(null); vnPlayFlow([{ author: "engine", type: "description", text: B("（你没有动，留在了原地。）", "(You don't move. You stay where you are.)") }]); };
-  el.append(t, go, stay); el.classList.remove("hidden");
+  el.append(t, go, stay);
+  // 🚶 带上谁: present, close-enough companions not already traveling with you — tap to bring
+  const bringable = (cast || []).filter(c => c && c.id && !following.includes(c.id) && c.can_follow !== false);
+  if (bringable.length && playMode !== "god") {
+    const row = document.createElement("div");
+    row.style.cssText = "flex-basis:100%;display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:2px";
+    const lbl = document.createElement("small"); lbl.style.color = "#a79e8c";
+    lbl.textContent = B("带上：", "Bring:"); row.appendChild(lbl);
+    bringable.forEach(c => {
+      const chip = document.createElement("span");
+      chip.className = "follow";
+      chip.textContent = B("＋" + c.name, "+" + c.name);
+      chip.onclick = () => {
+        if (moveBring.has(c.id)) { moveBring.delete(c.id); chip.classList.remove("on"); chip.textContent = B("＋" + c.name, "+" + c.name); }
+        else { moveBring.add(c.id); chip.classList.add("on"); chip.textContent = B("🚶" + c.name, "🚶" + c.name); }
+      };
+      row.appendChild(chip);
+    });
+    el.appendChild(row);
+  }
+  el.classList.remove("hidden");
 }
 async function acceptMove(req) {
+  const bring = [...moveBring];   // 🚶 snapshot before renderMoveAsk(null) clears it
   renderMoveAsk(null);
   if (!runId || ended) return;
   try {
-    const run = await j(`/runs/${runId}/move`, { method:"POST", body: JSON.stringify({ location: req.to || req.to_name, with_character_id: req.seek ? null : req.by_id, generate: !!req.generate }) });
+    const run = await j(`/runs/${runId}/move`, { method:"POST", body: JSON.stringify({ location: req.to || req.to_name, with_character_id: req.seek ? null : req.by_id, bring, generate: !!req.generate }) });
     applyRunUpdate(run);
     vnPlayFlow([{ author: "engine", type: "description",
       text: req.seek
@@ -4490,6 +4513,7 @@ function showMoments(moments, relDeltas) {
   for (const m of moments) {
     if (m.kind === "unlock") pushToast(B(`🔓 真相拼上一块：「${m.title}」`, `🔓 A piece of the truth clicks in: “${m.title}”`), "t-unlock", i++ * 650);
     else if (m.kind === "rel_up") pushToast(B(`💗 你和 ${m.name} 成了「${m.mode_name}」`, `💗 You and ${m.name} are now “${m.mode_name}”`), "t-rel", i++ * 650);
+    else if (m.kind === "follow" && m.on) pushToast(B(`🚶 ${escapeHtml(m.name || "TA")} 答应与你同行——你去哪 TA 跟到哪`, `🚶 ${escapeHtml(m.name || "They")} will travel with you`), "t-rel", i++ * 650);
     else if (m.kind === "act") pushToast(B(`📖 进入第${m.index}幕${m.title ? " · " + m.title : ""}`, `📖 Act ${m.index}${m.title ? " · " + m.title : ""}`), "t-act", i++ * 650);
     else if (m.kind === "ending" && !m.terminal) pushToast(B(`🏆 达成结局：「${m.title || m.ending_kind}」`, `🏆 Ending reached: “${m.title || m.ending_kind}”`), "t-end", i++ * 650);
     else if (m.kind === "pressure") pushToast(`⚠️ ${m.note || ""}`, "t-press", i++ * 650);

@@ -1168,6 +1168,12 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                                              "to=去处地名。【铁律】叙述里写了TA走（转身离开/迈出门/"
                                              "下台阶/说了『走了』然后动身）就必须填——写走不记走，"
                                              "TA就会阴魂不散地留在场上。通常填空数组[]"}
+        props["companion_join"] = {"type": "string", "description":
+                                   "若这一轮在场的某个角色【当面答应要和玩家一起走/同行】"
+                                   "（玩家邀TA一起去某处，TA应了；或TA主动说『我陪你去』『带你去』），"
+                                   "填TA的名字（只能从：" + "、".join(cand) + "）。"
+                                   "【铁律】嘴上答应了就必须填——答应同行却不记，玩家一挪步TA就凭空留下，"
+                                   "文与实就分家了。只是寒暄、含糊、还在犹豫、或明确拒绝，都不填；没有则空字符串"}
         if prompt.get("group_mode") in (None, "primary"):
             # ⚡ 提速: 建议 chips 折进主拍 (省掉每回合一次独立小调用 ~1.7s)
             props["suggestions"] = {"type": "array", "maxItems": 2,
@@ -1183,7 +1189,8 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
         if prompt.get("can_new_char"):
             props["new_character"] = {"type": "string", "description":
                                       "若剧情此刻确实需要一个此前不存在的新人物登场（推门进来/被引见/"
-                                      "下属报到/线人现身），填「名字｜身份与外貌各一句话」。"
+                                      "下属报到/线人现身），填「名字｜身份与外貌各一句话｜TA的说话规律"
+                                      "一句（口头禅/句长/腔调，要跟在场任何人都不一样）」。"
                                       "【名字铁律】名字必须像个真人名（2~4字姓名或诨名，如"
                                       "「王二」「沈青梧」「哑巴刀」），绝不能是句子片段、疑问词或"
                                       "代词（「谁看见」「那个人」都不合格，会被驳回）。并且 narration "
@@ -1843,6 +1850,8 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
         out["quest_accepted"] = str(d.get("quest_accepted") or "").strip()
     if "quest_done" in d:
         out["quest_done"] = str(d.get("quest_done") or "").strip()
+    if "companion_join" in d:
+        out["companion_join"] = str(d.get("companion_join") or "").strip()
     if "npc_moves" in d:
         out["npc_moves"] = [{"who": str(m.get("who") or "").strip(),
                              "to": str(m.get("to") or "").strip()}
@@ -3779,6 +3788,7 @@ class QwenLLM:
                '{"characters":[{"name":"名字","gender":"男|女|其他","age_band":"少年|青年|中年|老年",'
                '"role":"≤20字 身份·一句话记忆点","persona_text":"120~200字人设散文：为人、习惯、'
                '说话方式、藏着的心事","eq_style":"≤60字 TA怎么表达关心与情绪",'
+               '"voice_print":"≤40字 说话规律：句长习惯/口头禅/绝不说的词/标点脾气",'
                '"traits":{"外向":3,"温度":3,"主导":3},'
                '"fear":"≤24字 软肋一句","line":"≤24字 底线一句",'
                '"love_style":"傲娇|冷感慢热|回避型|占有欲|直球|留空",'
@@ -3789,7 +3799,7 @@ class QwenLLM:
                '"bio_layers":[{"closeness_min":25,"text":"≤80字 熟了才知道的过往"}]}]}。'
                "规矩：只从文字里来+贴文字口吻的合理推断，拿不准的字段留空或省略，绝不硬编；"
                "文字里有几个人就出几张卡（最多6张）；traits 三轴 1~5 分（3=常人）；"
-               "台词范例要能一句认出是谁，不许互相撞腔调；不用破折号。")
+               "台词范例和 voice_print 都要能一句认出是谁，几张卡之间不许互相撞腔调；不用破折号。")
         import json as _json
         u = _json.dumps({"世界观(贴年代与口吻)": prompt.get("world") or "",
                          "文风": prompt.get("style") or "",
@@ -3802,6 +3812,40 @@ class QwenLLM:
                                "max_tokens": 2400, "temperature": 0.7,
                                "response_format": {"type": "json_object"}},
                               timeout=60)
+            data = _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def _voice_prints(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🗣 存量补票: 给没有语言指纹的角色批量起草 voice_print (backfill_voice_prints.py
+        专用; 提案先给作者验收, 不直接落库)。Degrades to {} (该剧本这轮不出提案)."""
+        chars = prompt.get("characters") or []
+        if not chars:
+            return {}
+        sys = ("你给互动剧的角色起草【语言指纹】：这张嘴独有的说话规律。只输出JSON："
+               '{"prints":[{"name":"角色名(原样抄写)","voice_print":"≤40字 说话规律：'
+               '句长习惯/口头禅或用词癖/绝不说的词/标点脾气"}]}。'
+               "规矩：指纹必须从TA的人设、身份和台词范例里长出来，不许发明与人设矛盾的习惯；"
+               "同一批角色之间绝不许撞腔调，一句话就能认出是谁；"
+               "写规律不写性格（「句尾爱带『咯』」算，「性格开朗」不算）；不用破折号。"
+               + _lang_rule(prompt))
+        import json as _json
+        u = _json.dumps({"世界观": (prompt.get("world") or "")[:400],
+                         "文风": (prompt.get("style") or "")[:160],
+                         "角色": [{"名字": c.get("name"), "身份": c.get("role"),
+                                   "人设": (c.get("persona") or "")[:200],
+                                   "情绪表达": (c.get("eq_style") or "")[:80],
+                                   "台词范例": (c.get("examples") or [])[:4]}
+                                  for c in chars[:8]]}, ensure_ascii=False)
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model,
+                               "messages": [{"role": "system", "content": sys},
+                                            {"role": "user", "content": u}],
+                               "max_tokens": 800, "temperature": 0.7,
+                               "response_format": {"type": "json_object"}},
+                              timeout=45)
             data = _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
             return data if isinstance(data, dict) else {}
         except Exception:
@@ -3965,9 +4009,11 @@ class QwenLLM:
         wv = (prompt.get("worldview") or "").strip() or "一个由玩家亲手定义的世界。"
         sys = ("你为一个玩家自定义世界观的无尽沙盒剧情设计【开场人物】。只输出一个JSON对象，形如"
                ' {"characters":[{"name":"名字","role":"身份(≤12字)","persona":"外貌、性格与说话方式(≤80字)",'
+               '"voice":"说话规律(≤30字：句长习惯/口头禅或用词癖/标点脾气)",'
                '"items":["随身物件名|一句细节"]}]}'
                "，共2~3人。要求：人物必须从这个世界观里自然长出来（职业、立场、欲望各不相同），"
                "至少一人与玩家的到来直接相关；名字要贴合世界观的语感；"
+               "voice 是这张嘴独有的规律，几个人之间绝不许撞腔调，一句话就能认出是谁；"
                "每人配1~2件贴身份的随身物件（它们会成为世界里可送、可换、可被抢的实体）。"
                + ("本局为成人向（18+，玩家已成年）：persona 里的外貌一笔要立得住身材与气质的张力，"
                   "写出让人多看一眼的具体理由（身形、线条、气场），不低俗、不清单式。"
@@ -4299,7 +4345,8 @@ class QwenLLM:
                '不要任何其他文字，键：{"fits": true或false, "who": "TA的身份一句话(20字内)", '
                '"where": "TA此刻最可能出现的【一个】具体地点名(4~10字，如 天台画室；'
                '只给一个，绝不用「或」并列)", '
-               '"persona": "两三句人设：性格、说话方式、与这个世界的关系"}。'
+               '"persona": "两三句人设：性格、说话方式、与这个世界的关系", '
+               '"voice": "TA的说话规律一句(≤30字：口头禅/句长/腔调)"}。'
                "fits 为 false 时其余键都给空字符串。" + _lang_rule(prompt))
         u = (f"故事：《{title}》\n世界观：{world or '（未知）'}\n已有角色：{cast or '（无）'}\n"
              + (f"网上检索到的资料：\n{web[:800]}\n" if web else "")
@@ -4316,7 +4363,8 @@ class QwenLLM:
             return {"fits": bool(d.get("fits")),
                     "who": str(d.get("who") or "").strip()[:30],
                     "where": str(d.get("where") or "").strip()[:12],
-                    "persona": str(d.get("persona") or "").strip()[:220]}
+                    "persona": str(d.get("persona") or "").strip()[:220],
+                    "voice": str(d.get("voice") or "").strip()[:60]}
         except Exception:
             return {}
 
@@ -4486,6 +4534,8 @@ class QwenLLM:
             return self._scene_brief(prompt)
         if prompt.get("char_from_text"):
             return self._char_from_text(prompt)
+        if prompt.get("voice_prints"):
+            return self._voice_prints(prompt)
         if prompt.get("engine_skeleton"):
             return self._engine_skeleton(prompt)
         if prompt.get("engine_secrets"):

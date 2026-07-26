@@ -1189,6 +1189,13 @@ def move(run_id: str, body: MoveIn, user: User = Depends(current_user), db: Sess
         raise HTTPException(409, "这局已经结束了")
     st = dict(r.state or {})
     content = r.pinned_content or {}
+    # 🚶 带上TA一起: gate each chosen companion WHILE they're still in the current scene
+    # (set_follow needs them present here); those who pass join `following` and travel along.
+    for _cid in (body.bring or [])[:6]:
+        try:
+            runtime.set_follow(content, st, _cid, True)
+        except ValueError:
+            pass   # not here / unknown — silently skipped (UI only offers present, followable)
     generated = False
     try:
         if body.generate:
