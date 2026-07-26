@@ -685,6 +685,22 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
 @router.get("/{run_id}", response_model=Run)
 def get_run(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     r = _own_run(run_id, user, db)
+    # ⏰ 恢复存档即对钟 (实弹: 「第1天午 05:19」— slot 是回合时的旧账, 恢复不校准
+    # 就一直挂着错牌; 角色下一句话也会拿着旧时辰开口)
+    try:
+        _c0 = r.pinned_content or {}
+        if runtime.real_time_on(_c0):
+            _st0 = dict(r.state or {})
+            _slot0 = (_st0.get("clock") or {}).get("slot")
+            _day0 = (_st0.get("clock") or {}).get("day")
+            runtime.sync_real_clock(_c0, _st0)
+            _c1 = _st0.get("clock") or {}
+            if _c1.get("slot") != _slot0 or _c1.get("day") != _day0:
+                r.state = _st0
+                flag_modified(r, "state")
+                db.commit()
+    except Exception:
+        pass
     out = _to_run(r)
     # 🖼 丢单自愈: 图片队列在内存里, 重启会吞掉在途的背景渲染 (实弹: 领航塔永远
     # 停在关键词兜底图)。恢复存档时补一枪当前地点 — 幂等, 文件在就直接返回

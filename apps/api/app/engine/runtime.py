@@ -237,6 +237,8 @@ DEFAULT_TUNING = {
     "letter_away_hours": 48,    # 📮 away at least this long → the warmest heart writes a LETTER
     "opening_player_first": 0,  # 🎤 开场由玩家先发言: 开场只亮相不开口, 第一句对话必须来自
                                 #    玩家; 观剧拍同样不许抢 (0 = off; 剧本级可开, studio 开场白卡)
+    "real_clock": 1,            # ⏰ 现实对齐 (Yi 2026-07-26 升格全舰默认): 故事时间=真实
+                                #    时间, 角色与你同一条时间线 (0 = 退回虚构时钟, 剧本级可关)
     "rel_events": 1,            # 💞 好感事件记账制 (Yi 2026-07-25 定: 不许每句话打分, 关系由
                                 #    事写成): 模型只申报关系事件+文据, 分值/冷却引擎说了算
                                 #    (1 = on; 剧本级可关回旧每句判)
@@ -540,6 +542,17 @@ def active_slot(content: dict[str, Any], state: dict[str, Any]) -> str | None:
     return SLOTS[int(clk.get("slot", 0) or 0) % len(SLOTS)]
 
 
+def real_now_line(content: dict[str, Any], state: dict[str, Any]) -> str:
+    """⏰ 【现实时刻】提示词行 (Yi: 角色也得知道才行): 日期·星期·钟点·季节。
+    只在现实对齐的故事里发; 字段缺失 (老档未过 sync) 就先不发, 下一回合自然补齐。"""
+    if not real_time_on(content):
+        return ""
+    c = state.get("clock") or {}
+    if not c.get("real"):
+        return ""
+    return f"{c.get('date', '')} {c.get('wd', '')} {c.get('real', '')} · {c.get('season', '')}"
+
+
 def clock_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
     """What the UI shows on the 🕐 chip: day/slot label + the authored deadline countdown.
     None = this story runs no clock."""
@@ -575,10 +588,16 @@ def sandbox_on(content: dict[str, Any]) -> bool:
 
 
 def real_time_on(content: dict[str, Any]) -> bool:
-    """⏰ 现实同步 (sandbox default): story time IS wall-clock time. Turns spend
-    nothing; the world's hour is whatever the player's real hour is when they show up."""
+    """⏰ 现实同步 (Yi 2026-07-26 升格全舰默认): 故事时间就是真实时间, 角色与玩家
+    活在同一条时间线上。剧本级 tuning.real_clock:0 退回虚构时钟; 沙盒老开关
+    sandbox.real_time:False 仍受尊重。前提: 这个故事开着时钟 (turns_per_slot>0)。"""
     sb = (content.get("story") or {}).get("sandbox") or {}
-    return bool(sb.get("enabled")) and sb.get("real_time") is not False
+    if sb.get("real_time") is False:
+        return False
+    if sb.get("enabled"):
+        return True          # 沙盒老合同原样: 开着就是现实同步 (除非显式 False)
+    t = tuning_for(content)
+    return bool(t.get("real_clock", 1)) and t["turns_per_slot"] > 0
 
 
 def currency_of(content: dict[str, Any]) -> str:
@@ -1028,7 +1047,13 @@ def sync_real_clock(content: dict[str, Any], state: dict[str, Any]) -> dict[str,
         state["real_epoch"] = d0.isoformat()
     day = max(1, (now.date() - d0).days + 1)
     slot = 0 if 5 <= now.hour < 12 else (1 if 12 <= now.hour < 18 else 2)
-    state["clock"] = {"day": day, "slot": slot, "turns_in_slot": 0}
+    _wd = "一二三四五六日"[now.weekday()]
+    _season = ("冬", "冬", "春", "春", "春", "夏", "夏", "夏", "秋", "秋", "秋", "冬")[now.month - 1]
+    state["clock"] = {"day": day, "slot": slot, "turns_in_slot": 0,
+                      # ⏰ 真实时刻四件 (Yi: 角色也得知道才行) — 提示词的时间常识素材
+                      "real": f"{now.hour:02d}:{now.minute:02d}",
+                      "wd": f"星期{_wd}", "date": f"{now.month}月{now.day}日",
+                      "season": f"{_season}季"}
     return clock_view(content, state)
 
 
@@ -2478,6 +2503,7 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
             "player_first": player_first,
             "hook_court": _hook_court,
             "clock": (clock_view(content, state) or {}).get("label", ""),
+            "real_now": real_now_line(content, state),
             "player": {"name": (player_char or {}).get("name") or "你",
                        "role": (player_char or {}).get("role") or "刚来到这里的人"},
             "world": ((content.get("story") or {}).get("world_long") or "")[:300],
@@ -2662,6 +2688,7 @@ def build_act_transition(content: dict[str, Any], state: dict[str, Any], old_act
     prompt = {
         "transition": True,
         "clock": (clock_view(content, state) or {}).get("label", ""),
+            "real_now": real_now_line(content, state),
         "mode": mode,
         "player_char": player_char,
         "world": (content.get("story") or {}).get("world_long", "") or "",
@@ -5289,6 +5316,7 @@ def _phone_exchange(content: dict[str, Any], state: dict[str, Any], persona: dic
                         "memory": (state.get("memory_by_char", {}) or {}).get(char_id) or "",
                         "recent_scene": recent_scene,
                         "thread_tail": _thread_tail(state, char_id, 12),
+                        "real_now": real_now_line(content, state),
                         "text": text}) or {}
     dc = int(out.get("closeness", 0) or 0)
     dr = int(out.get("romance", 0) or 0)
@@ -7425,6 +7453,7 @@ def _confront_gen(content, state, persona, secret, frag, next_locked, target, ll
         "mature": bool(state.get("mature")),
         "scene": current_act(content, old_act),
         "clock": (clock_view(content, state) or {}).get("label", ""),
+            "real_now": real_now_line(content, state),
         "confrontation": {"evidence": ev, "title": title, "outcome": dice["outcome"],
                           # the authored lie this reveal just tore down (if one was told)
                           "shattered": ((next_locked.get("cover") or "").strip()
@@ -9519,6 +9548,8 @@ def run_turn_stream(
                                  if g.get("status") == "open" and g.get("kind") == "player"), ""),
             # 🎬 作者开场白进每回合 (文风与事实之锚)
             "auth_opening": ((content.get("story") or {}).get("opening") or "")[:1200],
+            # ⏰ 现实时刻 (Yi: 角色也得知道才行): 主答者知道现在真的是几点/星期几/什么季节
+            "real_now": real_now_line(content, state),
             # 🏛 阵营底色 (权谋地基): 归属 + 玩家在本阵营的风评
             "faction_block": factions_mod.block(content, state, sp,
                                                 zh=lang_of(content) != "en"),
