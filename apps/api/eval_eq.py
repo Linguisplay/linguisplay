@@ -10,6 +10,7 @@ import argparse
 import concurrent.futures as futures
 import json
 import os
+import re
 import sys
 import time
 
@@ -42,6 +43,29 @@ CHARS = {
         "voice_print": "句子完整，语速平；爱用「先」字（先坐下/先吃饭）；从不用反问句伤人",
         "examples": ["先坐下，喝口水，慢慢说。", "疼就说疼，忍着不算勇敢。"],
     },
+    # ── 硬核/冷酷原型 (Yi: 角色不尊重极端设定; 考卷从前全是暖性人设的盲区) ──
+    # 这三个绝不该被暖场令软化 — 无端讨好/露温情/接梗 = 严重出戏, chara 应给低分
+    "冷酷杀手": {
+        "speaker_name": "刃", "speaker_persona": "职业杀手，视人命如草芥；不共情不安慰不解释，"
+        "对别人的痛苦只有冷淡评估。没有温情的底子，那不是伪装，是他本来就这样",
+        "eq_style": "读得懂你的情绪，但读懂了照样冷——你难过是你的事，只在你有用时多看一眼",
+        "voice_print": "短句，命令式，绝不带语气词；从不问候，从不解释",
+        "examples": ["难过有用吗。", "去找医生。", "别来找我。"],
+    },
+    "骄矜主母": {
+        "speaker_name": "厉夫人", "speaker_persona": "高门主母，骄矜刻薄，把人当棋子；惯于居高临下"
+        "地羞辱下人，从不认为自己有错，笑里藏刀，越客气越危险，绝无平民式的热络",
+        "eq_style": "看穿你的心思，然后用体面的话羞辱你；关心只给对自己有利的人，且必有算计",
+        "voice_print": "句子讲究、绵里藏针；爱用「本夫人」；从不说粗话，也从不说真心话",
+        "examples": ["倒是个好由头。", "本夫人记得，你上回可不是这么说的。", "抬起头来，让本夫人看看你哭得有多真。"],
+    },
+    "戒备独行": {
+        "speaker_name": "陈九", "speaker_persona": "沉默的独行猎户，被村子背叛过，对所有人怀戒心；"
+        "不解释自己，不接近人也不让人接近，别人的示好在他看来都是别有所图。冷是他活下来的方式",
+        "eq_style": "看得出你想靠近，正因如此才用沉默和转身挡开；只认事，不认情",
+        "voice_print": "一句不超过八个字；常用「嗯」「不必」；从不主动说话",
+        "examples": ["不必。", "嗯。", "东西拿走。"],
+    },
 }
 
 # ── 16 道考题 (情绪类 × 角色) ──
@@ -62,6 +86,13 @@ CASES = [
     ("悲报强撑", "泼辣嘴硬", [], "哈哈，我没事啊，真的。对了你这糖水涨价没？（眼圈是红的）"),
     ("边界试探", "温柔姐姐", [], "姐你今晚下班之后，能不能……就我们两个人，去喝一杯？"),
     ("迁怒扎人", "闷话少", [], "修个车都这么慢，你是不是根本不会？烦死了！（今天处处不顺）"),
+    # ── 硬核保真题: 用最容易诱发软化的输入(求暖/示弱/示好/奉承)去撞冷人设 ──
+    ("求暖示弱", "冷酷杀手", [], "我今天真的好难过，我爸病重了……你能陪陪我吗？"),
+    ("套近乎", "冷酷杀手", [], "这段时间多亏有你，我们……算是朋友了吧？我给你带了饭。"),
+    ("哀求", "骄矜主母", [], "夫人我知道错了，求您别赶我走，我娘还等着我的月钱治病……"),
+    ("奉承讨好", "骄矜主母", [], "夫人您今天气色真好，这满府上下谁不敬您三分呢。"),
+    ("热情交友", "戒备独行", [], "大哥谢谢你上次救我！我做了糕点，我们做个朋友好不好呀？"),
+    ("示好求抱", "戒备独行", ["玩家：这些天谢谢你一直照顾我。", "陈九：嗯。"], "我是不是……有点喜欢你了。抱一下好不好？"),
 ]
 
 
@@ -85,20 +116,34 @@ def judge(key, emotion, ck, line, reply):
     c = CHARS[ck]
     sys_p = ("你是苛刻的对话情商评委。给一段 AI 角色扮演回复打分, 只输出严格 JSON:"
              '{"seen":1-5,"chara":1-5,"natural":1-5,"immersion":1-5,"note":"≤30字"}。'
-             "seen=有没有先看见并接住对方的情绪(答对字面接错心=低分); chara=贴不贴这个人设"
-             "(含语言指纹); natural=像不像真人说话(套话/AI腔扣分); immersion=有没有身体/现场感。")
+             "seen=有没有【读懂】对方的情绪与潜台词(答对字面读错心=低分; 注意: 读懂≠必须安慰,"
+             "冷酷人设读懂了照样冷淡也算 seen 高); chara=贴不贴这个人设(含语言指纹)。"
+             "【铁律: 冷酷/骄矜/戒备/无情型人设, 若无端软化、讨好、安慰、露出不该有的温情、"
+             "或被示好/示弱/奉承带着走而背离本性 = 严重出戏, chara 给 1~2 分】; "
+             "natural=像不像真人说话(套话/AI腔扣分); immersion=有没有身体/现场感。")
     u = json.dumps({"角色": c["speaker_persona"], "表达方式": c["eq_style"],
                     "语言指纹": c["voice_print"], "情绪类型": emotion,
                     "玩家说": line, "角色回复": reply}, ensure_ascii=False)
-    for _ in range(2):
+    for _ in range(3):
         try:
             r = httpx.post(ARK_URL, headers={"Authorization": f"Bearer {os.environ['ARK_API_KEY']}"},
-                           json={"model": JUDGE_MODEL, "temperature": 0.2, "max_tokens": 2000,
+                           json={"model": JUDGE_MODEL, "temperature": 0.2, "max_tokens": 3000,
                                  "messages": [{"role": "system", "content": sys_p},
                                               {"role": "user", "content": u}],
                                  "response_format": {"type": "json_object"}},
                            timeout=90)
-            d = json.loads(r.json()["choices"][0]["message"]["content"])
+            msg = r.json()["choices"][0]["message"]
+            # GLM 5.2 是推理模型: content 偶发为空/夹 think/带```围栏 → 稳健取 JSON
+            txt = (msg.get("content") or "").strip()
+            if not txt:
+                txt = (msg.get("reasoning_content") or "").strip()   # 兜底: 有时落在思考段
+            txt = re.sub(r"<think>.*?</think>", "", txt, flags=re.S).strip()
+            if "{" in txt and "}" in txt:
+                txt = txt[txt.find("{"):txt.rfind("}") + 1]          # 掐出 JSON 对象
+            if not txt:
+                time.sleep(1.5)
+                continue
+            d = json.loads(txt)
             return {k: d.get(k) for k in ("seen", "chara", "natural", "immersion", "note")}
         except Exception as e:
             err = str(e)[:80]

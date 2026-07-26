@@ -3,7 +3,7 @@ which is parsed out (not leaked as dialogue) and carried forward in run state fo
 cross-turn emotional continuity. The EQ guidance + per-character eq_style only shape the
 live qwen prompt; here we lock the parse + state plumbing deterministically."""
 
-from app.engine import qwen, runtime
+from app.engine import qwen, relationships, runtime
 
 
 def test_emotion_line_parsed_not_leaked_as_dialogue():
@@ -38,9 +38,22 @@ def test_eq_style_and_prior_emotion_injected_into_prompt():
         "eq_style": "话少眼神重，体贴从不挂嘴上",
         "player_emotion": "强忍委屈",
     })
-    assert "情绪敏感" in sys                    # the EQ / emotional-sensitivity block is present
+    assert "读懂对方" in sys                    # the EQ / read-the-room block is present
+    assert "先忠于你是谁" in sys                # persona-supremacy first principle governs the EQ block
     assert "话少眼神重" in sys                  # this character's own EQ style is used
     assert "强忍委屈" in sys                    # prior emotional read carried in for continuity
+
+
+def test_persona_supremacy_over_warmth_mandates():
+    """🎭 角色雷同修复 (Yi: 极端硬核设定不被尊重, 每个角色都被暖场令拉成傲娇暖心):
+    宪章第一诫=先忠于人设; 暖场/融化只对本就心软的人成立; 关系档要透过人设演。"""
+    sys = qwen._build_system({"speaker_name": "刃", "speaker_persona": "冷酷杀手",
+                              "persona": {"name": "你"}, "channel": "say", "context": {},
+                              "relationship_playbook": relationships.playbook_block(
+                                  "friend", char={"relation_allowed": ["friend"]})})
+    assert "先忠于你是谁" in sys                      # 第一诫存在
+    assert "只对本就心软的人成立" in sys              # 融化被人设门控, 不再普适
+    assert "透过你的人设来演" in sys                  # 关系档透过人设, 不碾人设
 
 
 def test_inter_character_eq_in_group_and_observer():

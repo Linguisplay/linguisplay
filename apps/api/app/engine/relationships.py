@@ -278,8 +278,9 @@ def playbook_block(mode_id: str, mature: bool = False,
     """The injected guidance for the current relationship mode. When `mature` (an 18+ run),
     every stage gets attraction/arc craft and 暧昧/恋人 get explicit-intimacy technique."""
     a = get(mode_id)
-    block = (f"【你此刻和对方的关系：{a['name']}】（这决定你这一轮怎么对待对方——"
-             f"语气、称呼、距离、给多少都要贴合它）：{a['playbook']}")
+    block = (f"【你此刻和对方的关系：{a['name']}】（这是你对 TA 的底色，但【一切都透过你的人设来演】"
+             f"——冷硬/傲慢/疏离的人到了这一档，也只是【单单对这一个人】松一道缝、多给一分，"
+             f"绝不会因此变成一个温暖的人）：{a['playbook']}")
     if char is not None:
         block += "\n" + approach_block(char, mode_id)
     if mode_id in _CHARM_PLAYBOOK:
