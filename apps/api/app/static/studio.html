@@ -996,7 +996,8 @@ function renderChars(){
         <label>背景（可选）</label><textarea oninput="setChar(${i},'background',this.value)">${esc(c.background||"")}</textarea>
         <label>TA 自己的目的（独立于玩家想要什么，驱动自主行为）</label><textarea oninput="setChar(${i},'agenda',this.value)">${esc(c.agenda||"")}</textarea>
         <div class="row2">
-          <div><label>情绪表达方式（可选）</label><input value="${esc(c.eq_style||"")}" oninput="setChar(${i},'eq_style',this.value)"></div>
+          <div><label>情绪表达方式（可选，写成接招棋谱最有效）</label><input value="${esc(c.eq_style||"")}" placeholder="例：嘴硬心软——被撒娇就损人但手上让步；见人低落绝不讲道理，先递吃的" oninput="setChar(${i},'eq_style',this.value)"></div>
+          <div><label>🗣 语言指纹（可选：句长/口头禅/绝不说的词/标点脾气）</label><input value="${esc(c.voice_print||"")}" placeholder="例：短句居多，句尾爱带「咯」；从不说客套话；心虚时才用省略号" oninput="setChar(${i},'voice_print',this.value)"></div>
           <div><label>对玩家的初始关系</label><select onchange="setChar(${i},'relation_default',this.value)">${REL_MODES.map(([v,t])=>`<option value="${v}" ${(c.relation_default||"")===v?"selected":""}>${t}</option>`).join("")}</select></div>
         </div>
         <div class="row4">
@@ -1529,7 +1530,7 @@ async function cloneCard(id){
   const c = sqCards.find(x=>x.id===id); if(!c) return;
   try{
     await j("/cards",{method:"POST",body:JSON.stringify({ name:c.name, role:c.role||"",
-      persona_text:c.persona_text||"", background:c.background||"", eq_style:c.eq_style||"",
+      persona_text:c.persona_text||"", background:c.background||"", eq_style:c.eq_style||"", voice_print:c.voice_print||"",
       agenda:c.agenda||"", knowledge:c.knowledge||"", examples:c.examples||[],
       items:c.items||[], bio_layers:c.bio_layers||[], visibility:"private" })});
     libCards = await j("/cards");

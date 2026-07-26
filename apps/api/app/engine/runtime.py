@@ -224,7 +224,8 @@ DEFAULT_TUNING = {
     "world_event_every": 0,     # 🌊 after this many quiet turns an authored act event fires
                                 #    itself (0 = off; Yi 2026-07-14 定: 默认不自燃, 剧本级可开)
     "turns_per_slot": 6,        # ⏳ turns per 时段 (晨/午/夜); a day = 3 slots. 0 = clock off
-    "troupe": 0,                # 🎬 剧组 (导演场次单+编剧扩展): 灰度旗, 剧本级试点 (照 plan_render 前例)
+    "troupe": 1,                # 🎬 剧组 (导演场次单+编剧扩展): 2026-07-26 升格全舰默认 (Yi 情商军令①:
+                                #    戏眼/每人心事进场 = 情商的原材料; 后台线程零首字代价, 剧本可关)
     "confront_base": 55,        # 🃏 evidence-confrontation base success %, + closeness//2
     "confront_cost": 3,         # 🃏 closeness cost of a successful confrontation (fail ×2, 大失败 ×3)
     "mind_reader": 1,           # 📟 心象仪: characters' true inner state shown on bubbles (0 = off)
@@ -9596,6 +9597,7 @@ def run_turn_stream(
             "place": place,                       # concrete current-location anchor (if authored)
             "intent_digest": intent_digest,       # 🧩 engine-verified referents of the line
             "eq_style": sp.get("eq_style", ""),   # how THIS character reads/expresses emotion
+            "voice_print": sp.get("voice_print", ""),  # 🗣 语言指纹: 句长/口头禅/忌语/标点脾气
             # 台词范例 (mes_example): lines that ARE this voice — the most durable 去AI味 lever
             "examples": [str(x) for x in (sp.get("examples") or [])][:5],
             # 🎯 this character's OWN goal/will: authored wants + the engine-tracked step

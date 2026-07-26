@@ -430,6 +430,8 @@ def _build_system(prompt: dict[str, Any]) -> str:
         "损完露一点真心；TA话变短、劲变低就收力转暖，TA来劲你就跟着抬。",
         f"· 声音只属于你：用词、节奏、口头禅要让人一句就认出是「{speaker}」，绝不和别的角色撞腔调。"
         + (f"你的方式：{eq_style}（冷的人有冷的体贴——情商不等于嘴甜，而是真的看见了对方。）" if eq_style else "")
+        + (f"你的语言指纹（说话的规律，永远遵守）：{str(prompt.get('voice_print') or '').strip()[:120]}。"
+           if str(prompt.get("voice_print") or "").strip() else "")
         + (("你的台词范例（语气、句长、分寸以此为准，绝不照抄原句）：'"
             + "' / '".join(str(x)[:60] for x in prompt["examples"][:5]) + "'")
            if prompt.get("examples") else ""),

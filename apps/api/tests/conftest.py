@@ -16,3 +16,5 @@ from app.engine import runtime  # noqa: E402
 @pytest.fixture(autouse=True)
 def _fictional_clock_default(monkeypatch):
     monkeypatch.setitem(runtime.DEFAULT_TUNING, "real_clock", 0)
+    # 剧组戏眼同理: 生产全舰开, 测试世界默认关 (spy LLM 的 prompts[0] 执法点生态), 剧组测试显式开旗
+    monkeypatch.setitem(runtime.DEFAULT_TUNING, "troupe", 0)

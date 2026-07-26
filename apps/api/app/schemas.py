@@ -103,6 +103,9 @@ class Character(BaseModel):
     # ── 🎭 角色卡 v2 (剧组重建 P0, docs/troupe-design.md) ──
     # 性别: 称呼与代词（他/她、哥/姐）从卡上走，不再让模型从名字猜。
     # 班底多样性由 linter 守卫（性别混合/年龄跨度），生成合同同规。
+    # 🗣 语言指纹 (2026-07-26 情商军令): 句长习惯/口头禅/绝不说的词/标点脾气 —
+    # 「像一个人」与「像AI演一个人」的分水岭; 台词范例给腔调, 指纹给规律
+    voice_print: Optional[str] = None
     gender: Optional[str] = None          # 男 | 女 | 其他
     age_band: Optional[str] = None        # 少年 | 青年 | 中年 | 老年
     # 🐱 非人角色的物种 (猫/犬/龙…): 立绘与头像提示词据此换词——「男性青年」对猫角色
