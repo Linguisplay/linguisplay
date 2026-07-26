@@ -106,6 +106,12 @@ class Character(BaseModel):
     # 🗣 语言指纹 (2026-07-26 情商军令): 句长习惯/口头禅/绝不说的词/标点脾气 —
     # 「像一个人」与「像AI演一个人」的分水岭; 台词范例给腔调, 指纹给规律
     voice_print: Optional[str] = None
+    # 🎬 表演指纹 v3 (2026-07-26 Yi: 把「细腻」拆成可执行锚点; 和 voice_print 同哲学, 但管
+    # 动作/感官/描写而非台词): 每角色一套, 生成点注入, 亲密/情感高光拍放满、日常轻描。
+    # 冷/钝的人就该快就该钝——是每角色的指纹, 绝不做全局规则。
+    act_pace: Optional[str] = None        # 行动节奏: 分阶段推进有确认 | 利落一步到位 | 冲动急促
+    sense_focus: Optional[str] = None     # 感官侧重: 触觉/视觉/听觉 哪种主导、更常被描写
+    emote_form: Optional[str] = None      # 情感表达形式: 动作暗示+内心独白 | 直球说出口 | 只做事不表达
     gender: Optional[str] = None          # 男 | 女 | 其他
     age_band: Optional[str] = None        # 少年 | 青年 | 中年 | 老年
     # 🐱 非人角色的物种 (猫/犬/龙…): 立绘与头像提示词据此换词——「男性青年」对猫角色
@@ -194,6 +200,9 @@ class CharacterCardInput(BaseModel):
     background: Optional[str] = None
     eq_style: Optional[str] = None
     voice_print: Optional[str] = None   # 🗣 语言指纹随卡走 (卡库往返不丢腔调)
+    act_pace: Optional[str] = None      # 🎬 表演指纹: 行动节奏
+    sense_focus: Optional[str] = None   # 🎬 表演指纹: 感官侧重
+    emote_form: Optional[str] = None    # 🎬 表演指纹: 情感表达形式
     agenda: Optional[str] = None
     knowledge: Optional[str] = None
     bio_layers: list[dict[str, Any]] = []

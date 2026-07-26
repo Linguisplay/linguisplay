@@ -9655,6 +9655,10 @@ def run_turn_stream(
             "intent_digest": intent_digest,       # 🧩 engine-verified referents of the line
             "eq_style": sp.get("eq_style", ""),   # how THIS character reads/expresses emotion
             "voice_print": sp.get("voice_print", ""),  # 🗣 语言指纹: 句长/口头禅/忌语/标点脾气
+            # 🎬 表演指纹 v3: 动作/感官/描写的规律 (亲密/高光拍放满, 日常轻描)
+            "act_pace": sp.get("act_pace", ""),
+            "sense_focus": sp.get("sense_focus", ""),
+            "emote_form": sp.get("emote_form", ""),
             # 台词范例 (mes_example): lines that ARE this voice — the most durable 去AI味 lever
             "examples": [str(x) for x in (sp.get("examples") or [])][:5],
             # 🎯 this character's OWN goal/will: authored wants + the engine-tracked step

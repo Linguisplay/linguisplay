@@ -104,6 +104,8 @@ class MockLLM:
                 {"name": "码头老陈", "gender": "男", "age_band": "中年",
                  "role": "码头账房 · 算盘比人心准", "persona_text": "在码头管了二十年账。",
                  "voice_print": "短句，爱用账房话打比方；从不喊人全名",
+                 "act_pace": "利落，一步到位", "sense_focus": "视觉，先看账再看人",
+                 "emote_form": "只做事不表达",
                  "traits": {"外向": 2, "温度": 3, "主导": 3},
                  "fear": "怕账对不上", "line": "假账不做",
                  "wants": "攒钱回乡下盖房", "life_goal": {"text": "攒钱回乡下盖房"},

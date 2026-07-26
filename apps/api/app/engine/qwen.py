@@ -444,6 +444,12 @@ def _build_system(prompt: dict[str, Any]) -> str:
         + (f"你的方式：{eq_style}（冷的人有冷的体贴——情商不等于嘴甜，而是真的看见了对方。）" if eq_style else "")
         + (f"你的语言指纹（说话的规律，永远遵守）：{str(prompt.get('voice_print') or '').strip()[:120]}。"
            if str(prompt.get("voice_print") or "").strip() else "")
+        + (("你的表演指纹（动作、感官、描写的规律，情绪浓/亲密时放满、日常轻描，别人替代不了）："
+            + "；".join(x for x in (
+                (f"行动节奏={str(prompt.get('act_pace') or '').strip()[:40]}" if str(prompt.get('act_pace') or '').strip() else ""),
+                (f"感官侧重={str(prompt.get('sense_focus') or '').strip()[:40]}" if str(prompt.get('sense_focus') or '').strip() else ""),
+                (f"情感表达={str(prompt.get('emote_form') or '').strip()[:40]}" if str(prompt.get('emote_form') or '').strip() else "")) if x) + "。")
+           if any(str(prompt.get(k) or '').strip() for k in ("act_pace", "sense_focus", "emote_form")) else "")
         + (("你的台词范例（语气、句长、分寸以此为准，绝不照抄原句）：'"
             + "' / '".join(str(x)[:60] for x in prompt["examples"][:5]) + "'")
            if prompt.get("examples") else ""),
@@ -3802,6 +3808,9 @@ class QwenLLM:
                '"role":"≤20字 身份·一句话记忆点","persona_text":"120~200字人设散文：为人、习惯、'
                '说话方式、藏着的心事","eq_style":"≤60字 TA怎么表达关心与情绪",'
                '"voice_print":"≤40字 说话规律：句长习惯/口头禅/绝不说的词/标点脾气",'
+               '"act_pace":"≤30字 行动节奏：分阶段推进有确认/利落一步到位/冲动急促",'
+               '"sense_focus":"≤30字 感官侧重：触觉视觉听觉哪种更敏感更常被写",'
+               '"emote_form":"≤30字 情感表达形式：动作暗示+内心独白/直球说出口/只做事不表达",'
                '"traits":{"外向":3,"温度":3,"主导":3},'
                '"fear":"≤24字 软肋一句","line":"≤24字 底线一句",'
                '"love_style":"傲娇|冷感慢热|回避型|占有欲|直球|留空",'
