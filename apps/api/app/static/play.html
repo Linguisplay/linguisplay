@@ -68,6 +68,10 @@
   #vnname.pop { animation: nmpop .38s ease; }
   @keyframes nmpop { from { opacity: 0; transform: translateY(6px); } }
   #vntext.hang { text-indent: -.62em; }
+  @keyframes chipIn { from { opacity: 0; transform: translateY(9px); } }
+  .typing-live::after { content: "▍"; color: #d8b57a; margin-left: 1px;
+    animation: curblink 1s steps(1) infinite; }
+  @keyframes curblink { 50% { opacity: 0; } }
   #tunebox { position: fixed; left: 10px; bottom: calc(84px + env(safe-area-inset-bottom, 0px));
     z-index: 95; width: 232px; padding: 12px 14px; border-radius: 16px;
     background: rgba(24,20,14,.9); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
@@ -1157,6 +1161,30 @@ const ICONS = {
   gauge2: '<path d="M4 17a9 9 0 0 1 16 0"/><path d="M12 15v-5"/><circle cx="12" cy="15" r="1.2" fill="currentColor" stroke="none"/>',
   gauge3: '<path d="M4 17a9 9 0 0 1 16 0"/><path d="m12 15 3.5-4"/><circle cx="12" cy="15" r="1.2" fill="currentColor" stroke="none"/>',
 };
+// 🎵 UI 音效: WebAudio 现场合成 (无资源文件, 随 soundOn) + 安卓触觉 — 交互的听觉/触觉层
+const buzz = (ms) => { try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) {} };
+const UIS = (() => {
+  let ac = null;
+  const ctx = () => (ac = ac || new (window.AudioContext || window.webkitAudioContext)());
+  const tone = (freq, d, type, vol) => {
+    if (typeof soundOn !== "undefined" && !soundOn) return;
+    try {
+      const c = ctx(), o = c.createOscillator(), g = c.createGain();
+      o.type = type || "sine"; o.frequency.value = freq; o.connect(g); g.connect(c.destination);
+      const t0 = c.currentTime;
+      g.gain.setValueAtTime(0, t0);
+      g.gain.linearRampToValueAtTime(vol || .05, t0 + .004);
+      g.gain.exponentialRampToValueAtTime(.0001, t0 + d);
+      o.start(t0); o.stop(t0 + d + .02);
+    } catch (e) {}
+  };
+  return {
+    tap: () => { tone(1250, .055, "triangle", .04); buzz(8); },            // 选项/按钮: 纸感轻点
+    send: () => { tone(720, .09, "sine", .05); setTimeout(() => tone(1080, .1, "sine", .038), 55); buzz(10); },
+    flip: () => tone(430, .12, "sine", .032),                              // 面板/卡片开合
+    chime: () => [880, 1108.7, 1318.5].forEach((f, i) => setTimeout(() => tone(f, .5, "sine", .036), i * 90)),
+  };
+})();
 const IC = (n, s = 17) => `<svg class="ic" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n] || ""}</svg>`;
 (function initIcons() {
   const set = (id, name, size) => { const el = document.getElementById(id); if (!el) return;
@@ -2030,6 +2058,7 @@ async function pickChoice(optionId) {
 }
 // 📔 dossier: unlocked truths + ending gallery + decisions — Discovery made reviewable.
 async function openJournal() {
+  UIS.flip();
   if (!runId) return;
   let jd;
   try { jd = await j(`/runs/${runId}/journal`); }
@@ -2204,6 +2233,7 @@ function renderPeek(v) {
   document.body.appendChild(ov);
 }
 async function openPhone() {
+  UIS.flip();
   if (!runId) return;
   let inbox = { threads: [], unread: 0, device: phoneDevice };
   let mailbox = { mail: [], unread: 0 };
@@ -2898,6 +2928,7 @@ function barHtml(label, val, min, max, color) {
 }
 async function openCharCard(cid) {
   if (!runId) return;
+  UIS.flip();
   let p;
   try { p = await j(`/runs/${runId}/character/${cid}`); } catch (e) { return; }
   let ov = document.getElementById("charcard");
@@ -3266,10 +3297,12 @@ function renderSuggest(items) {
     box.innerHTML = "";
     (items || []).slice(0, 2).forEach((t, i) => {
       const btn = document.createElement("button");
+      btn.style.animation = `chipIn .32s ${i * .05}s both`;
       if (i === 0) btn.className = "prime";
       btn.textContent = t; btn.title = t;
       btn.onclick = () => {
         if (vnLocked()) return;   // 🔒 过场在放, 选项也不许点
+        UIS.tap();
         box.classList.add("hidden");
         const isAct = t.startsWith("用「做」") || t.startsWith("Use “Do”");
         if (isAct) { channel.value = "do"; msg.focus(); return; }
@@ -3284,7 +3317,9 @@ function renderSuggest(items) {
   suggest.innerHTML = "";
   (items||[]).forEach((t, i) => {
     // chip 1 is engine-guaranteed to follow the player's own intent — mark it
-    const c = document.createElement("span"); c.className = "chip" + (i === 0 ? " prime" : ""); c.textContent = "💡 " + t;
+    const c = document.createElement("span"); c.className = "chip" + (i === 0 ? " prime" : ""); c.textContent = t;
+    c.style.animation = `chipIn .32s ${i * .05}s both`;
+    c.addEventListener("click", () => UIS.tap(), { capture: true });
     c.title = t;  // display may ellipsize; hover shows — and clicking pastes — the full line
     c.onclick = () => { const isAct = t.startsWith("用「做」") || t.startsWith("Use “Do”"); msg.value = isAct ? "" : t; if (isAct) channel.value = "do"; msg.focus(); };
     suggest.appendChild(c);
@@ -3365,6 +3400,7 @@ function cycleSpeed() {
 }
 async function typeInto(el, text, ms=22) {
   el.textContent = "";
+  el.classList.add("typing-live");   // ▍ 打字光标: 活着的文本
   const follow = () => {   // 打字机跟屏: 目标自己可滚 (VN 正文区) 就滚自己, 否则滚聊天流
     if (el.scrollHeight > el.clientHeight + 2) el.scrollTop = el.scrollHeight;
     chat.scrollTop = chat.scrollHeight;
@@ -3380,6 +3416,7 @@ async function typeInto(el, text, ms=22) {
     const pz = "。！？…".includes(ch) ? 7 : "，、；：".includes(ch) ? 3.5 : (ch === "—" ? 5 : 1);
     await sleep(ms * pz / f);
   }
+  el.classList.remove("typing-live");
   follow();
 }
 // ── 🎀 VN window (galgame 演出): beats play into the dialogue box, click advances ──
@@ -3519,6 +3556,17 @@ function _stageWidths() {
            pan: pan ? pan.getBoundingClientRect().width : 0 };
 }
 function TUNE(k, dft) { const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(k)); return isNaN(v) ? dft : v; }
+function _stageApply(x) {
+  const pan = document.getElementById("vnpan");
+  if (pan) pan.style.transform = `translateX(${x}px)`;
+  const wbg = document.getElementById("vnwbg");
+  if (wbg) {
+    const dz = TUNE("--bg-depth", -120);
+    const sc = (1000 + Math.abs(dz)) / 1000;
+    wbg.style.transform = `translateX(${x * TUNE("--bg-par", .35)}px) translateZ(${dz}px) scale(${sc.toFixed(3)})`;
+    wbg.classList.toggle("dragging", !!(pan && pan.classList.contains("dragging")));
+  }
+}
 function vnStageClamp() {
   const w = _stageWidths();
   const min = Math.min(0, w.world - w.pan);   // px
@@ -3595,12 +3643,44 @@ function vnSprite(name, expr) {
     stagePan.drag = { x0: e.clientX, panX0: stagePan.x };
     pan.classList.add("dragging");
   });
+  let _vel = 0, _lastX = 0, _lastT = 0, _glide = 0;
   document.addEventListener("pointermove", (e) => {
     if (!stagePan.drag) return;
-    stagePan.x = stagePan.drag.panX0 + (e.clientX - stagePan.drag.x0);
-    vnStageClamp();
+    const now = performance.now();
+    if (_lastT) _vel = (e.clientX - _lastX) / Math.max(1, now - _lastT);
+    _lastX = e.clientX; _lastT = now;
+    const w = _stageWidths();
+    const min = Math.min(0, w.world - w.pan);
+    let raw = stagePan.drag.panX0 + (e.clientX - stagePan.drag.x0);
+    // 🍎 边缘橡皮筋: 越界位移打 3.4 折 (iOS 手感), 松手由 cam-ease 弹回
+    if (raw > 0) raw = raw * 0.34;
+    else if (raw < min) raw = min + (raw - min) * 0.34;
+    stagePan.x = raw;
+    _stageApply(raw);
   });
-  const end = () => { stagePan.drag = null; pan.classList.remove("dragging"); };
+  const end = () => {
+    if (!stagePan.drag) return;
+    stagePan.drag = null;
+    const v0 = _vel; _vel = 0; _lastT = 0;
+    cancelAnimationFrame(_glide);
+    const w = _stageWidths();
+    const min = Math.min(0, w.world - w.pan);
+    // 🍎 惯性滑行: 速度衰减 rAF, 出界或耗尽即松手回弹 (dragging 摘除交给 cam-ease)
+    if (Math.abs(v0) > 0.08 && stagePan.x <= 0 && stagePan.x >= min) {
+      let v = v0 * 16;
+      const step = () => {
+        stagePan.x += v; v *= 0.93;
+        if (Math.abs(v) < 0.4 || stagePan.x > 24 || stagePan.x < min - 24) {
+          pan.classList.remove("dragging"); vnStageClamp(); return;
+        }
+        _stageApply(stagePan.x);
+        _glide = requestAnimationFrame(step);
+      };
+      _glide = requestAnimationFrame(step);
+    } else {
+      pan.classList.remove("dragging"); vnStageClamp();
+    }
+  };
   document.addEventListener("pointerup", end);
   document.addEventListener("pointercancel", end);
 })();
@@ -4200,6 +4280,7 @@ async function send(chOverride) {
   if (!runId || ended || turnInFlight || (vnMode && vnLocked())) return;
   const canEmpty = playMode === "god" || ch === "think" || ch === "drive";
   if (!text && !canEmpty) return;
+  UIS.send();
   msg.value = ""; sendBtn.disabled = true; suggest.innerHTML = "";
   // VN: 发完就把焦点还给舞台, 空格/回车立即可推进回复 (手机顺带收起键盘)
   if (vnMode) { try { msg.blur(); } catch (e) {}
@@ -4404,6 +4485,7 @@ function pushToast(html, cls, delay) {
   }, delay || 0);
 }
 function showMoments(moments, relDeltas) {
+  if (moments && moments.length) UIS.chime();
   let i = 0;
   for (const m of moments) {
     if (m.kind === "unlock") pushToast(B(`🔓 真相拼上一块：「${m.title}」`, `🔓 A piece of the truth clicks in: “${m.title}”`), "t-unlock", i++ * 650);
