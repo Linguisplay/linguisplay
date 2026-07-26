@@ -3387,6 +3387,7 @@ let vnMode = false, vnAutoOn = false, vnAdvanceResolve = null, spriteMap = {};
 function vnShow(on) {
   document.getElementById("vnui").classList.toggle("hidden", !on);
   document.body.classList.toggle("vn", on);
+  try { calmKick(); } catch (e) {}   // 🎬 进场即点火静场计时 (不等第一次触碰)
   // 打字为主: VN 里输入栏永远在场 (vnfree 常开), 选项只是它上面的辅助 chips
   if (on) document.body.classList.add("vnfree");
   else { document.body.classList.remove("vnlog", "vnfree");
