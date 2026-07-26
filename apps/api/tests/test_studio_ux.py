@@ -174,6 +174,18 @@ def test_sandbox_lint_skips_designed_absences():
     assert "no_endings" not in codes_sb and "no_playable" not in codes_sb
 
 
+def test_create_draft_with_if_rev_null():
+    """实弹 (2026-07-26): studio 新建草稿的 payload 带 if_rev:null (乐观锁字段)。
+    create_story 若不把 if_rev 从 **data 里剔掉, 会 TypeError 崩 500 — 谁都存不了新草稿。"""
+    with _client() as c:
+        r = c.post("/api/v1/stories", json={
+            "title": "新草稿", "visibility": "private", "if_rev": None,
+            "characters": [{"id": "c1", "name": "甲", "is_lead": True}],
+            "acts": [{"index": 1, "title": "一"}]})
+        assert r.status_code == 201, r.text
+        assert r.json()["title"] == "新草稿"
+
+
 def test_optimistic_lock_rejects_stale_tab():
     """🔒 乐观锁 (实弹: 陈旧标签页的整本覆盖式保存把修好的草稿静默回滚):
     if_rev 不一致 409; 一致放行并跳新票据; 不传 (老客户端) 放行。"""

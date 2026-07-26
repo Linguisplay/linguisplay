@@ -468,6 +468,7 @@ def create_story(
     body: StoryInput, user: User = Depends(current_user), db: Session = Depends(get_db)
 ):
     data = body.model_dump(exclude_unset=True)
+    data.pop("if_rev", None)   # 乐观锁字段, 不是 Story 列 (新建无需比对; 漏 pop 会 **data 崩)
     data.pop("characters", None)
     data.pop("acts", None)
     data.pop("endings", None)
