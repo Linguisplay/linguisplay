@@ -6794,31 +6794,50 @@ _POV_CORRECTION = ("上一版旁白的人称错了：旁白必须自始至终用
 # 写走必记走的架构版 (Yi: 这个铁律是走的架构吗): departure prose per present name
 _EXIT_TAIL_RE = (r"[^。！？\n]{0,12}?(?:离开|走了出去|走出了|迈出|迈下台阶|退了出去|出了门"
                  r"|拂袖而去|大步离去|走远|转身走了|头也不回地走|离场而去)")
+# 🚪 台词里的第一人称告别 (Yi: 角色「说」自己要走却没走 — 之前只读旁白不读台词)
+_SELF_EXIT_RE = re.compile(
+    r"我(?:先|得|这就|还是|要|该|去)?\s*(?:走一步|走了|走|离开|回去了?|撤了?|闪了?|告辞|失陪|先撤)"
+    r"(?=[。！？，、\s」”』’]|$)|失陪了|告辞了|我先走|我得走|我这就走")
+_EXIT_NEG_RE = re.compile(r"如果|要是|假如|万一|别走|不走|不能走|走不了|想走吗|要不要走|走神|走运|走心")
 
 
 def _settle_prose_exits(content: dict[str, Any], state: dict[str, Any],
                         d_beats: list[dict[str, Any]], pcid: str | None) -> list[str]:
-    """Deterministic backstop for npc_moves: narration that walks a PRESENT character
-    out books the exit in the ledger even when the model forgot to file it — prose and
-    ledger may never part ways. Exit destination unknown → pinned AWAY (unreachable
-    until their schedule or a summon brings them back). Returns exited names."""
-    txts = [b.get("text") or "" for b in d_beats or [] if b.get("type") != "dialogue"]
-    if not txts:
+    """Deterministic backstop for npc_moves: a PRESENT character walked out (in NARRATION)
+    or SAID they're leaving (in their own DIALOGUE) books the exit in the ledger even when
+    the model forgot to file it — prose and ledger may never part ways. Unknown destination
+    → routed HOME (a real place, per Yi「到另一个场景就好」); no home → AWAY. Returns names."""
+    narr = "\n".join(b.get("text") or "" for b in d_beats or [] if b.get("type") != "dialogue")
+    # 谁在自己那句台词里说了要走 (排掉条件句/否定句: 如果我走了 / 别走 / 走神)
+    said_bye: set[str] = set()
+    for b in d_beats or []:
+        if b.get("type") == "dialogue":
+            t = b.get("text") or ""
+            sp = (b.get("speaker_name") or "").strip()
+            if sp and _SELF_EXIT_RE.search(t) and not _EXIT_NEG_RE.search(t):
+                said_bye.add(sp)
+    if not narr and not said_bye:
         return []
-    blob = "\n".join(txts)
+    cur = state.get("location_id")
+    loc_ids = {l.get("id") for l in _locations(content)}
     outed: list[str] = []
     for c in list(scene_characters(content, state)):
         cid, nm = c.get("id"), (c.get("name") or "").strip()
         if not cid or not nm or cid == pcid:
             continue
-        if re.search(re.escape(nm) + _EXIT_TAIL_RE, blob):
-            pins = dict(state.get("char_pins") or {})
-            pins[cid] = AWAY
-            state["char_pins"] = pins
-            if cid in (state.get("following") or []):
-                state["following"] = [f for f in state["following"] if f != cid]
-            _audit(state, "npc.exit", True, nm, "散文离场，账本跟走")
-            outed.append(nm)
+        leaving = bool(narr and re.search(re.escape(nm) + _EXIT_TAIL_RE, narr)) or nm in said_bye
+        if not leaving:
+            continue
+        # 去处不明 → 回家(真地点); 没家、家不在册、或家就在此地 → AWAY
+        home = str(c.get("home_location_id") or "").strip()
+        dest = home if (home and home != cur and home in loc_ids) else AWAY
+        pins = dict(state.get("char_pins") or {})
+        pins[cid] = dest
+        state["char_pins"] = pins
+        if cid in (state.get("following") or []):
+            state["following"] = [f for f in state["following"] if f != cid]
+        _audit(state, "npc.exit", True, nm, "台词/散文离场→" + ("回家" if dest != AWAY else "离开"))
+        outed.append(nm)
     return outed
 
 
