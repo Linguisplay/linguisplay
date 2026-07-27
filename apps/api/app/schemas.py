@@ -112,6 +112,9 @@ class Character(BaseModel):
     act_pace: Optional[str] = None        # 行动节奏: 分阶段推进有确认 | 利落一步到位 | 冲动急促
     sense_focus: Optional[str] = None     # 感官侧重: 触觉/视觉/听觉 哪种主导、更常被描写
     emote_form: Optional[str] = None      # 情感表达形式: 动作暗示+内心独白 | 直球说出口 | 只做事不表达
+    # 🧩 已确知 (2026-07-26 治「角色现编不该知道的私事」如周三休假): 授权此角色确切知道的、
+    # 关于玩家/局势的事实。模型只能读、不能编; 此外只认玩家在对话里亲口说过的。留空=只认对话。
+    known_facts: Optional[str] = None
     gender: Optional[str] = None          # 男 | 女 | 其他
     age_band: Optional[str] = None        # 少年 | 青年 | 中年 | 老年
     # 🐱 非人角色的物种 (猫/犬/龙…): 立绘与头像提示词据此换词——「男性青年」对猫角色
@@ -203,6 +206,7 @@ class CharacterCardInput(BaseModel):
     act_pace: Optional[str] = None      # 🎬 表演指纹: 行动节奏
     sense_focus: Optional[str] = None   # 🎬 表演指纹: 感官侧重
     emote_form: Optional[str] = None    # 🎬 表演指纹: 情感表达形式
+    known_facts: Optional[str] = None   # 🧩 已确知: 授权的玩家/局势事实 (防现编)
     agenda: Optional[str] = None
     knowledge: Optional[str] = None
     bio_layers: list[dict[str, Any]] = []

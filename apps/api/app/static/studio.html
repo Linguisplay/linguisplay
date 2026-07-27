@@ -1008,6 +1008,8 @@ function renderChars(){
           <div><label>🎬 情感表达形式（可选）</label><input value="${esc(c.emote_form||"")}" placeholder="例：动作暗示+内心独白 ／ 直球说出口 ／ 只做事不表达" oninput="setChar(${i},'emote_form',this.value)"></div>
           <div></div>
         </div>
+        <label>🧩 已确知（可选：授权 TA 确切知道的玩家/局势事实。留空=TA 只认玩家亲口说过的，不会现编排班/住址/行踪）</label>
+        <input value="${esc(c.known_facts||"")}" placeholder="例：知道玩家是新调来的实习警员、住在城寨西门；但不知道玩家的排班和过往" oninput="setChar(${i},'known_facts',this.value)">
         <div class="row4">
           <div><label>在场状态</label><select onchange="setChar(${i},'presence',this.value)">
             <option value="present" ${(c.presence||"present")==="present"?"selected":""}>在场·可对话</option>

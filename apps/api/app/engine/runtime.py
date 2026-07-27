@@ -243,6 +243,9 @@ DEFAULT_TUNING = {
     "rel_events": 1,            # 💞 好感事件记账制 (Yi 2026-07-25 定: 不许每句话打分, 关系由
                                 #    事写成): 模型只申报关系事件+文据, 分值/冷却引擎说了算
                                 #    (1 = on; 剧本级可关回旧每句判)
+    "fallible": 1,              # 🎭 会露怯 (Yi 2026-07-26: 治「角色永远占上风=下头」): 宪章常驻
+                                #    反完美话术锚 + 引擎每 4 拍给主答者一记 off_balance 放大 (处下风/
+                                #    被将住/语塞/让玩家赢一手)。1=on; 需要角色始终碾压的本可关
     "pursue_player": 0,         # 💘 全员追玩家 (Yi 2026-07-26 定: 所有角色主动追你, 反向后宫):
                                 #    行为层, 不碰 voice_print — 各角色【透过自己人设】吊系地追
                                 #    (冷的人冷着追/傲的人嘴硬身诚实), 欲擒故纵不倒贴。默认 0,
@@ -9608,6 +9611,9 @@ def run_turn_stream(
             "real_now": real_now_line(content, state),
             # 💘 全员追玩家 (行为层, 不碰 voice_print): 各角色透过自己人设吊系地追
             "pursue_player": bool(tun.get("pursue_player")) and not observer,
+            # 🎭 露怯放大 (治下头): 主答者每 4 拍一记明显处下风, 打破「永远精准反击」
+            "off_balance": (bool(tun.get("fallible", 1)) and not observer and idx == 0
+                            and int(state.get("turn_seq") or 0) % 4 == 3),
             # 🏛 阵营底色 (权谋地基): 归属 + 玩家在本阵营的风评
             "faction_block": factions_mod.block(content, state, sp,
                                                 zh=lang_of(content) != "en"),
@@ -9659,6 +9665,8 @@ def run_turn_stream(
             "act_pace": sp.get("act_pace", ""),
             "sense_focus": sp.get("sense_focus", ""),
             "emote_form": sp.get("emote_form", ""),
+            # 🧩 已确知: 授权的玩家/局势事实 (防角色现编不该知道的私事)
+            "known_facts": sp.get("known_facts", ""),
             # 台词范例 (mes_example): lines that ARE this voice — the most durable 去AI味 lever
             "examples": [str(x) for x in (sp.get("examples") or [])][:5],
             # 🎯 this character's OWN goal/will: authored wants + the engine-tracked step
