@@ -243,6 +243,9 @@ DEFAULT_TUNING = {
     "rel_events": 1,            # 💞 好感事件记账制 (Yi 2026-07-25 定: 不许每句话打分, 关系由
                                 #    事写成): 模型只申报关系事件+文据, 分值/冷却引擎说了算
                                 #    (1 = on; 剧本级可关回旧每句判)
+    "physics_guard": 1,         # 🧊 物理连续性哨兵 (Yi 2026-07-27: 治道具/伤势穿模——裤兜掏
+                                #    瓶装汽水、断肋骨扛货): 仅当这拍有动作/道具/伤势字眼才用 flash
+                                #    快审, 探到硬物理矛盾→当场重生一次。纯聊天回合跳过=零延迟。1=on
     "fallible": 1,              # 🎭 会露怯 (Yi 2026-07-26: 治「角色永远占上风=下头」): 宪章常驻
                                 #    反完美话术锚 + 引擎每 4 拍给主答者一记 off_balance 放大 (处下风/
                                 #    被将住/语塞/让玩家赢一手)。1=on; 需要角色始终碾压的本可关
@@ -2924,6 +2927,44 @@ def _lang_guard(llm, prompt: dict[str, Any], directed: dict[str, Any],
     return retry if retry.get("beats") else directed
 
 
+import re as _re_phys
+# 🧊 物理穿模预筛: 只有这拍出现动作/道具/伤势/位置字眼才值得跑 flash 检测 (纯聊天跳过=零延迟)
+_PHYS_TRIGGER = _re_phys.compile(
+    "掏|抽出|拿出|取出|摸出|扛|背起|抱起|拎|举起|跑|冲过|跳|翻身|翻过|"
+    "伤|断|骨|血|疼|痛|拳|刀|枪|打|踢|摔|扑|冰|烫|递|塞给|口袋|裤兜|兜里")
+
+
+def _physics_audit(llm, directed: dict[str, Any], state: dict[str, Any]) -> list[str]:
+    """🧊 物理连续性哨兵 (Yi: 道具/伤势穿模): 只在有动作/道具/伤势字眼时, 用 flash 快审这一拍
+    正文的【硬物理矛盾】——凭空冒出且现实不可能的道具(裤兜掏瓶装汽水)、违反刚发生的明显伤势的
+    行为(断肋骨扛货)、无过渡的位置穿越。只报硬矛盾。降级返回 []（绝不阻断; Mock/无 key 也跳过）。"""
+    beats = directed.get("beats") or []
+    txt = " ".join((b.get("text") or "") for b in beats
+                   if b.get("type") in ("dialogue", "description"))[:900]
+    if not txt.strip() or not _PHYS_TRIGGER.search(txt) or not getattr(llm, "_url", None):
+        return []
+    prev = str(state.get("_last_text") or "")[:400]
+    import json as _json
+    sys_p = ("你是剧本的物理连续性审校。只挑【硬物理矛盾】，不挑文笔、不挑情节：①凭空冒出且现实"
+             "不可能的道具（如从裤兜掏出整瓶玻璃瓶汽水、场景里根本没有的东西突然出现）；②违反刚"
+             "发生的明显伤势的行为（如刚被打断肋骨却马上扛重物、健步如飞）；③无过渡的位置穿越。"
+             '只输出JSON：{"breaks":["≤20字 一条硬矛盾"]}。没有就空数组。宁可放过，别误伤合理描写。')
+    u = _json.dumps({"上一拍": prev, "这一拍正文": txt}, ensure_ascii=False)
+    try:
+        from . import qwen as _q
+        resp = _q._post_chat(llm._url, llm._key,
+                             {"model": "deepseek-v4-flash", "thinking": {"type": "disabled"},
+                              "messages": [{"role": "system", "content": sys_p},
+                                           {"role": "user", "content": u}],
+                              "max_tokens": 220, "temperature": 0.2,
+                              "response_format": {"type": "json_object"}},
+                             timeout=15, kind="physics")
+        d = _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
+        return [str(x).strip()[:30] for x in (d.get("breaks") or []) if str(x).strip()][:3]
+    except Exception:
+        return []
+
+
 def _logic_guard(llm, prompt: dict[str, Any], directed: dict[str, Any], content: dict[str, Any],
                  state: dict[str, Any], frags: list[dict[str, Any]]) -> dict[str, Any]:
     """Post-generation logic backstop for the addressed (primary) character. Deterministically
@@ -2968,8 +3009,11 @@ def _logic_guard(llm, prompt: dict[str, Any], directed: dict[str, Any], content:
     dir_finds = director_mod.logic_audit(
         directed.get("beats", []), slot=active_slot(content, state),
         dead_names=_dead_nm, prev_text=str(state.get("_last_text") or ""))
+    # 🧊 物理穿模哨兵 (道具/伤势/位置): 有动作字眼才 flash 快审, 探到硬矛盾→重生
+    phys_finds = (_physics_audit(llm, directed, state)
+                  if tuning_for(content).get("physics_guard", 1) else [])
     if not verdict["hard"] and not lang_broke and not power_broke and not heat_broke \
-            and not pov_broke and not dir_finds:
+            and not pov_broke and not dir_finds and not phys_finds:
         return directed
     # regenerate once, telling the model exactly what broke (labels only — never the secret body)
     corr_parts: list[str] = []
@@ -3002,6 +3046,11 @@ def _logic_guard(llm, prompt: dict[str, Any], directed: dict[str, Any], content:
                           "绝不逐句重复、引用或改写开场白里的句子，只写此刻正在发生的新内容。")
         _audit(state, "opening.echo", True, prompt.get("speaker_name") or "",
                "复读开场白，已强制重写")
+    if phys_finds:
+        corr_parts.append("物理连续性出错：" + "；".join(phys_finds) +
+                          "。请重写这一轮：去掉现实不可能存在的道具（别为了戏剧效果凭空造物件），"
+                          "让每个人的行为符合他此刻的伤势和体力，位置转换要有交代。")
+        _audit(state, "physics.enforced", True, "；".join(phys_finds)[:60], "物理穿模，已强制重写")
     retry = llm.generate({**prompt, "logic_correction": "\n".join(corr_parts)})
     if not _check(retry)["hard"]:
         return retry  # a lingering language slip is tolerable; a logic break is not
