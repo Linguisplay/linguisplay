@@ -1856,7 +1856,7 @@ def generate_and_move(content: dict[str, Any], state: dict[str, Any], place_name
         clean = (dp.get("name") or "").strip()
     except Exception:
         detail = ""
-    # 🧑‍⚖️ LLM 是铸造判官 (地名提炼): 原话可能是整句意图（「铁皮顶那屋摸个底」→「铁皮顶屋」）,
+    # 🧑‍⚖️ LLM 是铸造判官 (地名提炼): 原话可能是整句意图（「去河堤上透透气」→「河堤」）,
     # 也可能根本不含具体去处（模型答「无」）。提炼不出干净地名 = 不铸造 —
     # 宁可这回合没有确认条, 不许垃圾上地图。
     if not clean or len(clean) < 2 or _generic_place(clean):

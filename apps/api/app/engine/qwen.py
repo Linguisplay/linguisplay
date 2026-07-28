@@ -675,7 +675,7 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append("【当前所在·空间锚点】（玩家此刻就在这个具体地点，你的旁白必须扣住它来写——"
                      "写这里实际存在的陈设、光线、声响、距离与可触及的物件，让人能凭文字想象出画面；"
                      "不要把场景写得含糊或飘忽，也不要把不属于这里的东西搬进来。"
-                     "【移动规则】你可以主动提出带玩家去另一个【可去通路】里的地点（用下面的「带去」标记），"
+                     "【移动规则】你可以主动提出带玩家去另一个【可去通路】里的地点（用 move_invite 字段申报），"
                      "但旁白只写到你起身、招手、相邀为止——绝不要替玩家写出他已经跟你到了那里；"
                      "系统会先征求玩家同意，玩家点头后才真正过去）：\n" + place)
 
@@ -702,7 +702,7 @@ def _build_system(prompt: dict[str, Any]) -> str:
     ck = (prompt.get("clock") or "").strip()
     if ck:
         lines.append("")
-        lines.append(f"【此刻的时间】{ck}。旁白与对话必须贴合这个时辰——天光、街面动静、人的作息。")
+        lines.append(f"【此刻的时间】{ck}。")   # 禁令(不许说错时辰)由深锚独家承载, 这里只留数据
     if prompt.get("real_time"):
         lines.append("【时间与现实同步】上面的时间就是玩家此刻的真实时间。剧情里的约定（明晚见、明早再来）"
                      "对应真实的日子；角色像真的在过日子，玩家离开的这段时间里你也在生活。")
@@ -1087,9 +1087,8 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
         props["affinity"] = {"type": "integer", "description":
                              ("本场人物关系更近(正)/更疏(负)" if observer else
                               "0(对方不知道你在想什么)" if is_think else
-                              "这一句对你们关系的影响(-3~5)。像真实的人一样诚实起伏：走心/戳中你→+2~3；"
-                              "正常聊得下去→+1；敷衍/说教/自说自话/戳你痛处/冒犯→-1~-3，"
-                              "该扣就扣别客气，一直只涨不掉是假人；只有完全冷场才是0")}
+                              "这一句对你们关系的影响(-3~5)：走心/戳中→+2~3，正常→+1，"
+                              "敷衍/说教/冒犯→-1~-3，完全冷场才是0；该扣就扣，只涨不掉是假人")}
         required.append("affinity")
         if not observer and not is_member and not is_think:
             props["romance"] = {"type": "integer", "description":
@@ -1312,7 +1311,7 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                 "required": ["a", "b", "delta"]},
             "description": "仅当这一轮剧情让【在场两个角色彼此之间】（都不是玩家）的关系发生实质变化"
                            "（争执翻脸/冰释前嫌/一起扛过事）才填，最多2条；名字只能原样抄写在场角色名。"
-                           "通常填空数组[]。"}
+                           "通常省略。"}
     if (prompt.get("clock") or "").strip() and not is_member and not is_think \
             and not prompt.get("real_time"):
         props["time_skip"] = {"type": "string", "description":
@@ -1425,53 +1424,6 @@ def _plan_tool(prompt: dict[str, Any], speaker: str, observer: bool,
     return tool
 
 
-def _output_spec(prompt: dict[str, Any], speaker: str, observer: bool,
-                 group_mode: str | None, channel: str, advance_hint: str) -> str:
-    """Output contract = ONE natural Chinese-fiction passage where every spoken line is in
-    「」 quotes, plus a few metadata lines. The engine then splits narration (outside 「」)
-    from speech (inside 「」) DETERMINISTICALLY — which plays to DeepSeek's prose strength
-    and never degenerates the way response_format=json_object does."""
-    is_member = group_mode == "member"
-    is_think = channel == "think"
-    has_map = bool((prompt.get("place") or "").strip())
-    L: list[str] = []
-    if is_think:
-        L.append(f"【这一轮怎么写】写一段第三人称的内心独白式旁白（3~5句），细腻写出「{player_namesafe(prompt)}」"
-                 "此刻的思绪、身体感官、周遭环境光线声音气味的微妙变化。这一轮【没有任何台词，绝不要出现「」对白】。")
-    elif is_member:
-        L.append(f"【这一轮怎么写】只写「{speaker}」这一刻对在场众人【说出口】的话，用「」引号括起来"
-                 "（例：「哎哟，你们慢着点。」）。如果你这一刻不想搭话，就只回一个字：无。不要写旁白、不要写动作。")
-    else:
-        if channel == "do":
-            lead = ("写成一段自然的第三人称中文小说叙事（3~6句）：先把玩家那个【动作】造成的具体、连锁的后果"
-                    "一步步演出来（碰到什么、什么声响、谁怎么反应），再带出在场角色的神态。")
-            speech_rule = "你这一轮如果开口，每句台词都用「」括进叙事里；只用动作神态回应、不说话也可以。"
-        elif observer:
-            lead = "写成一段自然的第三人称中文小说叙事（2~5句），铺陈在场众人此刻的互动、气氛与神态。"
-            speech_rule = f"「{speaker}」对其他人说出口的每句话都用「」括进叙事里。"
-        else:
-            lead = "写成一段自然的第三人称中文小说叙事（2~5句），写出对方这句话此刻激起的神态、动作、气氛。"
-            speech_rule = ("你【被直接搭话，必须开口】：把你说出口的每一句话都用「」括进这段叙事里"
-                           f"（例：{speaker}歪了歪头，「哎哟，新来的。」说着把手里的东西放下）；"
-                           "哪怕冷淡、敷衍、拒答，也要有带「」的台词。")
-        L.append(f"【这一轮怎么写】{lead}用第三人称、用「{speaker}」的名字称呼自己，绝不用「我」。{speech_rule}"
-                 "【铁律】凡是说出口的话都必须在「」里；「」之外只写动作、神态、环境，绝不放台词。")
-    # metadata lines (parsed deterministically by prefix; kept minimal)
-    meta = ["然后另起新行，逐行给出（每项一行，照抄项目名）："]
-    if not is_think and not is_member:
-        meta.append("情绪：对方此刻言行底下真正的情绪，三五个字")
-    meta.append("好感：一个整数 -3~5（" + ("填0" if is_think else "对方敷衍冒犯→负，走心戳中→正，普通→0或1") + "）")
-    if not observer and not is_member and not is_think:
-        meta.append("心动：一个整数 -2~5，默认0（仅当对方在调情/示好/制造暧昧/情话、且你被触动才给正分，这是恋爱线）")
-    meta.append(f"推进：是 或 否（{advance_hint}）")
-    if has_map and not is_member and not is_think:
-        meta.append("带去：若你这一轮想带玩家一起去另一个【可去通路】里的地点，填那地点名（叙事里只写到你起身相邀，别写玩家已到）；否则填 无")
-    if not observer and not is_member and not is_think:
-        meta.append("结局：默认 无；只有玩家本人此刻被你弄死才填 死亡，走到不可挽回的坏结局填 坏")
-    L.append("\n".join(meta))
-    return "\n".join(L)
-
-
 def player_namesafe(prompt: dict[str, Any]) -> str:
     return (prompt.get("persona") or {}).get("name") or "玩家"
 
@@ -1493,13 +1445,12 @@ def _build_observe_system(prompt: dict[str, Any]) -> str:
     focus = (prompt.get("player_input") or "").strip()
     target = prompt.get("observe_target")
 
+    # ── 🧊 稳定带 (与 _build_system 同一手术): 剧本级常量在前吃缓存前缀; roster 是
+    #    逐拍现场账, 与逐拍状态一起住易变带 (审查教训: 混进稳定带会拦腰斩断缓存) ──
     lines = [
         "你是这个互动故事里的旁白叙述者。用中文，文笔要有画面感、质感与节奏。",
         _ANTI_ASSISTANT,
     ]
-    if prompt.get("player_dead"):
-        lines.append("【玩家已死】玩家已经死了，此刻是一缕无形的视角：任何人都感知不到玩家。"
-                     "把这个世界在没有玩家之后如何继续，具体地写给玩家看。")
     if prompt.get("sandbox"):
         lines.append("【无尽沙盒】这个世界没有终点，不要收束剧情，不要总结抒情。")
     if world:
@@ -1509,18 +1460,24 @@ def _build_observe_system(prompt: dict[str, Any]) -> str:
         lines.append("【文风·必须贴住】这个故事的叙事声音（优先级高于任何通用文风习惯）：" + _st)
     facts = (prompt.get("world_facts") or "").strip()
     roster = (prompt.get("roster") or "").strip()
-    if facts or roster:
-        block = "【世界设定·不可违背的事实】（确定的客观事实，你的旁白必须与之一致，尤其是在场的人与人数，" \
-                "不要数错、不要把玩家自己漏掉）："
-        if roster:
-            block += "\n" + roster
-        if facts:
-            block += "\n" + facts
-        lines.append(block)
+    if facts:
+        lines.append("【世界设定·不可违背的事实】（确定的客观事实，你的旁白必须与之一致，"
+                     "绝不能与之矛盾）：\n" + facts)
     if roster:
         lines.append("【龙套与路人】这个地点按常理该有的无名之辈（伙计/服务员/卫兵/行人/杂兵）"
                      "可以作为布景出现：在旁白里给他们动作和一两句台词，用身份称呼、不起名字、"
                      "不占在场人数、不知道内幕，事了退回背景。")
+    kn = _knowledge_block(prompt)
+    if kn:
+        lines.append(kn)
+    if prompt.get("mature"):
+        lines.append(_R18_BLOCK.format(speaker=(target or {}).get("name", "角色") if target else "旁白"))
+    # ── 以下逐拍易变 (缓存断点从这里开始) ──────────────────────────────
+    if prompt.get("player_dead"):
+        lines.append("【玩家已死】玩家已经死了，此刻是一缕无形的视角：任何人都感知不到玩家。"
+                     "把这个世界在没有玩家之后如何继续，具体地写给玩家看。")
+    if roster:
+        lines.append("【此刻在场·现场账】（场上每个人此刻的真实状态，旁白必须与之一致）：\n" + roster)
     place = (prompt.get("place") or "").strip()
     if place:
         lines.append("【当前所在·空间锚点】（描述四周时必须扣住这个具体地点的真实陈设，写得具体可感）：\n" + place)
@@ -1532,11 +1489,6 @@ def _build_observe_system(prompt: dict[str, Any]) -> str:
                  + "。名单之外的具名角色一律【不在场】：TA们绝不能出现、说话、行动或递出任何东西，"
                    "至多作为玩家的回忆或念头被想起。玩家在观察中提出的疑问，只能用眼前可见的"
                    "线索、痕迹与环境来回应——绝不允许凭空召来一个人替你作答。")
-    kn = _knowledge_block(prompt)
-    if kn:
-        lines.append(kn)
-    if prompt.get("mature"):
-        lines.append(_R18_BLOCK.format(speaker=(target or {}).get("name", "角色") if target else "旁白"))
     if scene_line:
         lines.append(scene_line)
     memory = (prompt.get("memory") or "").strip()
@@ -2117,17 +2069,17 @@ def _render_directive(prompt: dict[str, Any], speaker: str, outline: list[str]) 
                       f"你被直接搭话，必须至少有一行「{speaker}：」的台词行，哪怕冷淡、敷衍、拒答。")
         pl = player_namesafe(prompt)
         L.append(
-            "【输出格式·铁律】逐行输出，每行是独立的一拍，行首必须声明身份，只有两种行：\n"
-            f"旁白：一段第三人称叙事（{lead}用「{speaker}」的名字称呼自己，绝不用「我」）\n"
+            "【输出格式·铁律】逐行输出，每行是独立的一拍、行首声明身份，只有两种行，交替共3~6行：\n"
+            f"旁白：一段第三人称叙事（{lead}用「{speaker}」的名字称呼自己，绝不用「我」；"
+            "只写动作、神态、环境）\n"
             f"{speaker}：「这一拍{speaker}亲口说出的话」\n"
-            "两种行交替出现，共3~6行。【凡是人物说出口的话，必须单独成行、行首是说话人的名字】——"
-            "旁白行里绝不许出现任何说出口的话，也不许转述（『他说让你小心』这种是废稿；"
-            "要么让TA自己说一行，要么别提）。旁白行只写动作、神态、环境。" + must_speak)
+            "【凡是人物说出口的话，必须单独成行、行首是说话人的名字】——绝不进旁白行、"
+            "也不许转述（『他说让你小心』是废稿；要么让TA自己说一行，要么别提）。" + must_speak)
         L.append(f"【人称铁律】旁白里的「你」永远且只能指玩家「{pl}」本人；"
                  f"「{speaker}」和其他任何角色一律用名字称呼——绝不能把「你」安到{speaker}"
                  f"或别人头上，也绝不能把玩家「{pl}」写成第三人称（写TA的名字或他/她）。"
                  f"玩家的动作由玩家主动做出、效果落在别人身上，谁施谁受不许写反。")
-    L.append("只写这两种行：不要元数据、不要编号、不要标题、不要解释。")
+    L.append("不要元数据、不要编号、不要标题、不要解释。")
     return "\n".join(L)
 
 
@@ -2937,7 +2889,7 @@ class QwenLLM:
             '如「克制白描的乡土抒情。忌华丽辞藻；忌现代网络词；忌长句堆叠」",'
             '"chapters":[{"summary":"第1章一句话概要",'
             '"from":"该章在原文中起点处的前10~15个字，必须逐字照抄原文"}，…（3~5章）]}。'
-            "要求：角色≤6个只留有戏份的；场景≤8个；looks 必须具体（画师依赖它）；"
+            "要求：角色≤6个只留有戏份的；场景≤8个；"
             "至少标 1 个 route:true 的可攻略角色（与主角情感戏份最重的那个）；"
             "chapters 覆盖全书主线并收在临近结局分岔的高潮处：若原文包含多种结局走向"
             "（如果A…/如果B…），那些分支内容【不写进任何一章】——结局由专门的结局编译负责，"
@@ -2968,8 +2920,7 @@ class QwenLLM:
                           + ("〔可攻略〕" if c.get("route") else "") for c in chars)
         slist = "\n".join(f"- {s['id']}={s['name']}" for s in scenes)
         sys = (
-            "你是视觉小说（galgame）的编剧编译器。把指定章节改编成【简体中文】的拍序列"
-            "（原文是外语也一律转写成流畅的现代中文），只输出严格JSON："
+            "你是视觉小说（galgame）的编剧编译器。把指定章节改编成拍序列，只输出严格JSON："
             '{"beats":[{"who":"说话角色id，旁白则留空","text":"这一拍的文字",'
             '"expr":"常态|喜|怒|哀（说话角色此刻表情）","scene":"场景id",'
             '"bgm":"平静|温馨|浪漫|紧张|悲伤|寂寞|悬疑|激昂|静 之一（跟着这一段的情绪走，'
@@ -3137,7 +3088,7 @@ class QwenLLM:
                 "第一行就只输出一个字：无。")
         sys = ("你在为一个互动剧情游戏即时生成一个新地点。输出两行：\n"
                "第一行：把玩家的原话提炼成一个干净的【地名】（2~8字，只留地点本体，"
-               "去掉动作、目的和语气，如「铁皮顶那屋摸个底」→「铁皮顶屋」、"
+               "去掉动作、目的和语气，如「去河堤上透透气」→「河堤」、"
                "「去后巷看看情况」→「后巷」；原话本身已是干净地名就照抄）。"
                + _inv + "\n"
                "第二行：这个地点的环境描写：只写此刻实际能看到的具体陈设、光线、声响、气味，"
@@ -3726,7 +3677,7 @@ class QwenLLM:
         sys = ("你为一个持续运转的世界写【玩家缺席的那场戏】：角色如约赴了约，玩家没来。"
                '只输出JSON：{"scene":"≤80字，第三人称，一件具体发生了的事"}。'
                "要求：写角色真实做了什么（等了多久、做了什么小动作、最后怎么离开、顺手发生了什么），"
-               "贴人设与关系；克制，不哭喊不控诉，细节越具体越疼；不要对白引号堆砌；不用破折号。")
+               "贴人设与关系；克制，不哭喊不控诉，细节越具体越疼；不要对白引号堆砌。")
         u = (f"角色：{ch.get('name','')}（{ch.get('role','')}）。人设：{ch.get('persona_text','')}\n"
              f"与玩家的关系：{prompt.get('relation','')}\n"
              f"约定：{prompt.get('when','')}，{prompt.get('what','')}\n"
@@ -3922,7 +3873,7 @@ class QwenLLM:
                '"minds":{"角色名":"≤20字：TA此刻心里最挂着的一步（从TA的人生目标推）"},'
                '"initiative":"角色名：这场最有理由主动开口的人（性格外向/主导高的、或心里压着事的）",'
                '"spark":"≤30字：在场的暗流一句（有冲突素材才写，没有就空字符串）"}。'
-               "克制：不剧透、不替玩家决定、不编造卡上没有的事实；不用破折号。")
+               "克制：不剧透、不替玩家决定、不编造卡上没有的事实。")
         import json as _json
         u = _json.dumps({"地点": prompt.get("place"), "时刻": prompt.get("slot"),
                          "在场角色": prompt.get("cast"), "玩家": prompt.get("player"),
@@ -3966,7 +3917,7 @@ class QwenLLM:
                    "只写每个人正在做的事；若给了 tease，is_lead 的 action 里藏一丝"
                    "与之相关的欲言又止（绝不点破内容）；"
                    "标了 visiting 的角色不是本来就在这儿，是特意来找玩家打照面的，"
-                   "action 要写出TA上门/出现的样子；不用破折号。")
+                   "action 要写出TA上门/出现的样子。")
         else:
             sys = ("你为一部 galgame 写开场。只输出JSON："
                    '{"scene":"≤80字：此刻在哪、什么时辰、一个感官细节，玩家的处境一句带过",'
@@ -3980,7 +3931,7 @@ class QwenLLM:
                    "标了 visiting 的角色不是本来就在这儿，是特意来找玩家打照面的，"
                    "action 要写出TA上门/出现的样子；"
                    "带 opening_line 的角色，line 必须一字不改照抄 opening_line，"
-                   "action 围绕这句话此刻的说出而写；不用破折号。")
+                   "action 围绕这句话此刻的说出而写。")
         # 🎬 作者开场白 = 此刻的现场本身 (Yi 实弹: 只上台不喂生成 → 角色像没读过剧本)
         _ao = (prompt.get("auth_opening") or "").strip()
         if _ao:
@@ -4018,7 +3969,7 @@ class QwenLLM:
                '"impressions":{"角色ID":"该角色相处出来对玩家的印象，≤28字，口语"}}。'
                "要求：facts 写行为规律（爱莽/谨慎/嘴硬/吃软不吃硬/常深夜上线这类），"
                "不写剧情事件；impressions 只能写给定名单里的角色，各写各的视角，"
-               "允许与旧印象矛盾（人会改观）；没有新东西的角色可以不写；不用破折号。")
+               "允许与旧印象矛盾（人会改观）；没有新东西的角色可以不写。")
         u = (f"旧画像：{prior}\n"
              f"在场角色名单：{[(w.get('id'), w.get('name')) for w in wit]}\n"
              "近期对话（旧→新）：\n" + "\n".join(str(x) for x in prompt.get("recent") or []))
@@ -4045,7 +3996,7 @@ class QwenLLM:
                '{"what":"≤16字的具体事由","slot":"晨|午|夜","day_offset":1,'
                '"invite":"≤40字，TA发给玩家的邀约短信，必须是TA的口吻"}。'
                "要求：事由从人设、关系与世界近况里自然长出来（不要泛泛的散步吃饭，除非贴人设）；"
-               "day_offset 只能是1或2；短信口语、有性格、不解释背景；不用破折号。")
+               "day_offset 只能是1或2；短信口语、有性格、不解释背景。")
         u = (f"角色：{ch.get('name','')}（{ch.get('role','')}）。人设：{ch.get('persona_text','')}\n"
              f"与玩家的关系：{prompt.get('relation','')}\n"
              f"TA相处出来对玩家的印象：{prompt.get('impression') or '（还不深）'}\n"
@@ -4136,7 +4087,7 @@ class QwenLLM:
             '{"frames":[{"name":"角色名(原样抄写)","pos":"姿态与屋内位置(≤14字)",'
             '"doing":"手上的事(≤10字,可空)","wear":"衣着(≤10字,仅正文提到才填)"}],'
             '"player":{"pos":"...","doing":"...","wear":"..."},'
-            '"contradictions":["正文与上一帧的硬矛盾(无过渡的位置/姿态/衣着跳变、凭空冒出不合理的道具、违反明显伤势的行为),没有则空数组"]，"progressed":"本轮剧情是否有具体的事向前发生了(新事件/新决定/局面实变，单纯气氛加强或重复警告不算)，true或false","hanging":"≤16字：当前悬而未决的最大钩子(如：古镜异动将醒)，没有则空字符串"}。'
+            '"contradictions":["正文与上一帧的硬矛盾(无过渡的位置/姿态/衣着跳变、凭空冒出不合理的道具、违反明显伤势的行为),没有则空数组"],"progressed":"本轮剧情是否有具体的事向前发生了(新事件/新决定/局面实变，单纯气氛加强或重复警告不算)，true或false","hanging":"≤16字：当前悬而未决的最大钩子(如：古镜异动将醒)，没有则空字符串"}。'
             "规则：只记录正文明确写到或可直接推断的状态；正文没提到的人，把上一帧原样抄回来；"
             "wear 只在正文出现衣着信息时才填；不要发明正文里没有的细节；"
             "只记名单里列出的具名角色：名单之外的路人、龙套、无名氏一律不记、不输出。"
@@ -4222,22 +4173,23 @@ class QwenLLM:
         cast = "、".join(prompt.get("cast") or []) or "有人"
         place = prompt.get("place") or ""
         topics = [t for t in (prompt.get("topics") or []) if t]
-        tline = f"可以点到「{topics[0]}」这个话头（只许提名字，绝不许透露内容），" if topics else ""
         wf = (prompt.get("world") or "").strip().replace(chr(10), " ")[:140]
         stl = (prompt.get("style") or "").strip().split("。", 1)[0][:40]
+        # sys 保持纯规则常量 (跨剧本吃缓存); 世界观/文风/话头这些逐局素材全走 user
         sys = ("你在为一个互动剧情游戏写【玩家暂时放下这一刻】的定格旁白。写1~2句，"
                "用第二人称：「你」永远只指玩家本人；在场其他人一律称名字，绝不要用无名的"
                "「有人」「他」去指代任何人。【铁律】玩家人在原地、姿势不变，绝不要替玩家"
                "做任何动作（不许写你转身/你起身/你离开/你迈步这类）；写的是现场悬着的那口气："
-               "在场的某个具名者欲言又止、一个反常的细节此刻才被注意到、"
-               f"或一句没说完的话。{tline}要具体可感，不要总结、不要抒情空话、不要预告。"
-               "所有物件与细节必须属于这个世界观，绝不能出现不属于它的现代物品。"
-               + (f"【世界观】{wf}" if wf else "")
-               + (f"【文风】{stl}。" if stl else "")
-               + "只输出旁白本身。" + _STYLE_PUNCT + _lang_rule(prompt))
+               "在场的某个具名者欲言又止、一个反常的细节此刻才被注意到、或一句没说完的话。"
+               "话头只许提名字，绝不许透露内容。要具体可感，不要总结、不要抒情空话、不要预告。"
+               "所有物件与细节必须属于给定的世界观，绝不能出现不属于它的现代物品。"
+               "只输出旁白本身。" + _STYLE_PUNCT + _lang_rule(prompt))
         u = (f"地点：{place or '（未知）'}" + chr(10)
              + f"在场的人：{cast}" + chr(10)
-             + "玩家此刻起身离开。写那1~2句收尾旁白。")
+             + (f"世界观：{wf}" + chr(10) if wf else "")
+             + (f"文风：{stl}" + chr(10) if stl else "")
+             + (f"可点到的话头：{topics[0]}" + chr(10) if topics else "")
+             + "玩家此刻暂时放下游戏。写那1~2句定格旁白。")
         try:
             resp = _post_chat(self._url, self._key,
                               {"model": self._model, "messages": [{"role": "system", "content": sys},
@@ -4249,7 +4201,7 @@ class QwenLLM:
         if not txt:
             hint = f"关于「{topics[0]}」的话" if topics else "有句话"
             who = (prompt.get("cast") or ["有人"])[0]
-            txt = f"（你起身离开。身后{who}欲言又止，{hint}似乎还没说完。）"
+            txt = f"（{who}欲言又止，{hint}似乎还没说完。）"   # 兜底不许自己踩「替玩家动作」铁律
         return {"beats": [{"type": "description", "speaker_name": None, "text": txt}],
                 "affinity_delta": 0, "advance_act": False, "ending": None}
 
@@ -4492,17 +4444,20 @@ class QwenLLM:
         cur = str(prompt.get("currency") or "钱")
         base = int(prompt.get("base_money") or 50)
         known = "、".join(str(n) for n in (prompt.get("known_names") or []) if n)[:80]
+        # sys 纯规则常量; 阶梯/货币基准/候选对象是逐剧本逐NPC素材, 走 user (吃前缀缓存)
         sys = ("你在为互动剧情游戏裁定一个角色的实力位阶、随身财物，和一桩藏在心里的暗线。"
-               f"位阶阶梯（从低到高）：{'、'.join(ranks)}。"
-               f"按TA的身份年资定位阶（普通市井角色通常在低档，宿老/高手才靠上）；"
-               f"随身的钱按身份定（一个普通人身上约{base}{cur}）。"
+               "按TA的身份年资在给定阶梯里定位阶（普通市井角色通常在低档，宿老/高手才靠上）；"
+               "随身的钱按身份对照给定的普通人身价定。"
                "暗线：TA心里对某个人藏着一桩没人知道的事（暗恋/旧怨/亏欠/嫉妒/握着把柄/旧情），"
-               + (f"对象从这些人里选：{known}；" if known else "对象可以是玩家；")
-               + "选最贴TA人设的那种，一句话写透缘由。只输出两行，格式：\n"
+               "对象从给定候选里选（没给候选就选玩家），选最贴TA人设的那种，一句话写透缘由。"
+               "只输出两行，格式：\n"
                "位阶:<阶梯里的原词> 身家:<整数>\n"
                "暗线:对<名字>的<暗恋|旧怨|亏欠|嫉妒|把柄|旧情>——<一句话缘由，25字内>"
                + _lang_rule(prompt))
-        u = f"角色：{ch.get('name','')}（{ch.get('role','')}）{str(ch.get('persona_text') or '')[:160]}\n输出那两行。"
+        u = (f"位阶阶梯（从低到高）：{'、'.join(ranks)}\n"
+             f"普通人身上约有：{base}{cur}\n"
+             + (f"暗线对象候选：{known}\n" if known else "")
+             + f"角色：{ch.get('name','')}（{ch.get('role','')}）{str(ch.get('persona_text') or '')[:160]}\n输出那两行。")
         try:
             resp = _post_chat(self._url, self._key,
                               {"model": self._model, "messages": [{"role": "system", "content": sys},
@@ -4533,11 +4488,10 @@ class QwenLLM:
         cur = str(prompt.get("currency") or "钱")
         base = int(prompt.get("base_money") or 50)
         sys = ("你在为互动剧情游戏生成【今日集市】的货单：6件贴合世界观、玩家买得着用得上的"
-               "东西（吃食/工具/药物/消息/小物件，至少一件便宜一件贵）。"
-               f"货币是{cur}，一个普通人身上约有{base}{cur}，定价要合这个身价。"
+               "东西（吃食/工具/药物/消息/小物件，至少一件便宜一件贵），定价要合给定货币与普通人身价。"
                "只输出6行，每行格式：名称|价格整数|一句话（≤20字，它是什么/有什么用）"
                + _lang_rule(prompt))
-        u = f"世界观：{world or '（市井）'}\n输出6行货单。"
+        u = (f"世界观：{world or '（市井）'}\n货币：{cur}，普通人身上约{base}{cur}\n输出6行货单。")
         try:
             resp = _post_chat(self._url, self._key,
                               {"model": self._model, "messages": [{"role": "system", "content": sys},
