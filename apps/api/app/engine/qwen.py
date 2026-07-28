@@ -1224,6 +1224,16 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
         props["identity_change"] = {"type": "string", "description":
                                     "若这一轮玩家的身份/职务发生了实质改变（升职、任命、被揭穿、获得头衔），"
                                     "用一句话写TA的新身份；没有则空字符串"}
+        # 📇 联系方式申报口 (Yi 2026-07-28: 它原是全引擎唯一「引擎前置裁决」的账本事件 —
+        #    裁决只管命中关键词的那一拍, 谈判却跨好几拍, 于是戏里号码给了、通讯录还空着。
+        #    改成与其余五十个账本事件一视同仁: 模型申报, 引擎落账)。玩家已有此人联系方式
+        #    时不挂载 (一次性状态翻转, 不是逐拍抖动)。
+        if prompt.get("can_give_contact"):
+            props["contact_given"] = {"type": "boolean", "description":
+                                      "仅当这一拍你确实把自己的联系方式给了对方才填 true"
+                                      "（把号码报给TA、写给TA、让TA当场打过来、或明确说了"
+                                      "「记我的号」）。只是说「有事找我」而没给具体号码的不算；"
+                                      "没给就省略。"}
         props["item_gained"] = {"type": "string", "description":
                                 "若玩家这一轮确实把某件具体物品拿到手，填物品名；否则空字符串。"
                                 "「拿到手」包括：捡起、买下、赢得，以及【受赠】——只要有人把东西递给"
@@ -1843,6 +1853,9 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
                           "day_offset": pm.get("day_offset", 0),
                           "slot": str(pm.get("slot") or "").strip(),
                           "place": str(pm.get("place") or "").strip()}
+    _cg = d.get("contact_given")
+    if _cg is True or str(_cg).strip().lower() in ("true", "是", "yes"):
+        out["contact_given"] = True
     return out
 
 

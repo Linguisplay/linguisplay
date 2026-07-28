@@ -7854,6 +7854,9 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
         flags["primary_invite"] = directed.get("move_invite")
         flags["primary_name_for_invite"] = sp_name
         flags["time_skip"] = (directed.get("time_skip") or "").strip()
+        # 📇 戏里把号给了 (模型申报) → P8 落账; 只认主答者这一路
+        if directed.get("contact_given") and not observer:
+            flags["contact_given"] = True
         # 🧭 声明式移动: the narration itself already WALKED the player somewhere this
         # turn (穿过窄门/出了大门). The engine makes it true so prose and state can never
         # drift apart: known & reachable → move; sandbox & off-map → the place gets
@@ -9533,11 +9536,17 @@ def run_turn_stream(
     if channel != "think":
         state["last_speaker_id"] = primary_id
 
-    # 📇 玩家在要联系方式? 主答者按好感给或婉拒 (台词这里对齐, 账在 P8 落)
+    # 📇 联系方式 (Yi 2026-07-28 改架构): 好感【只定倾向】不再当判决 —— 判决只管命中
+    # 关键词的那一拍, 而谈判跨好几拍(实弹: 追问一句「那我现在打一个」那拍零约束, 模型
+    # 就把号给了, 通讯录却空着)。现在与其余五十个账本事件一视同仁: 模型申报 contact_given,
+    # 引擎按申报落账; 玩家死缠磨出来的号码本来就算「靠剧情挣」。
     _contact_ask = bool(player_input) and channel in ("say", "do") \
         and bool(_CONTACT_RE.search(player_input))
     _contact_will = False
     _contact_note = ""
+    _can_give_contact = bool(primary and not observer and phone_enabled(content)
+                             and primary.get("id") != state.get("player_character_id")
+                             and not has_contact(state, primary.get("id")))
     if _contact_ask and primary and not observer:
         if has_contact(state, primary.get("id")):
             _contact_note = "TA其实已经有你的联系方式了，自然地提醒一句就好。"
@@ -9546,9 +9555,10 @@ def run_turn_stream(
                         .get("closeness", 0) or 0)
             _contact_will = _clo0 >= CONTACT_ASK_T
             _contact_note = ("玩家在向你要联系方式。以你们现在的交情你愿意给："
-                             "自然地把号报给TA或写给TA。" if _contact_will else
-                             "玩家在向你要联系方式，但你们还没熟到那份上："
-                             "按你的性格自然地婉拒或岔开，话别说死。")
+                             "自然地把号报给TA或写给TA，并申报 contact_given。" if _contact_will else
+                             "玩家在向你要联系方式，但你们还没熟到那份上：按你的性格自然地"
+                             "婉拒或岔开，话别说死。（TA若一再坚持，你也可以按自己的性子松口——"
+                             "那就照实把号给出去并申报 contact_given，别嘴上给了却当没给。）")
 
     # In character mode the player speaks AS their chosen character — give the model that
     # identity instead of the generic persona name, so NPCs address the right person.
@@ -9663,7 +9673,7 @@ def run_turn_stream(
              "model_ending": model_ending, "primary_invite": primary_invite,
              "primary_name_for_invite": None, "time_skip": time_skip,
              "pressure_blown": pressure_blown, "content_mutated": content_mutated,
-             "gen_count": gen_count}
+             "gen_count": gen_count, "contact_given": False}
     # ━━━━━━━━━━ 管线 P7 · 导演循环（逐人：门控提示词→生成→守卫→落账） ━━━━━━━━━━
     for idx, sp in enumerate(responders):
         sp_id = sp.get("id")
@@ -9802,6 +9812,8 @@ def run_turn_stream(
                             if not s.get("paid")][:2] if is_primary else []),
             # 📇 联系方式 (Yi): 要靠剧情挣 — 玩家开口要时按好感给或婉拒
             "contact_note": _contact_note if is_primary else "",
+            # 📇 申报口只在「还没拿到这人联系方式」时挂载 (拿到后字段消失, 一次性状态翻转)
+            "can_give_contact": _can_give_contact if is_primary else False,
             "relationship_playbook": rel_playbook,  # current relationship mode toward player
             # 🪞 玩家档案: 这个角色自己相处出来的印象 (认知边界: 只有见证过的才有)
             "player_read": profile_mod.impression_of(state, sp_id),
@@ -10141,7 +10153,10 @@ def run_turn_stream(
                          .get("closeness", 0) or 0)
             _day_c = int((state.get("clock") or {}).get("day", 1) or 1)
             _gave = ""
-            if _contact_ask:
+            if flags.get("contact_given"):
+                # ① 戏里给了 (模型申报) — 最高优先: 正文说给了就真给, 文与实不许分家
+                _gave = "戏里TA亲口给你的"
+            elif _contact_ask:
                 if _contact_will:
                     _gave = "你开口要的"
                 else:
