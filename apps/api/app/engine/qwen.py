@@ -341,9 +341,18 @@ def _depth_anchor(prompt: dict[str, Any]) -> str:
     # 只住 system 正文, 隔着上万字符早忘了 — 与声纹同病同药: 复述一行事实, 不加禁令。
     _inv = [str(n) for n in (prompt.get("player_items") or []) if str(n).strip()][:8]
     if _inv and _pn and not prompt.get("observer"):
-        bits.append((f"[{_pn} is carrying: {', '.join(_inv)} — nothing weightier than that.]")
+        _pm = prompt.get("player_money") or {}
+        _mny = (f"，身上现钱 {_pm.get('amount', 0)}{_pm.get('currency', '')}"
+                if _pm else "")
+        # 只陈述事实 — 治住的是「模型自己凭空造物」(实弹: 玩家只问了句要不要喝, 模型就
+        # 让 TA 递出一瓶不存在的汽水)。【玩家自己声称掏出】那一半治不了: 实测两次都仍顺着
+        # 演, 因为它与「玩家支配自己言行」的铁律正面冲突, 而玩家输入在深度0是最强信号 —
+        # 加过一条 120 字的执法条款, 无效, 已撤 (被反复违反的规则等于噪音)。要治只能靠
+        # 生成前的确定性拦截, 不是加话。
+        bits.append((f"[{_pn} is carrying: {', '.join(_inv)}{_mny} — that is the whole "
+                     f"ledger of anything weighty.]")
                     if en else
-                    f"「{_pn}」身上在册的东西只有：{'、'.join(_inv)}（有分量的东西以此为准）。")
+                    f"「{_pn}」身上在册的东西只有：{'、'.join(_inv)}{_mny}（有分量的东西以此为准）。")
     digest = (prompt.get("intent_digest") or "").strip()
     if digest:
         bits.append(digest)  # 🧩 what the player's line actually names, engine-verified
