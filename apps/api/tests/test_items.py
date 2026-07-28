@@ -360,3 +360,33 @@ def test_pipeline_declared_mint_and_quarantine():
     # 隔离区 TTL: 游戏内三天没转正就过期丢弃
     assert items.quarantine_sweep(st2, day=99) >= 1
     assert not st2["item_quarantine"]
+
+
+# ── 🎒 背包贴生成点 (Yi 实弹: 背包没绿宝, 模型让玩家递出一瓶汽水) ──
+
+
+def test_depth_anchor_carries_inventory():
+    """背包清单必须复述到深锚 — 埋在 system 正文里隔着上万字符会被忘 (声纹同病)。"""
+    from app.engine import qwen
+    p = {"speaker_name": "蓝信一", "persona": {"name": "蔡妍"},
+         "player_items": ["警哨", "警棍", "传呼机"], "channel": "say", "context": {}}
+    a = qwen._depth_anchor(p)
+    assert "警棍" in a and "蔡妍" in a
+    assert "有分量的东西" in a          # 是事实+范围, 不是硬禁令
+
+
+def test_depth_anchor_no_inventory_line_when_empty():
+    from app.engine import qwen
+    p = {"speaker_name": "蓝信一", "persona": {"name": "蔡妍"},
+         "player_items": [], "channel": "say", "context": {}}
+    assert "身上在册" not in qwen._depth_anchor(p)
+
+
+def test_system_inventory_is_ledger_not_totality():
+    """合同修正: 背包是剧情物品册, 不再声称是身上全部 (琐碎放行, 有分量的守住)。"""
+    from app.engine import qwen
+    s = qwen._build_system({"speaker_name": "蓝信一", "persona": {"name": "蔡妍"},
+                            "player_items": ["警枪"], "channel": "say", "context": {}})
+    assert "身上在册的东西" in s and "有分量的东西" in s
+    assert "实际有的全部东西" not in s      # 旧的过强声明已撤
+    assert "琐碎不必在册" in s

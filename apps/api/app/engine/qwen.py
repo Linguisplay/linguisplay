@@ -337,6 +337,13 @@ def _depth_anchor(prompt: dict[str, Any]) -> str:
     roster = (prompt.get("roster") or "").strip()
     if roster:
         bits.append(roster.split("\n", 1)[0].strip())  # the "此刻在场…共N人" headcount sentence
+    # 🎒 背包贴生成点 (实弹: 玩家背包里没有绿宝, 模型照样让 TA 递出一瓶汽水)。清单原本
+    # 只住 system 正文, 隔着上万字符早忘了 — 与声纹同病同药: 复述一行事实, 不加禁令。
+    _inv = [str(n) for n in (prompt.get("player_items") or []) if str(n).strip()][:8]
+    if _inv and _pn and not prompt.get("observer"):
+        bits.append((f"[{_pn} is carrying: {', '.join(_inv)} — nothing weightier than that.]")
+                    if en else
+                    f"「{_pn}」身上在册的东西只有：{'、'.join(_inv)}（有分量的东西以此为准）。")
     digest = (prompt.get("intent_digest") or "").strip()
     if digest:
         bits.append(digest)  # 🧩 what the player's line actually names, engine-verified
@@ -770,11 +777,15 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append("")
         lines.append(f"【已不在人世】{'、'.join(deaths)} 已经死了——在场的每个人都记得这件事，"
                      "各自带着自己的方式消化它。TA们绝不会再出现、不能再开口；提及时用过去式。")
+    # 🎒 背包 = 剧情物品册, 不是"全部随身物" (Yi 2026-07-28 定): 旧文案声称是全部,
+    # 可清单里只有配发装备, 真人口袋里本就会有汽水香烟纸巾 — 声称全部的规则每局都被
+    # 违反, 而被反复违反的规则等于噪音。改成守【有分量的东西】, 琐碎放行。
     inv = [str(n) for n in (prompt.get("player_items") or []) if str(n).strip()]
     if inv and not observer and group_mode != "member":
         lines.append("")
-        lines.append(f"「{player_name}」随身带着：{'、'.join(inv)}。（这是TA身上实际有的全部东西——"
-                     "TA掏出此列之外的物品时，其实并没有。）")
+        lines.append(f"「{player_name}」身上在册的东西：{'、'.join(inv)}。"
+                     "（武器、钱财、钥匙、信物、任务物件这类【有分量的东西】以此为准，"
+                     "清单之外的TA没有，绝不能凭空掏出来；一瓶水、一包烟这类随身琐碎不必在册。）")
     scn = [str(n) for n in (prompt.get("scene_items") or []) if str(n).strip()]
     if not observer and group_mode != "member":
         # 🎒 场景在册物 (实体化 P1): 在册的是真物件, 布景只是氛围 — 要让新物件
@@ -1056,11 +1067,10 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
         # observer 不发 (观剧局玩家不在场, 角色间互动不许记到玩家关系头上 — 审查加固);
         # kind 上 enum 硬约束 (口语化申报会被法条驳回白丢事件 — 审查加固)。
         props["rel_event"] = {"type": "object", "description":
-            "默认省略。仅当这一拍【真的发生了关系事件】才填——日常寒暄、正常聊天、"
-            "客套恭维都不是事件，绝大多数回合应省略。kind 只能从这里选："
-            "交心(说出真心话/交换了真实的自己)/帮衬(对方实质帮你办成或扛下一件事)/"
-            "心动(你被这一拍真正打动)/和好(冲突后的修复)/冒犯(踩雷羞辱背弃)/"
-            "争执(正面冲突撕破脸)/越界(油腻廉价冒进让你不适)",
+            "默认省略。仅当这一拍【真的发生了关系事件】才填——日常寒暄、客套恭维"
+            "都不是事件，绝大多数回合应省略。kind 只能从这里选："
+            "交心(说出真心话)/帮衬(实质帮你办成一件事)/心动(这一拍真被打动)/"
+            "和好(冲突后修复)/冒犯(踩雷羞辱背弃)/争执(撕破脸)/越界(油腻冒进让你不适)",
             "properties": {"kind": {"type": "string",
                                     "enum": ["交心", "帮衬", "心动", "和好",
                                              "冒犯", "争执", "越界"]},
