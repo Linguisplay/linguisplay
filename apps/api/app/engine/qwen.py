@@ -227,16 +227,11 @@ def _depth_anchor(prompt: dict[str, Any]) -> str:
         # long intimate scenes drift back to tame defaults — restate the permission here.
         # An ACTIVE scene carries the engine's heat sheet instead (stage ladder, clothing
         # state, vocabulary clearance): the sharper anchor replaces the generic one.
+        # 冷场只留 20 字短锚 (长版许可在 system 稳定带吃缓存; 深锚防的只是长历史漂移)
         ha = (prompt.get("heat_anchor") or "").strip()
-        if ha:
-            bits.append(ha)
-        else:
-            bits.append("Mature mode is ON: intimate moments are written plainly and "
-                        "explicitly, no fading out, no euphemism — one step per turn, "
-                        "written fully."
-                        if en else
-                        "成人模式已开启：亲密处正面、直白、具体地写，不淡化、不跳切、不打哑谜；"
-                        "一轮写透当下这一步。")
+        bits.append(ha if ha else
+                    ("Mature mode is ON: write intimacy plainly, no fading out." if en else
+                     "成人模式已开启：写到亲密处直写，不淡化不回避。"))
     _sty = (prompt.get("style") or "").strip()
     if _sty:
         # one-line style tag at depth-0 (the full block lives in the system prompt but
@@ -260,11 +255,9 @@ def _depth_anchor(prompt: dict[str, Any]) -> str:
              f"玩家这一轮的动作是「{_pn}」主动做出的，施与受绝不能写反；"
              f"玩家的衣着与身体状态没写过变化就保持原样。"))
         # 🕶 玩家的底细不是公共情报 (Yi field case: 朱竹清叫破了玄玉手的名字和来历)
-        bits.append((f"【玩家的底细不是公共情报】你在原著或常识里也许「认识」{_pn}这号人物，"
-                     f"但戏里的你不知道任何原著剧情，也不知道TA的隐藏底细：TA的身世、秘密能力、"
-                     f"招式的名字与来历——除非在你面前发生过、TA亲口说过、或列在你的可透露信息里，"
-                     f"否则你一概不知道、叫不出名、也认不出来。你只看得到眼前的现象，按现象反应"
-                     f"（一记怪招就是「路数古怪的手法」，不是它的名字）。"))
+        bits.append((f"【底细不开上帝视角】哪怕原著/常识里你「认识」{_pn}，戏里的你不知道原著剧情"
+                     f"与TA的身世、秘密能力、招式名——除非当面发生过、TA亲口说过、或在你的可透露"
+                     f"信息里。只按眼前现象反应：一记怪招就是「路数古怪的手法」，叫不出名。"))
     _cl = (prompt.get("cult") or "").strip()
     if _cl:
         bits.append(_cl)
@@ -611,15 +604,8 @@ def _build_system(prompt: dict[str, Any]) -> str:
     if prompt.get("off_balance"):
         lines.append("【这一拍你明显处下风】：被将住、一时语塞、被戳到痛处、或让对方赢了这一回合——"
                      "别硬圆、别瞬间反杀，露出真实的措手不及。")
-    # group naturalness: the transcript of what others ALREADY said THIS turn (data; the
-    # how-to-react rules live in the charter's 群戏 line)
-    said = prompt.get("said_this_turn") or []
-    if said:
-        convo = "\n".join(f"- {s.get('speaker','旁白')}：{s.get('text','')}" for s in said if s.get("text"))
-        if convo:
-            lines.append("")
-            lines.append("【就在刚刚这一轮，你开口之前，现场已经发生了（按顺序）】：\n" + convo + "\n"
-                         "接住上面某个具体的人刚说的话往下走，只给出你自己的新反应/新主张/新信息。")
+    # (群戏本轮转录已并入 _turn_messages 的 assistant 消息流+收尾cue — 同一份话在一个
+    #  请求里跑两遍是审计舰队抓的双载, 正牌通路是消息流那份)
 
     _flog = prompt.get("fate_log") or []
     if _flog:
@@ -1059,9 +1045,7 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                 sd = (f"你这一轮亲口说出的原话（第一人称，{_pcs}）。"
                       "你也有沉默权：不想说、被噎住、话到嘴边咽下时，可以一言不发"
                       "（本字段留空）——但 narration 必须写出你沉默那一拍在做什么，"
-                      "动作只从此刻场景里【真实在场】的物件与环境取材"
-                      "（手边的、桌上的、【此地在册物件】里的），绝不凭空生造道具；"
-                      "沉默要有戏，不是省略。")
+                      "动作从【此地在册物件】与此刻环境取材；沉默要有戏，不是省略。")
         props["speech"] = {"type": "string", "description": sd}
         required.append("speech")
     if not observer and not is_member and not is_think:
@@ -1156,13 +1140,15 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                                                "step": {"type": "string", "description": "≤20字这一步"},
                                                "stage": {"type": "string", "description": "≤16字新阶段(没变省略)"}}}
 
+    # ⚡ 修为进益申报口与地图无关 (审查实弹: 曾错嵌在 has_map 里 — 没写地点详情的修仙
+    #    剧本, 被人传功/服灵物整个没处落账)
+    if (prompt.get("cult") or "").strip() and not is_member and not is_think:
+        props["cult_gain"] = {"type": "string", "description":
+                              "默认空字符串。仅当这一轮剧情让【玩家本人】获得了实打实的修为进益"
+                              "（被人传功/服下灵物/顿悟/奇遇灌体，且确实生效）才按分量填：小、中、大。"
+                              "玩家自己打坐修炼或掷骰吸收的不用你报（引擎自算）；没有就留空。"}
     if has_map and not is_member and not is_think:
-        props["move_invite"] = {"type": "string", "description": "若你这轮提出或答应带玩家去某处，填那个地点名（可以是【可去通路】里的，也可以是对话里自然浮现的新地点；旁白只写到起身相邀为止）；否则填空字符串"}
-        if (prompt.get("cult") or "").strip():
-            props["cult_gain"] = {"type": "string", "description":
-                                  "默认空字符串。仅当这一轮剧情让【玩家本人】获得了实打实的修为进益"
-                                  "（被人传功/服下灵物/顿悟/奇遇灌体，且确实生效）才按分量填：小、中、大。"
-                                  "玩家自己打坐修炼或掷骰吸收的不用你报（引擎自算）；没有就留空。"}
+        props["move_invite"] = {"type": "string", "description": "若你这轮提出或答应带玩家去某处，填那个地点名（【可去通路】外的新地点也可）；否则填空字符串"}
         props["moved_to"] = {"type": "string", "description":
                              "默认空字符串。仅当这一轮旁白已经把【玩家本人】实际带到了另一个地方"
                              "（走进后台、出了大门、上了楼、进了里屋）才填到达的地点名；"
@@ -1185,15 +1171,14 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                                   "who": {"type": "string"}, "to": {"type": "string"}},
                                   "required": ["who", "to"]},
                               "description": "若这一轮有在场角色【确实起身离开、去了别处】，填 who=名字、"
-                                             "to=去处地名。【铁律】叙述里写了TA走（转身离开/迈出门/"
-                                             "下台阶/说了『走了』然后动身）就必须填——写走不记走，"
-                                             "TA就会阴魂不散地留在场上。通常填空数组[]"}
+                                             "to=去处地名。【铁律】叙述里写了TA走（转身离开/出了门/"
+                                             "说了『走了』动身）就必须填——写走不记走TA就滞留场上。通常省略"}
         props["companion_join"] = {"type": "string", "description":
                                    "若这一轮在场的某个角色【当面答应要和玩家一起走/同行】"
                                    "（玩家邀TA一起去某处，TA应了；或TA主动说『我陪你去』『带你去』），"
                                    "填TA的名字（只能从：" + "、".join(cand) + "）。"
-                                   "【铁律】嘴上答应了就必须填——答应同行却不记，玩家一挪步TA就凭空留下，"
-                                   "文与实就分家了。只是寒暄、含糊、还在犹豫、或明确拒绝，都不填；没有则空字符串"}
+                                   "【铁律】嘴上答应了就必须填，否则玩家挪步TA就凭空滞留。"
+                                   "只是寒暄、含糊、犹豫或拒绝不填；没有则空字符串"}
         if prompt.get("group_mode") in (None, "primary"):
             # ⚡ 提速: 建议 chips 折进主拍 (省掉每回合一次独立小调用 ~1.7s)
             props["suggestions"] = {"type": "array", "maxItems": 2,
@@ -1209,14 +1194,13 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
         if prompt.get("can_new_char"):
             props["new_character"] = {"type": "string", "description":
                                       "若剧情此刻确实需要一个此前不存在的新人物登场（推门进来/被引见/"
-                                      "下属报到/线人现身），填「名字｜身份与外貌各一句话｜TA的说话规律"
-                                      "一句（口头禅/句长/腔调，要跟在场任何人都不一样）」。"
-                                      "【名字铁律】名字必须像个真人名（2~4字姓名或诨名，如"
-                                      "「王二」「沈青梧」「哑巴刀」），绝不能是句子片段、疑问词或"
-                                      "代词（「谁看见」「那个人」都不合格，会被驳回）。并且 narration "
-                                      "里必须把TA的登场写实：进场的动作、外貌神态、第一眼给人的感觉。"
-                                      "无名路人（伙计/卫兵/杂兵）被玩家搭上话、聊了不止一两句时，"
-                                      "也填这里给TA名字身份、把TA转正成真正的角色；不需要则空字符串"}
+                                      "线人现身），填「名字｜身份与外貌各一句话｜TA的说话规律一句"
+                                      "（口头禅/句长/腔调，要跟在场任何人都不一样）」。"
+                                      "【名字铁律】必须像真人名（2~4字姓名或诨名，如「沈青梧」「哑巴刀」），"
+                                      "句子片段、疑问词、代词（如「谁看见」）不合格会被驳回。"
+                                      "narration 里把TA的登场写实（进场动作、外貌、第一眼感觉）。"
+                                      "无名路人被玩家搭上话聊了不止一两句时，也填这里转正TA；"
+                                      "不需要则空字符串"}
     if not observer and not is_member and not is_think:
         props["identity_change"] = {"type": "string", "description":
                                     "若这一轮玩家的身份/职务发生了实质改变（升职、任命、被揭穿、获得头衔），"
@@ -1333,8 +1317,7 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                     "place": {"type": "string", "description": "在哪见；留空=就在此处"}},
                 "required": ["what", "day_offset", "slot"],
                 "description": "仅当你这一轮与对方明确定下了一个【将来的约定/邀约】（改天再见、请TA吃饭、"
-                               "夜里带TA去看样东西）才填，平时不填。若你们的关系已到暧昧/恋人，气氛合适时"
-                               "你可以主动发起这样的邀约——由你开口约TA。"}
+                               "夜里带TA去看样东西）才填，平时不填。"}
     pcfg = prompt.get("pressure_cfg") or {}
     if pcfg and not is_member and not is_think:
         props["pressure"] = {"type": "integer", "description":
@@ -1436,11 +1419,8 @@ def _build_observe_system(prompt: dict[str, Any]) -> str:
     profile + scene, never secret/locked content, so observation can't leak truths."""
     scene = prompt.get("scene") or {}
     scene_events = " ".join(e.get("what_happens", "") for e in (scene.get("events") or []))
+    # (情节底稿不进观察拍: 观察是静止拍不引剧情, 底稿在这里只喂剧透风险 — 盘点舰队)
     scene_line = f"【当前场景：第{scene.get('index','')}幕 {scene.get('title','')}】{scene_events}".strip()
-    _pscr = str((scene or {}).get("script") or "").strip()[:400]
-    if _pscr:
-        scene_line += ("\n【本幕的情节底稿·路标不是轨道】作者希望这一幕里自然发生："
-                       f"{_pscr}。顺着玩家的回应引出来，不接茬就换方式再引，绝不硬拽。")
     world = prompt.get("world") or ""
     focus = (prompt.get("player_input") or "").strip()
     target = prompt.get("observe_target")
@@ -1471,7 +1451,11 @@ def _build_observe_system(prompt: dict[str, Any]) -> str:
     if kn:
         lines.append(kn)
     if prompt.get("mature"):
-        lines.append(_R18_BLOCK.format(speaker=(target or {}).get("name", "角色") if target else "旁白"))
+        # 观察拍不推进亲密戏, 完整写法手册在这只是61%的死重 (盘点实测) — 短许可+铁律足矣
+        lines.append("【成人内容许可·18禁模式】本剧情已开启成人模式，玩家是成年人，平台已做"
+                     "年龄门控：当画面本就亲密时，就正面、直白、具体地写，不淡化、不跳切、"
+                     "不打哑谜。铁律只有两条：绝对拒绝任何涉及未成年人的性内容；"
+                     "强迫与胁迫不得被写成浪漫。")
     # ── 以下逐拍易变 (缓存断点从这里开始) ──────────────────────────────
     if prompt.get("player_dead"):
         lines.append("【玩家已死】玩家已经死了，此刻是一缕无形的视角：任何人都感知不到玩家。"
@@ -1582,10 +1566,9 @@ def _build_intro_system(prompt: dict[str, Any]) -> str:
             f"你必须把整个开场改写成「{name}」自己的视角：同一件事在TA眼里意味着什么、"
             f"TA此刻的处境与心事、TA与在场每个人真实的关系与温度，全部以「{name}」为圆心重新落笔。"
             "扮演不同的角色，看到的必须是不同的开场。",
-            f"请写 6~10 句开场，用第二人称「你」称呼玩家：先用一两句让玩家清楚自己是谁"
-            f"（{name}，{role}，并从TA的小传里带出一两句TA走到今天的来路），"
-            "再具体交代此刻身处何地、什么时间、周围有谁、正在发生什么。细节要足够，"
-            "玩家才能在脑中拼出画面。",
+            "请写 6~10 句开场，用第二人称「你」称呼玩家：开头一两句立住你是谁与来路，"
+            "再具体交代此刻身处何地、什么时间、周围有谁、正在发生什么，"
+            "细节要足够让玩家在脑中拼出画面。",
         ]
     else:
         lines += [
@@ -1649,12 +1632,11 @@ def _build_transition_system(prompt: dict[str, Any]) -> str:
         lines.append("（本剧情为成人向 18+，过场可带相应基调。）")
     if act_events:
         lines.append(f"【这一幕正在发生(这个世界的大势,不一定都在玩家眼前)】{act_events}")
-    place_set = bool(place)
     if cast:
         lines.append(f"【玩家此刻所在地、真正在场的人】只有:{('、'.join(cast))}。")
     else:
-        lines.append("【玩家此刻身边没有其他人】,这段过场里不要凭空塞人进来。")
-    if place_set:
+        lines.append("【玩家此刻身边没有其他人】")
+    if True:   # 反瞬移铁律无条件挂载 (曾被 place 门住: 没写地点详情的剧本守卫直接消失)
         lines.append(
             "【铁律·从玩家当前位置的视角写】过场只写玩家【此刻所在地】看得见听得到的:"
             "上面『真正在场的人』之外的角色,绝不能出现在这个房间里、也不能直接跟玩家对话;"
@@ -2051,7 +2033,6 @@ def _render_directive(prompt: dict[str, Any], speaker: str, outline: list[str]) 
         L.append(f"【输出格式·铁律】你是这一拍插话的成员。只输出「{speaker}：」开头的台词行"
                  f"（1~2行，行首是你的名字，话在「」里），不写任何旁白行、"
                  f"台词里也不许夹（动作神态）——你只有嘴。"
-                 f"只说你自己的话：别人问{pl}的问题由{pl}自己答，绝不替TA作答；"
                  f"【{pl}刚做的事是{pl}做的】——TA的手、TA的动作、TA惹的事，"
                  f"轮不到你替TA收场或找补，你只能以自己的身份对这件事说话（笑话TA/骂TA/看热闹都行）。"
                  "这一刻不想接话，就只输出一行：无")
@@ -2075,10 +2056,8 @@ def _render_directive(prompt: dict[str, Any], speaker: str, outline: list[str]) 
             f"{speaker}：「这一拍{speaker}亲口说出的话」\n"
             "【凡是人物说出口的话，必须单独成行、行首是说话人的名字】——绝不进旁白行、"
             "也不许转述（『他说让你小心』是废稿；要么让TA自己说一行，要么别提）。" + must_speak)
-        L.append(f"【人称铁律】旁白里的「你」永远且只能指玩家「{pl}」本人；"
-                 f"「{speaker}」和其他任何角色一律用名字称呼——绝不能把「你」安到{speaker}"
-                 f"或别人头上，也绝不能把玩家「{pl}」写成第三人称（写TA的名字或他/她）。"
-                 f"玩家的动作由玩家主动做出、效果落在别人身上，谁施谁受不许写反。")
+        # (人称铁律副本已删: 同一请求的深锚带着完整超集版「旁白视角铁律」, 相邻重复;
+        #  运行时另有 _pov_break 守卫兜底)
     L.append("不要元数据、不要编号、不要标题、不要解释。")
     return "\n".join(L)
 
@@ -2277,23 +2256,27 @@ def _turn_messages(prompt: dict[str, Any], system: str, speaker: str) -> list[di
             sep = ": " if en else "："
             messages.append({"role": "assistant", "content": f"{sp}{sep}{s['text']}"})
             said_appended = True
-    if said_appended:
+    if said_appended or prompt.get("group_mode") == "member":
         # RE-ANCHOR whose turn it is. Without this, generation continues the assistant
         # chain conversationally — e.g. the primary just asked the PLAYER a question, so
         # the "natural next line" is the player's ANSWER, and a member speaks it as if
         # it were their own (the 十二少-answers-for-the-player bug). A closing user-role
         # cue breaks that continuation: the model now responds to the cue AS ITSELF.
+        # (member 拍即使 said 为空也发 cue — 替答禁令的唯一居所, 不许有零禁令路径)
         pl = (prompt.get("persona") or {}).get("name") or ("them" if en else "对方")
         if en:
             messages.append({"role": "user", "content":
-                             f"(Your turn: speak only as {speaker}, in English. If anyone "
-                             f"above asked {pl} a question, {pl} answers it themselves. "
-                             f"Never answer for {pl}. Stay silent if you have nothing "
-                             f"to add.)"})
+                             f"(Your turn: speak only as {speaker}, in English — pick up "
+                             f"what someone above just said and add ONLY your own new "
+                             f"reaction or information. If anyone above asked {pl} a "
+                             f"question, {pl} answers it themselves. Never answer for "
+                             f"{pl}. Stay silent if you have nothing to add.)"})
         else:
             messages.append({"role": "user", "content":
-                             f"（该你了：只以「{speaker}」自己的身份接话。上面若有人向{pl}发问，"
-                             f"要由{pl}自己来答——你绝不能替{pl}作答。不想搭话就保持沉默。）"})
+                             f"（该你了：只以「{speaker}」自己的身份接话，接住上面某个具体的人"
+                             f"刚说的话往下走，只给出你自己的新反应/新主张/新信息。"
+                             f"上面若有人向{pl}发问，要由{pl}自己来答——你绝不能替{pl}作答。"
+                             f"不想搭话就保持沉默。）"})
     # a logic-guard regeneration passes a targeted correction (what broke last attempt)
     corr = prompt.get("logic_correction")
     if corr:
@@ -2921,7 +2904,7 @@ class QwenLLM:
         slist = "\n".join(f"- {s['id']}={s['name']}" for s in scenes)
         sys = (
             "你是视觉小说（galgame）的编剧编译器。把指定章节改编成拍序列，只输出严格JSON："
-            '{"beats":[{"who":"说话角色id，旁白则留空","text":"这一拍的文字",'
+            '{"beats":[{"who":"仅当这一拍是角色亲口台词才填角色id；叙述/动作/场景描写一律留空","text":"这一拍的文字",'
             '"expr":"常态|喜|怒|哀（说话角色此刻表情）","scene":"场景id",'
             '"bgm":"平静|温馨|浪漫|紧张|悲伤|寂寞|悬疑|激昂|静 之一（跟着这一段的情绪走，'
             '亲密暧昧用浪漫，独处思念用寂寞，追查不安用悬疑；'
@@ -2944,7 +2927,6 @@ class QwenLLM:
             f"【节奏合同】beats 产出 {lo}~{hi} 拍；每拍≤60字、只装一个信息点；"
             "对白为主、旁白为骨（旁白连续不超过3拍）；场景切换要换 scene id；"
             f"主角（{pro}）是视角人物：旁白里永远称TA为「你」，主角自己的台词 who 填 {pro}；"
-            "who 只在这一拍是角色亲口说出的台词时才填，叙述、动作、场景描写一律留空；"
             "关键的情绪画面拍（每章至多1拍）标 cg:true。"
             "【只写本章·铁律】故事原文是全书的素材，但你只改编属于本章的那一段剧情："
             "从前情摘要收尾的地方无缝接着往下演，第一拍就落在本章自己的时间与地点上；"
@@ -2980,12 +2962,11 @@ class QwenLLM:
                             for c in (prompt.get("chapters_all") or []))
         pt = (prompt.get("prev_tail") or "").strip()
         u = (f"角色表：\n{clist}\n场景表：\n{slist}\n"
-             + (f"全书章节表（各章的地盘，绝不越界）：\n{chtable}\n" if chtable else "")
+             + (f"全书章节表：\n{chtable}\n" if chtable else "")
              + f"前情摘要（前面各章已经演完的部分）：{prompt.get('prior_summary') or '（这是第一章，从头开场）'}\n"
-             + (f"前一章的收尾（铁律：本章第一拍必须发生在这之后，紧接着往下演，"
-                f"绝不回头重演任何已发生的场面）：…{pt}\n" if pt else "")
+             + (f"前一章的收尾（本章紧接其后）：…{pt}\n" if pt else "")
              + f"你要编译的是【第{ch.get('i')}章/共{prompt.get('chapter_count')}章】：{ch.get('summary')}\n"
-             f"本章的原文素材（只有这一段，把它演足演透，绝不写这段之外的剧情）：\n"
+             f"本章的原文素材（仅此段）：\n"
              f"{(prompt.get('source') or '')[:9000]}")
         _st = (prompt.get("style") or "").strip()
         if _st:
@@ -3018,9 +2999,8 @@ class QwenLLM:
                "pivot：0=情绪在延续，1=明显转折（气氛变了），2=急转（袭击/告白/死讯/翻脸）。"
                "规矩：情绪没实质变化就保持（track 填空）——频繁换曲比选错更伤气氛；"
                "但当前曲目是（无）时必须选一首（沉默不是配乐）；"
-               "选曲看情绪本质不看题材字眼：亲密暧昧→romantic，追查不安→mystery/eerie，"
-               "打斗逃命→battle/tense，失去离别→sad，独处空落→lonely，"
-               "日常闲适→daily，温情陪伴→warm。")
+               "选曲看情绪本质不看题材字眼：亲密暧昧→romantic，追查不安→mystery，"
+               "独处空落→lonely。")
         u = _json.dumps({"曲库": prompt.get("menu") or [],
                          "当前曲目": prompt.get("current") or "（无）",
                          "当前曲目已连续回合数": prompt.get("held", 0),
@@ -3043,8 +3023,7 @@ class QwenLLM:
         """📔 每日回忆结算 (Yi 2026-07-25 二改: 回忆不能只有一种 — 通盘总结当天互动
         并打标签, 收进小手机回忆册, 零弹窗)。Degrades to {} (今天就不记, 明天再看)。"""
         import json as _json
-        sys = ("你就是这个角色本人。夜深了，你独自把【今天一整天】和对方的相处在心里"
-               "从头到尾过一遍，写成一篇日记。只输出严格JSON："
+        sys = ("你就是这个角色本人。夜深了，把今天写成一篇日记。只输出严格JSON："
                '{"tag":"","title":"","text":"","heart":""}。'
                "tag：这一天的底色，只能从这里选一个：心动/甜蜜/开心/搞笑/惊险/平常——"
                "按真实发生的相处诚实定调，别拔高（普通的一天就是平常）。"
@@ -3388,12 +3367,38 @@ class QwenLLM:
         pl = prompt.get("player_name") or "对方"
         tail = "\n".join(f"{pl if m.get('from') == 'me' else ch.get('name','')}：{m.get('text','')}"
                          for m in (prompt.get("thread_tail") or []))
+        # 🧊 稳定带前置 (与 _build_system 同手术): 人设头+两大静态铁律块逐字不变,
+        # 排前面吃 DeepSeek 前缀缓存; memory/recent_scene/last_ignored 等逐次变的殿后
         sys_lines = [
             f"你是「{ch.get('name','')}」（{ch.get('role','')}）。人设：{ch.get('persona_text','')}",
             f"表达方式：{ch.get('eq_style','')}",
             ("你的台词范例（语气分寸以此为准，不照抄）：'" + "' / '".join(ch["examples"]) + "'")
             if ch.get("examples") else "",
             f"你自己的盘算：{ch.get('agenda','')}" if ch.get("agenda") else "",
+            ("【通话铁律】对方【看不见】你：挑眉、摆手、扬下巴这些一概不存在，绝不写任何动作神态、"
+             "绝不用（括号）描述自己；能被听见的动静（火柴声、风声、你把东西放下）只写进「背景」那一行。"
+             if call else
+             "【短信体铁律】你发的是消息，不是小说：对方只看得到字，看不见你——绝不写动作、神态、"
+             "场景描写，绝不用（括号）写你在做什么。像真人打字：每条短（20字内为佳），"
+             "想说的多就拆成两三条连发；可以省略主语、可以带语气词，但绝不要台词腔的长句。"
+             "【接话的情商】带情绪的消息先接情绪再谈事；TA分享的小事用具体追问接住，"
+             "回扣TA提过的细节。"
+             "【线上的撩法·仅当你对TA有心思或你们正暧昧】消息比当面更适合留白："
+             "话可以只说一半（「算了，见面说」）；不必每条都接满，回得短而有钩比周到更勾人；"
+             "收尾给明天留个话头（「明天有个东西给你看」）——把最好的那句留到见面，"
+             "线上是引子，线下才是正戏。"),
+            ("输出格式：写1~3行你说出口的话（口语，短句）。另起一行写：背景：你那头此刻传过去的"
+             "声响或动静，10~20字（环境音、你的动作声，不含你的台词）。如果你不想接这个话，"
+             "可以只说一两个字，或输出【沉默】表示你握着听筒没出声。"
+             if call else
+             "输出格式：写0~5条短消息，每条一行。【形状随心情】——回复的形状由你此刻的"
+             "心情和你们的关系决定，四种都是你的武器，别把一种用成习惯："
+             "①一个字/一个词回（「滚」「好耶」「？」）；"
+             "②认真的长回（一条几十字，把一件事说清楚）；"
+             "③连环刷屏（四五条短的连着发——兴奋、急了、憋不住才这样）；"
+             "④【已读】晾着——你看了但现在不想回：第一行只输出「【已读：原因】」"
+             "（原因≤12字，如 在气你昨天的事），第二行输出「稍后：」加你过阵子会补发的那句话"
+             "（它会晚些才送到对方手机上）。"),
             f"你与{pl}的关系：{prompt.get('relation','')}。{prompt.get('relationship_playbook','')}",
             (f"你相处下来对{pl}的印象：{prompt.get('player_read','')}"
              if prompt.get("player_read") else ""),
@@ -3414,18 +3419,6 @@ class QwenLLM:
             (f"【上次你已读没回】原因是：{prompt.get('last_ignored')}。对方若追问，认账，"
              "别装失忆；这口气顺没顺，由你此刻的心情决定。"
              if prompt.get("last_ignored") else ""),
-            ("【通话铁律】对方【看不见】你：挑眉、摆手、扬下巴这些一概不存在，绝不写任何动作神态、"
-             "绝不用（括号）描述自己；能被听见的动静（火柴声、风声、你把东西放下）只写进「背景」那一行。"
-             if call else
-             "【短信体铁律】你发的是消息，不是小说：对方只看得到字，看不见你——绝不写动作、神态、"
-             "场景描写，绝不用（括号）写你在做什么。像真人打字：每条短（20字内为佳），"
-             "想说的多就拆成两三条连发；可以省略主语、可以带语气词，但绝不要台词腔的长句。"
-             "【接话的情商】TA的消息带着情绪就先接情绪再谈事；TA分享小事是在靠近你，"
-             "用具体的追问接住，别拿「嗯/哦」把话掉在地上；记得回扣TA之前提过的细节。"
-             "【线上的撩法·仅当你对TA有心思或你们正暧昧】消息比当面更适合留白："
-             "话可以只说一半（「算了，见面说」）；不必每条都接满，回得短而有钩比周到更勾人；"
-             "收尾给明天留个话头（「明天有个东西给你看」）——把最好的那句留到见面，"
-             "线上是引子，线下才是正戏。"),
             "【铁律】你只能基于下面列出的「可透露信息」谈及内情；此外的任何秘密你都不知道，绝不能写出来——"
             "被追问就回避、岔开，或干脆不回。" if (reveal or new_reveal or has_hidden) else "",
             ("【TA这句话问到了要害，你守不住了——把下面这个实情，用你自己的话、你此刻的情绪说出来"
@@ -3436,18 +3429,6 @@ class QwenLLM:
                 for c in (ctx.get("covers") or [])[:3]))
             if (ctx.get("covers") and not new_reveal) else "",
             ("【你已经告诉过TA的】" + "；".join((r.get("content") or "")[:60] for r in reveal[:4])) if reveal else "",
-            ("输出格式：写1~3行你说出口的话（口语，短句）。另起一行写：背景：你那头此刻传过去的"
-             "声响或动静，10~20字（环境音、你的动作声，不含你的台词）。如果你不想接这个话，"
-             "可以只说一两个字，或输出【沉默】表示你握着听筒没出声。"
-             if call else
-             "输出格式：写0~5条短消息，每条一行。【形状随心情】——回复的形状由你此刻的"
-             "心情和你们的关系决定，四种都是你的武器，别把一种用成习惯："
-             "①一个字/一个词回（「滚」「好耶」「？」）；"
-             "②认真的长回（一条几十字，把一件事说清楚）；"
-             "③连环刷屏（四五条短的连着发——兴奋、急了、憋不住才这样）；"
-             "④【已读】晾着——你看了但现在不想回：第一行只输出「【已读：原因】」"
-             "（原因≤12字，如 在气你昨天的事），第二行输出「稍后：」加你过阵子会补发的那句话"
-             "（它会晚些才送到对方手机上）。"),
         ]
         sys = "\n".join(l for l in sys_lines if l) + _lang_rule(prompt)
         judgeline = ("最后另起一行，写：好感：一个整数-2~2（这几句话让你对TA更近还是更远）；"
@@ -3770,7 +3751,7 @@ class QwenLLM:
                '"traits":{"外向":3,"温度":3,"主导":3},'
                '"fear":"≤24字 软肋一句","line":"≤24字 底线一句",'
                '"love_style":"傲娇|冷感慢热|回避型|占有欲|直球|留空",'
-               '"wants":"≤50字 TA的人生目标","life_goal":{"text":"同wants","stage":"≤16字 当前进展",'
+               '"wants":"≤50字 TA的人生目标","life_goal":{"stage":"≤16字 当前进展",'
                '"obstacle":"≤16字 眼下的阻碍"},'
                '"examples":["3~5句只有这张嘴会说的台词"],'
                '"items":[{"name":"≤10字 随身物","detail":"≤30字"}],'
@@ -4140,10 +4121,7 @@ class QwenLLM:
             'fortune填「横财」或「破财」；timeskip填「次日」或「三日后」；story留空",'
             '"omen":"≤8字的代价预兆，只暗示不剧透（如：此路见血/有去无回/代价不菲）",'
             '"mandate":"选它之后剧情必须坚定走向的方向(≤30字)"}]}。'
-            "kind 释义：kill=角色就此死去；bond=与此人关系骤然绑深；rift=与此人恩断义绝；"
-            "identity=玩家身份就此改变；fortune=财运剧变；timeskip=时间直接跳过；"
-            "story=纯剧情走向。按剧情自然选用，不要硬凑类型。"
-            "要求：2~3个选项，方向必须彼此相斥（不是同一件事的三种语气）；"
+            "要求：kind 按剧情自然选用不硬凑；2~3个选项，方向必须彼此相斥（不是同一件事的三种语气）；"
             "至少一个选项要有真实代价；kind=kill 只在剧情确实走到生死关头时才用，"
             "target 只能原样抄写在场角色名；kind=move 的 target 优先用已知通路里的地点名；"
             "不许出现与眼下剧情无关的凭空事件。"
