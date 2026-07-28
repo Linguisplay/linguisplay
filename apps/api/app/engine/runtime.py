@@ -3008,7 +3008,8 @@ def _logic_guard(llm, prompt: dict[str, Any], directed: dict[str, Any], content:
                 if c.get("id") in _dead_ids(state) and c.get("name")]
     dir_finds = director_mod.logic_audit(
         directed.get("beats", []), slot=active_slot(content, state),
-        dead_names=_dead_nm, prev_text=str(state.get("_last_text") or ""))
+        dead_names=_dead_nm, prev_text=str(state.get("_last_text") or ""),
+        recent_texts=[t for t in (state.get("_recent_narr") or []) if t])
     # 🧊 物理穿模哨兵 (道具/伤势/位置): 有动作字眼才 flash 快审, 探到硬矛盾→重生
     phys_finds = (_physics_audit(llm, directed, state)
                   if tuning_for(content).get("physics_guard", 1) else [])
@@ -6799,6 +6800,12 @@ _SELF_EXIT_RE = re.compile(
     r"我(?:先|得|这就|还是|要|该|去)?\s*(?:走一步|走了|走|离开|回去了?|撤了?|闪了?|告辞|失陪|先撤)"
     r"(?=[。！？，、\s」”』’]|$)|失陪了|告辞了|我先走|我得走|我这就走")
 _EXIT_NEG_RE = re.compile(r"如果|要是|假如|万一|别走|不走|不能走|走不了|想走吗|要不要走|走神|走运|走心")
+# 🤝 邀请不是离场 (实弹: 「跟我走」被判离场钉成 AWAY)。审查教训: 不能整句否决 ——
+# 「改天带你去看看，我先走了」邀请与真告别同句, 整句放行会反向复刻原 bug。
+# 做法 = 先把邀请短语从台词里【剥掉】再判离场, 两者互不遮蔽。
+_INVITE_RE = re.compile(r"跟我走|跟我来|随我来|随我走|带你去|带你走|我们走|咱们走|一起走|一块走|同去")
+# 旁白同行白名单: 只有明确「带着玩家」的构式才豁免; 「丢下你/朝你摆手后离开」是真离场
+_LEAD_PLAYER_RE = re.compile(r"[拉牵带领拽挽扶搂背抱]着你|带你|领你|招呼你")
 
 
 def _settle_prose_exits(content: dict[str, Any], state: dict[str, Any],
@@ -6809,10 +6816,11 @@ def _settle_prose_exits(content: dict[str, Any], state: dict[str, Any],
     → routed HOME (a real place, per Yi「到另一个场景就好」); no home → AWAY. Returns names."""
     narr = "\n".join(b.get("text") or "" for b in d_beats or [] if b.get("type") != "dialogue")
     # 谁在自己那句台词里说了要走 (排掉条件句/否定句: 如果我走了 / 别走 / 走神)
+    # 邀请短语先剥掉再判: 「跟我走」不算走, 但「带你去看看，我先走了」里的真告别不被邀请遮蔽
     said_bye: set[str] = set()
     for b in d_beats or []:
         if b.get("type") == "dialogue":
-            t = b.get("text") or ""
+            t = _INVITE_RE.sub("", b.get("text") or "")
             sp = (b.get("speaker_name") or "").strip()
             if sp and _SELF_EXIT_RE.search(t) and not _EXIT_NEG_RE.search(t):
                 said_bye.add(sp)
@@ -6825,7 +6833,10 @@ def _settle_prose_exits(content: dict[str, Any], state: dict[str, Any],
         cid, nm = c.get("id"), (c.get("name") or "").strip()
         if not cid or not nm or cid == pcid:
             continue
-        leaving = bool(narr and re.search(re.escape(nm) + _EXIT_TAIL_RE, narr)) or nm in said_bye
+        _m = narr and re.search(re.escape(nm) + _EXIT_TAIL_RE, narr)
+        # 旁白里【带着玩家】一起走的不算离场 (「他拉着你走了出去」= 同行)。审查教训:
+        # 只认明确带人构式白名单 — 「丢下你走了出去」「朝你摆了摆手，转身走了」是真离场
+        leaving = bool(_m and not _LEAD_PLAYER_RE.search(_m.group(0))) or nm in said_bye
         if not leaving:
             continue
         # 去处不明 → 回家(真地点); 没家、家不在册、或家就在此地 → AWAY
@@ -6839,6 +6850,43 @@ def _settle_prose_exits(content: dict[str, Any], state: dict[str, Any],
         _audit(state, "npc.exit", True, nm, "台词/散文离场→" + ("回家" if dest != AWAY else "离开"))
         outed.append(nm)
     return outed
+
+
+def _heal_away_pins(content: dict[str, Any], state: dict[str, Any],
+                    all_beats: list[dict[str, Any]],
+                    away0: set[str] | None = None) -> list[str]:
+    """🩹 AWAY 钉子自愈: 台账说人「下落不明」(__away__ 钉永不被 _drop_pins_on_leave 释放),
+    正文却让 TA 开口说话 — 以台上证据为准, 解钉回玩家身边。(实弹: 「跟我走」误判离场后
+    人物从此消失, 文与账每拍打架。) 三道闸: ①只认台词证据, 不认旁白提及; ②只治【回合初
+    就钉着】的历史粘钉 (away0), 本回合刚离场者的告别台词不算证据; ③证据台词自己就是
+    告别语(「走了，各位保重」)的不算 — 那是在演他离开, 不是在演他在场。
+    已知残余: 幻觉台词可复活真离场者 — 按场记教义「文本即权威」有意接受 (模型坚持演
+    TA 在场, 账本就该跟文走; 反向硬拦会复刻钉死不放的原 bug)。"""
+    pins = state.get("char_pins") or {}
+    cur = state.get("location_id")
+    if AWAY not in pins.values() or not cur:
+        return []
+    speakers: set[str] = set()
+    for b in all_beats or []:
+        if b.get("type") == "dialogue":
+            sp = (b.get("speaker_name") or "").strip()
+            t = _INVITE_RE.sub("", b.get("text") or "")
+            if sp and not _SELF_EXIT_RE.search(t):
+                speakers.add(sp)
+    if not speakers:
+        return []
+    pcid = state.get("player_character_id")
+    healed: list[str] = []
+    for c in _characters(content):
+        cid, nm = c.get("id"), (c.get("name") or "").strip()
+        if cid and nm and cid != pcid and pins.get(cid) == AWAY and nm in speakers \
+                and (away0 is None or cid in away0):
+            pins = dict(pins)
+            pins[cid] = cur
+            state["char_pins"] = pins
+            _audit(state, "npc.heal", True, nm, "台上开口→解除下落不明")
+            healed.append(nm)
+    return healed
 
 
 def _addressed_char(content: dict[str, Any], state: dict[str, Any],
@@ -8541,6 +8589,8 @@ def run_turn_stream(
     # 🌅 日翻页哨兵 (Yi: 每天要给玩家自由活动的时间) — 回合末对账, 翻了天就发自由活动菜单
     _day0 = int((state.get("clock") or {}).get("day", 1) or 1)
     _loc0 = state.get("location_id")   # 🧭 回合起点位置 (文实合一兜底的比对基准)
+    # 🩹 回合初就钉着 AWAY 的名单 (自愈只治历史粘钉; 本回合新离场的人不许被告别台词复活)
+    _away0 = {k for k, v in (state.get("char_pins") or {}).items() if v == AWAY}
     # normalize the player's position to the EFFECTIVE location (unset → first authored)
     # so the location gating dimension always sees where they truly stand
     state["location_id"] = (current_location(content, state) or {}).get("id")
@@ -10699,6 +10749,9 @@ def run_turn_stream(
     if not observer and settle_prose_arrival(content, state, all_beats, _loc0,
                                              sp_id=state.get("last_speaker_id")):
         pass
+    # 🩹 AWAY 粘钉自愈 (排在收账后: 若这拍换了场, 解钉解到新地点)
+    if not observer:
+        _heal_away_pins(content, state, all_beats, away0=_away0)
     scene = scene_mod.classify_scene(
         " ".join(b.get("text", "") for b in all_beats), default_bg=story_default_bg(content)
     )
@@ -10911,8 +10964,13 @@ def run_turn_stream(
             profile_mod.distill_async(content, state, _rec, _wit, llm)
             _audit(state, "profile.distill", True, f"后台 wit={len(_wit)}")
 
-    # 🔎 导演审稿的比对底稿: 本回合正文留档, 下回合据此识破「整局复读」
+    # 🔎 导演审稿的比对底稿: 本回合正文留档, 下回合据此识破「整局复读」;
+    # 旁白单独留近3拍环形档, 供第④检识破「招牌动作/景物三拍复读」(蝴蝶刀实弹)
     state["_last_text"] = " ".join((b.get("text") or "") for b in all_beats)[:1600]
+    _narr_now = " ".join((b.get("text") or "") for b in all_beats
+                         if b.get("type") == "description")[:1200]
+    if _narr_now.strip():
+        state["_recent_narr"] = ([_narr_now] + list(state.get("_recent_narr") or []))[:3]
 
     # 建议随档持久化: 重开 App 恢复存档时, 上一轮的下一步 chips 原样还在 (竖屏 App 常驻件)
     # 🧭 口味罗盘 (Yi: 了解玩家喜好非常重要): 引擎已知的硬信号记账, 零调用;

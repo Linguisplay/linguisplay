@@ -166,3 +166,51 @@ def test_temper_colors_deltas():
     assert rel.temper(2, 1, 1) == (3, 2), "心气好: 好话添一分"
     assert rel.temper(-2, -2, 1) == (-1, -1), "心气好: 坏话减半"
     assert rel.temper(3, 1, 0) == (3, 1), "平常日不上色"
+
+
+# ── ④ 招牌动作/景物三拍复读 (蝴蝶刀实弹) ───────────
+
+
+def _b(text, sp=None):
+    return {"type": "dialogue" if sp else "description",
+            "speaker_name": sp, "text": text}
+
+
+def test_motif_three_strikes_flagged():
+    knife = "蝴蝶刀在指间慢悠悠转了一圈，咔一声收拢"
+    beats = [_b(f"他听见脚步声，{knife}，抬眼看你。")]
+    recent = [f"晨光里{knife}。他站起身。", f"巷口风大，{knife}，没人说话。"]
+    finds = director.logic_audit(beats, recent_texts=recent)
+    assert any("反复出现" in f for f in finds)
+
+
+def test_motif_two_strikes_tolerated():
+    """只出现两次(本拍+上拍)不算刷屏 — 一次呼应是好戏。"""
+    knife = "蝴蝶刀在指间慢悠悠转了一圈，咔一声收拢"
+    beats = [_b(f"他听见脚步声，{knife}。")]
+    finds = director.logic_audit(beats, recent_texts=[f"晨光里{knife}。", "巷子里只有雨声。"])
+    assert not any("反复出现" in f for f in finds)
+
+
+def test_motif_dialogue_catchphrase_exempt():
+    """口头禅是人设不是破绽: 台词不进第④检。"""
+    beats = [_b("哎哟，新来的，你这运气。", sp="蓝信一"),
+             _b("巷子里安静下来。")]
+    recent = ["他笑了：哎哟，新来的，你这运气。", "又是那句：哎哟，新来的，你这运气。"]
+    finds = director.logic_audit(beats, recent_texts=recent)
+    assert not any("反复出现" in f for f in finds)
+
+
+def test_motif_fresh_prose_clean():
+    beats = [_b("天台的风把床单吹得鼓起来，他递给你一瓶冰的绿宝。")]
+    recent = ["巷口的水滴声不紧不慢。", "理发店门口的后生仔在抽烟。"]
+    assert director.logic_audit(beats, recent_texts=recent) == []
+
+
+def test_motif_with_copied_context_still_flagged():
+    """复读连上下文一起抄(最常见形态): 整块被撑长, 块内核仍要认出 (审查实弹)。"""
+    knife = "蝴蝶刀在指间慢悠悠转了一圈"
+    beats = [_b(f"他没说话，{knife}，抬眼看你。")]
+    recent = [f"他没说话，{knife}，抬眼看你。", f"晨光里{knife}。"]
+    finds = director.logic_audit(beats, recent_texts=recent)
+    assert any("反复出现" in f for f in finds)

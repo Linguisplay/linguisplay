@@ -60,3 +60,89 @@ def test_following_char_released_on_exit():
     beats = [{"type": "dialogue", "speaker_name": "蓝信一", "text": "我先撤了。"}]
     runtime._settle_prose_exits(c, st, beats, pcid="p")
     assert "a" not in st["following"]
+
+
+def test_invitation_is_not_exit():
+    """「跟我走/我们走/走吧」是邀请, 不是离场 (实弹: 天台戏蓝信一被钉AWAY)。"""
+    c, st = _content(), _state()
+    beats = [{"type": "dialogue", "speaker_name": "蓝信一", "text": "跟我走。"},
+             {"type": "dialogue", "speaker_name": "蔡妍", "text": "走吧，我们上天台。"}]
+    out = runtime._settle_prose_exits(c, st, beats, pcid="p")
+    assert out == []
+    assert st["char_pins"] == {"a": "l1", "b": "l1"}
+
+
+def test_leading_player_narration_is_not_exit():
+    """旁白「他拉着你走了出去」= 带着玩家同行, 不算离场。"""
+    c, st = _content(), _state()
+    beats = [{"type": "description", "text": "蓝信一拉着你走了出去，头也不回。"}]
+    out = runtime._settle_prose_exits(c, st, beats, pcid="p")
+    assert out == []
+    assert st["char_pins"]["a"] == "l1"
+
+
+def test_away_pin_heals_on_dialogue():
+    """AWAY 粘钉自愈: 被钉「下落不明」的人在正文里开口 → 解钉回玩家所在地。"""
+    c, st = _content(), _state()
+    st["char_pins"] = {"a": runtime.AWAY, "b": "l1"}
+    beats = [{"type": "dialogue", "speaker_name": "蓝信一", "text": "说吧。你今天不是来巡铺的。"}]
+    healed = runtime._heal_away_pins(c, st, beats)
+    assert "蓝信一" in healed
+    assert st["char_pins"]["a"] == "l1"      # 回到玩家身边
+    assert st["char_pins"]["b"] == "l1"      # 别人不动
+
+
+def test_away_pin_stays_without_evidence():
+    """没开口就不复活: 旁白提及不算证据, 真离场的人不许被误拉回。"""
+    c, st = _content(), _state()
+    st["char_pins"] = {"a": runtime.AWAY}
+    beats = [{"type": "description", "text": "你想起蓝信一说过的话。"}]
+    assert runtime._heal_away_pins(c, st, beats) == []
+    assert st["char_pins"]["a"] == runtime.AWAY
+
+
+def test_freshly_exited_not_resurrected_by_farewell():
+    """本回合刚离场的人, 他的告别台词不算复活证据 (away0 快照把关)。"""
+    c, st = _content(), _state()
+    st["char_pins"] = {"a": runtime.AWAY}
+    beats = [{"type": "dialogue", "speaker_name": "蓝信一", "text": "走了，各位保重。"}]
+    assert runtime._heal_away_pins(c, st, beats, away0=set()) == []
+    assert st["char_pins"]["a"] == runtime.AWAY
+
+
+# ── 对抗审查抓出的四个回归场景 (2026-07-27 review workflow) ──
+
+
+def test_real_exit_with_invite_in_same_line_still_books():
+    """「改天带你去看看，我先走了」邀请与真告别同句 — 剥邀请后真告别仍入账。"""
+    c, st = _content(), _state()
+    beats = [{"type": "dialogue", "speaker_name": "蓝信一", "text": "改天带你去看看，我先走了。"}]
+    out = runtime._settle_prose_exits(c, st, beats, pcid="p")
+    assert "蓝信一" in out and st["char_pins"]["a"] == "l2"
+
+
+def test_wo_xian_zou_ba_is_exit():
+    """「我先走吧」是真告别, 不许被「走吧」类词整句吞掉。"""
+    c, st = _content(), _state()
+    beats = [{"type": "dialogue", "speaker_name": "蓝信一", "text": "我先走吧。"}]
+    out = runtime._settle_prose_exits(c, st, beats, pcid="p")
+    assert "蓝信一" in out
+
+
+def test_abandoning_player_is_exit():
+    """「丢下你走了出去」「朝你摆了摆手，转身走了」是真离场, 窗内有「你」也要入账。"""
+    c, st = _content(), _state()
+    beats = [{"type": "description", "text": "蓝信一丢下你走了出去。"}]
+    assert "蓝信一" in runtime._settle_prose_exits(c, st, beats, pcid="p")
+    c2, st2 = _content(), _state()
+    beats2 = [{"type": "description", "text": "蔡妍朝你摆了摆手，转身走了。"}]
+    assert "蔡妍" in runtime._settle_prose_exits(c2, st2, beats2, pcid="p")
+
+
+def test_sticky_away_farewell_line_not_heal_evidence():
+    """历史粘钉者本回合开口说的是告别语 → 不算在场证据, 不解钉。"""
+    c, st = _content(), _state()
+    st["char_pins"] = {"a": runtime.AWAY}
+    beats = [{"type": "dialogue", "speaker_name": "蓝信一", "text": "我走了，各位保重。"}]
+    assert runtime._heal_away_pins(c, st, beats, away0={"a"}) == []
+    assert st["char_pins"]["a"] == runtime.AWAY

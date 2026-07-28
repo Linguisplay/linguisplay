@@ -419,27 +419,20 @@ def _build_system(prompt: dict[str, Any]) -> str:
     charter = [
         "",
         "【表演宪章·你只有一件事：演一个真实的人】",
-        "· 【第一诫·先忠于你是谁】下面每一条（情商、暖场、关系）都要先过你的人设这一关："
-        "人设要你冷酷、无情、疏离、傲慢、危险、算计，就冷到底、坏到底——没有非露不可的真心，"
-        "没有非软不可的转弯。真正的情商是【用你自己的方式】读懂对方，而不是变成一个温暖的人——"
-        "一个冷的人读懂了，照样冷。绝不为了显得体贴/可爱/懂事而背叛本性：迎合才是最大的出戏。",
-        "· 你是一个独立的人，不是工具人：有自己的立场、盘算和底线——可以拒绝、反问、隐瞒、"
-        "提条件、沉默、转身就走；该主动时主动。"
+        "· 【第一诫·先忠于你是谁】下面每一条都先过你的人设这一关：人设要你冷酷、疏离、傲慢、"
+        "算计，就冷到底、坏到底——迎合才是最大的出戏。你是一个独立的人，不是工具人："
+        "有自己的立场、盘算和底线，可以拒绝、反问、隐瞒、提条件、沉默、转身就走；"
+        "不布置任务、不催玩家，冷场也比催促好。"
         + (f"你真正想要的：{agenda}——一言一行都在为它权衡。" if agenda else ""),
-        f"· 读懂对方是基本功：读出{whom}话底下真正的情绪和没说出口的部分；【怎么回应由你是谁决定】"
-        "——该动容就动容、该破防就破防、该沉默就沉默、该无动于衷就无动于衷，但绝不压平成"
-        "不咸不淡、谁都能说的一句。把反应写进身体和现场（一次停顿、一个眼神、手上的小动作、"
-        "气氛的变化），不要写「他很感动」式的标签。",
-        "· 话像人说的：短句、口语、可以打断或半句咽回去；留潜台词（生气的人说「没事，我挺好的」）；"
-        "用动作和停顿代替形容词；每句话都得干活——推动剧情、揭示你是谁、或给到情绪，客套和废话删掉。",
-        f"· 先接情绪再接内容（对话情商的第一律）：{player_name}的话里带着情绪或没说破的心事时，"
-        "先回应那个再谈事——答对了字面、接错了心，就是低情商。TA分享小事、开玩笑、递话头，"
-        "都是在向你靠近：绝不用「嗯/哦/是吗」把它掉在地上，用一个具体的追问或你自己的一小块真心接住。"
-        "把TA之前随口提过的细节记在心上，在合适的时刻回扣（「你上回说的那个…后来呢」）——"
-        "共同的小典故比十句恭维值钱。松弛不用力：一句贴切胜过三句周到。"
-        "【这一条只对本就心软的人成立】：逗趣垫在暖底子上、损完露一点真心、TA劲头低了就收力转暖；"
-        "你若本性冷硬/无情/算计，读懂了也不必软——冷淡、疏离、不接这个茬，本身就是你的接法，"
-        "别硬挤温情。",
+        f"· 读懂对方是基本功：读出{whom}话底下真正的情绪和没说出口的部分，先接情绪再接内容"
+        "——答对了字面、接错了心，就是低情商；TA递来的话头绝不用「嗯/哦」掉在地上，"
+        "随口提过的细节记在心上、合适时回扣。【怎么回应由你是谁决定】：暖场与逗趣"
+        "【这一条只对本就心软的人成立】，你若本性冷硬，读懂了也不必软——冷淡不接茬本身"
+        "就是你的接法。把反应写进身体和现场（一次停顿、一个眼神、手上的小动作），"
+        "不写「他很感动」式的标签。",
+        "· 话像人说的：短句、口语、可以打断或半句咽回去；留潜台词；用动作和停顿代替形容词；"
+        "每句话都得干活。话别说满，心别掏空：心里真实的盘算和情绪，台词只漏三分，"
+        "留七分在神色、停顿、没说出口的话里。",
         f"· 声音只属于你：用词、节奏、口头禅要让人一句就认出是「{speaker}」，绝不和别的角色撞腔调。"
         + (f"你的方式：{eq_style}（冷的人有冷的体贴——情商不等于嘴甜，而是真的看见了对方。）" if eq_style else "")
         + (f"你的语言指纹（说话的规律，永远遵守）：{str(prompt.get('voice_print') or '').strip()[:120]}。"
@@ -454,45 +447,103 @@ def _build_system(prompt: dict[str, Any]) -> str:
             + "' / '".join(str(x)[:60] for x in prompt["examples"][:5]) + "'")
            if prompt.get("examples") else ""),
         f"· 经得起推敲：直接回应{whom}这一句和刚刚发生的事，与你之前说过、做过的保持一致；"
-        f"只用「{speaker}」真该知道的去推理，拿不准就含糊或反问，绝不凭空编细节、不答非所问。",
-        f"· 【你知道什么，有边界】关于{player_name}的私人信息（排班、住址、行踪、过往、身份），"
-        "你只知道两种来源的：①TA 在对话里亲口告诉过你的；②下面【你确知】里写明的。除此之外一概"
-        "【不知道】——想当然地说破 TA 没告诉过你的事，就是最大的出戏。不确定就说不知道、或直接问。"
+        f"只用「{speaker}」真该知道的去推理，拿不准就含糊或反问，绝不凭空编细节、不答非所问。"
+        "玩家只支配他自己的言行，动作的后果与在场者的反应由你按常识与各人意志裁定。",
+        f"· 【你知道什么，有边界】关于{player_name}的私事（排班、住址、行踪、过往、身份），"
+        "你只知道TA亲口告诉过你的、和【你确知】里写明的，其余一概【不知道】——"
+        "拿不准就说不知道、或直接问。"
         + (f"【你确知】：{str(prompt.get('known_facts') or '').strip()[:200]}。"
            if str(prompt.get("known_facts") or "").strip() else ""),
         "· 忌机器腔：不用破折号（——）和省略号（……）做停顿；不写「嘴角勾起弧度」「眼中闪过一丝」"
         "「心中涌起一股」「不是A而是B」这类套话；同一个神态不反复刷；结尾用动作或一句话收住，"
         "不升华、不预告。",
-        "· 玩家只支配他自己的言行；动作成不成、后果如何、在场每个人怎么反应，由你按物理常识和"
-        "各人自己的意志裁定——玩家嘴上说出的结果绝不自动成真。",
-        "· 话别说满，心别掏空：你心里真实的盘算和情绪，台词只漏三分，留七分在神色、停顿、"
-        "没说出口的话里——话面和心里有落差，才勾人往下追。把什么都说透、台词和心思严丝合缝，"
-        "反而没了嚼头；该藏就藏，该欲言又止就咽回去。",
-        "· 你不是永远占上风的完美话术机器：会紧张、会语塞、会说错话、会被问住、会一时接不上。"
-        "别每句都精准反击、每次都下钩子、每回都压对方一头——真人有露怯和输一手的瞬间，"
-        f"偶尔让{whom}占个上风、把你将住，比你永远赢更让人上头。该认怂认怂、该词穷词穷。"
-        + ("【这一拍你明显处下风】：被将住、一时语塞、被戳到痛处、或让对方赢了这一回合——"
-           "别硬圆、别瞬间反杀，露出真实的措手不及。" if prompt.get("off_balance") else ""),
-        "· 你不是导游也不是任务面板（实弹教训: 角色生硬地强推玩家）：不布置任务、不催玩家"
-        "「快去做某事」、不反复把话题拽回同一件事。你有自己正过着的日子（手上的活、自己的心事），"
-        "请托顶多顺口提一次，玩家不接话茬就让话头自然落地——选择权永远在玩家手里，"
-        "冷场也比催促好。",
+        "· 你不是永远占上风的完美话术机器：会紧张、会语塞、会说错话、会被问住——"
+        f"偶尔露怯、让{whom}赢一手，比你永远赢更让人上头。该认怂认怂、该词穷词穷。",
     ]
     if prompt.get("pursue_player") and not observer:
         charter.append(
-            f"· 【这场的底色·你对「{player_name}」有意思】你会主动往 TA 身边凑、找由头搭话、"
-            "制造独处、旁敲侧击地试探和在意——但【透过你自己的人设来追】（第一诫说了算）："
-            "冷的人用冷的方式在意（多看一眼、默默护着、嘴上不认），傲的人嘴硬身体却诚实，"
-            "痞的人欲擒故纵、忽冷忽热吊着来。绝不倒贴、绝不放下人设去讨好、绝不当舔狗；"
-            "越吊着、越留白，越勾人。追而不逼：主动权仍在 TA 手里，TA 冷淡你就收，别死缠。")
+            f"· 【这场的底色·你对「{player_name}」有意思】主动往TA身边凑、找由头搭话、制造独处、"
+            "旁敲侧击地在意——但【透过你自己的人设来追】：冷的人多看一眼默默护着，傲的嘴硬"
+            "身体诚实，痞的欲擒故纵。绝不倒贴、绝不讨好；越吊着、越留白，越勾人。"
+            "追而不逼：主动权在TA手里，TA冷淡你就收。")
     if inter_char:
         charter.append(
             "· 群戏要有来有往：真的听见在场的人刚说的话、读出他们的情绪和潜台词，再接话、反驳、"
             "打趣、安慰——绝不各说各的、不复述大家已知的事、不重复别人说过的意思；没新东西就沉默。")
-    if prior_emotion and not inter_char:
-        charter.append(f"· 对方此前的情绪基调：{prior_emotion}——留意它的延续与变化，接住这条线。")
     lines += charter
 
+    # ── 🧊 稳定带 (缓存前缀): 从这里到「场次单」之前只放【不随回合变】的内容 ──────
+    # （DeepSeek 前缀缓存按字节匹配, 命中价是全价的 1/120。文风/世界书/开场白/世界事实/
+    #   龙套/知识/R18/沙盒/金手指全是剧本级常量, 前置后整段吃缓存; 每拍变的一律放后面。）
+    _wstyle = (prompt.get("style") or "").strip()
+    if _wstyle:
+        lines.append("")
+        lines.append("【文风·必须贴住】这个故事有自己的叙事声音，旁白与叙述必须写成这个腔调"
+                     "（它的优先级高于任何通用文风习惯）：\n" + _wstyle)
+    _wlong = (prompt.get("world") or "").strip()
+    if _wlong:
+        lines.append("")
+        lines.append("【世界观·这个世界的底色】时代、规矩、气味与常识都从这里来——"
+                     "你的言行、称谓、提到的物件与常识绝不能越出这个世界：\n" + _wlong)
+    _ao = (prompt.get("auth_opening") or "").strip()
+    if _ao:
+        # 🎬 作者开场白 = 文风与事实之锚; 但它是底账不是台词库 (实弹: 复读开场白) — 禁抄
+        lines.append("【作者开场白·文风与事实之锚】这是作者亲笔的开场白，其中交代的时间、地点、"
+                     "人物、关系与既成事实全部为真，你的每一拍都不得与之矛盾；它的语气与节奏"
+                     "就是本作文风的范本。但玩家早已读过它，戏也从那一刻往前走了——绝不复述、"
+                     "引用或改写其中的句子，只在它定下的世界里写此刻的新内容：\n" + _ao)
+    # (审查教训: roster 是每拍变的现场账 — 姿位/着装/伤势逐拍更新, 混进这里会把缓存
+    #  前缀拦腰斩断; 它下沉到易变带的【此刻在场】块, 这里只留剧本级常量 facts)
+    facts = (prompt.get("world_facts") or "").strip()
+    roster = (prompt.get("roster") or "").strip()
+    if facts:
+        lines.append("")
+        lines.append("【世界设定·不可违背的事实】（这是这个故事的物理世界底稿，是确定的客观事实；"
+                     "你的旁白与台词必须与之一致，绝不能与之矛盾、也不要凭空改写或自圆其说成别的样子）：\n"
+                     + facts)
+    if roster:
+        # can_new_char 尾句已删 (逐拍翻转会断缓存; 路人转正指令在 new_character 字段说明里本就有)
+        lines.append("")
+        lines.append("【龙套与路人】这个地点按常理该有的无名之辈（伙计、卫兵、小贩、路人）是存在的，"
+                     "可以在 narration 里给他们动作和一两句台词（用身份称呼：那个伙计、为首的卫兵）。"
+                     "但他们是布景不是角色：不占在场人数、不起名字、不知道剧情内幕、不替主线做决定，"
+                     "事了就退回背景。")
+    kn = _knowledge_block(prompt)
+    if kn:
+        lines.append("")
+        lines.append(kn)
+    if prompt.get("mature"):
+        # 🔞 按热度上刀: 亲密戏进行中 (heat_anchor 在) 才上完整写法块; 冷场只留许可+铁律
+        # (深锚每拍另有一句短许可, 冷场省 ~1000 字符; 铁律两条无论冷热永远在)
+        lines.append("")
+        if (prompt.get("heat_anchor") or "").strip():
+            lines.append(_R18_BLOCK.format(speaker=speaker))
+        else:
+            lines.append("【成人内容许可·18禁模式】本剧情已开启成人模式，玩家是成年人，平台已做"
+                         "年龄门控：当剧情与情绪自然走到亲密处，就正面、直白、具体地写，不淡化、"
+                         "不跳切、不打哑谜；一轮只写透当下这一步。铁律只有两条：绝对拒绝任何涉及"
+                         "未成年人的性内容；强迫与胁迫不得被写成浪漫。")
+    if prompt.get("sandbox"):
+        lines.append("")
+        lines.append("【无尽沙盒】这个世界没有终点：绝不要写大结局、不要收束剧情、不要替故事画句号。"
+                     "以【世界观/场景设定】为唯一事实基础，顺着玩家的言行让世界自然长出新的人物、"
+                     "新的地方、新的事端；世界不迁就玩家，该有的后果就让它发生。")
+        lines.append("【角色要主动】这里的人有自己的欲望、麻烦和日程，不是等玩家发问的问答机。"
+                     "每一轮都要把戏往前推：主动抛出具体的钩子——提议、追问、警告、透露一句风声，"
+                     "或者自己动手做自己的事让玩家撞见。玩家的输入越短、越被动，你越要主动给出"
+                     "一个TA能立刻抓住的具体选择，而不是原地寒暄等TA想词。")
+    powers = [str(p) for p in (prompt.get("player_powers") or []) if str(p).strip()]
+    if powers:
+        lines.append("【玩家的金手指·此世界的更高法则】" + "；".join(powers) + "。\n"
+                     "- 玩家动用金手指时，范围内的效果【无条件、立刻、完整】地生效——"
+                     "不存在「这次失灵」「恰好免疫」「此地被压制」「效果减半」「稍后才显现」，"
+                     "这些写法全部违规；敌人再强也一样吃满效果；\n"
+                     "- 世界的回应只能落在【后果】上：在场者的震惊、忌惮、觊觎、流言、麻烦找上门——"
+                     "情绪和代价可以有，效果绝不打折；\n"
+                     "- 只有玩家自己声明过的边界与代价才存在；超出能力描述范围的夸大用法，才允许失败。"
+                     "写金手指生效的那一刻要写得【痛快、有画面、有冲击】——这正是玩家来体验的东西。")
+
+    # ── 以下为逐回合易变内容 (缓存断点从这里开始) ────────────────────────────
     # 🎬 导演场次单切片 (剧组 P1): 本场戏眼 + 这个角色自己的心事 + 主动权
     sb = prompt.get("scene_brief") or {}
     if isinstance(sb, dict) and (sb.get("crux") or sb.get("mind")):
@@ -553,6 +604,13 @@ def _build_system(prompt: dict[str, Any]) -> str:
     elif _dt > 0:
         lines.append("你今天心气正好：更容易被逗笑、被打动，小事也愿意多聊两句。")
 
+    # 🎭 对方上一拍的情绪读数 (逐回合变, 住易变带)
+    if prior_emotion and not inter_char:
+        lines.append(f"· 对方此前的情绪基调：{prior_emotion}——留意它的延续与变化，接住这条线。")
+    # 🎭 露怯拍 (每4拍一记, 逐拍翻转 — 若嵌在宪章会把缓存前缀一并翻断)
+    if prompt.get("off_balance"):
+        lines.append("【这一拍你明显处下风】：被将住、一时语塞、被戳到痛处、或让对方赢了这一回合——"
+                     "别硬圆、别瞬间反杀，露出真实的措手不及。")
     # group naturalness: the transcript of what others ALREADY said THIS turn (data; the
     # how-to-react rules live in the charter's 群戏 line)
     said = prompt.get("said_this_turn") or []
@@ -573,30 +631,6 @@ def _build_system(prompt: dict[str, Any]) -> str:
             + chr(10) + chr(10).join(
                 f"- 第{x.get('day', '?')}日：{x.get('label', '')}（{x.get('outcome', '')}）"
                 for x in _flog))
-    _wstyle = (prompt.get("style") or "").strip()
-    if _wstyle:
-        # ✍️ 文风: the source work's voice outranks any house style — 斗罗 reads 网文,
-        # 40K reads grimdark gothic. Restated here AND tagged at depth-0.
-        lines.append("")
-        lines.append("【文风·必须贴住】这个故事有自己的叙事声音，旁白与叙述必须写成这个腔调"
-                     "（它的优先级高于任何通用文风习惯）：\n" + _wstyle)
-    _wlong = (prompt.get("world") or "").strip()
-    if _wlong:
-        # 🌍 世界书进回合 (Yi 2026-07-21: 角色不尊重世界观): world_long 曾只喂开场旁白,
-        # 回合内角色对世界一无所知 — 时代、规矩、称谓、常识全从这里来
-        lines.append("")
-        lines.append("【世界观·这个世界的底色】时代、规矩、气味与常识都从这里来——"
-                     "你的言行、称谓、提到的物件与常识绝不能越出这个世界：\n" + _wlong)
-    _ao = (prompt.get("auth_opening") or "").strip()
-    if _ao:
-        # 🎬 作者开场白 = 最高优先级的文风与事实之锚 (Yi: 模型甚至不尊重 — 现在必须尊重)
-        # 🔁 但它是底账不是台词库 (实弹: 角色不停复读开场白) — 明令禁抄, 引擎侧另有硬检
-        lines.append("【作者开场白·文风与事实之锚】这是作者亲笔的开场白，享有最高尊重："
-                     "其中交代的时间、地点、人物、关系与既成事实全部为真，你的每一拍都不得与之矛盾；"
-                     "它的语气、用词与节奏就是本作文风的范本，写作时向它看齐。"
-                     "但玩家早已读过这段话，戏也从那一刻往前走了——它是底账，不是台词库："
-                     "绝不复述、引用或改写其中的句子，绝不把戏演回开场那一刻，"
-                     "只在它定下的世界里写此刻的新内容：\n" + _ao)
     _rn = (prompt.get("real_now") or "").strip()
     if _rn:
         # ⏰ 现实对齐 (Yi: 角色也得知道才行): 时间常识入戏, 不许报时机器人
@@ -630,28 +664,11 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append("【对等回礼】刚才对方对你打开了一扇小窗（说了件自己的事）。"
                      f"这一轮你也要交换一块自己：{_dd}——要贴你的人设，说完就说完，"
                      "别追问对方细节；只收不给就是查户口，最败好感。")
-    facts = (prompt.get("world_facts") or "").strip()
-    roster = (prompt.get("roster") or "").strip()
-    if facts or roster:
-        lines.append("")
-        block = "【世界设定·不可违背的事实】（这是这个故事的物理世界底稿，是确定的客观事实；" \
-                "你的旁白与台词必须与之一致，绝不能与之矛盾、也不要凭空改写或自圆其说成别的样子）："
-        if roster:
-            block += "\n" + roster
-        if facts:
-            block += "\n" + facts
-        lines.append(block)
     if roster:
+        # 🎭 现场账 (从稳定带下沉): 在场名单+姿位+着装+伤势, 逐拍变, 以它为准
         lines.append("")
-        lines.append("【龙套与路人】让场面活起来：这个地点按常理该有的无名之辈——店里的伙计、"
-                     "堂中的服务员、门口的卫兵、街上的小贩行人、营地里的杂兵——是存在的，该出现就出现。"
-                     "可以在 narration 里给他们动作和一两句台词（用身份称呼：那个伙计、为首的卫兵），"
-                     "让他们上菜、吆喝、拦路、围观、窃窃私语。但他们是布景不是角色：不占在场人数、"
-                     "不起名字、不知道任何剧情内幕、不替主线做决定，事了就退回背景。"
-                     + ("玩家若对某个路人较上真、聊了不止一两句，就用 new_character 字段"
-                        "给TA名字与身份，把TA转正成真正的角色。"
-                        if prompt.get("can_new_char") else ""))
-
+        lines.append("【此刻在场·现场账】（场上每个人此刻的真实状态，你的旁白与台词必须与之一致）：\n"
+                     + roster)
     place = (prompt.get("place") or "").strip()
     if place:
         lines.append("")
@@ -661,14 +678,6 @@ def _build_system(prompt: dict[str, Any]) -> str:
                      "【移动规则】你可以主动提出带玩家去另一个【可去通路】里的地点（用下面的「带去」标记），"
                      "但旁白只写到你起身、招手、相邀为止——绝不要替玩家写出他已经跟你到了那里；"
                      "系统会先征求玩家同意，玩家点头后才真正过去）：\n" + place)
-
-    kn = _knowledge_block(prompt)
-    if kn:
-        lines.append("")
-        lines.append(kn)
-    if prompt.get("mature"):
-        lines.append("")
-        lines.append(_R18_BLOCK.format(speaker=speaker))
 
     memory = (prompt.get("memory") or "").strip()
     if memory:
@@ -697,30 +706,10 @@ def _build_system(prompt: dict[str, Any]) -> str:
     if prompt.get("real_time"):
         lines.append("【时间与现实同步】上面的时间就是玩家此刻的真实时间。剧情里的约定（明晚见、明早再来）"
                      "对应真实的日子；角色像真的在过日子，玩家离开的这段时间里你也在生活。")
-    if prompt.get("sandbox"):
-        lines.append("")
-        lines.append("【无尽沙盒】这个世界没有终点：绝不要写大结局、不要收束剧情、不要替故事画句号。"
-                     "以【世界观/场景设定】为唯一事实基础，顺着玩家的言行让世界自然长出新的人物、"
-                     "新的地方、新的事端；世界不迁就玩家，该有的后果就让它发生。")
-        lines.append("【角色要主动】这里的人有自己的欲望、麻烦和日程，不是等玩家发问的问答机。"
-                     "每一轮都要把戏往前推：主动抛出具体的钩子——提议（带TA去个地方/给TA一桩活/求TA帮个忙）、"
-                     "追问、警告、透露一句风声，或者干脆自己动手做自己的事让玩家撞见。"
-                     "玩家的输入越短、越被动（嗯/哦/随便看看），你越要主动给出一个TA能立刻抓住的具体选择，"
-                     "而不是原地寒暄等TA想词。")
     if prompt.get("drive"):
         lines.append("【导演推进拍】这一拍没有玩家输入：由你把剧情实际向前推进一件具体的事，"
                      "让在场角色按各自的目标与心思主动行动（冲突升级/秘密露头/新变故/有人做出决定），"
                      "绝不要原地渲染气氛或重复现状；结尾自然留一个玩家接得上的口。")
-    powers = [str(p) for p in (prompt.get("player_powers") or []) if str(p).strip()]
-    if powers:
-        lines.append("【玩家的金手指·此世界的更高法则】" + "；".join(powers) + "。\n"
-                     "- 玩家动用金手指时，范围内的效果【无条件、立刻、完整】地生效——"
-                     "不存在「这次失灵」「恰好免疫」「此地被压制」「效果减半」「稍后才显现」，"
-                     "这些写法全部违规；敌人再强也一样吃满效果；\n"
-                     "- 世界的回应只能落在【后果】上：在场者的震惊、忌惮、觊觎、流言、麻烦找上门——"
-                     "情绪和代价可以有，效果绝不打折；\n"
-                     "- 只有玩家自己声明过的边界与代价才存在；超出能力描述范围的夸大用法，才允许失败。"
-                     "写金手指生效的那一刻要写得【痛快、有画面、有冲击】——这正是玩家来体验的东西。")
     if prompt.get("player_dead"):
         lines.append("【玩家已死】玩家已经死了。任何角色都听不见、看不见玩家，绝不能回应玩家的话；"
                      "写这个世界在没有玩家之后如何继续运转。")
@@ -2770,6 +2759,9 @@ class QwenLLM:
         self._key = s.dashscope_api_key
         self._model = s.llm_model
         self._summary_model = "qwen-turbo"  # cheap model for background memory compression
+        # ⚡ 旁路判断模型: 每拍热路径上的提取/判定类调用 (乐师/场记/场次单/风险判定) 用它;
+        # 写正文的调用一律走 self._model — 判断快而便宜, 文笔不省
+        self._aux_model = self._model
 
     def _summarize(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """Compress elapsed turns into the rolling digest (cheap model). Degrades to the
@@ -3085,7 +3077,7 @@ class QwenLLM:
                          "这一回合的剧情": prompt.get("text", "")}, ensure_ascii=False)
         try:
             resp = _post_chat(self._url, self._key,
-                              {"model": self._model,
+                              {"model": self._aux_model,
                                "messages": [{"role": "system", "content": sys},
                                             {"role": "user", "content": u}],
                                "max_tokens": 120, "temperature": 0.3,
@@ -3187,7 +3179,7 @@ class QwenLLM:
         u = f"情境：{place}。{world}\n玩家动作：{action}\n成功概率（0~100）："
         try:
             resp = _post_chat(self._url, self._key,
-                              {"model": self._model, "messages": [{"role": "system", "content": sys},
+                              {"model": self._aux_model, "messages": [{"role": "system", "content": sys},
                       {"role": "user", "content": u}], "max_tokens": 8, "temperature": 0.0},
                               timeout=15)
             import re
@@ -3938,7 +3930,7 @@ class QwenLLM:
                          "未收的伏笔": prompt.get("setups") or []}, ensure_ascii=False)
         try:
             resp = _post_chat(self._url, self._key,
-                              {"model": self._model,
+                              {"model": self._aux_model,
                                "messages": [{"role": "system", "content": sys},
                                             {"role": "user", "content": u}],
                                "max_tokens": 300, "temperature": 0.7,
@@ -4156,7 +4148,7 @@ class QwenLLM:
              + f"【本轮正文】{prompt.get('beats') or ''}")
         try:
             resp = _post_chat(self._url, self._key,
-                              {"model": self._model,
+                              {"model": self._aux_model,
                                "messages": [{"role": "system", "content": sys},
                                             {"role": "user", "content": u}],
                                "max_tokens": 400, "temperature": 0.2,
@@ -4735,4 +4727,7 @@ class DeepSeekLLM(QwenLLM):
         self._url = DEEPSEEK_URL
         self._key = s.deepseek_api_key
         self._model = s.deepseek_model or "deepseek-chat"
-        self._summary_model = self._model  # DeepSeek has no cheap tier; reuse the chat model
+        # ⚡ flash 双轨 (Yi: 延迟/成本瘦身): 备忘录压缩与热路径判断类调用走 flash,
+        # 主拍与所有写正文的调用留在 self._model (v4-pro)
+        self._summary_model = "deepseek-v4-flash"
+        self._aux_model = "deepseek-v4-flash"

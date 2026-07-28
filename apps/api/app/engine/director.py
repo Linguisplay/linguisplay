@@ -151,10 +151,52 @@ _SLOT_CONTRA = {   # 时段 → 旁白里不该出现的相反时辰铁证 (月�
 }
 
 
+_CJK_RE = re.compile(r"[一-鿿]")
+
+
+def _repeat_motifs(beats: list[dict[str, Any]], recent_texts: list[str]) -> list[str]:
+    """④ 招牌动作/景物复读 (实弹: 蝴蝶刀每拍转一圈、同一段晨光描写反复出现)。
+    铁证标准 (宁漏勿误杀): 本拍旁白与最近一拍存在 ≥8 字逐字重合, 且该片段在更早的
+    近拍里也出现过 — 三次落地才算刷屏; 台词不查 (口头禅是人设不是破绽)。"""
+    narr = " ".join((b.get("text") or "") for b in beats
+                    if b.get("type") == "description")[:1200]
+    rs = [(t or "")[:1200] for t in (recent_texts or []) if t]
+    if len(narr) < 24 or not rs:
+        return []
+    import difflib
+
+    def _core_in(s: str, older: str) -> str:
+        """s 与更早拍的 ≥8 字逐字重合核 (复读常连上下文一起抄, 整块子串查找会漏 —
+        审查实弹: 块被周边共同措辞撑长后 `s in older` 失配; 改为块内再配一次)。"""
+        for b2 in difflib.SequenceMatcher(None, s, older).get_matching_blocks():
+            if b2.size >= 8:
+                core = s[b2.a: b2.a + b2.size].strip("，。！？、 \n「」…—")
+                if len(core) >= 8 and len(_CJK_RE.findall(core)) >= 6:
+                    return core
+        return ""
+
+    hits: list[str] = []
+    sm = difflib.SequenceMatcher(None, rs[0], narr)
+    for blk in sm.get_matching_blocks():
+        if blk.size < 8:
+            continue
+        s = rs[0][blk.a: blk.a + blk.size].strip("，。！？、 \n「」…—")
+        if len(s) < 8 or len(_CJK_RE.findall(s)) < 6:
+            continue
+        core = next((c for c in (_core_in(s, older) for older in rs[1:]) if c), "")
+        if core:   # 三次落地 (本拍+上拍+更早)
+            hits.append(core[:20])
+        if len(hits) >= 2:
+            break
+    return hits
+
+
 def logic_audit(beats: list[dict[str, Any]], *, slot: str | None = None,
-                dead_names: tuple | list = (), prev_text: str = "") -> list[str]:
+                dead_names: tuple | list = (), prev_text: str = "",
+                recent_texts: list[str] | None = None) -> list[str]:
     """确定性审稿: 返回破绽清单 (空 = 无漏洞)。
-    ① 死者开口 ② 昼夜矛盾 (只查旁白) ③ 整回合复读上一回合 (模型卡拍)."""
+    ① 死者开口 ② 昼夜矛盾 (只查旁白) ③ 整回合复读上一回合 (模型卡拍)
+    ④ 招牌动作/景物三拍复读 (需 recent_texts 近拍档)."""
     finds: list[str] = []
     dead = {str(n) for n in dead_names if n}
     for b in beats:
@@ -175,6 +217,9 @@ def logic_audit(beats: list[dict[str, Any]], *, slot: str | None = None,
         import difflib
         if difflib.SequenceMatcher(None, prev, joined).ratio() >= 0.92:
             finds.append("这一回合几乎在逐字复读上一回合")
+    for m in _repeat_motifs(beats, recent_texts or []):
+        finds.append(f"「{m}」这一动作/画面已连着好几拍反复出现，换新的表现方式，"
+                     "同一个招牌动作、同一段景物不许再原样重演")
     return finds
 
 
