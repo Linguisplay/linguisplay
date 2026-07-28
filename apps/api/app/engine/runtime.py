@@ -9649,6 +9649,13 @@ def run_turn_stream(
         # transcript (deploy mid-scene / a climb the patterns missed), jump to truth
         _recent = ([b.get("text") or "" for b in (beat_log or [])[-12:]]
                    or [h.get("content") or "" for h in (history or [])[-12:]])
+        # 🧯 先反向自愈: 账本比正文烫得多就降温 (一次误判会把整局钉在第4级, 阶梯单调,
+        # 老档自己下不来 — 这样存量误判档不必动生产库, 下一拍自己凉下去)
+        _h_was = int((state.get("heat") or {}).get("stage") or 0)
+        _h_cool = heat_mod.cool_if_unsupported(
+            state, [b.get("text") or "" for b in (beat_log or [])[-24:]] or _recent)
+        if _h_cool != _h_was:
+            _audit(state, "heat.cool", True, f"{_h_was}→{_h_cool}", "正文无实锤，账本降温")
         _h_old, _h_new = heat_mod.catchup(state, _recent, state.get("location_id"))
         if _h_new != _h_old:
             _audit(state, "heat.stage", True, f"{_h_old}→{_h_new}（回填）")

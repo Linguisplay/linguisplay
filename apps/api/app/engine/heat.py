@@ -26,26 +26,32 @@ from typing import Any
 # beats read strictly (prose mentions like 舔了舔嘴唇 must not climb the ladder).
 # Keywords ≥2 chars or bound to an object, per the actions.py lesson (撬棍 ≠ 撬锁).
 _PLAYER_RES: list[tuple[int, re.Pattern]] = [
-    (5, re.compile(r"高潮|绝顶|射了|射精|射进|射在|内射|中出|\b(climax|orgasm|cum|came|finish inside)\b", re.I)),
-    (4, re.compile(r"插进|插入|插到|猛插|深插|再插|抽插|抽送|做爱|交合|骑乘|骑上|捅进"
+    (5, re.compile(r"高潮|绝顶|内射|中出|(?<![投照放反折喷斜直散辐激注])射(了|精|进|在)"
+                   r"|\b(climax|orgasm|cums?|came (inside|hard)|finish inside)\b", re.I)),
+    (4, re.compile(r"猛插|深插|再插|抽插|抽送|做爱|交合|骑乘|骑上|捅进"
+                   r"|插(进|入|到)(?!.{0,6}(口袋|裤袋|衣袋|兜里|袋里|槽|孔|插座|接口|缝里|土里|地里))"
                    r"|进入.{0,4}(身体|体内|里面)|狠狠(顶|撞|操|干|插)|操逼|干死"
-                   r"|(干|操|上)(她|他|我|你)|操死|鸡巴|肉棒|阳具|阴茎.{0,6}(插|进|埋)"
-                   r"|\b(fuck|thrust|penetrate|put it in|inside (her|him|me|you))\b", re.I)),
-    (3, re.compile(r"口交|口活|(给|帮)(我|他|她|你)口|先口|口一下|深喉|吹箫"
+                   r"|(?<![鱼饼豆笋菜肉果核虾腊风能才若])干(她|他|我|你)|操(她|他|我|你)|(想|要|把|敢|真|就)上(她|他|我|你)|上了(她|他|我|你)"
+                   r"|把(她|他|我|你)上了|操死|鸡巴|肉棒|阳具|阴茎.{0,6}(插|进|埋)"
+                   r"|\b(fucks?|fucking|penetrates?|put it in|inside (her|him|me|you))\b", re.I)),
+    (3, re.compile(r"(?<![档门窗路港渡摊铺洞伤胃出入进借])口交|口活|(给|帮)(我|他|她|你)口|先口|口一下|深喉|吹箫"
                    r"|舔(她|他|我|你|下面|阴|穴|乳)|吸吮|吮吸|含住|指交|前戏|手指.{0,4}(探|滑|伸)进"
                    r"|揉(胸|乳|臀)|摸(下面|私处|胸|乳|大腿根)"
                    r"|\b(foreplay|lick|suck|blowjob|finger her|finger me|eat (her|me) out|go down on)\b", re.I)),
-    (2, re.compile(r"脱(衣|光|掉|下|了)|解(开)?(衣|扣|裙|裤|胸衣|内衣)|宽衣|扒(光|掉|下)|快脱"
+    (2, re.compile(r"脱(衣|光|掉|下|了)|解(开)?(衣|扣|裙|裤|胸衣|内衣)|宽衣|扒光|扒(掉|下).{0,6}(衣|衫|裙|裤|内衣)|快脱"
                    r"|\b(undress|strip|take off (your|her|his|my|the) \w+)\b", re.I)),
     (1, re.compile(r"接吻|亲吻|亲(她|他|我|你|上|嘴)|吻(她|他|我|你|上)|舌吻|拥吻|调情|挑逗|推倒"
                    r"|搂进怀|抱(上|到)床|\b(kiss|make out|flirt with|push .{0,12} onto the bed)\b", re.I)),
 ]
 _MODEL_RES: list[tuple[int, re.Pattern]] = [
-    (5, re.compile(r"高潮|绝顶|痉挛着到达|释放在|射精|泄了出来|\b(climax|orgasm|came|comes undone)\b", re.I)),
+    (5, re.compile(r"高潮|绝顶|痉挛着到达|释放在|射精|泄了出来"
+                   r"|\b(climax|orgasm|came (inside|hard|undone)|comes undone)\b", re.I)),
     (4, re.compile(r"插入|抽插|挺进|顶入|顶弄|贯穿|沉腰.{0,8}(坐|吞|纳)|进入.{0,4}(身体|体内|里面)"
-                   r"|结合处|硬挺(抵|顶|进|撞|入)|抵进来|撞进|一下一下(顶|撞|捣)|顶得.{0,8}(撞|晃|颤|抖)"
-                   r"|\b(thrusts?|sinks? (down )?onto|slides? into|buried inside)\b", re.I)),
-    (3, re.compile(r"口交|吸吮|指尖.{0,4}(探|滑|伸)入|舔弄|舔舐|吞吐|深喉|含住"
+                   r"|结合处|硬挺(抵|顶|进|撞|入)|抵进来|撞进.{0,3}(体内|身体|里面|穴)"
+                   r"|一下一下(顶|撞|捣)|顶得.{0,8}(撞|晃|颤|抖)"
+                   r"|\b(thrusts? into|sinks? (down )?onto|slides? into|buried inside)\b", re.I)),
+    (3, re.compile(r"(?<![档门窗路港渡摊铺洞伤胃出入进借])口交|吸吮|指尖.{0,4}(探|滑|伸)入|舔弄|深喉|含住"
+                   r"|(舔舐|吞吐).{0,4}(她|他|你|我|唇|舌|乳|颈|耳|穴|茎|腿根|指尖)"
                    r"|\b(licks?|sucks?|fingers? (her|him))\b", re.I)),
     (2, re.compile(r"(脱|褪|扒)(下|去|掉).{0,8}(衣|衫|裙|裤|胸衣|内衣)|褪到(膝|脚|腿)|赤裸|一丝不挂"
                    r"|\b(undresses|strips|slips? off (her|his) \w+|naked)\b", re.I)),
@@ -125,6 +131,33 @@ def catchup(state: dict[str, Any], recent_texts: list[str], location_id: Any) ->
     if detected > old:
         h["stage"], h["at"] = detected, location_id
     return old, h["stage"]
+
+
+def cool_if_unsupported(state: dict[str, Any], recent_texts: list[str]) -> int:
+    """🧯 反向自愈 (Yi 2026-07-28): 账本比正文【烫】得多时降温。catchup 只会往上补火,
+    于是一次误判(「撞上他」→ 交合)会把整局钉死在第4级 —— 阶梯是单调的, 除非换地方或
+    明写穿好衣服, 老档永远自己下不来。这里按同一条家法办: 文本即权威, 近几拍里找不到
+    任何 ≥2 级的实锤, 就把账本降到 1 (调情), 不直接归零以免打断真在升温的戏。
+    返回降到的级数 (没动就返回原级)。"""
+    h = state.get("heat")
+    if not isinstance(h, dict):
+        return 0
+    old = int(h.get("stage") or 0)
+    if old < 2:
+        return old
+    blob = " ".join(t for t in (recent_texts or []) if t)
+    if not blob:
+        return old
+    # 降到【正文撑得住的那一级】: 只有一个吻的近拍撑不起「正在交合」。窗口给得宽
+    # (调用侧给近 24 拍), 真床戏里的纯对话停顿仍能找到更早的实锤, 不会被误凉。
+    top = 0
+    for stage_n, rx in _PLAYER_RES + _MODEL_RES:
+        if stage_n > top and rx.search(blob):
+            top = stage_n
+    if top >= old:
+        return old                # 有据撑得住, 账本不动
+    h["stage"] = max(top, 1)
+    return h["stage"]
 
 
 def stage(state: dict[str, Any]) -> int:
