@@ -1810,6 +1810,33 @@ def settle_music(state: dict[str, Any], mj: dict[str, Any] | None) -> dict[str, 
     return {"track": str(led.get("track") or ""), "feel": str((mj or {}).get("feel") or "")[:8]}
 
 
+# 🎭 基调锚 (Yi 2026-07-28 实弹: 暧昧戏里玩家撒娇「错过今天就没机会了，蓝少」，模型被
+# 「错过/机会/跨过线」的字面狠劲带偏，回了一句地盘警告，当场从调情翻成翻脸)。
+# 根因与声纹/背包同族: 基调引擎早就算准了 (乐师判词带迟滞, 已反哺台词形状), 但那句话
+# 埋在系统提示词第 400 行, 隔着上万字符; 且它写的是【句子形状】不是【情绪立场】。
+# 做法: 把基调连同已持续拍数当【事实】贴到生成点, 只在软基调下附一句延续默认值 —
+# 紧张/战斗/诡异下狠话就该按字面读, 不许也当撒娇。
+_SOFT_TONES = {"romantic": "暧昧", "warm": "温情", "daily": "轻松日常",
+               "lonely": "静", "sad": "低落"}
+
+
+def tone_anchor(state: dict[str, Any], zh: bool = True) -> str:
+    """本轮基调事实 (空 = 硬基调或还没稳住, 不发)。"""
+    led = state.get("bgm_led") or {}
+    key = str(led.get("track") or ((state.get("scene") or {}).get("mood") or "")).rstrip("23456789")
+    label = _SOFT_TONES.get(key)
+    held = int(led.get("held", 0) or 0)
+    if not label or held < 2:
+        return ""       # 硬基调按字面读; 刚起头的软基调还没成"已建立的基调"
+    if not zh:
+        return (f"[Scene register: {key}, held for {held} beats. Read a menacing-sounding "
+                f"line from them as teasing or testing first, not a real turn — unless "
+                f"they actually strike or plainly break it off.]")
+    return (f"此刻这场戏的基调是【{label}】，已经连着{held}拍。对方话里若冒出狠话、最后通牒、"
+            f"划线一类的字面措辞，先按这个基调读（多半是撒娇、玩笑或试探），别当真翻脸——"
+            f"除非TA真动了手或明说要断。")
+
+
 def _generic_place(nm: str) -> bool:
     """「个地方」「别处」这类泛指碎片 — 不是地名, 不许上地图 (实弹: 「换个地方聊」
     被铸成地点「个地方」)。"""
@@ -9752,6 +9779,8 @@ def run_turn_stream(
             **({"world_seed": _ws_mode} if idx == 0 and _ws_mode else {}),
             # 🎼 节奏带 (Spec A): 引擎按乐师账本查表, 全体发言者同一拍点
             "pace": _pace,
+            # 🎭 基调事实 (贴生成点): 治「字面狠词压过语境基调」— 只在软基调且已稳住时发
+            "tone": tone_anchor(state, zh=lang_of(content) != "en") if is_primary else "",
             # 🪃 记忆回调 (Spec E): 到期时引擎抽真实旧事作必填素材, 只给主答者
             **({"callback": {"mode": _cb_mode,
                              "material": pick_callback_material(content, state, sp_id)}}

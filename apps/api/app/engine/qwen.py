@@ -258,6 +258,12 @@ def _depth_anchor(prompt: dict[str, Any]) -> str:
         bits.append((f"【底细不开上帝视角】哪怕原著/常识里你「认识」{_pn}，戏里的你不知道原著剧情"
                      f"与TA的身世、秘密能力、招式名——除非当面发生过、TA亲口说过、或在你的可透露"
                      f"信息里。只按眼前现象反应：一记怪招就是「路数古怪的手法」，叫不出名。"))
+    # 🎭 基调锚 (实弹: 暧昧戏里一句撒娇式的「错过今天就没机会了」, 模型被字面狠劲带偏,
+    # 回了地盘警告当场翻脸)。引擎的乐师判词早就算准了基调, 但它只以【台词形状】的样子
+    # 埋在 system 第 400 行 — 隔着上万字符压不住字面语义。这里把它当事实复述到生成点。
+    _tone = (prompt.get("tone") or "").strip()
+    if _tone:
+        bits.append(_tone)
     _cl = (prompt.get("cult") or "").strip()
     if _cl:
         bits.append(_cl)
