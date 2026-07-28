@@ -2339,20 +2339,39 @@ def _build_summary_system() -> str:
 
 
 def _qwen_chat(system: str, user: str, max_tokens: int = 700, temperature: float = 0.6) -> str:
-    """One-shot qwen call returning text (or "" on failure). Shared by enrich helpers."""
+    """One-shot 辅助文本调用 (返回 "" 表示全部通路都失败)。enrich 系共用。
+
+    🔁 双通路 (Yi 2026-07-28 实弹): 这里原本死绑 dashscope, 于是阿里一停服,
+    整条智能增强就哑了 —— generate_knowledge 的检索词生成与结果整理都走它,
+    链断在起点, 联网检索连跑都没跑, Studio 里那个「智能增强」按钮也一起变成废的。
+    现在 dashscope 空/失败就回落到对话主力 (DeepSeek), 它本来就一直在线。"""
     s = get_settings()
-    if not s.dashscope_api_key:
-        return ""
-    try:
-        resp = _post_chat(DASHSCOPE_URL, s.dashscope_api_key,
-                          {"model": s.llm_model,
-                           "messages": [{"role": "system", "content": system},
-                                        {"role": "user", "content": user}],
-                           "max_tokens": max_tokens, "temperature": temperature},
-                          timeout=40, kind="enrich")
-        return resp.json()["choices"][0]["message"]["content"].strip()
-    except Exception:
-        return ""
+    if s.dashscope_api_key:
+        try:
+            resp = _post_chat(DASHSCOPE_URL, s.dashscope_api_key,
+                              {"model": s.llm_model,
+                               "messages": [{"role": "system", "content": system},
+                                            {"role": "user", "content": user}],
+                               "max_tokens": max_tokens, "temperature": temperature},
+                              timeout=40, kind="enrich")
+            txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+            if txt:
+                return txt
+        except Exception:
+            pass
+    if s.deepseek_api_key:
+        try:
+            resp = _post_chat(DEEPSEEK_URL, s.deepseek_api_key,
+                              {"model": s.deepseek_model or "deepseek-v4-flash",
+                               "thinking": {"type": "disabled"},
+                               "messages": [{"role": "system", "content": system},
+                                            {"role": "user", "content": user}],
+                               "max_tokens": max_tokens, "temperature": temperature},
+                              timeout=40, kind="enrich")
+            return (resp.json()["choices"][0]["message"]["content"] or "").strip()
+        except Exception:
+            return ""
+    return ""
 
 
 DASHSCOPE_T2I_URL = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis"
@@ -2665,7 +2684,9 @@ def generate_knowledge(name: str, profile: str, world: str = "") -> str:
     enrich degrades gracefully.
     """
     s = get_settings()
-    if not s.dashscope_api_key:
+    # 🔁 只要有任一文本通路就干活 (_qwen_chat 内部 dashscope→DeepSeek 回落);
+    # 从前这里死等 dashscope, 阿里停服时整条链一个字都不跑
+    if not (s.dashscope_api_key or s.deepseek_api_key):
         return ""
     profile = (profile or "")[:600]
     combined = f"角色名：{name}\n角色设定：{profile}\n所在故事/世界：{(world or '')[:400]}"

@@ -37,12 +37,46 @@ def test_knowledge_block_injected_when_present():
 
 def test_generate_knowledge_degrades_without_key(monkeypatch):
     # with no search/model key, enrich must return "" (degrade), never raise — no network call
+    # (双通路后要把两个模型 key 都清掉: dashscope 停服时 enrich 会回落到 DeepSeek)
     class _NoKey:
         dashscope_api_key = ""
+        deepseek_api_key = ""
+        tavily_api_key = ""
         llm_model = "qwen-max"
+        deepseek_model = ""
 
     monkeypatch.setattr(qwen, "get_settings", lambda: _NoKey())
     assert qwen.generate_knowledge("某人", "一个神秘的角色", "某个世界") == ""
+
+
+def test_generate_knowledge_survives_dashscope_outage(monkeypatch):
+    """🔁 阿里停服时智能增强不许整条哑掉 (实弹: 检索词生成走 dashscope, 一停就零输出)。"""
+    class _DsDown:
+        dashscope_api_key = "x"      # key 在, 但服务返回空
+        deepseek_api_key = "y"
+        tavily_api_key = ""
+        llm_model = "qwen-max"
+        deepseek_model = "deepseek-v4-flash"
+
+    calls = []
+
+    def _fake_post(url, key, body, timeout=25, kind="aux"):
+        calls.append(url)
+        if "dashscope" in url:
+            raise RuntimeError("欠费停服")
+
+        class _R:
+            @staticmethod
+            def json():
+                return {"choices": [{"message": {"content": "【人物设定】外貌是银发紫瞳。"}}]}
+        return _R()
+
+    monkeypatch.setattr(qwen, "get_settings", lambda: _DsDown())
+    monkeypatch.setattr(qwen, "_post_chat", _fake_post)
+    got = qwen.generate_knowledge("某人", "一个神秘的角色", "某个世界")
+    assert "银发紫瞳" in got
+    assert any("dashscope" in u for u in calls)        # 先试阿里
+    assert any("deepseek" in u for u in calls)         # 挂了回落
 
 
 def test_mature_defaults_off_and_flows_through_run():

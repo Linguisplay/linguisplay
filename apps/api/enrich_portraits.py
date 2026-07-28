@@ -39,7 +39,9 @@ def build_prompt(c: dict, world: str, ip: str = "") -> str:
     # 🎭 同人角色先钉「这是谁」(经典形象), 再让性格描述补细节 —— 否则画出来
     # 是个泛泛的少年, 玩家一眼认不出是唐三还是别人 (Yi 2026-07-28)
     canon = ipface.canon_clause(ip, c.get("name") or "", c.get("knowledge"))
-    bits = [c.get("name") or "", c.get("role") or "", (c.get("persona_text") or "")[:160]]
+    look = (c.get("looks") or "").strip()      # 搜来的经典外貌优先
+    bits = [c.get("name") or "", c.get("role") or "",
+            look or (c.get("persona_text") or "")[:160]]
     who = "，".join(b for b in bits if b)
     return f"{canon}{who}。世界背景：{(world or '')[:120]}。{STYLE}"
 

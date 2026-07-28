@@ -53,6 +53,46 @@ def looks_from_knowledge(knowledge: str | None) -> str:
     return "，".join(dict.fromkeys(h for h in hits if h))[:180]
 
 
+def fetch_canon_looks(ip: str, name: str, hint: str = "") -> str:
+    """🔎 专门去搜「这个角色长什么样」, 返回一句可直接进画笔的外貌描述 (失败返回 "")。
+
+    为什么要单开一路 (Yi 2026-07-28 实弹): 通用的 generate_knowledge 搜出来的
+    是武魂、剧情、人际关系, 外貌一个字都没有 —— 因为它的检索词就没往那个方向问。
+    而生图要的恰恰只有外貌。所以这里用一组钉死方向的检索词, 再让模型把结果压成
+    一句只讲长相的话; 拿不到就返回空, 调用方照旧只用「经典形象」条款。
+    """
+    if not ip or not name:
+        return ""
+    from .qwen import _qwen_chat, _tavily_search
+    raw = "\n\n".join(
+        f"[{q}]\n{r}" for q in (
+            f"{ip} {name} 人物外貌 发型 发色 瞳色",
+            f"{ip} {name} 角色设定 服装 造型",
+            f"{ip} {name} 立绘 形象",
+        ) if (r := _tavily_search(q, 2))
+    )[:3000]
+    if not raw:
+        return ""
+    out = _qwen_chat(
+        "你在为画师整理一个动漫/小说角色的外貌参考。只描述【长相与穿着】："
+        "发型发色、瞳色、脸型气质、标志性服饰与配饰、身形年龄感。"
+        "不要写能力、剧情、性格、人际关系。若资料里没提到某项就跳过，不要编。"
+        "【冲突以本作设定为准】检索结果可能是同名的另一个角色，或把这个角色和别人"
+        "搞混了。凡是与下面「本作设定」对不上的（系别、武器、年龄、性别、身份），"
+        "一律丢弃，只保留不冲突的外貌特征；若整段检索结果明显不是同一个人，"
+        "就只输出四个字：无可用资料。"
+        "只输出一句话，80字以内，不加任何解释或标题。",
+        f"角色：{ip} · {name}\n本作设定：{hint[:240]}\n\n检索结果：\n{raw}",
+        max_tokens=160, temperature=0.3)
+    out = (out or "").strip().strip("。 ")
+    # 兜底: 跑偏去写能力剧情、或明说搜到的不是同一个人时, 不如不要 —— 错的外貌
+    # 比没有外貌更糟 (实弹: 一个植物系角色被套上了同族冰系角色的形象与武器)
+    if not out or len(out) < 8 or any(
+            w in out for w in ("没有", "未提及", "无法", "抱歉", "无可用资料")):
+        return ""
+    return out[:120]
+
+
 def canon_clause(ip: str, name: str, knowledge: str | None = None) -> str:
     """经典形象条款 (空 = 不是同人角色, 调用方照旧走原创描述)。
 
