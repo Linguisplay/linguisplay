@@ -27,16 +27,21 @@ from app.db import SessionLocal  # noqa: E402
 from app.engine.qwen import generate_image  # noqa: E402
 from app.models import Story, StorySnapshot  # noqa: E402
 
+from app.engine import ipface  # noqa: E402
+
 AV_DIR = Path(__file__).parent / "app" / "static" / "scene" / "avatar"
 
 STYLE = ("电影质感人物肖像，胸像特写，正面微侧，目光看向镜头外，"
          "写实风格，柔和的侧光，背景虚化，情绪克制内敛，高细节，胶片颗粒感")
 
 
-def build_prompt(c: dict, world: str) -> str:
+def build_prompt(c: dict, world: str, ip: str = "") -> str:
+    # 🎭 同人角色先钉「这是谁」(经典形象), 再让性格描述补细节 —— 否则画出来
+    # 是个泛泛的少年, 玩家一眼认不出是唐三还是别人 (Yi 2026-07-28)
+    canon = ipface.canon_clause(ip, c.get("name") or "", c.get("knowledge"))
     bits = [c.get("name") or "", c.get("role") or "", (c.get("persona_text") or "")[:160]]
     who = "，".join(b for b in bits if b)
-    return f"{who}。世界背景：{(world or '')[:120]}。{STYLE}"
+    return f"{canon}{who}。世界背景：{(world or '')[:120]}。{STYLE}"
 
 
 def main() -> None:
@@ -52,6 +57,9 @@ def main() -> None:
         if not s:
             print(f"story not found: {title}")
             sys.exit(1)
+        story_ip = ipface.ip_of(s)   # 🎭 同人本 → 画经典形象
+        if story_ip:
+            print(f"  🎭 同人剧本，角色按《{story_ip}》的经典形象画")
         chars = list(s.characters or [])
         changed = False
         for c in chars:
@@ -67,7 +75,7 @@ def main() -> None:
                 print(f"  skip {name} ({cid}) — image exists")
                 continue
             print(f"  generating {name} ({cid})…", end=" ", flush=True)
-            img = generate_image(build_prompt(c, s.world_long or ""), size="768*768")
+            img = generate_image(build_prompt(c, s.world_long or "", story_ip), size="768*768")
             if not img:
                 print("FAILED")
                 continue

@@ -44,6 +44,8 @@ from app.engine.sprites import SPRITE_DIR, build_expr_pack, ingest_upload  # noq
 from app.models import Story, StorySnapshot  # noqa: E402
 
 # cids whose art is OWNED by another story (shared face) — never regenerate here
+from app.engine import ipface  # noqa: E402
+
 HARD_SKIP = {"cyclone", "shin", "twelfth", "sei"}   # 龙头共享脸, 永不在浮生重画
 
 # 生成专用外貌 (八十年代港风): per-cid, story-agnostic engine stays clean
@@ -71,12 +73,12 @@ LOOKS: dict[str, str] = {
 }
 
 
-def tachie_prompt(name: str, looks: str, art: str) -> str:
+def tachie_prompt(name: str, looks: str, art: str, canon: str = "") -> str:
     # style anchor rides FIRST (art bible doctrine: 画风是 token 体系, 前置才压得住)
     # Seedream 铁律: 圣经按「；舞台」拆分, 立绘只喂画风段 — 舞台段入词必画整条街
     # (阿彩 v1 存证), qwen-image 从前只是碰巧没接住它
     art = art.split("；舞台")[0]
-    return (f"{art}。单人全身立绘：{name}，{looks}。平静自然的神情，正面站姿微侧，"
+    return (f"{art}。{canon}单人全身立绘：{name}，{looks}。平静自然的神情，正面站姿微侧，"
             "双脚站在地上，人物完整（从头顶到鞋都在画面内，头顶上方留出空间），"
             "画面里只有这一个人。纯色浅灰背景，柔和顶光，高细节，画面里没有任何文字或水印")
 
@@ -104,6 +106,9 @@ def main() -> None:
         if not s:
             raise SystemExit(f"story not found: {title}")
         art = str((s.tuning or {}).get("art_style") or "")
+        story_ip = ipface.ip_of(s)   # 🎭 同人本 → 画经典形象
+        if story_ip:
+            print(f"  🎭 同人剧本，角色按《{story_ip}》的经典形象画")
         if not art:
             raise SystemExit(f"《{title}》 has no tuning.art_style — author the bible first")
         SPRITE_DIR.mkdir(parents=True, exist_ok=True)
@@ -128,6 +133,7 @@ def main() -> None:
                 print(f"  skip {name} ({cid}) — sprite exists")
                 continue
             looks = LOOKS.get(cid) or (c.get("persona_text") or "")[:120]
+            canon = ipface.canon_clause(story_ip, name, c.get("knowledge"))
             photo = SPRITE_DIR / f"{cid}_photo.jpg"
             if restyle and photo.exists():
                 # 改绘铁律 (smart_cast 同款): 保真条款放最前, 画风只给一句核心
@@ -141,7 +147,7 @@ def main() -> None:
             else:
                 print(f"  t2i {name} ({cid})…", end=" ", flush=True)
                 camp_neg = _STYLE_NEG if is_anime_style(art) else _REAL_NEG
-                img = generate_image(tachie_prompt(name, looks, art), size=TACHIE_SIZE,
+                img = generate_image(tachie_prompt(name, looks, art, canon), size=TACHIE_SIZE,
                                      model=TACHIE_MODEL,
                                      seed=char_seed(s.id, SEED_SALT.get(cid, cid)),
                                      negative=portrait_negative(art) + camp_neg)
