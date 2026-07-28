@@ -1217,16 +1217,15 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                              "消耗品第8段填c，第9段填可用次数。"
                              "（重量档：1轻若无物~5搬不动；体积档：1口袋~5固定大件）；"
                              "老物件或没有 item_gained 则空字符串"}
+        # (三律细则由 system【物品三律】独家承载 — 字段只留判据与格式, 不复述法条)
         props["item_used"] = {"type": "string", "description":
                               "若玩家这一轮【使用】了随身物品（敷上/喝下/点燃/掏出来用），填"
-                              "「物品名|对象名或self|一句语境」。用掉≠遗失——用东西一律报这里，"
-                              "item_lost 只用于遗失/被夺/主动丢弃。效果不由你写，引擎会落账并"
-                              "播报结果，你照结果叙述；没有则空字符串"}
+                              "「物品名|对象名或self|一句语境」；效果引擎落账、你照结果叙述；"
+                              "没有则空字符串"}
         props["item_transformed"] = {
             "type": "object", "description":
-                "若一件东西【变成了别的东西】（烧成灰/熔成锭/撕成条/拆解），在这里一笔报完"
-                "投入和产出——不许拆成 item_lost + item_gained 两笔。物理必然的过程走这里"
-                "（不掷骰）；结果有悬念的合成走 item_crafted（掷骰）。没有则整体省略",
+                "若一件东西【变成了别的东西】（烧成灰/熔成锭/撕成条/拆解），一笔报完投入与产出"
+                "（走法见【物品三律】）；没有则整体省略",
             "properties": {
                 "inputs": {"type": "array", "items": {"type": "string"},
                            "description": "被销毁的源物名（须是玩家真带着的）"},
