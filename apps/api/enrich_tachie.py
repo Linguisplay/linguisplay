@@ -133,7 +133,8 @@ def main() -> None:
                 print(f"  skip {name} ({cid}) — sprite exists")
                 continue
             # 🎨 搜来的经典外貌优先于人设描述 (人设写的是性格, 画笔要的是长相)
-            looks = (c.get("looks") or "").strip() or LOOKS.get(cid) \n                or (c.get("persona_text") or "")[:120]
+            looks = ((c.get("looks") or "").strip() or LOOKS.get(cid)
+                     or (c.get("persona_text") or "")[:120])
             canon = ipface.canon_clause(story_ip, name, c.get("knowledge"))
             photo = SPRITE_DIR / f"{cid}_photo.jpg"
             if restyle and photo.exists():
