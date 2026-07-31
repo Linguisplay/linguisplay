@@ -1179,13 +1179,24 @@ def align_clock_to_act(content: dict[str, Any], state: dict[str, Any],
     return clock_view(content, state)
 
 
-def char_home(c: dict[str, Any], act: int, slot: str | None = None) -> str | None:
-    """Where this character is RIGHT NOW (作息表): among schedule entries with
-    from_act <= act that cover the current 时段 (an entry may carry slots: ["夜"] —
-    no slots = all hours), the highest from_act wins; slot-specific beats generic on a
-    tie. A scheduled character whom no entry covers this hour is AWAY (off somewhere,
-    unreachable) — home_location_id only backs up characters with no reached schedule.
-    None = ubiquitous (legacy stories that don't pin characters to places)."""
+def _char_home(c: dict[str, Any], act: int, slot: str | None = None) -> str | None:
+    """作息表说这个角色在哪 (ONE RUNG of char_position, never the answer by itself).
+
+    Among schedule entries with from_act <= act that cover the given 时段 (an entry may
+    carry slots: ["夜"] — no slots = all hours), the highest from_act wins; slot-specific
+    beats generic on a tie. A scheduled character whom no entry covers this hour is AWAY
+    (off somewhere, unreachable) — home_location_id only backs up characters with no
+    reached schedule. None = ubiquitous (legacy stories that don't pin characters).
+
+    🔒 PRIVATE — "谁此刻在哪" 的唯一出口是 char_position(). 作息只是它的第 7 级, 上面
+    还压着 同行/濒死/威胁/被掳/约定/钉子 六级。绕过 char_position 直接问作息 = 表现层
+    各说各话 (实弹 2026-07-30: 打电话独走这条路, 于是角色被钉在码头时全场显示"在场",
+    电话里却是"无人接听, TA此刻不知在何处")。合法调用者只有三个, 各有各的理由:
+      · char_position   — 它就是第 7 级本身
+      · apply_char_move — 问的是【所有权】: 作息管着这双脚吗? 不是问人在哪
+      · make_promise    — 问的是【未来某时段】TA会在哪; char_position 只懂"现在", 答不了
+    新增第四个调用者前先问自己: 我问的是"现在谁在哪"吗? 是 → 用 char_position。
+    tests/test_position_single_source.py 会替你把关。"""
     best = (-1, -1)
     best_loc = None
     reached = False
@@ -1272,13 +1283,28 @@ def char_position(content: dict[str, Any], state: dict[str, Any],
     pin = (state.get("char_pins") or {}).get(cid)
     if pin:
         return pin  # 🔎 the engine told the player "TA在那儿" — so they ARE there, waiting
-    sched = char_home(c, int(state.get("act", 1) or 1), active_slot(content, state))
+    sched = _char_home(c, int(state.get("act", 1) or 1), active_slot(content, state))
     if sched:
         return sched  # includes AWAY
     pos = _sim_pos_loc(((state.get("char_sim") or {}).get(cid) or {}).get("pos"))
     if pos:
         return pos
     return (locs[0] or {}).get("id")
+
+
+def _schedule_says_away(content: dict[str, Any], state: dict[str, Any],
+                        c: dict[str, Any]) -> bool:
+    """作者的班表有没有把【这个钟点】写成"找不到人"。
+
+    问的是作者意图, 不是"人在哪" —— 所以合法直读作息表 (见 _char_home 的豁免名单)。
+    为什么要把这一问单独拎出来: char_position 报 AWAY 有两个出处, 后果天差地别 ——
+      · 作息 AWAY —— 作者写的班表, 下一个时段自动恢复;
+      · 钉子 AWAY —— 「TA走出了这一场, 引擎不知道去了哪」, 而这颗钉子【永不释放】
+        (_drop_pins_on_leave 只摘等于旧地点的钉子; 自愈只认台上台词, 可离场的人根本不上台)。
+    把后者也当成"关机", 角色说一句「我先走了」就此电话永久打不通 (2026-07-30 评审实跑抓到)。
+    """
+    return _char_home(c, int(state.get("act", 1) or 1),
+                      active_slot(content, state)) == AWAY
 
 
 def apply_char_move(content: dict[str, Any], state: dict[str, Any], name_ref: str,
@@ -1296,7 +1322,8 @@ def apply_char_move(content: dict[str, Any], state: dict[str, Any], name_ref: st
                  None)
     if not mover or mover.get("id") in (state.get("following") or []):
         return None
-    if char_home(mover, int(state.get("act", 1) or 1), active_slot(content, state)):
+    # 🔒 作息【所有权】问句, 不是"人在哪" — 故意直读 _char_home (见其 docstring 豁免名单)
+    if _char_home(mover, int(state.get("act", 1) or 1), active_slot(content, state)):
         return None  # the author's schedule owns this character's feet
     dest = resolve_location(content, dest_ref)
     if not dest or not dest.get("id") or dest["id"] == state.get("location_id"):
@@ -3821,15 +3848,22 @@ def map_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
         return {"nodes": [], "hidden": 0, "current": None}
     act = int(state.get("act", 1) or 1)
     cur = (current_location(content, state) or {}).get("id")
-    pcid = state.get("player_character_id")
-    following = set(state.get("following") or [])
+    # 🔒 与回合载荷的 here/cast 同法: 只有【附身模式】才把自己从名单里摘掉; 上帝视角下
+    # 那个角色就是个 NPC, 该上图 —— 否则他出现在在场条却不在地图上 (两边对不上)。
+    pcid = state.get("player_character_id") \
+        if (state.get("mode") or "character") == "character" else None
     avail = {l.get("id"): location_available(content, state, l) for l in locs}
+    # 🔒 玩家脚下这块地永远可见: 解锁条件是会掉的 (affinity_min 跌破就判不可用), 可人
+    # 已经站在这儿了。不豁免就会「自己所在地连人带节点一起从地图上消失, 对话名册照旧列人」。
+    if cur in avail:
+        avail[cur] = True
     name_to_id = {l.get("name"): l.get("id") for l in locs if l.get("name")}
     at: dict[str, list[str]] = {}
     for c in present_characters(content, act, _dead_ids(state)):
         if c.get("id") == pcid:
             continue
-        lid = cur if c.get("id") in following else char_position(content, state, c)
+        # 🔒 位置只问 char_position —— 同行那一级是它级联的第 1 条, 别在这儿抄第二遍
+        lid = char_position(content, state, c)
         if lid and lid != AWAY and avail.get(lid) and c.get("name"):
             at.setdefault(lid, []).append(c["name"])
     # 🗺 分层收纳 (Yi 2026-07-24: 地点多了地图乱): 热度/置顶/休眠随节点下发,
@@ -4211,7 +4245,8 @@ def make_promise(content: dict[str, Any], state: dict[str, Any], char: dict[str,
         return None  # the promised hour must lie ahead
     # the meeting must be somewhere the character WILL be: their 作息 at that hour wins
     # over whatever place was named; an hour they're AWAY can't host a promise at all
-    expected = char_home(char, int(state.get("act", 1) or 1), slot)
+    # 🔒 【未来时段】问句 — char_position 只解得开"现在", 这里故意直读 _char_home
+    expected = _char_home(char, int(state.get("act", 1) or 1), slot)
     if expected == AWAY:
         return None
     if expected:
@@ -5020,6 +5055,10 @@ def social_feed(content: dict[str, Any], state: dict[str, Any],
         so["mark"] = mark
         dead = _dead_ids(state)
         met = set(state.get("met_ids") or [])
+        # 📍 动态也读位置真源: 帖子里的地名因此是【可印证的】—— 玩家真走过去就能撞见 TA,
+        # 因为地图/对白/通讯录/这里问的是同一个 char_position。这才是"世界真在转"的体感,
+        # 而不是模型随口编的地名。口径同地图: 只给地图上已经能看见的地方。
+        _avail_s = {l.get("id"): location_available(content, state, l) for l in _locations(content)}
         items = []
         for c in _characters(content):
             cid = c.get("id")
@@ -5037,10 +5076,14 @@ def social_feed(content: dict[str, Any], state: dict[str, Any],
                 if p.get("char_id") == cid and p.get("status") == "open":
                     hooks.append(f"惦记着约好的：{str(p.get('what') or '')[:30]}")
             if hooks:
+                _pos = char_position(content, state, c)
+                _at = ((_location_by_id(content, _pos) or {}).get("name") or "") \
+                    if (_pos and _pos != AWAY and _avail_s.get(_pos)) else ""
                 items.append({"cid": cid, "name": c.get("name"),
                               "persona": (c.get("persona_text") or "")[:80],
                               "eq_style": (c.get("eq_style") or "")[:60],
-                              "hooks": hooks[:2]})
+                              # at 单开一档, 不跟近况素材抢 hooks[:2] 的名额
+                              "at": _at, "hooks": hooks[:2]})
         posted = {p.get("cid") for p in (so.get("posts") or [])[-3:]}
         items = [i for i in items if i["cid"] not in posted][:2]
         if items:
@@ -5306,6 +5349,11 @@ def phone_threads_view(content: dict[str, Any], state: dict[str, Any]) -> dict[s
     pcid = state.get("player_character_id")
     dead = _dead_ids(state)
     have = set((((state.get("phone") or {}).get("threads")) or {}))
+    # 📍 通讯录也读位置真源 (2026-07-30): 打不通就该在通讯录里看得懂, 而不是拨过去
+    # 撞一鼻子灰。口径【完全对齐地图】—— 地图能看见的地方才写地名, 看不见的只给
+    # "联系得上/联系不上"; 一个字的新情报都不多给, 两个面板也永远不会各说各话。
+    _here_ids = {c.get("id") for c in scene_characters(content, state)}
+    _avail = {l.get("id"): location_available(content, state, l) for l in _locations(content)}
     contacts = []
     for cid in state.get("met_ids") or []:
         c = _char_by_id(content, cid)
@@ -5313,10 +5361,19 @@ def phone_threads_view(content: dict[str, Any], state: dict[str, Any]) -> dict[s
             continue
         if not has_contact(state, cid):
             continue   # 📇 联系方式要靠剧情挣 (Yi): 没交换过的人不在通讯录里
-        contacts.append({"char_id": cid, "name": c.get("name") or "",
-                         "role": (c.get("role") or "")[:24],
-                         "avatar_url": c.get("avatar_url"),
-                         "dead": cid in dead, "has_thread": cid in have})
+        row = {"char_id": cid, "name": c.get("name") or "",
+               "role": (c.get("role") or "")[:24],
+               "avatar_url": c.get("avatar_url"),
+               "dead": cid in dead, "has_thread": cid in have,
+               # away=拨过去无人接听 (phone_call 用的是同一句 char_position == AWAY)
+               "away": False, "here": False, "where": ""}
+        pos = None if cid in dead else char_position(content, state, c)
+        if pos is not None:   # None = 这本没有地图, 位置系统压根没启用 → 一个位置字都不给
+            row["away"] = _phone_unreachable(content, state, c)   # 与拨号同一句判据
+            row["here"] = cid in _here_ids
+            if pos != AWAY and _avail.get(pos):
+                row["where"] = (_location_by_id(content, pos) or {}).get("name") or ""
+        contacts.append(row)
     apps = phone_apps(content)
     if not economy_on(state):
         apps = apps - {"bank"}   # 💰 没有经济账本的本, 银行 app 无账可管 — 不亮
@@ -5336,6 +5393,18 @@ def phone_thread(content: dict[str, Any], state: dict[str, Any], char_id: str,
     return {"char_id": char_id, "name": c.get("name") or "", "avatar_url": c.get("avatar_url"),
             "dead": char_id in _dead_ids(state), "device": phone_device(content),
             "msgs": list(th.get("msgs") or [])}
+
+
+def _phone_unreachable(content: dict[str, Any], state: dict[str, Any],
+                       c: dict[str, Any]) -> bool:
+    """📞 拨过去到底有没有人接 —— 电话与通讯录共用这一句, 两处永远不会各说各话。
+
+    位置先问真源 char_position (于是同行/守约/被钉在某处的人都打得通, 不再像从前那样
+    只认作息表); 真源报 AWAY 时再问一句是不是作者的班表说的 —— 只有作者写的"这个钟点
+    找不到TA"才等于无人接听, 引擎那颗"走出了这一场"的钉子不是关机。
+    """
+    return (char_position(content, state, c) == AWAY
+            and _schedule_says_away(content, state, c))
 
 
 def _phone_target(content: dict[str, Any], state: dict[str, Any], char_id: str,
@@ -5642,9 +5711,12 @@ def phone_call(content: dict[str, Any], state: dict[str, Any], persona: dict[str
         raise ValueError("TA就在你身边，当面说吧")
     now_label = (clock_view(content, state) or {}).get("label", "")
     th = _thread(state, char_id)
-    # 作息说 TA 此刻不知去向 → 无人接听 (the world doesn't bend for the dial tone)
-    slot_now = active_slot(content, state)
-    if char_home(c, int(state.get("act", 1) or 1), slot_now) == AWAY:
+    # 作者的班表说 TA 这个钟点找不到 → 无人接听 (the world doesn't bend for the dial tone)。
+    # 🔒 判据与通讯录共用 _phone_unreachable, 不许在这儿手拼 (实弹 2026-07-30):
+    # 曾直读 _char_home 跳过前六级 —— 角色被钉在码头, 地图和对话都说"在那儿", 电话却回
+    # "TA此刻不知在何处"; 改成硬判 char_position==AWAY 又走过了头, 让散文离场的永久钉子
+    # 等于关机, 于是短信召得回、电话永远不接。两次都是同一个病: 判据没归一。
+    if _phone_unreachable(content, state, c):
         th["msgs"].append({"from": "me", "text": f"📞 {text[:120]}", "at": now_label, "call": True})
         th["msgs"].append({"from": "sys", "text": "（无人接听。TA此刻不知在何处。）",
                            "at": now_label, "call": True})

@@ -113,8 +113,8 @@ def test_slot_schedule_moves_characters_and_away():
     content2 = _story(tuning={"turns_per_slot": 1},
                       schedule=[{"from_act": 1, "location_id": "hall"},
                                 {"from_act": 1, "location_id": "alley", "slots": ["夜"]}])
-    assert runtime.char_home(content2["story"]["characters"][1], 1, "夜") == "alley"
-    assert runtime.char_home(content2["story"]["characters"][1], 1, "午") == "hall"
+    assert runtime._char_home(content2["story"]["characters"][1], 1, "夜") == "alley"
+    assert runtime._char_home(content2["story"]["characters"][1], 1, "午") == "hall"
 
 
 def test_deadline_warns_then_ends():

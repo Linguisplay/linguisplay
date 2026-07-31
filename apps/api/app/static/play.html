@@ -1105,6 +1105,13 @@ let curScene = null, curLocId = null; let beasts = [];  // for backdrop: last sc
 let curClock = null, curLocData = null; // ⏳ the diegetic clock + last place (placebar redraws)
 let cast = [], target = null;  // target = character_id the player is addressing (null = auto)
 let relations = {}, following = [];  // {cid:{mode,mode_name,romance,...}} ; ids traveling with you
+// 🔒 在场名单是【缓存】, 不是账本 (Yi 2026-07-30 高频报障「地图说他走了, 对话里还在互动」):
+// 它只靠回合末的 here 事件刷新, 流被掐断 (断网/切后台/服务重启) 就停在上一回合; 而地图和
+// 通讯录每次打开都是实时读服务端。两边于是当着玩家的面各说各话 —— 服务端字段其实没打架。
+// 立此旗: 这一回合没收到 here 就认账已脏, 落定后重拉整档以服务端为准。
+// worldSeq = 世界状态的世代号: 任何权威更新 (here/place 事件、整档回填) 都让它 +1,
+// 于是在途的异步对账响应一旦发现世代变了, 就整份作废 —— 绝不半新半旧地拼。
+let castStale = false, worldSeq = 0;
 let currentStoryId = null, playMode = "character";
 
 const MOOD_GRAD = {
@@ -1907,13 +1914,37 @@ function renderCult(cv) {
 }
 function applyRunUpdate(run) {
   const st = run && run.state || {};
+  worldSeq++;                                    // 🔒 权威更新落地 → 在途的旧响应就此作废
   cast = st.here || run.cast || [];
   relations = st.relations || {};
   following = st.following || [];
+  // 🐲 兽台是这座舞台的另一半: 只对回人不对回兽, 立牌会停在上一回合 (缺字段不当空兽台)
+  if (st.beasts !== undefined) beasts = st.beasts || [];
   if (target && !cast.some(c => c.id === target)) target = null;
   renderCast(); updatePlaceholder();
   if (st.location !== undefined) renderPlace(st.location);
   if (st.cultivation !== undefined) renderCult(st.cultivation);
+}
+// 🔒 把本地缓存对回服务端真源。GET /runs/{id} 的 state.here 读的是 runtime.char_position
+// 那一套九级级联 —— 地图、通讯录、对白名册、电话问的是同一个函数, 所以对完这一次,
+// 四个面板必然一致。拉不到就维持现状 (下一回合还会再对一次), 绝不把空名单当答案。
+//
+// 两道闸都是必须的 (2026-07-30 评审实跑):
+//  ① 回合在途不许对账 —— 服务端要到回合末才落库, 这时候读到的是【上一回合】的名单,
+//     拉回来只会把流里刚送到的新名单盖掉, 而且此时 castStale 已为 false, 不会再被纠正:
+//     换个成因复刻了本次要消灭的撕裂。何况 GET /runs/{id} 在现实钟剧本里会整列盲写 state,
+//     和回合提交撞车就是"文与实永久分家"。
+//  ② 世代号 —— 面板期间玩家可能移动/换同行, 迟到的响应必须整份作废, 不能半新半旧。
+let _resyncing = false;
+async function resyncWorld() {
+  if (!runId || _resyncing || ended || turnInFlight) return;
+  const seq = worldSeq;
+  _resyncing = true;
+  try {
+    const run = await j(`/runs/${runId}`);
+    if (run && run.state && seq === worldSeq && !turnInFlight) applyRunUpdate(run);
+  } catch (e) {}
+  finally { _resyncing = false; }
 }
 async function moveTo(name) {
   if (!runId || ended) return;
@@ -2529,15 +2560,22 @@ async function openContacts() {
   const rows = (inbox.contacts || []).map(c => {
     const av = c.avatar_url ? `<img class="pav" src="${c.avatar_url}" onerror="this.style.display='none'">`
                             : `<span class="pav plet" style="background:${avatarColor(c.name)}">${escapeHtml((c.name||"?")[0])}</span>`;
+    // 📍 可达性来自引擎位置真源 (char_position), 和地图/对白/电话同一句判据 —— 打不通
+    // 该在这儿看得懂, 而不是拨过去撞一鼻子灰。地名只给地图上已能看见的地方, 不多漏情报。
+    const at = c.dead ? ""
+      : c.here ? B("　· 就在眼前", " · right here")
+      : c.away ? B("　· 此刻联系不上", " · unreachable now")
+      : (c.where ? B(`　· 在${escapeHtml(c.where)}`, ` · at ${escapeHtml(c.where)}`) : "");
     return `<div class="pthread" data-cid="${escapeHtml(c.char_id)}">${av}<div class="pmeta">
       <div class="pname">${c.dead ? "🕯 " : ""}${escapeHtml(c.name||"")}<a class="cinfo" data-info="${escapeHtml(c.char_id)}">ⓘ</a></div>
-      <div class="plast">${escapeHtml(c.role||"")}${c.has_thread ? "" : B("　· 还没聊过", " · no thread yet")}</div></div></div>`;
+      <div class="plast">${escapeHtml(c.role||"")}${at}${c.has_thread ? "" : B("　· 还没聊过", " · no thread yet")}</div></div></div>`;
   }).join("") || `<div class="jempty">${B("通讯录空空如也。<br>先去见见这个世界里的人。", "No contacts yet.<br>Go meet someone first.")}</div>`;
   const ov = phoneShell(rows, "👥 通讯录", "openPhone()");
   ov.querySelectorAll(".pthread").forEach(el => { el.onclick = () => openThread(el.dataset.cid); });
   ov.querySelectorAll(".cinfo").forEach(el => {
     el.onclick = (e) => { e.stopPropagation(); document.getElementById("phoneov").remove(); openCharCard(el.dataset.info); };
   });
+  resyncWorld();   // 🔒 这一屏是实时读的; 顺手把在场条也对回真源, 关掉面板两边不打架
 }
 // 🎒 背包: what you carry + what you've stashed where (收纳一目了然)
 async function openBag() {
@@ -2614,6 +2652,7 @@ async function openMap() {
   if (!runId) return;
   let mp;
   try { mp = await j(`/runs/${runId}/map`); } catch (e) { return; }
+  resyncWorld();   // 🔒 地图是实时读的, 在场条是缓存 —— 开图顺手对账, 免得关掉图两边对不上
   let ov = document.getElementById("mapov");
   if (!ov) {
     ov = document.createElement("div"); ov.id = "mapov";
@@ -4311,6 +4350,7 @@ async function send(chOverride) {
 // them one-by-one (typed) the moment they arrive. Used by normal turns AND confrontations.
 async function streamTurn(url, bodyObj) {
   turnInFlight = true;   // 🔒 在途门闩置起, finishTurn 落定后才释放
+  let sawHere = false;   // 🔒 这一回合服务端有没有把在场名单送到 (没送到 = 本地缓存已脏)
   playQ = []; playing = false; streamDone = false; firstBeat = true;
   clearLive(); liveText = ""; vnLiveBuf = ""; vnLiveSeen = ""; vnLiveDone = false; skipType = false;
   if (url.endsWith("/play") && bodyObj && (bodyObj.input || "").trim()) lastTurnBody = bodyObj;
@@ -4355,9 +4395,9 @@ async function streamTurn(url, bodyObj) {
                                  B("新的一天 · 自由活动", "A new day · free time"));
         }
         else if (ev.event === "cast") { updateCast(ev.cast); }
-        else if (ev.event === "here") { relations = ev.relations || {}; following = ev.following || []; beasts = ev.beasts || []; updateCast(ev.here || []); }
+        else if (ev.event === "here") { sawHere = true; worldSeq++; relations = ev.relations || {}; following = ev.following || []; beasts = ev.beasts || []; updateCast(ev.here || []); }
         else if (ev.event === "goal") { renderGoal(ev.goal); }
-        else if (ev.event === "place") { renderPlace(ev.location); }
+        else if (ev.event === "place") { worldSeq++; renderPlace(ev.location); }
         else if (ev.event === "peek") { renderPeek(ev.peek); }
         else if (ev.event === "sugg") { renderSuggest(ev.suggestions || []); }
         else if (ev.event === "promises") { renderPromises(ev.promises); }
@@ -4405,6 +4445,7 @@ async function streamTurn(url, bodyObj) {
   driveGhost = null;
   hideTyping();
   streamDone = true;
+  castStale = !sawHere;   // 🔒 没收到 here → 名单可能停在上一回合, finishTurn 里对回真源
   if (!playing) finishTurn();   // queue already drained (or nothing arrived)
 }
 // 🃏 证据对峙: present an unlocked clue to its owner, face to face — a visible opposed
@@ -4619,6 +4660,8 @@ function finishTurn() {
   }
   maybeAddRetryChip();   // a bad beat's exit lives right next to the suggestions
   turnInFlight = false;   // 🔒 回合彻底落定, 放行下一回合
+  // 🔒 流断在半路 → 在场名单还是上一回合的; 落定后静默对回服务端 (放在放闩之后, 不挡下一回合)
+  if (castStale) { castStale = false; resyncWorld(); }
   sendBtn.disabled = false;
   // 📵 手机铁律 (Yi 报障): 键盘只属于用户亲手点输入框的那一刻 —
   // 回合末自动 focus 在触屏上 = 点屏幕过剧情时输入法弹脸

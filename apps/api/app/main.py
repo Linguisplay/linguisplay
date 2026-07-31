@@ -15,7 +15,7 @@ for _sub in ("bg", "bgm", "sfx", "creature"):
 
 from .config import get_settings
 from .db import init_db
-from .routers import auth, cards, gal, me, packs, personas, phone_mock, push, runs, stories
+from .routers import auth, cards, gal, me, packs, personas, push, runs, stories
 
 settings = get_settings()
 
@@ -84,7 +84,9 @@ app.include_router(cards.router, prefix=API)  # 📚 角色卡库 (cross-story c
 app.include_router(stories.router, prefix=API)
 app.include_router(packs.router, prefix="/api/v1")
 app.include_router(runs.router, prefix=API)
-app.include_router(phone_mock.router, prefix=API)  # MOCK: phone domain skeleton
+# 🪦 phone_mock 已删 (2026-07-30): 它的每条路由都被 runs.router 的 /{run_id}/phone/{char_id}
+# 抢先匹配 (挂载顺序在前), 一条都到不了; 而它对任何 run 都返回硬编码的假通讯录。
+# 手机的真实现在 runs.py:/{run_id}/phone*, 位置口径统一走 runtime.char_position。
 app.include_router(gal.router, prefix=API)  # 🎀 galgame 生成器 (docs/galgame-maker.md)
 app.include_router(push.router, prefix=API)  # 🔔 Web Push 订阅 (活世界 P3)
 

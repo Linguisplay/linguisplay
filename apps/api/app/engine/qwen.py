@@ -3274,8 +3274,10 @@ class QwenLLM:
     def _social_posts(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """📸 角色的朋友圈动态: 从账本素材 (演变/在办的事/约定) 写 1~2 条 in-voice 短帖。"""
         items = prompt.get("items") or []
+        # 📍 at = 此刻人在哪 (引擎位置真源给的, 不是编的): 允许入帖, 因为玩家真能走过去印证
         mat = "\n".join(f"- {i.get('name')}（{i.get('persona','')}；表达方式：{i.get('eq_style','')}）"
-                        f"近况素材：{'；'.join(i.get('hooks') or [])}" for i in items)
+                        f"近况素材：{'；'.join(i.get('hooks') or [])}"
+                        + (f"；此刻人在：{i['at']}" if i.get("at") else "") for i in items)
         sys = ("你在写游戏内社交动态（朋友圈式短帖）。下面每个角色给出了近况素材，"
                "各写一条TA会发的动态：≤40字，口语，有TA的性格，可含语气词/省略号；"
                "不解释背景、不@人、不写标签。【铁律】只基于给出的素材，绝不发明新的人名地名事件；"

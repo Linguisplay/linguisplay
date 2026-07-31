@@ -77,10 +77,10 @@ def test_prop_search_unlocks_through_the_full_turn():
 
 
 def test_schedule_moves_the_character_between_acts():
-    assert runtime.char_home({"home_location_id": "hall"}, 1) == "hall"
+    assert runtime._char_home({"home_location_id": "hall"}, 1) == "hall"
     c = MAP["story"]["characters"][0]
-    assert runtime.char_home(c, 1) == "hall"    # before from_act → home
-    assert runtime.char_home(c, 2) == "study"   # schedule entry wins
+    assert runtime._char_home(c, 1) == "hall"    # before from_act → home
+    assert runtime._char_home(c, 2) == "study"   # schedule entry wins
     # scene membership follows: at hall in act2, Mara is NOT here anymore
     st = {**runtime.default_state(), "act": 2, "location_id": "hall"}
     assert runtime.scene_characters(MAP, st) == []
