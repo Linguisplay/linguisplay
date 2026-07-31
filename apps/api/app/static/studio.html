@@ -172,9 +172,15 @@ body.simple details.sec > summary::before { content:""; }
     <details class="sec" data-sec="chars" open>
       <summary>👥 角色 <span class="seccount" id="sc_chars"></span></summary>
       <div class="secbody">
-      <div class="bar"><button class="sm" onclick="addChar()">+ 加角色</button>
-        <button class="sm ghost" onclick="openCardLib(true)">📚 从角色卡库导入</button></div>
-      <div class="muted">主角（is_lead）是默认开口的人。写好「TA是谁 + TA想要什么」，其他都可以后补。</div>
+      <div class="bar" style="flex-wrap:wrap;gap:6px">
+        <input id="quickChar" placeholder="⚡ 一句话描述TA，AI 出整张卡：一个嘴硬心软的老船长…"
+               style="flex:1;min-width:200px;margin:0"
+               onkeydown="if(event.key==='Enter')quickAddChar()">
+        <button class="sm" onclick="quickAddChar()">🪄 一句话加角色</button>
+        <button class="sm ghost" onclick="addChar()">+ 空白卡</button>
+        <button class="sm ghost" onclick="openCardLib(true)">📚 从卡库导入</button></div>
+      <div class="muted"><span id="quickCharMsg"></span>
+        主角（is_lead）是默认开口的人。写好「TA是谁 + TA想要什么」，其他都可以后补，或点卡里的「🪄 AI 补全空白」。</div>
       <details style="margin:8px 0">
         <summary style="cursor:pointer">🪄 扔一大段文字，自动生成角色卡（小说片段/wiki/你自己的笔记都行）</summary>
         <textarea id="charBlob" rows="6" placeholder="把描述角色的文字整段粘进来——一段里有几个人就出几张卡：名字、性别、性格、口癖台词、人生目标都会自动填好，生成后可再手改。" style="width:100%;margin:6px 0"></textarea>
@@ -833,26 +839,29 @@ function renderLocs(){
 // ── characters ──
 function addChar(){ story.characters.push({id:gid("c_"),name:"",role:"",is_lead:story.characters.length===0,persona_text:"",background:"",avatar_url:"",presence:"present",appears_from_act:0,playable:false,relation_default:"",agenda:"",eq_style:"",home_location_id:null,schedule:[],ties:[],items:[],bio_layers:[]}); _openChar=story.characters.length-1; renderAll(); }
 // 🪄 一大段文字 → 角色卡 (Yi 定): 后端 LLM 解析成卡 v2 全字段, 生成后照常手改
+// 🪄 共用解析通路: 提交秒回任务号 + 短轮询 (长连接会被手机网络/webview 掐断 — 实弹)。
+// 语言随剧本走 (英文本子解析出英文卡, 不然卡上全是中文散文喂给英文演出)。
+async function _parseChars(text, onTick){
+  const sub = await j(`/stories/parse_characters`, { method:"POST",
+    body: JSON.stringify({ text, world: story.world_long||"", style: story.style||"",
+                           language: story.language||"" }) });
+  for (let i = 0; i < 36; i++) {
+    await new Promise(r => setTimeout(r, 2500));
+    if (onTick) onTick(i);
+    const st = await j(`/stories/parse_characters/${sub.job}`);
+    if (st.status === "done") return st.characters || [];
+    if (st.status === "error") throw new Error(st.error || "解析失败");
+  }
+  throw new Error("解析超时，再点一次试试");
+}
 async function parseCharBlob(){
   const ta = document.getElementById("charBlob"), msg = document.getElementById("charBlobMsg");
   const text = (ta.value||"").trim();
   if (!text) { msg.textContent = "先粘一段文字进来"; return; }
-  if (text.length < 20) { msg.textContent = "太短了，至少给一两句描述"; return; }
+  if (text.length < 8) { msg.textContent = "太短了，至少给一句描述"; return; }
   msg.textContent = "🪄 解析中（十几秒）…";
   try {
-    // 提交秒回任务号 + 短轮询 (长连接会被手机网络/webview 掐断 — 实弹)
-    const sub = await j(`/stories/parse_characters`, { method:"POST",
-      body: JSON.stringify({ text, world: story.world_long||"", style: story.style||"" }) });
-    let out = null;
-    for (let i = 0; i < 36; i++) {
-      await new Promise(r => setTimeout(r, 2500));
-      msg.textContent = "🪄 解析中" + ".".repeat(1 + i % 3);
-      const st = await j(`/stories/parse_characters/${sub.job}`);
-      if (st.status === "done") { out = st; break; }
-      if (st.status === "error") throw new Error(st.error || "解析失败");
-    }
-    if (!out) throw new Error("解析超时，再点一次试试");
-    const got = out.characters || [];
+    const got = await _parseChars(text, i => { msg.textContent = "🪄 解析中" + ".".repeat(1 + i % 3); });
     if (!got.length) { msg.textContent = "没解析出角色，换段更具体的文字试试"; return; }
     for (const c of got) {
       c.id = gid("c_");
@@ -861,6 +870,51 @@ async function parseCharBlob(){
     msg.textContent = `✓ 生成了 ${got.length} 张卡（记得保存）`;
     ta.value = "";
     renderAll();
+  } catch(e) { msg.textContent = "✗ " + e.message; }
+}
+// ⚡ 一句话加角色 (Yi: 加新角色要更容易): 「一个嘴硬心软的老船长」→ 一张填好的卡
+async function quickAddChar(){
+  const inp = document.getElementById("quickChar"), msg = document.getElementById("quickCharMsg");
+  const t = (inp.value||"").trim();
+  if (t.length < 4) { msg.textContent = "再多写两个字"; return; }
+  msg.textContent = "🪄 生成中…";
+  try {
+    const got = await _parseChars("为下面这句话塑造一个角色（只出这一个人的卡），没写到的部分按世界观合理补全：" + t,
+      i => { msg.textContent = "🪄 生成中" + ".".repeat(1 + i % 3); });
+    if (!got.length) throw new Error("没生成出来，再具体一点试试");
+    const c = got[0]; c.id = gid("c_");
+    if (!story.characters.length) c.is_lead = true;
+    story.characters.push(c); _openChar = story.characters.length - 1;
+    inp.value = ""; msg.textContent = "✓ 已加入（记得保存）";
+    renderAll();
+  } catch(e) { msg.textContent = "✗ " + e.message; }
+}
+// 🪄 单卡补全 (Yi: 编辑角色要更容易): 拿卡上已写的当素材, 只往【空白】字段里填,
+// 作者亲手写过的一个字不动
+async function fillChar(i){
+  const c = story.characters[i], msg = document.getElementById("avmsg_"+i);
+  const have = [c.name && ("名字：" + c.name), c.role && ("身份：" + c.role),
+                c.persona_text && ("人设：" + c.persona_text),
+                c.background && ("背景：" + c.background),
+                c.agenda && ("TA的目的：" + c.agenda)].filter(Boolean).join("\n");
+  if (have.length < 8) { msg.textContent = "先写点名字/身份/人设，AI 才有东西可补"; return; }
+  msg.textContent = "🪄 补全空白中…";
+  try {
+    const got = await _parseChars("下面是一张没写完的角色卡。按已有信息把这【一个】角色补写完整，名字原样保留：\n" + have,
+      k => { msg.textContent = "🪄 补全空白中" + ".".repeat(1 + k % 3); });
+    if (!got.length) throw new Error("没解析出来，先把人设写具体一点");
+    const n = got[0]; let filled = 0;
+    const KEEP = new Set(["id","is_lead","avatar_url","generated","name"]);   // 这几样绝不让 AI 碰
+    for (const k of Object.keys(n)) {
+      if (KEEP.has(k)) continue;
+      const cur = c[k];
+      const empty = cur==null || cur==="" || (Array.isArray(cur) && !cur.length)
+        || (typeof cur==="object" && !Array.isArray(cur) && !Object.keys(cur||{}).length);
+      if (empty && n[k]!=null && n[k]!=="") { c[k] = n[k]; filled++; }
+    }
+    msg.textContent = filled ? `✓ 补了 ${filled} 个空白字段（记得保存）` : "这张卡没有空白可补";
+    _openChar = i;   // 保住当前展开的卡 (renderChars 只按 _openChar 展开)
+    renderChars();
   } catch(e) { msg.textContent = "✗ " + e.message; }
 }
 function delChar(i){ story.characters.splice(i,1); renderAll(); }
@@ -983,6 +1037,7 @@ function renderChars(){
       <div class="bar" style="margin:2px 0 8px">
         <label class="sm ghost" style="cursor:pointer;margin:0;padding:4px 10px;border:1px solid #292217;border-radius:8px">📷 上传照片<input type="file" accept="image/*" style="display:none" onchange="uploadCharPhoto(${i},this)"></label>
         <button class="sm ghost" onclick="genCharAvatar(${i})">🎨 AI 画一张（跟剧本画风）</button>
+        <button class="sm ghost" onclick="fillChar(${i})">🪄 AI 补全空白</button>
         <span class="muted" id="avmsg_${i}" style="font-size:12px"></span>
       </div>
       <div class="row2">

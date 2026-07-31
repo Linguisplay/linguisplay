@@ -50,6 +50,14 @@
       成品本：AI 全自动出可玩的选项式本子。引擎本：AI 起草角色/三幕/秘密，进工坊精修后可玩真互动（秘密门控、自由行动）。</p>
     <label>作品标题</label>
     <input id="title" maxlength="24" placeholder="给你的 galgame 起个名字">
+    <div id="engineOnly" style="display:none">
+      <label>演出语言</label>
+      <select id="dLang">
+        <option value="">自动（按素材文字判断）</option>
+        <option value="zh">中文</option>
+        <option value="en">English</option>
+      </select>
+    </div>
     <div id="paneA">
       <label>故事文本（≥200 字；越具体，人物和画面越准）</label>
       <textarea id="src" placeholder="把你的故事贴在这里——短篇小说、剧本、一段完整的情节都可以。"></textarea>
@@ -152,6 +160,8 @@ function setOut(o){
   document.getElementById("outEngine").style.borderColor = o==="engine" ? "#8ea2ff" : "";
   // 引擎本用不上 gal 专属项 (画风/文风/配图/18+) — 藏起来别误导
   document.getElementById("galOnly").style.display = o==="gal" ? "" : "none";
+  // 演出语言只有引擎本认 (gal 成品管线写死转写中文) — 同理只在引擎本露出
+  document.getElementById("engineOnly").style.display = o==="engine" ? "" : "none";
   document.getElementById("go").textContent = o==="gal" ? "开始建造" : "开始起草（完成后进工坊精修）";
 }
 setOut("gal");
@@ -163,7 +173,8 @@ async function build() {
     go.disabled = true; go.textContent = "AI 起草中…（角色→三幕→秘密→自检）";
     try {
       const jb = await j("/stories/draft_engine", { method: "POST",
-        body: JSON.stringify({ text, title: $id("title").value.trim() }) });
+        body: JSON.stringify({ text, title: $id("title").value.trim(),
+                               language: $id("dLang").value }) });
       const t = setInterval(async () => {
         try {
           const r = await j(`/stories/draft_engine/${jb.job}`);

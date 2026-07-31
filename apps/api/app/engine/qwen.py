@@ -3749,7 +3749,8 @@ class QwenLLM:
                '"locations":[{"name":"≤6字地名","detail":"≤40字 具体陈设与光线",'
                '"exits":["相邻地点名"]}] 共2~4个、出口必须互相指向真实存在的地点名,'
                '"acts":[{"title":"≤8字幕题","goal":"≤30字 这一幕要让玩家经历什么"}] 恰好3幕，'
-               "节奏为 起-承-合。全部用作者素材里的元素，不要发明无关内容。")
+               "节奏为 起-承-合。全部用作者素材里的元素，不要发明无关内容。"
+               + _lang_rule(prompt))
         import json as _json
         try:
             resp = _post_chat(self._url, self._key,
@@ -3782,7 +3783,8 @@ class QwenLLM:
                "（第几幕起可解锁，层越深越晚）,"
                '"endings":[{"kind":"good或bad","title":"≤8字","text":"60~120字结局文",'
                f'"act_min":{max(1, len(acts))}}}] 1~2个。'
-               "秘密必须从概要里长出来，不要发明无关内容。")
+               "秘密必须从概要里长出来，不要发明无关内容。"
+               + _lang_rule(prompt))
         import json as _json
         try:
             resp = _post_chat(self._url, self._key,
@@ -3818,7 +3820,8 @@ class QwenLLM:
                '"bio_layers":[{"closeness_min":25,"text":"≤80字 熟了才知道的过往"}]}]}。'
                "规矩：只从文字里来+贴文字口吻的合理推断，拿不准的字段留空或省略，绝不硬编；"
                "文字里有几个人就出几张卡（最多6张）；traits 三轴 1~5 分（3=常人）；"
-               "台词范例和 voice_print 都要能一句认出是谁，几张卡之间不许互相撞腔调；不用破折号。")
+               "台词范例和 voice_print 都要能一句认出是谁，几张卡之间不许互相撞腔调；不用破折号。"
+               + _lang_rule(prompt))
         import json as _json
         u = _json.dumps({"世界观(贴年代与口吻)": prompt.get("world") or "",
                          "文风": prompt.get("style") or "",

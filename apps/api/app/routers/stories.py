@@ -169,6 +169,18 @@ class CharBlobInput(BaseModel):
     text: str = ""
     world: str = ""    # 剧本世界观随行, 解析出的卡贴世界的年代与口吻
     style: str = ""
+    # 🌐 演出语言随行: 起草曾写死 "zh", 英文题材起草进编辑器语言就"消失"回中文
+    # (Yi 实弹 2026-07-31)。留空 = 按素材文字自动判。
+    language: Optional[str] = None
+
+
+def _guess_lang(text: str) -> str:
+    """素材大半是 ASCII 就当英文本子起草。只在作者没明说时兜底。"""
+    t = (text or "").strip()
+    if not t:
+        return "zh"
+    ascii_n = sum(1 for ch in t if ord(ch) < 128)
+    return "en" if ascii_n / len(t) > 0.6 else "zh"
 
 
 def _sanitize_cards(out: dict) -> list[dict]:
@@ -205,19 +217,21 @@ def parse_characters(body: CharBlobInput, user: User = Depends(current_user)):
     import time as _t
     import uuid as _uuid
     text = (body.text or "").strip()[:6000]
-    if len(text) < 20:
-        raise HTTPException(400, "文字太短，至少给一两句描述")
+    if len(text) < 8:   # 「一句话加角色」也走这条路, 8 字就够起一张卡
+        raise HTTPException(400, "文字太短，至少给一句描述")
     jid = _uuid.uuid4().hex[:12]
     _PARSE_JOBS[jid] = {"status": "working", "at": _t.time(), "uid": user.id}
     while len(_PARSE_JOBS) > _PARSE_CAP:   # 台账限容: 最老的先走
         _PARSE_JOBS.pop(next(iter(_PARSE_JOBS)), None)
     world, style = (body.world or "")[:400], (body.style or "")[:160]
+    lang = (body.language or "").strip() or _guess_lang(text)
 
     def _work():
         from ..engine.llm import get_llm
         try:
             out = get_llm().generate({"char_from_text": True, "text": text,
-                                      "world": world, "style": style}) or {}
+                                      "world": world, "style": style,
+                                      "language": lang}) or {}
         except Exception:
             out = {}
         cards = _sanitize_cards(out)
@@ -305,6 +319,7 @@ def draft_engine(body: CharBlobInput, user: User = Depends(current_user)):
         _PARSE_JOBS.pop(next(iter(_PARSE_JOBS)), None)
     uid = user.id
     utitle = (body.title or "").strip()[:24]   # 作者填了标题就尊重
+    lang = (body.language or "").strip() or _guess_lang(text)
 
     def _work():
         import json as _json
@@ -315,11 +330,13 @@ def draft_engine(body: CharBlobInput, user: User = Depends(current_user)):
         job = _PARSE_JOBS.get(jid)
         try:
             llm = get_llm()
-            sk = llm.generate({"engine_skeleton": True, "text": text}) or {}
+            sk = llm.generate({"engine_skeleton": True, "text": text,
+                               "language": lang}) or {}
             if not (sk.get("title") and sk.get("acts")):
                 raise ValueError("骨架没起出来，换一段更具体的素材试试")
             cards = _sanitize_cards(llm.generate({"char_from_text": True, "text": text,
-                                                  "world": sk.get("world_long") or ""}) or {})
+                                                  "world": sk.get("world_long") or "",
+                                                  "language": lang}) or {})
             # id 铸造 (服务端确定性), 名字→id 映射供秘密归属
             chars = []
             for i, c in enumerate(cards[:5]):
@@ -341,7 +358,8 @@ def draft_engine(body: CharBlobInput, user: User = Depends(current_user)):
             sec_out = llm.generate({"engine_secrets": True,
                                     "synopsis": sk.get("synopsis") or "",
                                     "characters": chars,
-                                    "acts": [a["title"] for a in acts]}) or {}
+                                    "acts": [a["title"] for a in acts],
+                                    "language": lang}) or {}
             n_acts = max(1, len(acts))
             secrets, fi = [], 0
             for si, s in enumerate((sec_out.get("secrets") or [])[:3]):
@@ -384,7 +402,7 @@ def draft_engine(body: CharBlobInput, user: User = Depends(current_user)):
                                               "required_flags": {}}})
             payload = {
                 "title": utitle or str(sk.get("title") or "未命名草稿")[:24],
-                "language": "zh", "visibility": "private",
+                "language": lang, "visibility": "private",
                 "one_liner": str(sk.get("one_liner") or "")[:40],
                 "synopsis": str(sk.get("synopsis") or "")[:400],
                 "world_long": str(sk.get("world_long") or "")[:600],
