@@ -91,7 +91,19 @@
   .door span { display: block; margin-top: 4px; font-size: 11.5px; color: var(--dim); line-height: 1.55; }
   .stub { display: flex; align-items: center; gap: 13px; margin: 10px 0;
     background: rgba(29,28,25,.88); border: .5px solid #201c15; border-radius: 14px;
-    padding: 12px 10px 12px 15px; cursor: pointer; transition: transform .12s ease; }
+    padding: 12px 10px 12px 15px; cursor: pointer; transition: transform .12s ease;
+    position: relative; overflow: hidden; }
+  /* 🎞 景片: 最后停留的场景垫在票根底下, 左重右轻的黑纱保住文字 */
+  .stub .still { position: absolute; inset: 0; background-size: cover;
+    background-position: center; opacity: .5; }
+  .stub .still::after { content: ""; position: absolute; inset: 0;
+    background: linear-gradient(90deg, rgba(18,15,11,.96) 26%, rgba(18,15,11,.62)); }
+  .stub .act, .stub .mid, .stub .ops { position: relative; }
+  .stub .faces { display: flex; align-items: center; margin-top: 6px; }
+  .stub .faces img { width: 23px; height: 23px; border-radius: 50%; object-fit: cover;
+    object-position: top; border: 1px solid rgba(216,181,122,.45); margin-right: -7px;
+    background: #201c15; }
+  .stub .faces .where { font-size: 11px; color: var(--dim); margin-left: 14px; }
   .stub:active { transform: scale(.985); }
   .stub .act { flex: 0 0 auto; min-width: 34px; text-align: center;
     font-family: "Source Han Serif SC","Noto Serif CJK SC","Songti SC",Georgia,serif;
@@ -843,6 +855,18 @@ body.dread #dread { opacity:1; }
 .castitem .cinfo { color:#a79e8c; margin-left:3px; cursor:pointer; font-style:normal; }
 .castitem .cinfo:hover { color:#cfc6b4; }
 #charcard { position:fixed; inset:0; z-index:70; background:rgba(0,0,0,.55); display:grid; place-items:center; }
+/* 🖼 立绘大图查看器: 头像→档案卡→大图 的最后一层 */
+#artview { position: fixed; inset: 0; z-index: 240; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 12px; cursor: zoom-out;
+  background: rgba(10,8,5,.92); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  animation: avfade .22s ease; }
+@keyframes avfade { from { opacity: 0; } }
+#artview img { max-width: 94vw; max-height: 82vh; object-fit: contain;
+  filter: drop-shadow(0 16px 44px rgba(0,0,0,.65)); animation: avrise .3s ease; }
+@keyframes avrise { from { transform: translateY(12px); opacity: 0; } }
+#artview .cap { font-family: "Source Han Serif SC","Noto Serif CJK SC","Songti SC",Georgia,serif;
+  color: #f2ead9; font-size: 17px; letter-spacing: .14em; }
+.av.tap, .cportrait.tap { cursor: pointer; }
 #charcard .jcard { width:min(520px, 94vw); max-height:84vh; overflow-y:auto; background:#1c1a18; border:1px solid #2e2820; border-radius:14px; padding:16px 18px; box-shadow:0 12px 48px rgba(0,0,0,.6); }
 #charcard .jbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
 #charcard .jh { color:#d8b57a; font-weight:700; font-size:13px; margin:13px 0 6px; border-bottom:1px dashed #2a2418; padding-bottom:4px; }
@@ -1145,8 +1169,11 @@ let soundOn = true, curBgmMood = null;
 // 聊天头像: name → portrait url (built from the story's full cast so replayed bubbles of
 // dead/absent characters keep their face; cast/here updates merge in emergent characters)
 let avatarMap = {};
+let charIdByName = {};   // 🖼 头像点开档案卡用: 气泡只有名字, 这里换回 id
 function mergeAvatars(list) {
-  (list || []).forEach(c => { if (c && c.name && c.avatar_url) avatarMap[c.name] = c.avatar_url; });
+  (list || []).forEach(c => { if (!c || !c.name) return;
+    if (c.avatar_url) avatarMap[c.name] = c.avatar_url;
+    if (c.id) charIdByName[c.name] = c.id; });
 }
 let curScene = null, curLocId = null; let beasts = [];  // for backdrop: last scene + current place id
 let curClock = null, curLocData = null; // ⏳ the diegetic clock + last place (placebar redraws)
@@ -1347,12 +1374,19 @@ async function afterAuth() {
         const who = r.mode === "god" ? B("旁观", "watching") : (r.player_character_name ? B(`扮演${r.player_character_name}`, `as ${r.player_character_name}`) : "");
         const tag = r.ended ? B("已完结 · 可回看", "finished · replayable") : "";
         const prev = (r.last_beat_preview || "").slice(0, 60);
-        div.innerHTML =
+        // 🎞 景片 + 在场的脸: 存档长什么样, 打开前就看得见
+        const still = r.scene_bg ? `<div class="still" style="background-image:url('${r.scene_bg}')"></div>` : "";
+        const faces = (r.faces || []).map(f =>
+          `<img src="${f.avatar}" alt="" title="${escapeHtml(f.name)}" onerror="this.remove()">`).join("");
+        const facesRow = (faces || r.scene_name)
+          ? `<div class="faces">${faces}${r.scene_name ? `<span class="where">${escapeHtml(r.scene_name)}</span>` : ""}</div>` : "";
+        div.innerHTML = still +
           `<div class="act">${r.ended ? "終" : escapeHtml(String(r.act || 1))}` +
             `<small>${r.ended ? B("落幕", "END") : B("幕", "ACT")}</small></div>` +
           `<div class="mid"><b>${escapeHtml(r.story_title)}</b>` +
             `<div class="sub">${escapeHtml([who, tag].filter(Boolean).join(" · "))}</div>` +
             (prev ? `<div class="prev">${escapeHtml(prev)}${(r.last_beat_preview||"").length>60?"…":""}</div>` : "") +
+            facesRow +
           `</div>`;
         const ops = document.createElement("div");
         ops.className = "ops";
@@ -1745,13 +1779,19 @@ async function doLogout() {
 
 // ── rendering ─────────────────────────────────────────
 function avatarColor(name){ let h=0; for(const c of (name||"?")) h=(h*31+c.charCodeAt(0))%360; return `hsl(${h},45%,42%)`; }
-function avatarEl(name, url){
+function avatarEl(name, url, openable){
   const a = document.createElement("div"); a.className = "av";
   a.style.background = avatarColor(name); a.textContent = (name||"?").slice(0,1);
   if (url) {
     const img = document.createElement("img");
     img.src = url; img.alt = name || "";
     img.onload = () => { a.textContent = ""; a.appendChild(img); };
+  }
+  // 🖼 头像可点开 (Yi): 气泡/打字条上的脸 → 档案卡 (卡上再点肖像看大图立绘)
+  if (openable) {
+    a.classList.add("tap");
+    a.onclick = (e) => { const cid = charIdByName[name];
+      if (!cid || !runId) return; e.stopPropagation(); openCharCard(cid); };
   }
   return a;
 }
@@ -1885,7 +1925,7 @@ function attachMood(row, mood) {
 // unmistakably "words said out loud" vs the narration band.
 function makeRow(side, name, text, withWho, spoken) {
   const row = document.createElement("div"); row.className = "row " + side + (side==="left"?" npc":" me");
-  row.appendChild(avatarEl(name, avatarMap[name]));
+  row.appendChild(avatarEl(name, avatarMap[name], side === "left"));
   const bub = document.createElement("div"); bub.className = "bubble";
   const body = spoken ? `<span class="said">${escapeHtml(text)}</span>` : escapeHtml(text);
   bub.innerHTML = (withWho ? `<div class="who">${escapeHtml(name)}</div>` : "") + body;
@@ -3040,6 +3080,24 @@ function barHtml(label, val, min, max, color) {
   const pct = Math.max(0, Math.min(100, ((val - min) / (max - min)) * 100));
   return `<div class="cbar"><span>${label}</span><span class="ctrack"><span class="cfill" style="width:${pct}%;background:${color}"></span></span><b>${val}</b></div>`;
 }
+// 🖼 立绘大图: 档案卡上点肖像 → 全屏看这张脸 (立绘 → 源图 → 头像三级回落)
+function openArtView(cid, name) {
+  const old = document.getElementById("artview"); if (old) old.remove();
+  const ov = document.createElement("div"); ov.id = "artview";
+  ov.onclick = () => ov.remove();
+  const img = document.createElement("img");
+  img.dataset.stage = "sprite";
+  img.onerror = () => {
+    if (img.dataset.stage === "sprite") { img.dataset.stage = "src"; img.src = `/scene/sprite/${cid}_src.jpg`; }
+    else if (img.dataset.stage === "src") { img.dataset.stage = "av"; img.src = `/scene/avatar/${cid}.jpg` + _sv(cid); }
+    else ov.remove();   // 一张图都没有 — 静默收场
+  };
+  img.src = `/scene/sprite/${cid}.webp` + _sv(cid);
+  const cap = document.createElement("div"); cap.className = "cap";
+  cap.textContent = name || "";
+  ov.append(img, cap);
+  document.body.appendChild(ov);
+}
 async function openCharCard(cid) {
   if (!runId) return;
   UIS.flip();
@@ -3062,7 +3120,7 @@ async function openCharCard(cid) {
   const bio = (p.bio || []).map(b => `<div class="jfrag">${escapeHtml(b)}</div>`).join("")
     + (p.bio_next_at != null ? `<div class="jlocked">${B(`🔒 关系再近一点（亲近≥${p.bio_next_at}），你会更了解TA…`, `🔒 Get closer (closeness ≥${p.bio_next_at}) to learn more…`)}</div>` : "");
   const nextTxt = rel.next && rel.next.name ? `<span class="jwho">${B(`（差${rel.next.to_next}到「${rel.next.name}」）`, ` (${rel.next.to_next} to “${rel.next.name}”)`)}</span>` : "";
-  const av = p.avatar_url ? `<img class="cportrait" src="${p.avatar_url}${_sv(p.id)}" alt="" onerror="this.style.display=\'none\'">`
+  const av = p.avatar_url ? `<img class="cportrait tap" src="${p.avatar_url}${_sv(p.id)}" alt="" title="${B("看大图", "View art")}" data-n="${escapeHtml(p.name || "")}" onclick="openArtView('${p.id}', this.dataset.n)" onerror="this.style.display=\'none\'">`
                           : `<div class="cportrait cletter" style="background:${avatarColor(p.name)}">${escapeHtml((p.name||"?").slice(0,1))}</div>`;
   const followBtn = (!p.dead && playMode !== "god")
     ? `<button class="ghost" style="font-size:12px;padding:5px 10px" onclick="toggleFollow('${p.id}', ${!p.following}); document.getElementById('charcard').remove()">${p.following ? B("🚶同行中 · 分开走", "🚶Together · part ways") : (p.can_follow ? B("邀TA同行", "Invite along") : B("🔒关系不够", "🔒Not close enough"))}</button>` : "";
@@ -3493,7 +3551,7 @@ function hideTyping(){ if (typingEl){ typingEl.remove(); typingEl = null; } }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 function makeTypingRow(side, name) {
   const row = document.createElement("div"); row.className = "row " + side + (side==="left"?" npc":" me");
-  row.appendChild(avatarEl(name, avatarMap[name]));
+  row.appendChild(avatarEl(name, avatarMap[name], side === "left"));
   const bub = document.createElement("div"); bub.className = "bubble";
   const who = document.createElement("div"); who.className = "who"; who.textContent = name; bub.appendChild(who);
   // .said → CSS adds the 「」 quotes, so streamed speech looks identical to replayed speech
@@ -3834,6 +3892,7 @@ function vnHudList() {
     const im = document.createElement("img");
     im.src = (avatarMap[c.name]) || `/scene/avatar/${c.id}.jpg` + _sv(c.id);
     im.onerror = () => im.remove();
+    im.onclick = (e) => { e.stopPropagation(); openCharCard(c.id); };   // 🖼 点脸看档案
     const nm = document.createElement("span"); nm.textContent = c.name;
     row.append(im, nm);
     // 🚶 邀同行 (Yi 报障: VN 里没了入口) — 聊天模式角色条的同款开关搬进名单

@@ -473,10 +473,33 @@ def list_runs(archived: bool = False,
     )
     out = []
     for r in rows:
-        story = (r.pinned_content or {}).get("story", {})
+        content = r.pinned_content or {}
+        story = content.get("story", {})
         last = r.beats[-1].text if r.beats else None
         st = r.state or {}
         pcid = st.get("player_character_id")
+        # 🎬 存档卡视觉化: 最后停留的场景图 + 在场的脸。单档算坏绝不拖垮整张列表。
+        scene_bg = scene_name = None
+        faces: list[dict] = []
+        try:
+            loc = runtime.current_location(content, st)
+            if loc and loc.get("id") and (_BG_DIR / f"{loc['id']}.jpg").exists():
+                scene_bg = f"/scene/bg/{loc['id']}.jpg"
+                scene_name = loc.get("name") or None
+            roster = runtime.scene_cast(
+                content, st,
+                exclude_id=pcid if st.get("mode", "character") == "character" else None)
+            withface = [c for c in roster if c.get("avatar_url")]
+            faces = [{"id": c["id"], "name": c.get("name") or "",
+                      "avatar": c["avatar_url"]}
+                     for c in (withface or roster)[:3] if c.get("avatar_url")]
+            if not faces:   # 在场没有带脸的 → 拿班底的脸垫上 (存档卡不能光秃秃)
+                faces = [{"id": c.get("id"), "name": c.get("name") or "",
+                          "avatar": c.get("avatar_url")}
+                         for c in (story.get("characters") or [])
+                         if c.get("avatar_url") and c.get("id") != pcid][:3]
+        except Exception:
+            pass
         out.append(
             RunSummary(
                 id=r.id,
@@ -488,8 +511,11 @@ def list_runs(archived: bool = False,
                 unread=False,
                 act=int(st.get("act", 1) or 1),
                 mode=st.get("mode", "character"),
-                player_character_name=(runtime._char_name(r.pinned_content or {}, pcid) if pcid else None),
+                player_character_name=(runtime._char_name(content, pcid) if pcid else None),
                 ended=bool(st.get("ended")),
+                scene_bg=scene_bg,
+                scene_name=scene_name,
+                faces=faces,
                 updated_at=r.updated_at,
             )
         )

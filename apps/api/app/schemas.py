@@ -568,6 +568,10 @@ class RunSummary(BaseModel):
     mode: str = "character"
     player_character_name: Optional[str] = None
     ended: bool = False
+    # 🎬 存档卡视觉化 (Yi): 最后停留的场景 + 在场的脸 — 存档长什么样, 打开前就看得见
+    scene_bg: Optional[str] = None      # /scene/bg/<lid>.jpg (文件真存在才给)
+    scene_name: Optional[str] = None
+    faces: list[dict] = []              # [{id, name, avatar}] ≤3, 有头像的优先
 
 
 class GoalIn(BaseModel):
