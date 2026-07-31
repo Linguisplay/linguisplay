@@ -65,6 +65,49 @@
   .scard .meta span { font-size: 11px; padding: 3px 10px; border-radius: 999px;
     background: rgba(24,20,14,.62); border: .5px solid rgba(216,181,122,.3); color: #dcccaa;
     backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+  /* ── 🎬 大厅 = 今夜排片表 (Yi: 主界面要有设计感) ─────────────────────────
+     法典之内做深: 影棚黑上直接立卡 (撤掉 #pick 自己那层双重盒子), 宋体大题配
+     钨丝金眉题, 「继续」是戏票存根 (宋体幕数当结构), 「新片」维持 hero 海报卡。
+     强调色只有钨丝金一支 — 法典禁多色。 */
+  #pick { background: transparent; border: 0; padding: 18px 16px 30px; margin: 0; }
+  .marquee { margin: 8px 2px 4px; }
+  .marquee .eyebrow { font-size: 10.5px; letter-spacing: .34em; color: var(--gold);
+    opacity: .8; margin-bottom: 7px; }
+  .marquee .mtitle { font-family: "Source Han Serif SC","Noto Serif CJK SC","Songti SC",Georgia,serif;
+    font-size: 26px; line-height: 1.35; letter-spacing: .05em; color: #f2ead9;
+    text-wrap: balance; margin: 0; }
+  .marquee::after { content: ""; display: block; width: 44px; height: 2px;
+    margin-top: 12px; background: linear-gradient(90deg, var(--gold), transparent); }
+  .sechead { display: flex; align-items: center; gap: 12px; margin: 26px 2px 4px; }
+  .sechead b { font-size: 11px; letter-spacing: .3em; color: var(--gold);
+    font-weight: 600; white-space: nowrap; opacity: .9; }
+  .sechead i { flex: 1; border-top: .5px solid var(--line); }
+  .duet { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 14px 0 2px; }
+  .door { background: rgba(32,28,21,.6); border: .5px solid var(--line);
+    border-radius: 14px; padding: 13px 14px 12px; cursor: pointer;
+    transition: transform .12s ease, border-color .2s ease; }
+  .door:active { transform: scale(.97); border-color: rgba(216,181,122,.5); }
+  .door b { display: block; color: var(--paper); font-size: 14px; }
+  .door span { display: block; margin-top: 4px; font-size: 11.5px; color: var(--dim); line-height: 1.55; }
+  .stub { display: flex; align-items: center; gap: 13px; margin: 10px 0;
+    background: rgba(29,28,25,.88); border: .5px solid #201c15; border-radius: 14px;
+    padding: 12px 10px 12px 15px; cursor: pointer; transition: transform .12s ease; }
+  .stub:active { transform: scale(.985); }
+  .stub .act { flex: 0 0 auto; min-width: 34px; text-align: center;
+    font-family: "Source Han Serif SC","Noto Serif CJK SC","Songti SC",Georgia,serif;
+    font-size: 23px; line-height: 1; color: var(--gold); }
+  .stub .act small { display: block; font-size: 8.5px; letter-spacing: .22em;
+    color: var(--dim); margin-top: 4px; font-family: inherit; }
+  .stub .mid { flex: 1; min-width: 0; }
+  .stub .mid b { color: var(--paper); font-size: 14.5px; }
+  .stub .sub { font-size: 11.5px; color: var(--dim); margin-top: 2px; }
+  .stub .prev { font-size: 12px; color: #cfc6b4; opacity: .78; margin-top: 5px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stub .ops { flex: 0 0 auto; display: flex; flex-direction: column; gap: 10px;
+    padding: 0 4px; color: #857c6b; font-size: 13px; text-align: center; }
+  .stub .ops a { padding: 1px 4px; }
+  .stub.done { opacity: .82; }
+  .stub.done .act { color: var(--dim); }
   #vnname.pop { animation: nmpop .38s ease; }
   @keyframes nmpop { from { opacity: 0; transform: translateY(6px); } }
   #vntext.hang { text-indent: -.62em; }
@@ -892,9 +935,12 @@ body.dread #dread { opacity:1; }
     </p>
   </div>
 
-  <!-- story picker -->
+  <!-- story picker: 今夜排片表 -->
   <div id="pick" class="card hidden">
-    <h3 style="margin-top:0;font-family:'Source Han Serif SC','Noto Serif CJK SC','Songti SC',Georgia,serif;font-size:24px;letter-spacing:.06em;color:#f2ead9">今晚，走进谁的生命？</h3>
+    <div class="marquee">
+      <div class="eyebrow">今夜排片</div>
+      <h3 class="mtitle">今晚，走进谁的生命？</h3>
+    </div>
     <div id="stories"></div>
   </div>
 
@@ -1007,6 +1053,7 @@ const EN = {
   "密码（≥8位）": "Password (8+ chars)",
   "提示：直接点「注册」就能用上面的默认账号开玩。": "Tip: just hit Sign up to play with the demo account above.",
   "今晚，走进谁的生命？": "Whose life will you step into tonight?",
+  "今夜排片": "TONIGHT'S PROGRAMME",
   "继续你的故事": "Continue your stories", "选择玩法": "Choose how to play",
   "✏️ 编辑这个剧本": "✏️ Edit this story", "← 换剧本": "← Back",
   "扮演其中一个角色，亲自下场：": "Step in as one of them:",
@@ -1265,51 +1312,62 @@ async function afterAuth() {
   if (uiLang === "en" && myName === "我") myName = "Me";
   const page = await j("/stories");
   stories.innerHTML = "";
-  // 🎀 galgame 书架入口: 自制可玩本子的统一门面 (/gal)
+  // 🚪 两扇门并排 (排片表设计): 书架 + 创作 — 它们是门不是内容, 收成一行
+  const duet = document.createElement("div");
+  duet.className = "duet";
   const galCard = document.createElement("div");
-  galCard.className = "card runcard";
-  galCard.style.cssText = "margin:8px 0; cursor:pointer";
-  galCard.innerHTML = `<b>${IC("book", 15)} Galgame ${B("书架", "shelf")}</b> <span class="muted">` +
-    `${B("自己做的可玩本子都在这里 →", "Your playable galgames →")}</span>`;
+  galCard.className = "door";
+  galCard.innerHTML = `<b>${IC("book", 14)} Galgame ${B("书架", "shelf")}</b>` +
+    `<span>${B("自己做的可玩本子 →", "Your playable galgames →")}</span>`;
   galCard.onclick = () => location.href = "/gal";
-  stories.appendChild(galCard);
+  duet.appendChild(galCard);
   // ✍️ 创作入口 (创作 UX 首期 D): 从前必须手敲 /studio 网址 — 断链治理
   const makeCard = document.createElement("div");
-  makeCard.className = "card runcard";
-  makeCard.style.cssText = "margin:8px 0; cursor:pointer";
-  makeCard.innerHTML = `<b>${IC("flag", 15)} ${B("创作剧本", "Create a story")}</b> <span class="muted">` +
-    `${B("AI 起草或从模板开工，做一个你自己的世界 →", "Draft with AI or start from a template →")}</span>`;
+  makeCard.className = "door";
+  makeCard.innerHTML = `<b>${IC("flag", 14)} ${B("创作剧本", "Create a story")}</b>` +
+    `<span>${B("AI 起草，做你自己的世界 →", "Draft with AI, build your own world →")}</span>`;
   makeCard.onclick = () => location.href = "/studio";
-  stories.appendChild(makeCard);
+  duet.appendChild(makeCard);
+  stories.appendChild(duet);
+  const sechead = (label) => {
+    const h = document.createElement("div");
+    h.className = "sechead"; h.innerHTML = `<b>${escapeHtml(label)}</b><i></i>`;
+    return h;
+  };
   // 继续你的故事: existing runs come FIRST — the relationships you built are the game
   try {
     const runs = await j("/runs");
     if (runs.length) {
-      const h = document.createElement("p");
-      h.className = "muted"; h.style.margin = "4px 0"; h.textContent = t("继续你的故事");
+      const h = sechead(t("继续你的故事"));
       stories.appendChild(h);
       runs.slice(0, 8).forEach(r => {
+        // 🎟 戏票存根: 左侧宋体幕数是结构不是装饰 (它就是你的进度)
         const div = document.createElement("div");
-        div.className = "card runcard"; div.style.margin = "8px 0"; div.style.cursor = "pointer";
+        div.className = "stub" + (r.ended ? " done" : "");
         const who = r.mode === "god" ? B("旁观", "watching") : (r.player_character_name ? B(`扮演${r.player_character_name}`, `as ${r.player_character_name}`) : "");
-        const tag = r.ended ? B("（已完结·可回看）", "(finished · replayable)") : B(`第${r.act}幕`, `Act ${r.act}`);
-        const prev = (r.last_beat_preview || "").slice(0, 42);
-        div.innerHTML = `<b>${escapeHtml(r.story_title)}</b> <span class="muted">${escapeHtml(who)} · ${escapeHtml(tag)}</span>` +
-          `<div class="muted" style="margin-top:4px">${escapeHtml(prev)}${(r.last_beat_preview||"").length>42?"…":""}</div>`;
+        const tag = r.ended ? B("已完结 · 可回看", "finished · replayable") : "";
+        const prev = (r.last_beat_preview || "").slice(0, 60);
+        div.innerHTML =
+          `<div class="act">${r.ended ? "終" : escapeHtml(String(r.act || 1))}` +
+            `<small>${r.ended ? B("落幕", "END") : B("幕", "ACT")}</small></div>` +
+          `<div class="mid"><b>${escapeHtml(r.story_title)}</b>` +
+            `<div class="sub">${escapeHtml([who, tag].filter(Boolean).join(" · "))}</div>` +
+            (prev ? `<div class="prev">${escapeHtml(prev)}${(r.last_beat_preview||"").length>60?"…":""}</div>` : "") +
+          `</div>`;
+        const ops = document.createElement("div");
+        ops.className = "ops";
+        const hid = document.createElement("a");
+        hid.textContent = "🙈"; hid.title = B("隐藏这段进度（不删除，可在下方「已隐藏的局」里找回）", "Hide this run (kept — recover under Hidden runs)");
+        hid.onclick = async (e) => { e.stopPropagation();
+          await j(`/runs/${r.id}/archive?archived=true`, { method:"POST" }); div.remove(); };
+        ops.appendChild(hid);
         const del = document.createElement("a");
         del.textContent = "✕"; del.title = B("删除这段进度", "Delete this run");
-        del.style.cssText = "float:right; color:#a79e8c; padding:0 4px";
         del.onclick = async (e) => { e.stopPropagation();
           if (!confirm(B(`删除《${r.story_title}》的这段进度？关系和已揭开的真相都会丢失。`, `Delete this run of “${r.story_title}”? Relationships and uncovered truths will be lost.`))) return;
           await j(`/runs/${r.id}`, { method:"DELETE" }); div.remove(); };
-        div.prepend(del);
-        // 🙈 隐藏而非删除: leaves this list, keeps everything; recover via 已隐藏的局
-        const hid = document.createElement("a");
-        hid.textContent = "🙈"; hid.title = B("隐藏这段进度（不删除，可在下方「已隐藏的局」里找回）", "Hide this run (kept — recover under Hidden runs)");
-        hid.style.cssText = "float:right; color:#a79e8c; padding:0 4px";
-        hid.onclick = async (e) => { e.stopPropagation();
-          await j(`/runs/${r.id}/archive?archived=true`, { method:"POST" }); div.remove(); };
-        div.prepend(hid);
+        ops.appendChild(del);
+        div.appendChild(ops);
         div.onclick = () => resumeRun(r.id);
         stories.appendChild(div);
       });
@@ -1323,20 +1381,24 @@ async function afterAuth() {
           if (!hidden.length) { pushToast(B("没有隐藏的局", "No hidden runs"), "", 1800); return; }
           hidden.forEach(r => {
             const d = document.createElement("div");
-            d.className = "card runcard"; d.style.cssText = "margin:8px 0; opacity:.75";
-            d.innerHTML = `<b>${escapeHtml(r.story_title)}</b> <span class="muted">${B(`第${r.act}幕 · 已隐藏`, `Act ${r.act} · hidden`)}</span>`;
+            d.className = "stub done";
+            d.innerHTML = `<div class="act">${escapeHtml(String(r.act || 1))}<small>${B("幕", "ACT")}</small></div>` +
+              `<div class="mid"><b>${escapeHtml(r.story_title)}</b>` +
+              `<div class="sub">${B("已隐藏", "hidden")}</div></div>`;
+            const ops = document.createElement("div");
+            ops.className = "ops";
             const un = document.createElement("a");
-            un.textContent = B("恢复", "Restore"); un.style.cssText = "float:right; color:#8fdcb4; padding:0 4px; font-size:12px";
+            un.textContent = B("恢复", "Restore"); un.style.cssText = "color:#8fdcb4; font-size:12px";
             un.onclick = async (e) => { e.stopPropagation();
               await j(`/runs/${r.id}/archive?archived=false`, { method:"POST" }); afterAuth(); };
-            d.prepend(un);
+            ops.appendChild(un);
+            d.appendChild(ops);
             stories.insertBefore(d, h2);
           });
         } catch (e) {}
       };
       stories.appendChild(shelf);
-      const h2 = document.createElement("p");
-      h2.className = "muted"; h2.style.margin = "14px 0 4px"; h2.textContent = t("开一段新的");
+      const h2 = sechead(t("开一段新的"));
       stories.appendChild(h2);
     }
   } catch (e) {}
