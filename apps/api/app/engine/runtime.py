@@ -3144,7 +3144,15 @@ _SLOT_FLAVOR_EN = {"晨": "In the morning light", "午": "Under the midday sun",
 
 
 def _first_sentence(s: str, cap: int = 48) -> str:
-    return (s or "").strip().replace("\n", " ").split("。")[0][:cap]
+    """第一句, 中西通吃: 旧版只认「。」, 英文卡整段落进 [:cap] 从单词中间劈断
+    (Golden Hour 进场旁白实弹)。西文句尾 = .!? 后接空白; 超长截断退到空格。"""
+    s = (s or "").strip().replace("\n", " ")
+    s = re.split(r"。|(?<=[.!?])\s+", s, 1)[0].strip()
+    if len(s) > cap:
+        cut = s.rfind(" ", 0, cap)
+        s = s[:cut if cut > cap // 2 else cap].rstrip()
+    # 「。」在 split 时就丢了; 西文句点对齐同一行为 (调用方模板自己补标点, 不对齐会出 "..)")
+    return s.rstrip(".!?")
 
 
 def entrance_beat(content: dict[str, Any], state: dict[str, Any], c: dict[str, Any]) -> dict[str, Any]:
@@ -3158,8 +3166,9 @@ def entrance_beat(content: dict[str, Any], state: dict[str, Any], c: dict[str, A
     if en:
         bits = "; ".join(b for b in (role, look) if b)
         lead = f"{flavor}, " if flavor else ""
+        # 冒号不用破折号 (Yi 忌清单: 少用破折号, game prose 含引擎模板)
         return {"type": "description", "speaker_name": None,
-                "text": f"({lead}{c.get('name')} arrives{(' — ' + bits) if bits else ''}.)"}
+                "text": f"({lead}{c.get('name')} arrives{(': ' + bits) if bits else ''}.)"}
     bits = "，".join(b for b in (role, look) if b)
     lead = f"{flavor}，" if flavor else ""
     return {"type": "description", "speaker_name": None,

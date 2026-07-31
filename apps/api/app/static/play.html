@@ -3465,7 +3465,8 @@ async function typeInto(el, text, ms=22) {
     el.textContent += ch;
     follow();
     // 呼吸分级 (Yi: 高级感): 句末重顿×7, 逗顿×3.5, 破折×5 — 匀速滴答是廉价感
-    const pz = "。！？…".includes(ch) ? 7 : "，、；：".includes(ch) ? 3.5 : (ch === "—" ? 5 : 1);
+    // (西文句读同刑: 英文本子此前全程匀速滴答, 廉价感实弹)
+    const pz = "。！？…!?.".includes(ch) ? 7 : "，、；：,;:".includes(ch) ? 3.5 : (ch === "—" ? 5 : 1);
     await sleep(ms * pz / f);
   }
   el.classList.remove("typing-live");
@@ -4125,21 +4126,28 @@ async function playBeatVN(b, skipLog) {
   box.className = isNarr ? "narr" : "";
   // 📖 分页 (Yi: 一页字太多): 长拍按句读切成 ≤76 字的页, 逐页点击翻
   for (const page of paginate(b.text)) {
+    // 西文一个字符只有中文一半的信息量: 打字与驻留同速会拖成幻灯片
+    const lat = /^[\x00-\x7f]+$/.test(page) ? 0.5 : 1;
     if (vnLiveSeen && vnLiveSeen.includes(page)) {
       // 这一页流式时玩家真读过 (直播只演第一页, 只有它配秒出) — 短驻留不重打
       box.textContent = page;
       if (box.scrollHeight > box.clientHeight + 2) box.scrollTop = box.scrollHeight;
-      await vnWait(500 + page.length * 22);
+      await vnWait(500 + page.length * 22 * lat);
     } else {
-      await typeInto(box, page, isNarr ? 16 : 22);
-      await vnWait(900 + page.length * 55);
+      await typeInto(box, page, (isNarr ? 16 : 22) * lat);
+      await vnWait(900 + page.length * 55 * lat);
     }
   }
 }
 // 一句一页 (Yi 铁律: 分批次出现, 一个句号一次点击 — 古典 ADV 的呼吸感):
-// 句读/分号/换行即翻页; 超长单句硬切; 只有 ≤6 字的碎屑并入上一页
+// 句读/分号/换行即翻页; 超长单句硬切; 只有 ≤6 字的碎屑并入上一页。
+// ⚠️ 英文本子另一把刀: 这套句读一个都切不到西文句号, 旧版只剩 66 字硬切,
+// 一页页从单词中间劈开 (Golden Hour 实弹 2026-07-31)。
 function paginate(text, cap = 66) {
-  const segs = String(text || "").split(/(?<=[。！？…；;\n])/);
+  const t = String(text || "");
+  const ascii = (t.match(/[\x00-\x7f]/g) || []).length / Math.max(1, t.length);
+  if (ascii > 0.7) return paginateLatin(t);
+  const segs = t.split(/(?<=[。！？…；;\n])/);
   const pages = [];
   for (let s of segs) {
     s = s.replace(/\n/g, "");
@@ -4147,6 +4155,30 @@ function paginate(text, cap = 66) {
     while (s.length > cap) { pages.push(s.slice(0, cap)); s = s.slice(cap); }
     if (!s.trim()) continue;
     if (s.trim().length <= 6 && pages.length) pages[pages.length - 1] += s;
+    else pages.push(s);
+  }
+  return pages.length ? pages : [""];
+}
+// 西文分页: 句尾 = .!?… (可带右引号) 后接空白; Mr./Dr. 这类缩写不算句尾;
+// 硬切永远退到最近的空格, 绝不从单词中间劈。cap 156 ≈ 中文 66 字的版面量
+// (西文字符窄一半); 碎屑并页阈值同步放大到 14。流式 vnToken 每个 token 都会
+// 重切一次, 这里必须保持 O(n) 轻量。
+function paginateLatin(t, cap = 156) {
+  // 缩写守卫必须连「.」一起写进 lookbehind (漏掉 \. 整条守卫等于没有, 自测实弹);
+  // 碎屑阈值只收真正的孤词 ("No." "Fine."), 大了会把连续短句黏成一页, 破了一句一页法
+  const segs = t.split(/(?<!\b(?:Mr|Mrs|Ms|Dr|St|vs)\.)(?<!\b[ap]\.m\.)(?<=[.!?…]["']?)\s+/);
+  const pages = [];
+  for (let s of segs) {
+    s = s.replace(/\s+/g, " ").trim();
+    if (!s) continue;
+    while (s.length > cap) {
+      let cut = s.lastIndexOf(" ", cap);
+      if (cut < cap * 0.4) cut = cap;   // 半页内都没空格 (长链接之类) 才硬切
+      pages.push(s.slice(0, cut));
+      s = s.slice(cut).trim();
+    }
+    if (!s) continue;
+    if (s.length <= 8 && pages.length) pages[pages.length - 1] += " " + s;
     else pages.push(s);
   }
   return pages.length ? pages : [""];
