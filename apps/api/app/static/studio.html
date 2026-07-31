@@ -950,7 +950,8 @@ async function uploadLocBg(i, inp){
   const l = story.locations[i];
   const msg = document.getElementById(`bgmsg_${i}`); if(msg) msg.textContent = "上传中…";
   try{
-    if(!story.id) await save(false);            // 上传需要草稿在库 — 自动先存
+    // 无条件先存: 新加的地点不入库, 上传接口一样查无此地 (与角色同病)
+    if(!await save(false)) throw new Error("先保存没成功，看顶部提示");
     const fd = new FormData();
     fd.append("kind","bg"); fd.append("target_id", l.id); fd.append("file", f);
     const r = await fetch(API+`/stories/${story.id}/upload`,{method:"POST",credentials:"include",body:fd});
@@ -961,7 +962,8 @@ async function uploadLocBg(i, inp){
 async function genLocBg(i){
   const l = story.locations[i];
   try{
-    if(!story.id) await save(false);
+    // 无条件先存 (同 uploadLocBg)
+    if(!await save(false)) throw new Error("先保存没成功，看顶部提示");
     const msg = document.getElementById(`bgmsg_${i}`);
     if(msg) msg.textContent = "🎨 排队作画中（约十几秒，画好自动出现）…";
     await j(`/stories/${story.id}/gen_bg/${l.id}`,{method:"POST"});
@@ -977,7 +979,9 @@ async function uploadCharPhoto(i, inp){
   const c = story.characters[i];
   const msg = document.getElementById(`avmsg_${i}`); if(msg) msg.textContent = "上传中…";
   try{
-    if(!story.id) await save(false);            // 上传需要草稿在库 — 自动先存
+    // 无条件先存: 剧本在库但【这张卡】是新加的还没保存, 服务器一样查无此人
+    // (实弹: 一句话加角色后直接点作画 → "这个剧本里没有该角色")
+    if(!await save(false)) throw new Error("先保存没成功，看顶部提示");
     const fd = new FormData();
     fd.append("kind","avatar"); fd.append("target_id", c.id); fd.append("file", f);
     const r = await fetch(API+`/stories/${story.id}/upload`,{method:"POST",credentials:"include",body:fd});
@@ -992,7 +996,8 @@ async function uploadCharPhoto(i, inp){
 async function genCharAvatar(i){
   const c = story.characters[i];
   try{
-    if(!story.id) await save(false);
+    // 无条件先存 (同 uploadCharPhoto): 新加的卡不入库, 作画接口查无此人
+    if(!await save(false)) throw new Error("先保存没成功，看顶部提示");
     const msg = document.getElementById(`avmsg_${i}`);
     if(msg) msg.textContent = "🎨 排队作画中（约十几秒，画好自动出现）…";
     await j(`/stories/${story.id}/gen_avatar/${c.id}`,{method:"POST"});
@@ -1523,7 +1528,7 @@ async function save(publish){
         saveMsg.innerHTML = `<span style="color:#e0968b">🧪 体检未过（${d.count||"?"} 处），修好才能发布：</span>`+
           `<ul style="margin:6px 0 0 18px;color:#ffb9b9">${list}</ul>`+
           (sweepable?`<button class="sm" style="margin-top:8px" onclick="sweepAndPublish()">🧹 一键清理失效引用并重新发布</button>`:"");
-        return;
+        return false;
       }
       if (!r.ok) throw new Error((await r.json().catch(()=>({}))).detail || r.status);
       const pr = await r.json();
@@ -1532,7 +1537,8 @@ async function save(publish){
     }
     else saveMsg.innerHTML=`已保存草稿 ✓ <span class="muted">草稿不上线：点「发布」，改动才会进游戏（且只对新开的档生效）。</span>`;
     renderMedia();
-  }catch(e){ saveMsg.textContent="出错: "+e.message; }
+    return true;   // 调用方 (作画/上传前置保存) 靠这个返回值知道保存有没有真成
+  }catch(e){ saveMsg.textContent="出错: "+e.message; return false; }
 }
 
 // ── 📚 角色卡库：跨剧本的角色（Character.AI 式）。导入 = 复制进当前剧本 ──
