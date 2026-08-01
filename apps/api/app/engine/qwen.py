@@ -1253,7 +1253,8 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                                     "items": {"type": "string"},
                                     "description": "玩家下一步的两个可点建议：玩家第一人称短句"
                                                    "≤16字，第一条顺着刚发生的势头，第二条换个方向"
-                                                   "（可指向别处/别人/动手做事）；贴文风，不用破折号"}
+                                                   "（可指向别处/别人/动手做事）；贴文风，不用破折号；"
+                                                   "必须用剧本的演出语言写（英文本子写英文）"}
         if prompt.get("creatures_here"):
             props["creature_hit"] = {"type": "string", "description":
                                      "若这一轮玩家的攻击【确实打中了】在场生物，填"

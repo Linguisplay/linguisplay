@@ -563,7 +563,15 @@ def real_now_line(content: dict[str, Any], state: dict[str, Any]) -> str:
     c = state.get("clock") or {}
     if not c.get("real"):
         return ""
-    return f"{c.get('date', '')} {c.get('wd', '')} {c.get('real', '')} · {c.get('season', '')}"
+    line = f"{c.get('date', '')} {c.get('wd', '')} {c.get('real', '')} · {c.get('season', '')}"
+    if lang_of(content) == "en":
+        # 🌐 少喂中文质量 (GH 实弹: 英文主拍里中文元数据越多, 结构化字段越容易被带偏)
+        for a, b in (("星期日", "Sun"), ("星期一", "Mon"), ("星期二", "Tue"), ("星期三", "Wed"),
+                     ("星期四", "Thu"), ("星期五", "Fri"), ("星期六", "Sat"),
+                     ("春季", "Spring"), ("夏季", "Summer"), ("秋季", "Autumn"), ("冬季", "Winter"),
+                     ("月", "/"), ("日", "")):
+            line = line.replace(a, b)
+    return line
 
 
 def clock_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
@@ -8510,8 +8518,13 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
         if is_primary:
             flags["dir_ran"] = True   # 主拍在场证明: world_seed 结算凭它区分「真填无」与「没问过」
         if is_primary and directed.get("suggestions"):
-            flags["dir_suggestions"] = [str(x).strip()[:20]
-                                        for x in directed["suggestions"] if str(x).strip()][:2]
+            _sg_items = [str(x).strip()[:20] for x in directed["suggestions"] if str(x).strip()]
+            if lang_of(content) == "en":
+                # 🌐 合同护栏 (GH 实弹 2026-08-01: 英文本子建议 chips 冒中文): _lang_rule
+                # 白纸黑字管着 suggestions, 模型随机违约 → 含中文的建议整条丢弃走兜底,
+                # 宁缺勿错 (兜底 ensure_three_suggestions 有确定性货)
+                _sg_items = [s for s in _sg_items if not re.search(r"[一-鿿]", s)]
+            flags["dir_suggestions"] = _sg_items[:2]
         # 🐲 生物命中报审 → 引擎按骰面裁决入账 (血阶联动在函数里)
         _crh = (directed.get("creature_hit") or "").strip()
         if _crh and not observer:
