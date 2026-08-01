@@ -292,7 +292,7 @@ def settle_pending(content: dict[str, Any], state: dict[str, Any],
             scene = _absent_scene(content, state, char, pr, llm)
             nw["text"] = scene
             runtime.rel_log(state, cid, int(state.get("act", 1) or 1), "promise",
-                            f"你没来。{scene}")
+                            runtime._t(content, f"你没来。{scene}", f"You never came. {scene}"))
             if pend.get("text_due") and runtime.phone_enabled(content):
                 msgs = runtime.compose_message(
                     content, state, char, "stood_up",

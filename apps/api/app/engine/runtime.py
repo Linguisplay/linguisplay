@@ -799,18 +799,30 @@ def _own_rank_line(content: dict[str, Any], state: dict[str, Any], char: dict[st
     if not sandbox_on(content):
         return ""
     e = ensure_npc_rank(content, state, char, llm)
+    en = lang_of(content) == "en"
     bits = []
     if e.get("rank"):
-        line = f"你「{char.get('name', '')}」自己的境界是【{e['rank']}】"
-        pv = cult_view(content, state)
-        if pv and pv.get("rank"):
-            line += f"；对面玩家的境界是【{pv['rank']}】。境界差距就是实力差距，言行要贴住这一点"
-        bits.append(line + "。")
+        if en:
+            line = f"Your own rank on the ladder is [{e['rank']}]"
+            pv = cult_view(content, state)
+            if pv and pv.get("rank"):
+                line += (f"; the player's rank is [{pv['rank']}]. The rank gap IS the power "
+                         "gap; carry it in every word and move")
+        else:
+            line = f"你「{char.get('name', '')}」自己的境界是【{e['rank']}】"
+            pv = cult_view(content, state)
+            if pv and pv.get("rank"):
+                line += f"；对面玩家的境界是【{pv['rank']}】。境界差距就是实力差距，言行要贴住这一点"
+        bits.append(line + ("." if en else "。"))
     money = (((state.get("char_sim") or {}).get(char.get("id")) or {}).get("money"))
     if money is not None:
-        bits.append(f"你身上约有{int(money)}{currency_of(content)}，买卖赊借都从这里出。")
+        bits.append(f"You carry about {int(money)} {currency_of(content)}; deals and loans come out of it."
+                    if en else f"你身上约有{int(money)}{currency_of(content)}，买卖赊借都从这里出。")
     if e.get("secret"):
-        bits.append(f"你心里还藏着一桩【没人知道】的事：{e['secret']}。"
+        bits.append((f"You harbor one thing NOBODY knows: {e['secret']}. It colors your eyes, "
+                     "distance and choices, but you never let it slip unless the story forces it.")
+                    if en else
+                    f"你心里还藏着一桩【没人知道】的事：{e['secret']}。"
                     "它一直影响你的眼神、分寸与选择，但你绝不轻易说破——"
                     "除非剧情把你逼到那一步。")
     return "".join(bits)
@@ -2427,6 +2439,11 @@ def set_suggestions(state: dict[str, Any], items: list[str],
     out: list[str] = []
     for s in items or []:
         t = dedash(str(s or "").strip())
+        # 🎭 视角守卫 (Yi 实弹 2026-08-02 二犯): 建议是【玩家】的下一步, 「你…」开头
+        # 的是角色在劝玩家 — 视角串了, 整条丢, 缺口由 ensure_three_suggestions 垫底。
+        # (玩家第一人称的合法开头是 我…/动词…, 不会以「你/You」起手。)
+        if re.match(r"^(你|請你|请你|You\b|Your\b)", t, re.IGNORECASE):
+            continue
         if t and t not in out:
             out.append(t[:60])
         if len(out) >= 2:
@@ -3659,7 +3676,8 @@ def _apply_fate(content: dict[str, Any], state: dict[str, Any], option_id: str) 
             state["following"] = [f for f in (state.get("following") or []) if f != target]
             void_promises_of(state, target)
             nm = _char_name(content, target) or "TA"
-            rel_log(state, target, int(state.get("act", 1) or 1), "death", f"{nm} 死了。")
+            rel_log(state, target, int(state.get("act", 1) or 1), "death",
+                    _t(content, f"{nm} 死了。", f"{nm} died."))
             _audit(state, "fate.kill", True, nm)
             res["killed"] = nm
     elif kind == "move" and target:
@@ -3686,8 +3704,10 @@ def _apply_fate(content: dict[str, Any], state: dict[str, Any], option_id: str) 
         rel_all[target] = relationships.apply_deltas(
             rel_all.get(target) or relationships.new_scores(), cd, rd, tun)
         nm = _char_name(content, target) or "TA"
-        rel_log(state, target, int(state.get("act", 1) or 1),
-                "fate", f"命运抉择：与{nm}{'关系骤然贴近' if kind == 'bond' else '恩断义绝'}。")
+        rel_log(state, target, int(state.get("act", 1) or 1), "fate",
+                _t(content,
+                   f"命运抉择：与{nm}{'关系骤然贴近' if kind == 'bond' else '恩断义绝'}。",
+                   f"Twist of fate: {'suddenly closer to' if kind == 'bond' else 'a clean break with'} {nm}."))
         _audit(state, f"fate.{kind}", True, nm)
         res[kind] = nm
     elif kind == "identity" and target:
@@ -5738,7 +5758,9 @@ def _phone_probe(content: dict[str, Any], state: dict[str, Any], char_id: str,
             continue
         title = (sec.get("title") or "").strip()
         rel_log(state, sec.get("character_id"), act, "reveal",
-                f"关于「{title}」的真相，在{phone_device(content)}里揭开了一层。")
+                _t(content,
+                   f"关于「{title}」的真相，在{phone_device(content)}里揭开了一层。",
+                   f"A layer of the truth about “{title}” came loose in the {phone_device(content)}."))
         # only truths this speaker is allowed to voice count as "撬开了TA的嘴"
         if any(not f.get("known_by_character_ids")
                or char_id in (f.get("known_by_character_ids") or []) for f in hit):
@@ -7941,10 +7963,12 @@ def _confront_gen(content, state, persona, secret, frag, next_locked, target, ll
         for t in _titles_for_fragments(content, [forced_id]):
             moments.append({"kind": "unlock", "title": t})
         rel_log(state, char_id, old_act, "confront",
-                f"你当面摆出证据，TA终于松口，「{title}」又揭开一层。")
+                _t(content, f"你当面摆出证据，TA终于松口，「{title}」又揭开一层。",
+                   f"You laid out the evidence; they finally gave, and “{title}” peeled another layer."))
     else:
         rel_log(state, char_id, old_act, "confront",
-                f"你拿「{title}」的证据当面对质，被TA挡了回来。")
+                _t(content, f"你拿「{title}」的证据当面对质，被TA挡了回来。",
+                   f"You confronted them with the “{title}” evidence and got stonewalled."))
     # the model PERFORMS the aftermath with the character's full normal context; the forced
     # fragment rides the standard new_reveal channel (【必须亲口说出来】 machinery)
     frags = gating.iter_fragments(content)
@@ -8383,7 +8407,8 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
                         set_char_hp(state, hid, nxt)
                         moments.append({"kind": "recover", "name": hvictim.get("name")})
                         rel_log(state, hid, old_act, "hurt",
-                                f"{hvictim.get('name')} 的伤势缓过来了。")
+                                _t(content, f"{hvictim.get('name')} 的伤势缓过来了。",
+                                   f"{hvictim.get('name')} pulled through their injury."))
                 else:
                     nxt = "dying" if ("重" in hl or "濒" in hl or cur_hp == "hurt") else "hurt"
                     if nxt != cur_hp:
@@ -8392,7 +8417,9 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
                             _sim(state, hid)["pos"] = state["location_id"]
                         moments.append({"kind": nxt, "name": hvictim.get("name")})
                         rel_log(state, hid, old_act, "hurt",
-                                f"{hvictim.get('name')} {'重伤濒死' if nxt == 'dying' else '受了伤'}。")
+                                _t(content,
+                                   f"{hvictim.get('name')} {'重伤濒死' if nxt == 'dying' else '受了伤'}。",
+                                   f"{hvictim.get('name')} is {'critically wounded' if nxt == 'dying' else 'hurt'}."))
         # ☠️ DEATH is TWO-STAGE: only the already-dying can die. A killing blow on a
         # healthy body books them as 濒死 instead — there is always a window to save.
         died_ref = (directed.get("died") or "").strip()
@@ -8411,7 +8438,8 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
                     _sim(state, victim["id"])["pos"] = state["location_id"]
                 moments.append({"kind": "dying", "name": victim.get("name")})
                 rel_log(state, victim.get("id"), old_act, "hurt",
-                        f"{victim.get('name')} 重伤濒死。")
+                        _t(content, f"{victim.get('name')} 重伤濒死。",
+                           f"{victim.get('name')} is critically wounded."))
                 yield emit({"type": "description", "speaker_name": None,
                             "text": f"（{victim.get('name')}还吊着一口气，气若游丝。"
                                     "现在施救，或许还来得及。）"})
@@ -8424,7 +8452,7 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
                 dead_names.append(victim.get("name"))
                 moments.append({"kind": "death", "name": victim.get("name")})
                 rel_log(state, victim.get("id"), old_act, "death",
-                        f"{victim.get('name')} 死了。")
+                        _t(content, f"{victim.get('name')} 死了。", f"{victim.get('name')} died."))
                 for _vp in void_promises_of(state, victim["id"]):
                     yield emit({"type": "description", "speaker_name": None,
                                 "text": f"（你们约好的（{_vp.get('what','')}），"
@@ -8524,6 +8552,10 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
                 # 白纸黑字管着 suggestions, 模型随机违约 → 含中文的建议整条丢弃走兜底,
                 # 宁缺勿错 (兜底 ensure_three_suggestions 有确定性货)
                 _sg_items = [s for s in _sg_items if not re.search(r"[一-鿿]", s)]
+            # 🎭 视角护栏 (Yi 实弹 2026-08-02 二犯): 建议是玩家的下一步; 「你…」开头
+            # 是角色劝玩家的口气 = 视角串了, 在垫底之前丢掉, 缺口由确定性货补齐
+            _sg_items = [s for s in _sg_items
+                         if not re.match(r"^(你|請你|请你|You\b|Your\b)", s, re.IGNORECASE)]
             flags["dir_suggestions"] = _sg_items[:2]
         # 🐲 生物命中报审 → 引擎按骰面裁决入账 (血阶联动在函数里)
         _crh = (directed.get("creature_hit") or "").strip()
@@ -8573,7 +8605,8 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
                     old_s = rel_all.get(vid) or relationships.new_scores()
                     rel_all[vid] = relationships.apply_deltas(old_s, -8, 0, tun)
                     rel_log(state, vid, old_act, "hurt",
-                            f"你从TA手里抢走了{it.get('name')}。TA记住了。")
+                            _t(content, f"你从TA手里抢走了{it.get('name')}。TA记住了。",
+                               f"You snatched the {it.get('name')} from them. They remember."))
                     moments.append({"kind": "item", "verb": "taken",
                                     "name": it.get("name"), "from": victim_t.get("name")})
                     if pcfg:
@@ -8598,7 +8631,8 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
                     old_s = rel_all.get(sp_id) or relationships.new_scores()
                     rel_all[sp_id] = relationships.apply_deltas(old_s, 2, 0, tun)
                     rel_log(state, sp_id, old_act, "gift",
-                            f"你用{mine.get('name')}换了TA的{theirs.get('name')}。")
+                            _t(content, f"你用{mine.get('name')}换了TA的{theirs.get('name')}。",
+                               f"You traded your {mine.get('name')} for their {theirs.get('name')}."))
                     moments.append({"kind": "item", "verb": "traded",
                                     "name": theirs.get("name"), "gave": mine.get("name")})
         # 🎁 GIFT: the player handed the speaker something of theirs — the receiver
@@ -8623,12 +8657,14 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
                         old_g, 4 if g_liked else 1,
                         (2 if g_mode in ("flirt", "lover") else 0) if g_liked else 0, tun)
                     rel_log(state, sp_id, old_act, "gift",
-                            f"你把{it.get('name')}送给了TA{'，TA很喜欢' if g_liked else ''}。")
+                            _t(content, f"你把{it.get('name')}送给了TA{'，TA很喜欢' if g_liked else ''}。",
+                               f"You gave them the {it.get('name')}{' and they loved it' if g_liked else ''}."))
                     moments.append({"kind": "gift", "name": sp_name,
                                     "item": it.get("name"), "liked": g_liked})
                 else:
                     rel_log(state, sp_id, old_act, "gift",
-                            f"你想把{g_item.strip()}送给TA，被TA推回来了。")
+                            _t(content, f"你想把{g_item.strip()}送给TA，被TA推回来了。",
+                               f"You offered the {g_item.strip()}; they pushed it back."))
         # 💰 MONEY: judged payments/earnings hit a HARD ledger — spending clamps
         # at the balance, every booking is logged with its reason and hour
         md = (directed.get("money_delta") or "").strip()
@@ -8769,7 +8805,7 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
             # 同名物 → 申报按过期幻觉驳回 (收进柜子的灯笼也不许被重报出场)
             _sp = (directed.get("stage_props") or "").strip()
             if _sp and state.get("location_id"):
-                for _n in [x.strip(" 。，") for x in _re_split_mats(_sp)][:3]:
+                for _n in [x.strip(" 。，,.") for x in _re_split_mats(_sp)][:3]:
                     if not _n:
                         continue
                     if _item_known_anywhere(state, _n):
@@ -9760,7 +9796,9 @@ def run_turn_stream(
             title = (sec.get("title") or "").strip()
             if scid and title and sec.get("id") not in logged                     and any(f.get("id") in newset for f in sec.get("fragments", []) or []):
                 logged.add(sec.get("id"))
-                rel_log(state, scid, old_act, "reveal", f"关于「{title}」的真相，揭开了一层。")
+                rel_log(state, scid, old_act, "reveal",
+                        _t(content, f"关于「{title}」的真相，揭开了一层。",
+                           f"A layer of the truth about “{title}” came loose."))
             # 📸 秘密拼全: the LAST piece of a layered secret just clicked in — that's
             # a keepsake. Single-fragment secrets don't count (nothing was "assembled").
             sfids = [f.get("id") for f in sec.get("fragments", []) or [] if f.get("id")]
@@ -9832,7 +9870,8 @@ def run_turn_stream(
         if cid and cid not in met:
             met.add(cid)
             rel_log(state, cid, old_act, "meet",
-                    f"初次见面{('，在' + here_name) if here_name else ''}。")
+                    _t(content, f"初次见面{('，在' + here_name) if here_name else ''}。",
+                       f"First met{(' at ' + here_name) if here_name else ''}."))
     state["met_ids"] = sorted(met)
 
     # 📱 remember WHEN the player was last face to face with each character — the
@@ -9876,7 +9915,8 @@ def run_turn_stream(
                             "what": promise_kept.get("what"),
                             "romantic": bool(promise_kept.get("romantic"))})
             rel_log(state, kc, old_act, "promise",
-                    f"你如约而至：{promise_kept.get('what','')}。")
+                    _t(content, f"你如约而至：{promise_kept.get('what','')}。",
+                       f"You kept the promise: {promise_kept.get('what','')}."))
 
     if mode == "god":
         # Invisible-observer mode: the player doesn't speak in-scene; the present cast
@@ -10408,7 +10448,8 @@ def run_turn_stream(
             d_beats = [b for b in d_beats if _norm_line(b.get("text", "")) not in prior_said
                        and not _too_similar(b.get("text", ""), said_this_turn)]
         # the sim sheet remembers what this character SAID they'd do next
-        _intent = (directed.get("self_intent") or "").strip()[:40]
+        # (英文一词好几个字母, 中文字数截断会腰斩英文句 — 语言分档)
+        _intent = (directed.get("self_intent") or "").strip()[:80 if lang_of(content) == "en" else 40]
         if _intent and sp_id:
             _sim(state, sp_id)["intent"] = _intent
         # 🧍 姿位账本: where this body is inside the room and how it's held. Entries
@@ -10423,7 +10464,7 @@ def run_turn_stream(
                 state["player_pos"] = {"text": _ppos, "at": state.get("location_id")}
                 _audit(state, "pos.set", True, f"你:{_ppos}")
         # 📟 心象仪: the speaker's own judged inner state rides on their LAST line
-        mood = (directed.get("self_state") or "").strip()[:12]
+        mood = (directed.get("self_state") or "").strip()[:40 if lang_of(content) == "en" else 12]
         # 🎭 …and PERSISTS: how this scene left them is how the next one finds them
         if mood and sp_id:
             _sim(state, sp_id)["mood"] = {"text": mood, "at": _time_index(state)}
@@ -10651,7 +10692,8 @@ def run_turn_stream(
                                      "romance": int(prev.get("romance", 0)) + dr_g}
             album_add(content, state, "golden", g_title, g_text, star)
             moments.append({"kind": "golden", "title": g_title, "name": star.get("name")})
-            rel_log(state, sid_g, old_act, "golden", f"「{g_title}」：{g_text[:40]}")
+            rel_log(state, sid_g, old_act, "golden",
+                    _t(content, f"「{g_title}」：{g_text[:40]}", f"“{g_title}”: {g_text[:80]}"))
             # 💘 a golden moment is a warm spike — a styled character will pull back next time
             if relationships.love_style_of(star):
                 _sim(state, sid_g)["warm_peak"] = {"t": _time_index(state), "served": False}
@@ -10785,7 +10827,8 @@ def run_turn_stream(
                     state["following"] = [f for f in (state.get("following") or [])
                                           if f != _kid]
                     moments.append({"kind": "death", "name": _kc.get("name")})
-                    rel_log(state, _kid, old_act, "death", f"{_kc.get('name')} 死了。")
+                    rel_log(state, _kid, old_act, "death",
+                            _t(content, f"{_kc.get('name')} 死了。", f"{_kc.get('name')} died."))
                     for _vp in void_promises_of(state, _kid):
                         yield emit({"type": "description", "speaker_name": None,
                                     "text": f"（你们约好的（{_vp.get('what','')}），"
@@ -10970,7 +11013,8 @@ def run_turn_stream(
                 moments.append({"kind": "promise", "status": "missed",
                                 "name": pr.get("char_name"), "what": pr.get("what")})
                 rel_log(state, mc, old_act, "promise",
-                        f"你爽约了：{pr.get('what','')}。")
+                        _t(content, f"你爽约了：{pr.get('what','')}。",
+                           f"You stood them up: {pr.get('what','')}."))
                 yield emit({"type": "description", "speaker_name": None,
                             "text": _t(content,
                                        f"（你猛然想起，和{pr.get('char_name','')}约好的"
