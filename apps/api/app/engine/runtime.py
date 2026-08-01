@@ -2636,10 +2636,11 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
         if nm not in by_name or nm in seen:   # 越界/重复的直接丢 — 名单引擎说了算
             continue
         seen.add(nm)
-        act_txt = dedash(str(v.get("action") or "").strip())[:80]
-        line_txt = dedash(str(v.get("line") or "").strip().strip("「」\"'"))[:60]
+        # ≤80/60 的预算是中文体量 — 英文走 cap_prose 双倍且不劈单词 (straig 实弹)
+        act_txt = cap_prose(dedash(str(v.get("action") or "").strip()), 80, content)
+        line_txt = cap_prose(dedash(str(v.get("line") or "").strip().strip("「」\"'")), 60, content)
         # 🎙 作者写定的开场白原样上台 — 模型的即兴让位, 只保留它写的动作
-        _auth = dedash(str(by_name[nm].get("opening_line") or "").strip().strip("「」\"'"))[:80]
+        _auth = cap_prose(dedash(str(by_name[nm].get("opening_line") or "").strip().strip("「」\"'")), 80, content)
         if _auth:
             line_txt = _auth
         if act_txt:
@@ -2751,7 +2752,8 @@ def opening_hook_beats(content: dict[str, Any], state: dict[str, Any],
                             "place": (current_location(content, state) or {}).get("name") or "",
                             "tease": tease or ""}) or {}
         narration = str(out.get("narration") or "").strip()
-        line = str(out.get("line") or "").strip().strip("「」\"'")[:80]
+        # 上台的台词 — 英文双倍预算且不劈单词 (straig 同族)
+        line = cap_prose(str(out.get("line") or "").strip().strip("「」\"'"), 80, content)
     except Exception:
         pass
     if not narration and tease:
@@ -3141,6 +3143,20 @@ def ensure_three_suggestions(primary: list[str], backup: list[str],
 # Slot flavor prefixes for deterministic entrance lines (keyed by SLOTS names).
 _SLOT_FLAVOR = {"晨": "晨光里", "午": "日头底下", "夜": "夜色里"}
 _SLOT_FLAVOR_EN = {"晨": "In the morning light", "午": "Under the midday sun", "夜": "Out of the dark"}
+
+
+def cap_prose(s: str, n: int, content: dict[str, Any]) -> str:
+    """生成文的硬截, 中西分刀 (预算都是按中文体量定的): 中文原样 [:n] 字节不变;
+    英文同信息量要双倍字符, 且绝不从单词中间劈 (访客开场实弹 2026-08-01:
+    [:80] 把 straightens 劈成 straig 存进了库, 玩家满屏看半个词)。"""
+    s = (s or "").strip()
+    if lang_of(content) != "en":
+        return s[:n]
+    m = n * 2
+    if len(s) <= m:
+        return s
+    cut = s.rfind(" ", 0, m)
+    return (s[:cut] if cut > m // 2 else s[:m]).rstrip(" ,;:-")
 
 
 def _first_sentence(s: str, cap: int = 48) -> str:
