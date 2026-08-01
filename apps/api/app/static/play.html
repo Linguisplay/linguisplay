@@ -2301,7 +2301,10 @@ function phoneShell(inner, title, backTo) {
     ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
     document.body.appendChild(ov);
   }
-  const back = backTo ? `<a class="pback" onclick="${backTo}">‹ 返回</a>` : "";
+  // 防呆: backTo 是要塞进 onclick 的【调用】; 只给个名字 (实弹 "phone") 等于
+  // 死键 — 不带括号的一律当回主屏
+  const go = !backTo ? "" : /\)\s*;?\s*$/.test(backTo) ? backTo : "openPhone()";
+  const back = go ? `<a class="pback" onclick="${go}">‹ 返回</a>` : "";
   ov.innerHTML = `<div class="pcard" onclick="event.stopPropagation()">
     <div class="pbar">${back}<b>${escapeHtml(title)}</b>
       <button class="ghost" onclick="document.getElementById('phoneov').remove()">合上</button></div>
@@ -2322,7 +2325,7 @@ async function openBestiary() {
         <div style="font-size:12px;margin:3px 0"><span style="color:${HPC[c.hp]||"#ccc"}">●</span> ${escapeHtml(c.hp)}${(c.wounds||[]).length?` · ${B("部位破坏","Broken")}: ${c.wounds.map(escapeHtml).join("/")}`:""}</div>
         <div class="muted" style="font-size:11px">${escapeHtml(c.habits||c.desc||"")}</div></div></div>`).join("");
   const un = v.unseen ? `<p class="muted">${B(`这个世界还有 ${v.unseen} 种你未曾遭遇的生物…`, `${v.unseen} creature(s) not yet encountered…`)}</p>` : "";
-  phoneShell((rows||"")+un || `<p class="muted">${B("还没有遭遇过任何生物。","No encounters yet.")}</p>`, `📖 ${B("图鉴","Bestiary")}`, "phone");
+  phoneShell((rows||"")+un || `<p class="muted">${B("还没有遭遇过任何生物。","No encounters yet.")}</p>`, `📖 ${B("图鉴","Bestiary")}`, "openPhone()");
 }
 // 🏦 银行 app: 余额 + 流水 + 转账 (真钱落账, TA 短信里真会回应)
 async function openBank() {
@@ -2342,7 +2345,7 @@ async function openBank() {
       <div class="muted" style="font-size:12px">${B("余额","Balance")}</div>
       <div style="font-size:30px;font-weight:700">${v.balance} <span style="font-size:14px">${escapeHtml(v.currency||"")}</span></div></div>
     ${xfer}<div class="muted" style="margin:10px 0 4px;font-size:12px">${B("流水","History")}</div>${rows}`,
-    `🏦 ${B("银行","Bank")}`, "phone");
+    `🏦 ${B("银行","Bank")}`, "openPhone()");
 }
 async function bankSend() {
   const who = document.getElementById("bkWho")?.value, amt = parseInt(document.getElementById("bkAmt")?.value, 10);
@@ -2377,7 +2380,7 @@ async function openSocial() {
         <input id="sc_${p.id}" placeholder="${B("评论…","Comment…")}" style="flex:1;font-size:12px;padding:5px 8px">
         <button class="sm ghost" style="padding:3px 10px" onclick="socComment('${p.id}')">${B("发","Go")}</button></div></div>`;
   }).join("") || `<p class="muted">${B("还没有动态——认识的人多了、事情发生了，这里就热闹了。","Quiet for now.")}</p>`;
-  phoneShell(cards, `📸 ${B("动态","Feed")}`, "phone");
+  phoneShell(cards, `📸 ${B("动态","Feed")}`, "openPhone()");
 }
 async function socLike(pid, btn) {
   try { await j(`/runs/${runId}/social/like`, { method:"POST", body: JSON.stringify({ post_id: pid }) });
