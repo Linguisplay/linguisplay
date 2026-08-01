@@ -85,6 +85,22 @@ def test_asked_fallback_and_answered_pairing(monkeypatch):
     assert view["answered"] and not view["open"]
 
 
+def test_asked_claim_rejected_when_prose_diverged(monkeypatch):
+    """申报要对得上正文: plan 说问「你怕不怕高」, 渲染实际问了别的 → 驳回申报;
+    正文问句带问号时兜底接管, 不带问号时宁漏 (不许记从没问出口的问题)。"""
+    st = {"clock": _clk(), "location_id": "loc_roof"}
+    monkeypatch.setattr(runtime, "scene_characters", lambda c, s: [{"id": "shin"}])
+    beats = [{"type": "dialogue", "speaker_name": "某人",
+              "text": "这个点钟不睡觉，是睡不着还是不想睡。"}]   # 无问号的问句
+    runtime._sl_settle({}, st, _tun(1), beats, "随便聊聊", {"scene_asked": "你怕不怕高"},
+                       "say", "cai")
+    assert not st["asked_log"]          # 申报驳回 + 兜底无问号 → 宁漏
+    beats2 = [{"type": "dialogue", "speaker_name": "某人", "text": "你到底怕不怕高？"}]
+    runtime._sl_settle({}, st, _tun(1), beats2, "再聊", {"scene_asked": "你怕不怕高"},
+                       "say", "cai")
+    assert any("怕不怕高" in a["q"] for a in st["asked_log"])   # 对得上 → 收下
+
+
 def test_asked_log_expires_by_day(monkeypatch):
     st = {"clock": _clk(day=5), "location_id": "loc_roof",
           "asked_log": [{"q": "旧问题", "a": None, "day": 1}]}

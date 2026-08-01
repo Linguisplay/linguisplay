@@ -1795,6 +1795,13 @@ def _sl_settle(content: dict[str, Any], state: dict[str, Any], tun: dict[str, An
         if tgt is not None:
             tgt["a"] = (ans or pin_txt)[:12]
     q = str(flags.get("scene_asked") or "").strip()
+    # 申报要对得上正文 (实操实弹 2026-08-01: plan 先于散文申报「问什么」, 渲染拍改道后
+    # 账本记下一个从没问出口的问题) — 台词里找不着就驳回, 走兜底; 兜底也没有就宁漏。
+    if q:
+        _dlg = " ".join((b.get("text") or "") for b in all_beats
+                        if b.get("type") == "dialogue")
+        if q[:4] not in _dlg and q.rstrip("？?吗呢")[:4] not in _dlg:
+            q = ""
     if not q:   # 兜底: 主答台词以问号收尾 → 取末句提炼
         for b in reversed(all_beats):
             if b.get("type") == "dialogue" and (b.get("text") or "").rstrip().endswith(("？", "?")):
