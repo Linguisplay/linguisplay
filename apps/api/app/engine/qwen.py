@@ -580,6 +580,21 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append("【未收的伏笔·埋下的必须兑现】" + "；".join(str(x) for x in _sdue)
                      + "。时机合适就在这一拍收线（setup_pay 照抄原文），"
                        "或让角色亲口把它了结，不许悄悄当没发生过。")
+    # 🎬 场账本 (docs/scene-ledger.md): 已演的不重演, 已答的不重问 — 治语义重演
+    _spent = prompt.get("scene_spent") or []
+    if _spent:
+        lines.append("【本场已经演过】" + "、".join(str(x) for x in _spent)
+                     + "——这些动作已经发生过了，绝不许再演一遍（换个措辞也不行），"
+                       "只能往下接。")
+    _ask = prompt.get("asked_state") or {}
+    if _ask.get("answered"):
+        lines.append("【问过且对方已答】"
+                     + "；".join(f"「{a.get('q')}」→ TA答了「{a.get('a')}」"
+                                 for a in _ask["answered"])
+                     + "。接住答案往前走，绝不许换个措辞把同一个问题再问一遍。")
+    if _ask.get("open"):
+        lines.append("【问过还没答】" + "；".join(f"「{q}」" for q in _ask["open"])
+                     + "。可以追问这几个，但别再抛新的问题钩子。")
 
     # current relationship MODE toward the player (flows over time; shapes how you treat them)
     rel_pb = (prompt.get("relationship_playbook") or "").strip()
@@ -1185,6 +1200,13 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                                 "properties": {"who": {"type": "string", "description": "角色名"},
                                                "step": {"type": "string", "description": "≤20字这一步"},
                                                "stage": {"type": "string", "description": "≤16字新阶段(没变省略)"}}}
+        # 🎬 场账本申报 (docs/scene-ledger.md): 治「汽水递三次/问过又答过还再问」
+        props["spent"] = {"type": "string", "description":
+                          "默认空字符串。这一拍花掉的标志性动作（≤8字，如「递汽水」），此后不得重演；没有就省略"}
+        props["asked"] = {"type": "string", "description":
+                          "默认空字符串。这一拍向玩家抛出的问题（≤10字概括）；没有就省略"}
+        props["answered"] = {"type": "string", "description":
+                             "默认空字符串。玩家刚才的话回答了此前哪个问题（≤10字，与【问过还没答】对得上）；没有就省略"}
 
     # ⚡ 修为进益申报口与地图无关 (审查实弹: 曾错嵌在 has_map 里 — 没写地点详情的修仙
     #    剧本, 被人传功/服灵物整个没处落账)
@@ -1723,8 +1745,8 @@ def _strip_quotes(s: str) -> str:
 
 
 def _free_smuggled_speech(beats: list[dict], speaker: str) -> list[dict]:
-    """旁白里私藏的台词拆出来 (狗笼实弹 2026-08-01: 渲染拍违反行协议直写散文,
-    「蓝信一：最后一箱了」整段沦为旁白 — 台词失去气泡/配音/心象位)。
+    """旁白里私藏的台词拆出来 (实弹 2026-08-01: 渲染拍违反行协议直写散文,
+    「某人：台词」整段沦为旁白 — 台词失去气泡/配音/心象位)。
     只认【本拍说话人名 + 行首 + 冒号】的铁证; 别人的名字不猜 (宁漏勿误杀)。"""
     if not speaker or not beats:
         return beats
@@ -1816,6 +1838,10 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
         "setup_plant": str(d.get("setup_plant") or "").strip(),
         "setup_pay": str(d.get("setup_pay") or "").strip(),
         "agenda_step": d.get("agenda_step") if isinstance(d.get("agenda_step"), dict) else None,
+        # 🎬 场账本申报 (docs/scene-ledger.md): settle 三段式与 mood 同款
+        "spent": str(d.get("spent") or "").strip(),
+        "asked": str(d.get("asked") or "").strip(),
+        "answered": str(d.get("answered") or "").strip(),
         "affinity_delta": 0 if is_think else _i(d.get("affinity"), -3, 8),
         "romance_delta": 0 if is_think else _i(d.get("romance"), -3, 6),
         "rep_delta": 0 if is_think else _i(d.get("faction_rep"), -3, 3),
@@ -2147,7 +2173,9 @@ def _render_directive(prompt: dict[str, Any], speaker: str, outline: list[str]) 
             "只写动作、神态、环境）\n"
             f"{speaker}：「这一拍{speaker}亲口说出的话」\n"
             "【凡是人物说出口的话，必须单独成行、行首是说话人的名字】——绝不进旁白行、"
-            "也不许转述（『他说让你小心』是废稿；要么让TA自己说一行，要么别提）。" + must_speak)
+            "也不许转述（『他说让你小心』是废稿；要么让TA自己说一行，要么别提）。" + must_speak
+            + "玩家已经回答过的问题绝不许换措辞再问；也不必每拍都拿问题收尾——"
+              "接住对方刚说的话往前走，比抛新钩子高级。")
         # (人称铁律副本已删: 同一请求的深锚带着完整超集版「旁白视角铁律」, 相邻重复;
         #  运行时另有 _pov_break 守卫兜底)
     L.append("不要元数据、不要编号、不要标题、不要解释。")

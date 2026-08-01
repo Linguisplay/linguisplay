@@ -4,9 +4,20 @@
 22 个文件预设 slot/day 当执法点。测试世界默认虚构钟, 现实对齐机制由
 tests/test_real_clock.py 显式开旗执法。沙盒的现实同步老合同不受此旗影响。"""
 import os
+import sys
+import types
 
 os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///./test_e2e.db")
 os.environ.setdefault("JWT_SECRET", "test")
+
+# 🪟 Windows 垫片: runs.py 顶层 import fcntl (Unix 专属) — 本地 Windows 跑不了任何
+# 走 app.main 的测试 (13 个模块收集即炸)。锁语义在单进程测试里本就无争用, 垫空实现。
+if sys.platform == "win32" and "fcntl" not in sys.modules:
+    _fcntl = types.ModuleType("fcntl")
+    _fcntl.LOCK_EX, _fcntl.LOCK_SH, _fcntl.LOCK_UN, _fcntl.LOCK_NB = 2, 1, 8, 4
+    _fcntl.flock = lambda *a, **k: None
+    _fcntl.lockf = lambda *a, **k: None
+    sys.modules["fcntl"] = _fcntl
 
 import pytest  # noqa: E402
 

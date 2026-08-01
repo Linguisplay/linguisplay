@@ -39,7 +39,10 @@ _PINS_OK = {("runtime.py", "char_position"),          # 唯一的读者 (级联�
             ("runtime.py", "_drop_pins_on_leave"), ("runtime.py", "_heal_away_pins"),
             ("runtime.py", "_settle_prose_exits"), ("runtime.py", "settle_prose_arrival"),
             ("runtime.py", "_settle_directed"), ("runtime.py", "_apply_phone_judgments"),
-            ("runtime.py", "build_opening"), ("runtime.py", "run_turn_stream")}
+            ("runtime.py", "build_opening"), ("runtime.py", "run_turn_stream"),
+            # 🎬 场账本 (docs/scene-ledger.md): 开场钉 cast/收场拔自己钉的钉 —— 落账,
+            # 「正在陪你」由此成为显式状态 (钉子天然压作息、被危机链压过)
+            ("runtime.py", "_sl_open"), ("runtime.py", "_sl_close")}
 
 # schedule 字段本身的合法读者: 级联第 7 级 / 校验作者数据的剧本 linter / 起草空骨架
 _SCHEDULE_OK = {("runtime.py", "_char_home"), ("logic.py", "lint_story"),

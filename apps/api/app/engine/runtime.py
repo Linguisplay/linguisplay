@@ -229,6 +229,8 @@ DEFAULT_TUNING = {
     "confront_base": 55,        # 🃏 evidence-confrontation base success %, + closeness//2
     "confront_cost": 3,         # 🃏 closeness cost of a successful confrontation (fail ×2, 大失败 ×3)
     "mind_reader": 1,           # 📟 心象仪: characters' true inner state shown on bubbles (0 = off)
+    "scene_ledger": 0,          # 🎬 场账本 (docs/scene-ledger.md, 2026-08-01 中切): 作息离场须走戏
+                                #    /时钟场内缓拨/已演已问入账。0 = off, 剧本级开 (狗笼试点)
     "promise_keep_bonus": 6,    # 🤝 closeness for showing up to a promise (romantic: 心动 too)
     "promise_break_cost": 4,    # 🤝 closeness lost for standing someone up
     "golden_chance": 4,         # ✨ 稀有奇遇: % chance per eligible turn (0 = off)
@@ -1709,6 +1711,118 @@ def _drop_pins_on_leave(state: dict[str, Any], old_lid: str | None) -> None:
         kept = {k: v for k, v in pins.items() if v != old_lid}
         if len(kept) != len(pins):
             state["char_pins"] = kept
+    _sl_close(state)   # 🎬 真实换场 = 收场 (本函数是全引擎移动成立的公共窄口)
+
+
+# ── 🎬 场账本 (docs/scene-ledger.md, Yi 2026-08-01 拍板「中切」) ──────────────
+# 「场」= 一段连续虚构时间 + 固定参与者 + 一件正在进行的事。此前引擎只有世界层
+# (时钟/作息/压力) 和回合层 (beats), 虚构连续性只活在上下文里 — 显式状态永远赢过
+# 隐式虚构, 漏出三怪相: 邀约中被作息蒸发/语义重演/长谈跨时段。两本账两个寿命:
+# 动作账 spent 跟场走 (收场即弃), 问答账 asked_log 跟天走 (换了地方也不许再问)。
+# 让位规则 a 用现成钉子实现: 开场把 cast 钉在场址 — 钉子在 char_position 判定链里
+# 天然压过作息, 又天然被 濒死/威胁/被掳 压过, 危机泄压阀是位置链白送的。
+
+def _sl(state: dict[str, Any]) -> dict[str, Any] | None:
+    sl = state.get("scene_ledger")
+    return sl if isinstance(sl, dict) and sl.get("open") else None
+
+
+def _sl_open(state: dict[str, Any], loc_id: str | None,
+             cast_ids: list[str], clk: dict[str, Any]) -> None:
+    pins = state.setdefault("char_pins", {})
+    mine = [cid for cid in cast_ids if cid and cid not in pins]
+    for cid in mine:
+        pins[cid] = loc_id   # 「正在陪你」落成显式状态 — 作息从此拉不走TA
+    state["scene_ledger"] = {
+        "open": True, "loc": loc_id, "cast": [c for c in cast_ids if c],
+        "opened": {"day": int(clk.get("day", 1) or 1), "slot": int(clk.get("slot", 0) or 0)},
+        "spent": [], "ticks": 0, "turns": 0, "pins": mine}
+
+
+def _sl_close(state: dict[str, Any]) -> None:
+    sl = _sl(state)
+    if not sl:
+        return
+    pins = state.get("char_pins") or {}
+    for cid in sl.get("pins") or []:
+        if pins.get(cid) == sl.get("loc"):
+            pins.pop(cid, None)   # 只拔自己钉的钉 — 约定钟点的钉不归场管
+    # ⏳ 时钟补拨: 场内凝滞吸掉的格一次性还上 (世界不欠账; real_time 从不欠)
+    for _ in range(int(sl.get("ticks") or 0)):
+        clk = dict(state.get("clock") or {})
+        clk.setdefault("day", 1)
+        clk.setdefault("slot", 0)
+        clk["slot"] = int(clk["slot"]) + 1
+        if clk["slot"] >= len(SLOTS):
+            clk["slot"], clk["day"] = 0, int(clk["day"]) + 1
+        clk["turns_in_slot"] = 0
+        state["clock"] = clk
+    state["scene_ledger"] = None
+
+
+def _asked_view(state: dict[str, Any]) -> dict[str, Any] | None:
+    """问答账的提示词切片: 已答的不许换措辞再问, 未答的可追但别抛新钩。"""
+    log = state.get("asked_log") or []
+    if not log:
+        return None
+    return {"answered": [{"q": a.get("q"), "a": a.get("a")} for a in log if a.get("a")][-4:],
+            "open": [a.get("q") for a in log if not a.get("a")][-3:]}
+
+
+def _sl_settle(content: dict[str, Any], state: dict[str, Any], tun: dict[str, Any],
+               all_beats: list[dict[str, Any]], player_input: str, flags: dict[str, Any],
+               channel: str, pcid: str | None) -> None:
+    """回合落账: 申报优先 (编剧 plan 的 spent/asked/answered), 确定性兜底; 零 LLM。
+    旗关着时只负责把残留的场收干净 (中途关旗不留永生账)。"""
+    if not tun.get("scene_ledger"):
+        if _sl(state):
+            _sl_close(state)
+        return
+    day_now = int((state.get("clock") or {}).get("day", 1) or 1)
+    # 问答账 (跟天走): 过期先清 (day+2)
+    log = [a for a in (state.get("asked_log") or [])
+           if isinstance(a, dict) and int(a.get("day") or 0) + 2 >= day_now]
+    pin_txt = (player_input or "").strip()
+    if pin_txt and channel in ("say", "do"):
+        # answered: 申报能对上就结申报那条; 否则最旧未答者结在玩家原话上
+        ans = str(flags.get("scene_answered") or "").strip()
+        tgt = None
+        if ans:
+            tgt = next((a for a in log if not a.get("a")
+                        and (ans[:4] in str(a.get("q") or "") or str(a.get("q") or "")[:4] in ans)), None)
+        if tgt is None:
+            tgt = next((a for a in log if not a.get("a")), None)
+        if tgt is not None:
+            tgt["a"] = (ans or pin_txt)[:12]
+    q = str(flags.get("scene_asked") or "").strip()
+    if not q:   # 兜底: 主答台词以问号收尾 → 取末句提炼
+        for b in reversed(all_beats):
+            if b.get("type") == "dialogue" and (b.get("text") or "").rstrip().endswith(("？", "?")):
+                t = (b.get("text") or "").rstrip("？? ")
+                q = t.replace("\n", "").split("。")[-1].split("，")[-1][-12:]
+                break
+    if q and all(q != str(a.get("q") or "") for a in log):
+        log.append({"q": q[:12], "a": None, "day": day_now})
+    state["asked_log"] = log[-12:]
+    # 场: 开 / 更新 / 收
+    sl = _sl(state)
+    if sl:
+        sl["turns"] = int(sl.get("turns") or 0) + 1
+        here_ids = {c.get("id") for c in scene_characters(content, state) if c.get("id")}
+        sl["cast"] = [c for c in (sl.get("cast") or []) if c in here_ids]
+        spent = str(flags.get("scene_spent") or "").strip()
+        if spent and spent not in (sl.get("spent") or []):
+            sl.setdefault("spent", []).append(spent[:12])
+            sl["spent"] = sl["spent"][-10:]
+        # 收场条件: 人走净 / 场龄超限 (防永生) / 地点已变 (移动窄口没兜住的兜底)
+        if not sl["cast"] or sl["turns"] > 24 or state.get("location_id") != sl.get("loc"):
+            _sl_close(state)
+    elif pin_txt and channel in ("say", "do") \
+            and any(b.get("type") == "dialogue" for b in all_beats):
+        cast = [c.get("id") for c in scene_characters(content, state)
+                if c.get("id") and c.get("id") != pcid]
+        if cast:
+            _sl_open(state, state.get("location_id"), cast, state.get("clock") or {})
 
 
 def settle_prose_arrival(content: dict[str, Any], state: dict[str, Any],
@@ -7996,6 +8110,12 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
         _mood_claim = str(directed.get("mood") or "").strip()
         if _mood_claim:
             flags["mood_claim"] = _mood_claim[:6]
+        # 🎬 场账本申报 (docs/scene-ledger.md): 本拍花掉的动作/抛出的问题/接住的回答 —
+        # 与 mood 同款三段式 (申报→flags 暂存→回合尾 _sl_settle 统一落账)
+        for _sk in ("spent", "asked", "answered"):
+            _sv = _claim(directed.get(_sk), 12)
+            if _sv:
+                flags["scene_" + _sk] = _sv
         _day_now = int((state.get("clock") or {}).get("day", 1) or 1)
         stps = state.setdefault("setups", [])
         _plant = _claim(directed.get("setup_plant"), 24)
@@ -10074,6 +10194,12 @@ def run_turn_stream(
             # 📌 未收的伏笔 (剧组 P2): 编剧埋的钩子到点必须收线或明书作废
             "setups_due": ([str(s.get("text")) for s in (state.get("setups") or [])
                             if not s.get("paid")][:2] if is_primary else []),
+            # 🎬 场账本切片 (docs/scene-ledger.md): 已演动作 + 问答账 — 饿死语义重演。
+            # 旗关着两账皆空 = 零提示词成本
+            "scene_spent": (list(((state.get("scene_ledger") or {}) if isinstance(
+                state.get("scene_ledger"), dict) else {}).get("spent") or [])[:6]
+                if is_primary else []),
+            "asked_state": (_asked_view(state) if is_primary else None),
             # 📇 联系方式 (Yi): 要靠剧情挣 — 玩家开口要时按好感给或婉拒
             "contact_note": _contact_note if is_primary else "",
             # 📇 申报口只在「还没拿到这人联系方式」时挂载 (拿到后字段消失, 一次性状态翻转)
@@ -10773,6 +10899,21 @@ def run_turn_stream(
                 steps = 1 if clk["turns_in_slot"] >= tun["turns_per_slot"] else 0
                 if steps:
                     clk["turns_in_slot"] = 0
+            # 🎬 场账本·让位规则b: 场开着时时段不许悄悄穿越 — 自然拨格前 2 次推迟
+            # (凝滞入 ticks, 收场一次性补拨), 第 3 次放行 (_slot_narr 会当场向玩家交代
+            # 时段翻页)。明确的时间跳跃 (睡到天亮/次日) 是有意为之 → 收场后照常放行。
+            _slx = _sl(state)
+            if _slx and steps:
+                if skip:
+                    # 欠的格并进本次 steps 一起拨 — _sl_close 不许直接碰 state["clock"],
+                    # 5c 尾部的 state["clock"] = clk 会覆写它 (自查实弹)
+                    steps += int(_slx.get("ticks") or 0)
+                    _slx["ticks"] = 0
+                    _sl_close(state)
+                elif int(_slx.get("ticks") or 0) < 2:
+                    _slx["ticks"] = int(_slx.get("ticks") or 0) + 1
+                    clk["turns_in_slot"] = int(tun["turns_per_slot"])   # 下一拍重新叩门
+                    steps = 0
         for _ in range(steps):
             clk["slot"] = int(clk["slot"]) + 1
             if clk["slot"] >= len(SLOTS):
@@ -11256,6 +11397,12 @@ def run_turn_stream(
             profile_mod.distill_async(content, state, _rec, _wit, llm)
             _audit(state, "profile.distill", True, f"后台 wit={len(_wit)}")
 
+    # 🎬 场账本落账 (docs/scene-ledger.md): 开/更新/收场 + 问答账 — 必须在 final 之前
+    # (final 之后 router 才持久化 state, 晚了就丢账)。申报优先, 兜底确定性, 零 LLM。
+    try:
+        _sl_settle(content, state, tun, all_beats, player_input, flags, channel, pcid)
+    except Exception:
+        pass
     # 🔎 导演审稿的比对底稿: 本回合正文留档, 下回合据此识破「整局复读」;
     # 旁白单独留近3拍环形档, 供第④检识破「招牌动作/景物三拍复读」(蝴蝶刀实弹)
     state["_last_text"] = " ".join((b.get("text") or "") for b in all_beats)[:1600]
