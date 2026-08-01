@@ -662,6 +662,10 @@ body.vn { touch-action: pan-y; }
 #vnname { display: inline-block; font-family: "Source Han Serif SC","Noto Serif CJK SC","Songti SC",Georgia,serif;
   font-size: 15px; letter-spacing: 3px; color: #d8b57a; padding-bottom: 3px;
   margin-bottom: 7px; border-bottom: 1px solid rgba(216,181,122,.45); }
+/* 🎙 台词播放键: 名牌旁的小喇叭 (galgame 惯例, 键在对话框上) */
+#vnhear { cursor: pointer; margin-left: 8px; font-size: 15px; opacity: .55;
+  user-select: none; vertical-align: middle; }
+#vnhear:active, #vnhear:hover { opacity: 1; }
 #vntext { font-size: 15px; line-height: 2; color: #ede6d8; min-height: 3.4em;
   text-shadow: 0 1px 3px rgba(0,0,0,.8); max-width: 860px; margin: 0 auto; }
 #vntext.narr { color: rgba(236,233,226,.78); }
@@ -956,8 +960,8 @@ body.dread #dread { opacity:1; }
   <div id="scenehud" onclick="event.stopPropagation();vnHudToggle()"></div>
   <div id="scenehudlist" class="hidden"></div>
   <div id="vnbox" onclick="vnAdvance()">
-    <div id="vnname" class="hidden"></div>
-    <div id="vnctl"><span id="vnctlh" onclick="event.stopPropagation();vnCtlToggle()" title="菜单">☰</span><span onclick="event.stopPropagation();vnHearts()" title="好感度">好感</span><span onclick="event.stopPropagation();vnToggleStat()" title="目标/理智/警觉等状态">状态</span><span onclick="event.stopPropagation();vnHide()" title="隐藏界面看立绘">隐藏</span><span id="vnauto" onclick="event.stopPropagation();vnToggleAuto()" title="自动播放">自动</span><span onclick="event.stopPropagation();vnToggleLog()" title="回想">记录</span><span id="vnvoice" onclick="event.stopPropagation();vnHearLine()" title="听TA说这句（按需配音）">配音</span><span onclick="event.stopPropagation();vnRewindLast()" title="撤回上一个回合">撤回</span></div>
+    <div id="vnname" class="hidden"></div><span id="vnhear" class="hidden" onclick="event.stopPropagation();vnHearLine()" title="听TA说这句（按需配音）">🔊</span>
+    <div id="vnctl"><span id="vnctlh" onclick="event.stopPropagation();vnCtlToggle()" title="菜单">☰</span><span onclick="event.stopPropagation();vnHearts()" title="好感度">好感</span><span onclick="event.stopPropagation();vnToggleStat()" title="目标/理智/警觉等状态">状态</span><span onclick="event.stopPropagation();vnHide()" title="隐藏界面看立绘">隐藏</span><span id="vnauto" onclick="event.stopPropagation();vnToggleAuto()" title="自动播放">自动</span><span onclick="event.stopPropagation();vnToggleLog()" title="回想">记录</span><span onclick="event.stopPropagation();vnRewindLast()" title="撤回上一个回合">撤回</span></div>
     <div id="vntext"></div>
     <!-- 选项住在对话面板内部: 文字和选项同一个流, 物理上不可能互相遮挡 -->
     <div id="vnchoices" class="hidden" onclick="event.stopPropagation()"></div>
@@ -2017,15 +2021,15 @@ async function vnHearLine() {
   ensureVoxAudible();   // 点「配音」=明确想听: 语音音量在 0 就抬回默认
   const key = `${name}|${b.text}`;
   if (_voxUrls[key]) { playVox(_voxUrls[key]); return; }
-  const el = document.getElementById("vnvoice");
+  const el = document.getElementById("vnhear");
   if (el && el.dataset.busy) return;   // 在途去重 — 连点不重复扣费
-  if (el) { el.dataset.busy = "1"; el.textContent = "…"; }
+  if (el) { el.dataset.busy = "1"; el.textContent = "⏳"; }
   try {
     const r = await j(`/runs/${runId}/tts`, { method: "POST",
       body: JSON.stringify({ speaker_name: name, text: b.text }) });
     _voxUrls[key] = r.url; playVox(r.url);
   } catch (e2) { pushToast(B("⚠️ 这句配不了音", "⚠️ Can't voice this line"), "", 2200); }
-  if (el) { delete el.dataset.busy; el.textContent = B("配音", "Voice"); }
+  if (el) { delete el.dataset.busy; el.textContent = "🔊"; }
 }
 // `spoken` = wrap the text in 「」 and style it as speech, so a dialogue bubble is
 // unmistakably "words said out loud" vs the narration band.
@@ -4459,6 +4463,7 @@ async function playBeatVN(b, skipLog) {
   if (b.author === "player") {
     document.getElementById("vnchoices").classList.add("hidden");
     nameEl.textContent = myName; nameEl.classList.remove("hidden");
+    const _he = document.getElementById("vnhear"); if (_he) _he.classList.add("hidden");   // 玩家不配音
     vnSprite(null); box.className = ""; box.textContent = b.text;
     return;   // your own line flows straight into their reply
   }
@@ -4481,7 +4486,10 @@ async function playBeatVN(b, skipLog) {
   // 「 起头的台词悬挂缩进 — 引号吊在版心外, 行首齐(中文排印工艺)
   box.classList.toggle("hang", !isNarr && /^[「『]/.test(b.text || ""));
   vnSprite(isNarr ? null : b.speaker_name, isNarr ? undefined : b.expr);
-  if (!isNarr) { voxSprite(b.speaker_name || "", b.expr, b.text); vnCurBeat = b; }   // 🎙 开口那声简语音 + 记住当前句给「配音」键
+  if (!isNarr) { voxSprite(b.speaker_name || "", b.expr, b.text); vnCurBeat = b; }   // 🎙 开口那声简语音 + 记住当前句给播放键
+  // 🎙 台词播放键挂名牌旁 (galgame 惯例: 键在对话框上, 不藏菜单里); 无配音者不亮
+  const hearEl = document.getElementById("vnhear");
+  if (hearEl) hearEl.classList.toggle("hidden", isNarr || !voiceMap[b.speaker_name || ""]);
   box.className = isNarr ? "narr" : "";
   // 📖 分页 (Yi: 一页字太多): 长拍按句读切成 ≤76 字的页, 逐页点击翻
   for (const page of paginate(b.text)) {
