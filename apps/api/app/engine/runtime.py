@@ -5137,12 +5137,49 @@ def _social_mark(content: dict[str, Any], state: dict[str, Any]) -> int:
     return n
 
 
+def _welcome_post(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+    """📣 开卷通告 (Yi 定 2026-07-31): feed 的第一条是欢迎玩家进入这个世界的公告,
+    顺带交代眼下的处境。确定性拼装 (标题/一句话简介/所在地/身边的人), 零 LLM,
+    引擎不带任何具体剧本的字。它随时间自然沉底、被容量顶掉 — 通告本来就该过期。"""
+    story = content.get("story") or {}
+    en = lang_of(content) == "en"
+    title = (story.get("title") or "").strip()
+    tease = (story.get("one_liner") or "").strip() \
+        or _first_sentence(story.get("synopsis") or "", 60)
+    loc = current_location(content, state)
+    here = [c.get("name") for c in scene_characters(content, state)
+            if c.get("id") != state.get("player_character_id") and c.get("name")][:3]
+    if en:
+        bits = [f"Welcome to {title}." if title else "Welcome.",
+                (tease + ".") if tease and not tease.endswith((".", "!", "?")) else tease,
+                f"You are at {loc.get('name')}." if loc and loc.get("name") else "",
+                ("Nearby: " + ", ".join(here) + ".") if here
+                else "Go meet the people of this world.",
+                "Likes and comments here are remembered."]
+        text = " ".join(b for b in bits if b)
+    else:
+        bits = [f"欢迎来到《{title}》。" if title else "欢迎。",
+                (tease + "。") if tease and not tease.endswith(("。", "！", "？")) else tease,
+                f"你现在在{loc.get('name')}。" if loc and loc.get("name") else "",
+                ("身边有" + "、".join(here) + "。") if here else "先去见见这个世界里的人。",
+                "在这里点的赞、留的言，TA们都会记在心里。"]
+        text = "".join(b for b in bits if b)
+    return {"id": "po_welcome", "cid": "", "name": "📣 " + ("Notice" if en else "通告"),
+            "welcome": True, "text": text[:180],
+            "label": (clock_view(content, state) or {}).get("label", ""),
+            "liked": False, "comments": []}
+
+
 def social_feed(content: dict[str, Any], state: dict[str, Any],
                 llm: LLM | None = None) -> dict[str, Any]:
     """📸 动态: 已认识角色的"朋友圈"。素材全取自账本 (演变人话/在办的事/约定),
     账本指纹没变不出新帖 — 一次生成永久缓存, 不烧无谓的调用。"""
     llm = lang_llm(llm or get_llm(), content)
     so = _social_state(state)
+    if not so.get("welcomed"):
+        # 📣 第一次打开 feed: 先立欢迎通告 (此刻的处境写进去, 越早打开越准)
+        so["welcomed"] = True
+        so.setdefault("posts", []).insert(0, _welcome_post(content, state))
     mark = _social_mark(content, state)
     if mark != so.get("mark"):
         so["mark"] = mark
@@ -5206,6 +5243,8 @@ def social_like(content: dict[str, Any], state: dict[str, Any], post_id: str) ->
     post = next((p for p in so.get("posts") or [] if p.get("id") == post_id), None)
     if not post:
         raise ValueError("这条动态不见了")
+    if post.get("welcome"):
+        raise ValueError("通告只是通告——把赞留给活人吧")
     if not post.get("liked"):
         post["liked"] = True
         tun = tuning_for(content)
@@ -5224,6 +5263,8 @@ def social_comment(content: dict[str, Any], state: dict[str, Any], persona: dict
     post = next((p for p in so.get("posts") or [] if p.get("id") == post_id), None)
     if not post:
         raise ValueError("这条动态不见了")
+    if post.get("welcome"):
+        raise ValueError("通告没有嘴——去评论活人的动态吧")
     text = (text or "").strip()[:60]
     if not text:
         raise ValueError("评论不能是空的")

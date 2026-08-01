@@ -2358,6 +2358,11 @@ async function bankSend() {
 async function openSocial() {
   let v; try { v = await j(`/runs/${runId}/social`); } catch(e) { pushToast(escapeHtml(e.message)); return; }
   const cards = (v.posts||[]).map(p => {
+    // 📣 开卷通告: 官方腔的欢迎卡 — 金虚线框, 没有点赞评论 (通告不吃赞)
+    if (p.welcome) return `<div style="border:1px dashed rgba(216,181,122,.5);border-radius:14px;padding:12px 14px;margin-bottom:10px;background:rgba(216,181,122,.05)">
+      <div style="display:flex;align-items:center;gap:8px"><b style="font-size:13px;color:#d8b57a">${escapeHtml(p.name)}</b>
+        <span class="muted" style="font-size:11px">${escapeHtml(p.label||"")}</span></div>
+      <div style="margin-top:8px;font-size:13.5px;line-height:1.75;color:#e8e1d3">${escapeHtml(p.text)}</div></div>`;
     const av = `/scene/avatar/${encodeURIComponent(p.cid)}.jpg`;
     const cms = (p.comments||[]).map(c =>
       `<div style="font-size:12px;margin-top:4px;color:${c.from==="me"?"#d8b57a":"#d5dbec"}">${c.from==="me"?B("你","You"):escapeHtml(p.name)}：${escapeHtml(c.text)}</div>`).join("");
