@@ -365,6 +365,36 @@
     border: 1px dashed rgba(216,181,122,.35); color: #d8b57a; font-size: 13px; }
   .pcaladd:active { background: rgba(216,181,122,.08); }
   .pcalitem.editing { background: rgba(216,181,122,.09); border-radius: 8px; }
+  /* 🗓 iOS 风月历 (Yi: 像 iPhone 一样): 红圈今日 + 事件圆点 + 点日期看当天 */
+  .ical { font-family: -apple-system, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+    user-select: none; }
+  .ical-head { display: flex; justify-content: space-between; align-items: flex-start; padding: 4px 2px 10px; }
+  .ical-title { font-size: 21px; font-weight: 700; color: #fff; letter-spacing: .2px; }
+  .ical-sub { font-size: 12px; color: #8e8e93; margin-top: 2px; }
+  .ical-nav span { color: #ff453a; font-size: 22px; font-weight: 600; padding: 0 10px; cursor: pointer; }
+  .ical-nav span.off { color: #48484a; pointer-events: none; }
+  .ical-week { display: grid; grid-template-columns: repeat(7, 1fr); font-size: 11px;
+    font-weight: 600; color: #8e8e93; text-align: center; margin-bottom: 5px; }
+  .ical-grid { display: grid; grid-template-columns: repeat(7, 1fr); row-gap: 4px; }
+  .ical-day { position: relative; height: 40px; display: flex; align-items: center;
+    justify-content: center; cursor: pointer; }
+  .ical-day .n { width: 32px; height: 32px; line-height: 32px; text-align: center;
+    border-radius: 50%; font-size: 15px; color: #fff; }
+  .ical-day.past .n { color: #8e8e93; }
+  .ical-day.sel .n { background: #e5ddcc; color: #111; font-weight: 600; }
+  .ical-day.today .n { background: #ff453a; color: #fff; font-weight: 600; }
+  .ical-day .dot { position: absolute; bottom: 1px; left: 50%; transform: translateX(-50%);
+    width: 5px; height: 5px; border-radius: 50%; background: #8e8e93; }
+  .ical-day.today .dot { background: #ff453a; }
+  .ical-sep { height: 1px; background: rgba(255,255,255,.12); margin: 8px 0 10px; }
+  .ical-dayh { font-size: 13px; font-weight: 600; color: #8e8e93; margin: 2px 0 4px; }
+  .ical-ev { display: flex; align-items: center; gap: 8px; padding: 8px 2px;
+    border-bottom: 1px solid rgba(255,255,255,.08); font-size: 14px; color: #eee; }
+  .ical-ev .bar { flex: 0 0 3.5px; height: 26px; border-radius: 2px; background: #ff9f0a; }
+  .ical-ev.locked .bar { background: #8e8e93; }
+  .ical-ev.past { opacity: .5; }
+  .ical-ev .t { flex: 1; }
+  .ical-ev .when { color: #8e8e93; font-size: 12.5px; }
   /* 🎯 门面 */
   .hero { padding: 6px 2px 12px; border-bottom: 1px solid #201c15; }
   .hero-t { font-size: 22px; font-weight: 800; letter-spacing: 1px; color: #f0f2f8; line-height: 1.4; }
@@ -2847,14 +2877,64 @@ function openPlanner(tab) {
   const inp = document.getElementById(_plannerTab === "notes" ? "noteText" : "calText");
   if (inp && _noteEditing) inp.focus();
 }
+// 🗓 iOS 风月历: 游戏日映射七列周 (第1天=周一), 28 天一页, 红圈今日, 点日期看当天
+let _calPage = null;   // 28 天页号 (null = 跟着今天走)
+let _calSel = null;    // 选中的游戏日 (null = 今天)
+function calSelDay(d){ _calSel = d; openPlanner("cal"); }
+function calFlipPage(dir){
+  const today = (curClock && curClock.day) || 1;
+  const cur = _calPage == null ? Math.floor((today - 1) / 28) : _calPage;
+  _calPage = Math.max(0, cur + dir);
+  openPlanner("cal");
+}
 function _calTab() {
   const ck = curClock;
-  const now = ck && ck.label ? `<div class="pcalnow">${B("🕐 现在：", "🕐 Now: ")}<b>${escapeHtml(ck.label)}</b></div>` : "";
+  const today = (ck && ck.day) || 1;
+  const evs = playerEvents || [];
+  const page = _calPage == null ? Math.floor((today - 1) / 28) : _calPage;
+  const start = page * 28 + 1;
+  const sel = _calSel == null ? today : _calSel;
+  const evDays = new Set(evs.map(e => +e.day));
+  const WD = [["一","M"],["二","T"],["三","W"],["四","T"],["五","F"],["六","S"],["日","S"]];
+  let cells = "";
+  for (let k = 0; k < 28; k++) {
+    const d = start + k;
+    const cls = "ical-day" + (d === today ? " today" : "") + (d === sel ? " sel" : "")
+      + (d < today ? " past" : "");
+    cells += `<div class="${cls}" onclick="calSelDay(${d})"><span class="n">${d}</span>${evDays.has(d) ? '<span class="dot"></span>' : ""}</div>`;
+  }
+  const grid = `<div class="ical">
+    <div class="ical-head">
+      <div><div class="ical-title">${B(`第 ${start} – ${start + 27} 天`, `Day ${start} – ${start + 27}`)}</div>
+        ${ck && ck.label ? `<div class="ical-sub">${B("现在", "Now")} · ${escapeHtml(ck.label)}</div>` : ""}</div>
+      <div class="ical-nav"><span class="${page > 0 ? "" : "off"}" onclick="calFlipPage(-1)">‹</span><span onclick="calFlipPage(1)">›</span></div>
+    </div>
+    <div class="ical-week">${WD.map(([z, e]) => `<span>${B(z, e)}</span>`).join("")}</div>
+    <div class="ical-grid">${cells}</div>
+    <div class="ical-sep"></div></div>`;
   let ddl = "";
   if (ck && ck.deadline) {
     const d = ck.deadline;
     ddl = `<div class="pcalddl">⏳ ${escapeHtml(d.text)}${B("：", ": ")}${d.days_left > 0 ? B(`还剩 <b>${d.days_left}</b> 天`, `<b>${d.days_left}</b> day(s) left`) : d.days_left === 0 ? B("<b>就在今天</b>", "<b>today</b>") : B("已经过去", "passed")}</div>`;
   }
+  // 选中日的行程 (iOS: 网格下方只看这一天)
+  const dayEvs = evs.filter(e => +e.day === sel).map(ev =>
+    `<div class="ical-ev${ev.passed ? " past" : ""}${ev.told === "none" ? " locked" : ""}"><span class="bar"></span>` +
+    `<span class="t">${ev.told === "none" ? "🔒 " : ""}${escapeHtml(ev.text)}</span>` +
+    `<span class="when">${escapeHtml(ev.slot || B("全天", "All day"))}</span>` +
+    `<a class="pcaldel" onclick="delCalEvent('${ev.id}')">✕</a></div>`).join("")
+    || `<div class="jempty">${B("这天还没安排。", "Nothing planned.")}</div>`;
+  const dayh = `<div class="ical-dayh">${sel === today ? B(`今天 · 第 ${sel} 天`, `Today · Day ${sel}`) : B(`第 ${sel} 天`, `Day ${sel}`)}</div>`;
+  // ✍️ 折叠式添加: 记在选中的那天 (iOS 惯例: 先选日子再添事)
+  const form = `<div class="pcaladd" id="calAdd" onclick="plannerExpand('calAdd','calText')">＋ ${sel === today ? B("在今天记一笔…", "Add for today…") : B(`在第 ${sel} 天记一笔…`, `Add for day ${sel}…`)}</div>
+    <div class="pcalform hidden" id="calFormBox">
+      <input id="calText" maxlength="60" placeholder="${B("周五考试 / 明晚加班…", "exam Friday / late shift tomorrow…")}">
+      <div class="pcalrow"><span class="chips" id="calSlot">
+        ${[["", B("全天", "All day")], ["晨", B("晨", "AM")], ["午", B("午", "Noon")], ["夜", B("夜", "Night")]].map(([v, l], i) => `<span class="chk${i === 0 ? " on" : ""}" data-v="${v}" onclick="calPick(this,'calSlot')">${l}</span>`).join("")}
+      </span></div>
+      <div class="pcalrow"><label class="pcalpriv"><input type="checkbox" id="calPriv"> ${B("私密（角色不知道）", "Private (characters won't know)")}</label>
+        <button class="sm" onclick="addCalEvent()">${B("记上", "Add")}</button></div>
+      <div class="muted" id="calMsg" style="font-size:11px"></div></div>`;
   const prs = (lastPromises || []).map(p =>
     `<div class="pcalitem">${p.romantic ? "💞" : "🤝"} <b>${escapeHtml(p.when)}</b>${p.place ? " · " + escapeHtml(p.place) : ""} · ${escapeHtml(p.what)}<span class="jwho">（${escapeHtml(p.name)}）</span></div>`
   ).join("") || `<div class="jempty">${B("还没有和谁定下约。", "No promises yet.")}</div>`;
@@ -2862,23 +2942,7 @@ function _calTab() {
     `<div class="pcalitem">📋 ${escapeHtml(q.title||"")}${q.reward ? B(`（酬 ${q.reward}${escapeHtml(curCurrency)}）`, ` (pay ${q.reward}${escapeHtml(curCurrency)})`) : ""}${q.deadline_day ? B(` · 限第${q.deadline_day}天内`, ` · by day ${q.deadline_day}`) : ""}<span class="jwho">（${escapeHtml(q.giver||"")}）</span></div>`
   ).join("");
   const g = lastGoal ? `<div class="jh">🎯 ${B("当前目标", "Current goal")}</div><div class="pcalitem">${escapeHtml(lastGoal)}</div>` : "";
-  // 我的行程: 你写下的日子, 世界会记得 (公开=角色关心; 私密=纯备忘)
-  const mine = (playerEvents || []).map(ev =>
-    `<div class="pcalitem${ev.passed ? " past" : ""}">${ev.told === "none" ? "🔒" : "🗓"} <b>${escapeHtml(ev.when)}</b> · ${escapeHtml(ev.text)}` +
-    `<a class="pcaldel" onclick="delCalEvent('${ev.id}')">✕</a></div>`).join("");
-  // ✍️ 折叠式添加 (UX 收口): 一行「+ 记一笔」, 点开才展开表单, 页面不被表单占满
-  const form = `<div class="pcaladd" id="calAdd" onclick="plannerExpand('calAdd','calText')">＋ ${B("记一笔行程…", "Add a plan…")}</div>
-    <div class="pcalform hidden" id="calFormBox">
-      <input id="calText" maxlength="60" placeholder="${B("周五考试 / 明晚加班…", "exam Friday / late shift tomorrow…")}">
-      <div class="pcalrow"><span class="chips" id="calDay">
-        ${[0,1,2].map(o=>`<span class="chk${o===0?" on":""}" data-o="${o}" onclick="calPick(this,'calDay')">${o===0?B("今天","Today"):o===1?B("明天","Tomorrow"):B("后天","Day after")}</span>`).join("")}
-      </span><span class="chips" id="calSlot">
-        ${[["",B("全天","All day")],["晨",B("晨","AM")],["午",B("午","Noon")],["夜",B("夜","Night")]].map(([v,l],i)=>`<span class="chk${i===0?" on":""}" data-v="${v}" onclick="calPick(this,'calSlot')">${l}</span>`).join("")}
-      </span></div>
-      <div class="pcalrow"><label class="pcalpriv"><input type="checkbox" id="calPriv"> ${B("私密（角色不知道）", "Private (characters won't know)")}</label>
-        <button class="sm" onclick="addCalEvent()">${B("记上", "Add")}</button></div>
-      <div class="muted" id="calMsg" style="font-size:11px"></div></div>`;
-  return `${now}${ddl}${g}<div class="jh">${B("我的行程", "My plans")}</div>${form}${mine}` +
+  return `${grid}${ddl}${dayh}${dayEvs}${form}${g}` +
     `<div class="jh">${B("约定", "Promises")}</div>${prs}${qs ? `<div class="jh">${B("在办的差事", "Open jobs")}</div>${qs}` : ""}`;
 }
 function _notesTab() {
@@ -2941,9 +3005,9 @@ async function addCalEvent(){
   const t = (document.getElementById("calText").value||"").trim();
   const msg = document.getElementById("calMsg");
   if (t.length < 2) { msg.textContent = B("写清楚一点：至少两个字", "A bit more detail, please"); return; }
-  const off = +(document.querySelector("#calDay .on")||{}).dataset?.o || 0;
   const slot = (document.querySelector("#calSlot .on")||{}).dataset?.v || "";
-  const day = ((curClock && curClock.day) || 1) + off;
+  // 记在月历上选中的那天 (iOS 惯例: 先点日子再添事); 没点过就是今天
+  const day = _calSel == null ? ((curClock && curClock.day) || 1) : _calSel;
   try {
     const r = await j(`/runs/${runId}/calendar`, { method:"POST",
       body: JSON.stringify({ text: t, day, slot, told: document.getElementById("calPriv").checked ? "none" : "all" }) });
