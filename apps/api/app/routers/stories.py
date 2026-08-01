@@ -976,3 +976,109 @@ async def upload_media(
             flag_modified(snap, "content")
         db.commit()
     return {"url": url}
+
+
+# 🎙 声音克隆 (Yi: 编辑剧本一定要能自己上传声音) ────────────────────────────
+def _sniff_audio(data: bytes) -> str | None:
+    """magic bytes → 扩展名; 认不出就拒 (声音样本只收 wav/mp3/m4a)."""
+    if data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+        return "wav"
+    if data[:3] == b"ID3" or (len(data) > 1 and data[0] == 0xFF and (data[1] & 0xE0) == 0xE0):
+        return "mp3"
+    if data[4:8] == b"ftyp":
+        return "m4a"
+    return None
+
+
+_VOICE_PREVIEW = {"zh": "你来啦。我还以为要再等一会儿呢。",
+                  "en": "There you are. I was starting to wonder."}
+
+
+def _story_lang(s: StoryModel) -> str:
+    return "en" if str(s.language or "zh").lower().startswith("en") else "zh"
+
+
+@router.post("/{story_id}/voice_clone")
+async def voice_clone(
+    story_id: str,
+    target_id: str = Form(...),
+    file: UploadFile = File(...),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Author uploads a voice sample (10~30s 清晰人声) → CosyVoice 克隆专属声线。
+    成功即写进角色卡与最新快照 (配音是演出层, 在途 run 立刻换声);
+    语气音精灵后台自动生成; 返回 preview_url 供编辑器当场试听。"""
+    import asyncio
+    import threading
+
+    s = _own_story(story_id, user, db)
+    from ..engine.gal import safe_asset_key
+    try:
+        target_id = safe_asset_key(target_id)
+    except ValueError:
+        raise HTTPException(400, "非法的 target_id")
+    chars = list(s.characters or [])
+    c = next((x for x in chars if x.get("id") == target_id), None)
+    if not c:
+        raise HTTPException(404, "这个剧本里没有该角色")
+    data = await file.read()
+    if len(data) > 10 * 1024 * 1024:
+        raise HTTPException(413, "音频太大（上限 10MB，10~30 秒足够）")
+    ext = _sniff_audio(data)
+    if not ext:
+        raise HTTPException(415, "只支持 WAV / MP3 / M4A 音频")
+    from ..engine import voice as voice_engine
+    try:
+        voice_id = await asyncio.to_thread(voice_engine.enroll, data, ext)
+    except voice_engine.TTSError as e:
+        raise HTTPException(502, f"克隆失败: {e}")
+    v = {"id": voice_id, "speed": 1.0, "model": voice_engine.CLONE_MODEL, "cloned": True}
+    c["voice"] = v
+    s.characters = chars
+    flag_modified(s, "characters")
+    snap = (db.query(StorySnapshot).filter(StorySnapshot.story_id == s.id)
+            .order_by(StorySnapshot.version.desc()).first())
+    if snap and (snap.content or {}).get("story"):
+        for sc in snap.content["story"].get("characters", []):
+            if sc.get("id") == target_id:
+                sc["voice"] = dict(v)
+        flag_modified(snap, "content")
+    db.commit()
+    lang = _story_lang(s)
+    # 语气音精灵后台补齐 (十几秒); 缺的期间客户端静默降级, 不挡返回
+    threading.Thread(target=voice_engine.gen_sprites_for,
+                     args=(voice_id, lang, voice_engine.CLONE_MODEL), daemon=True).start()
+    preview_url = None
+    try:
+        preview_url = await voice_engine.tts_line_cached(
+            _VOICE_PREVIEW[lang], voice_id, 1.0, model=voice_engine.CLONE_MODEL)
+    except voice_engine.TTSError:
+        pass   # 试听失败不吞掉克隆成果
+    return {"voice": v, "preview_url": preview_url}
+
+
+@router.post("/{story_id}/voice_preview")
+async def voice_preview(
+    story_id: str,
+    target_id: str = Form(...),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """编辑器试听: 用该角色当前音色 (克隆或预置) 合成一句固定台词, 缓存复用."""
+    s = _own_story(story_id, user, db)
+    c = next((x for x in (s.characters or []) if x.get("id") == target_id), None)
+    if not c:
+        raise HTTPException(404, "这个剧本里没有该角色")
+    v = c.get("voice") or {}
+    if not v.get("id"):
+        raise HTTPException(404, "这个角色还没有配音")
+    from ..engine import voice as voice_engine
+    try:
+        url = await voice_engine.tts_line_cached(
+            _VOICE_PREVIEW[_story_lang(s)], str(v["id"]),
+            float(v.get("speed") or 1.0),
+            model=str(v["model"]) if v.get("model") else None)
+    except voice_engine.TTSError as e:
+        raise HTTPException(502, f"试听失败: {e}")
+    return {"url": url}

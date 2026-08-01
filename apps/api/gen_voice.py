@@ -14,7 +14,7 @@ Upload: tar czf - -C app/static/scene voice | ssh persona "tar xzf - -C /opt/lin
 import os
 import sys
 
-from app.engine.voice import synth
+from app.engine.voice import SPRITES, synth
 
 OUT_DIR = os.path.join("app", "static", "scene", "voice")
 
@@ -40,31 +40,7 @@ VOICES: dict[str, str] = {
     "longanlang_v3":  "en",    # Ilya (双语音色, 微口音正合丹麦人设; 勿再跨语双持)
 }
 
-# 分类对齐 director._EXPR_MAP 四分类 (惊/怒/哀/喜) + 常态; 文件名用 ASCII。
-# 文本就是全部演技: 标点与省略号驱动语气, CosyVoice 对叹词的处理实测自然。
-SPRITES: dict[str, dict[str, list[str]]] = {
-    "zh": {
-        "surprise": ["诶？！", "嗯？！"],
-        "anger":    ["哼。", "啧。"],
-        "sad":      ["唉……", "嗯……"],
-        "joy":      ["哈哈。", "嘿嘿。"],
-        "neutral":  ["嗯。", "嗯？"],
-    },
-    "yue": {
-        "surprise": ["吓？！", "咦？！"],
-        "anger":    ["哼。", "嘖。"],
-        "sad":      ["唉……", "哎……"],
-        "joy":      ["哈哈。", "嘻嘻。"],
-        "neutral":  ["嗯。", "係。"],
-    },
-    "en": {
-        "surprise": ["Huh?!", "What—?"],
-        "anger":    ["Tch.", "Hmph."],
-        "sad":      ["Haah...", "Mm..."],
-        "joy":      ["Heh.", "Ha ha."],
-        "neutral":  ["Mm.", "Hm?"],
-    },
-}
+# 精灵台本住在 engine/voice.SPRITES (克隆音即时生成与这里共用一份, 不许分家)。
 
 
 def main() -> None:

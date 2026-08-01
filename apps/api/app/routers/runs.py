@@ -777,7 +777,8 @@ async def tts_line(run_id: str, body: TTSIn,
         raise HTTPException(404, "这个角色没有配音选角")
     try:
         url = await voice_mod.tts_line_cached(body.text, str(v["id"]),
-                                              float(v.get("speed") or 1.0))
+                                              float(v.get("speed") or 1.0),
+                                              model=str(v["model"]) if v.get("model") else None)
     except voice_mod.TTSError as e:
         raise HTTPException(502, f"配音失败: {e}")
     return {"url": url}

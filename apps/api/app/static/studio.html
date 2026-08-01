@@ -904,7 +904,7 @@ async function fillChar(i){
       k => { msg.textContent = "🪄 补全空白中" + ".".repeat(1 + k % 3); });
     if (!got.length) throw new Error("没解析出来，先把人设写具体一点");
     const n = got[0]; let filled = 0;
-    const KEEP = new Set(["id","is_lead","avatar_url","generated","name"]);   // 这几样绝不让 AI 碰
+    const KEEP = new Set(["id","is_lead","avatar_url","generated","name","voice"]);   // 这几样绝不让 AI 碰 (voice=选角/克隆, AI 不许瞎配)
     for (const k of Object.keys(n)) {
       if (KEEP.has(k)) continue;
       const cur = c[k];
@@ -1010,6 +1010,43 @@ async function genCharAvatar(i){
     }, 5000);
   }catch(e){ const m=document.getElementById(`avmsg_${i}`); if(m) m.textContent="失败: "+e.message; }
 }
+// 🎙 声音克隆 (Yi: 编辑剧本一定要能自己上传声音): 传样本 → 服务器 enroll 专属声线
+// 成功即入库 (角色卡+快照, 在途 run 立刻换声), 返回试听句当场播
+async function uploadCharVoice(i, inp){
+  const f = inp.files && inp.files[0]; if(!f) return;
+  const c = story.characters[i];
+  const msg = document.getElementById(`vcmsg_${i}`);
+  try{
+    // 无条件先存 (同 uploadCharPhoto): 新加的卡不入库, 克隆接口查无此人
+    if(!await save(false)) throw new Error("先保存没成功，看顶部提示");
+    if(msg) msg.textContent = "⏳ 克隆中（约 20 秒，别关页面）…";
+    const fd = new FormData();
+    fd.append("target_id", c.id); fd.append("file", f);
+    const r = await fetch(API+`/stories/${story.id}/voice_clone`,{method:"POST",credentials:"include",body:fd});
+    if(!r.ok) throw new Error((await r.json().catch(()=>({}))).detail||r.status);
+    const d = await r.json();
+    c.voice = d.voice;
+    if(d.preview_url) new Audio(d.preview_url).play().catch(()=>{});
+    _openChar = i; renderChars();
+  }catch(e){ const m=document.getElementById(`vcmsg_${i}`); if(m) m.textContent = "克隆失败: " + e.message; }
+  finally{ inp.value = ""; }
+}
+async function hearCharVoice(i){
+  const c = story.characters[i];
+  const msg = document.getElementById(`vcmsg_${i}`);
+  try{
+    if(msg) msg.textContent = "⏳ 合成试听…";
+    const fd = new FormData(); fd.append("target_id", c.id);
+    const r = await fetch(API+`/stories/${story.id}/voice_preview`,{method:"POST",credentials:"include",body:fd});
+    if(!r.ok) throw new Error((await r.json().catch(()=>({}))).detail||r.status);
+    new Audio((await r.json()).url).play().catch(()=>{});
+    if(msg) msg.textContent = c.voice&&c.voice.cloned ? "专属声线已克隆" : "预置音色: "+(c.voice&&c.voice.id||"");
+  }catch(e){ if(msg) msg.textContent = "试听失败: " + e.message; }
+}
+function clearCharVoice(i){
+  story.characters[i].voice = {};   // 存盘后生效; 语气音与台词键随之消失
+  _openChar = i; renderChars();
+}
 function renderChars(){
   chars.innerHTML="";
   story.characters.forEach((c,i)=>{
@@ -1044,6 +1081,11 @@ function renderChars(){
         <button class="sm ghost" onclick="genCharAvatar(${i})">🎨 AI 画一张（跟剧本画风）</button>
         <button class="sm ghost" onclick="fillChar(${i})">🪄 AI 补全空白</button>
         <span class="muted" id="avmsg_${i}" style="font-size:12px"></span>
+      </div>
+      <div class="bar" style="margin:2px 0 8px">
+        <label class="sm ghost" style="cursor:pointer;margin:0;padding:4px 10px;border:1px solid #292217;border-radius:8px">🎙 上传声音（克隆专属声线）<input type="file" accept="audio/*,.wav,.mp3,.m4a" style="display:none" onchange="uploadCharVoice(${i},this)"></label>
+        ${c.voice&&c.voice.id?`<button class="sm ghost" onclick="hearCharVoice(${i})">▶ 试听</button><button class="sm del" onclick="clearCharVoice(${i})">✖ 去掉配音</button>`:""}
+        <span class="muted" id="vcmsg_${i}" style="font-size:12px">${c.voice&&c.voice.id?(c.voice.cloned?"专属声线已克隆":"预置音色: "+esc(c.voice.id)):"未配音 · 传 10~30 秒清晰人声即可"}</span>
       </div>
       <div class="row2">
         <div><label>名字</label><input value="${esc(c.name)}" oninput="setChar(${i},'name',this.value)"></div>
