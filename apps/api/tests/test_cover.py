@@ -191,6 +191,33 @@ def test_the_only_figure_we_have_is_used_even_if_unmeasurable():
     assert cover.build(story)["cast"] == 1, "只剩这一个还挑, 封面就空了 — 宁可用先验缩放"
 
 
+# ── ⑤ 脸不许出画, 引子不许腰斩 ────────────────────────────────────────────
+@pytest.mark.parametrize("bust", [True, False])
+@pytest.mark.parametrize("nh_mul,face_off_frac", [(0.35, 0.02), (1.0, 0.05),
+                                                  (2.2, 0.10), (2.2, 0.45), (0.2, 0.5)])
+def test_a_face_never_leaves_the_frame(bust, nh_mul, face_off_frac):
+    """齐底摆法碰上特别高的人形, 脑袋会顶出上沿 —— 封面上只剩一双手 (实弹)。"""
+    H = 1200
+    nh = int(H * nh_mul)
+    off = nh * face_off_frac
+    top, _ = cover.place_top(H, 0.33, 0, nh, off, bust)
+    fy = top + off
+    assert H * cover.FACE_TOP_MIN - 1 <= fy <= H * cover.FACE_TOP_MAX + 1, \
+        f"脸落在 {fy / H:.2f} 屏高处 — 出画了"
+
+
+def test_the_teaser_is_never_cut_mid_word():
+    long_en = ("You inherited a lighthouse. It came with a keeper nobody "
+               "remembers hiring and a light that answers back.")
+    out = cover._clip(long_en, 82)
+    assert len(out) <= 83 and out.endswith("…")
+    assert out[:-1].rstrip().split()[-1] in long_en.split(), "西文被腰斩在半个单词上"
+    zh = "深夜的精神病院，铁门在你身后锁死。巡夜人循声而猎，活下去，挖出真相，或者成为14床。"
+    assert cover._clip(zh, 24).endswith("…")
+    assert cover._clip("短句", 24) == "短句"          # 够短就别加省略号
+    assert cover._clip("", 24) == ""
+
+
 def test_offstage_characters_stay_off_the_cover():
     _put_sprite("live", _person())
     _put_sprite("ghost", _person())

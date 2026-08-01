@@ -33,7 +33,7 @@ BG_DIR = _STATIC / "bg"
 COVER_DIR = _STATIC / "cover"
 
 # 版式版本号: 改了排版/配色/字号就 +1 —— 指纹里带着它, 全站封面自动重排
-ALGO = "c3"
+ALGO = "c4"
 
 POSTER = (900, 1200)     # 3:4 盒绘
 WIDE = (1440, 864)       # 16:9.6 —— 与 play.html .scard 的 aspect-ratio 对齐
@@ -570,6 +570,19 @@ def _wrap(draw, text: str, font, max_w: int, max_lines: int) -> list[str]:
     return lines
 
 
+def _clip(s: str, n: int) -> str:
+    """引子截断: 西文退到词边界, 中文退到最近的标点, 截了就补省略号。
+    硬截会把一个词腰斩 (实弹: 封面上印着 "…nobody remembers hir")。"""
+    t = " ".join((s or "").split())
+    if len(t) <= n:
+        return t
+    cut = t[:n]
+    at = max((cut.rfind(c) for c in " ,;—、，。；：!?！？"), default=-1)
+    if at >= n * 0.55:
+        cut = cut[:at]
+    return cut.rstrip(" ,、，；;:—") + "…"
+
+
 def _text_block(img, pal, title: str, eyebrow: str, tease: str):
     """海报的字: 眉标(疏排小字) → 标题(衬线大字, 自动缩到放得下) → 细线 → 一句引子。
     左对齐留边, 顶部一条竖向的强调色标尺 —— 不居中、不加框, 靠对齐和留白站住。"""
@@ -646,6 +659,38 @@ _LAYOUT = {
 _DIM = [(1.0, 1.02), (0.94, 0.96), (0.94, 0.96), (0.88, 0.90), (0.88, 0.90)]
 
 
+FACE_TOP_MIN, FACE_TOP_MAX = 0.085, 0.62
+
+
+def place_top(H: int, eye: float, rank: int, nh: int, face_off: float,
+              bust: bool) -> tuple[int, bool]:
+    """这个人形的上沿落在第几行 + 底边要不要化开。
+
+    两种摆法: 全身班底按【视平线】对脸 (顶着猫耳的和贴头皮的才排得齐), 半身班底
+    按【齐底】—— 一排人从下沿长出来, 不然下面空一大块。
+
+    最后压一道死规矩: 脸必须留在画面里。齐底摆法碰上一个特别高的人形, 底边一钉,
+    脑袋就顶出上沿, 封面上只剩一双手 (实弹: The Lighthouse at Gull Point)。
+    宁可让身子多出画一点, 绝不让脸出画。
+    """
+    fade = False
+    if bust:
+        top = int(H * (1.035 - 0.022 * min(rank, 4))) - nh
+    else:
+        top = int(H * eye - face_off)
+        bottom = top + nh
+        # ✂️ 脚踝切口是海报的低级事故 (实弹第一版三个人全切在脚踝上)。
+        # 差一点点就出画的, 索性推下去让它切在小腿。
+        if H * 0.90 < bottom < H * 1.06:
+            top += int(H * 1.09) - bottom
+        elif bottom < H * 0.86:
+            top += min(int(H * 0.14), int(H * 0.92) - bottom)
+            fade = True
+    fy = top + face_off
+    top += int(max(H * FACE_TOP_MIN - fy, 0) - max(fy - H * FACE_TOP_MAX, 0))
+    return top, fade
+
+
 def _cast_layer(size, figs, kind, pal):
     from PIL import Image, ImageEnhance, ImageFilter
     W, H = size
@@ -666,8 +711,14 @@ def _cast_layer(size, figs, kind, pal):
         face, ftop, _ = head_metrics(figs[i])
         sc = (H * cfg["face"][min(i, 4)]) / max(1e-6, face)
         plan.append([sc, ftop])
-    hs = sorted(figs[i].height * plan[i][0] for i in range(n))
-    med = hs[len(hs) // 2]
+    hs = [figs[i].height * plan[i][0] for i in range(n)]
+    med = sorted(hs)[n // 2]
+    # 🩺 拔尖的往回收: 谁归一后比全班中位高出六成, 多半是脸量小了。同台的人身量
+    # 不该差出两倍 —— 不收, 封面上就是"一个巨人 + 几个被挤到画外的零件"(实弹)
+    if n >= 3:
+        for i in range(n):
+            if hs[i] > med * 1.6:
+                plan[i][0] *= med * 1.6 / hs[i]
     bust = med < H * 0.60
     if bust:                                    # 半身: 放大到能撑住版面, 但别撑爆
         k = max(1.0, min(1.7, H * 0.62 / max(1.0, med)))
@@ -679,8 +730,8 @@ def _cast_layer(size, figs, kind, pal):
         im = figs[i]
         sc, ftop = plan[i]
         nw, nh = max(2, int(im.width * sc)), max(2, int(im.height * sc))
-        if nh > H * 2.6:                       # 病态输入 (量歪了) 的止损
-            sc = H * 2.6 / im.height
+        if nh > H * 2.2:                       # 病态输入 (量歪了) 的止损
+            sc = H * 2.2 / im.height
             nw, nh = max(2, int(im.width * sc)), max(2, int(im.height * sc))
         f = _feather_cropped(im.resize((nw, nh), Image.LANCZOS))
 
@@ -690,20 +741,9 @@ def _cast_layer(size, figs, kind, pal):
         if i >= 3:
             f = f.filter(ImageFilter.GaussianBlur(1.1))   # 空气透视: 最后一排微微发虚
 
-        if bust:
-            # 齐底: 一排人从下沿长出来, 越靠后的略高一点 (远小近大的老规矩)
-            top = int(H * (1.035 - 0.022 * min(i, 4))) - nh
-        else:
-            # 视平线对的是【脸顶】不是图框顶 —— 顶着猫耳的和贴头皮的才排得齐
-            top = int(H * cfg["eye"][min(i, 4)] - ftop * sc)
-            bottom = top + nh
-            # ✂️ 脚踝切口是海报的低级事故 (实弹第一版三个人全切在脚踝上)。
-            # 差一点点就出画的, 索性推下去让它切在小腿。
-            if H * 0.90 < bottom < H * 1.06:
-                top += int(H * 1.09) - bottom
-            elif bottom < H * 0.86:
-                top += min(int(H * 0.14), int(H * 0.92) - bottom)
-                f = _fade_bottom(f, 0.20)
+        top, faded = place_top(H, cfg["eye"][min(i, 4)], i, nh, ftop * sc, bust)
+        if faded:
+            f = _fade_bottom(f, 0.20)
         left = int(W * xs[i] - nw / 2)
 
         # 底影 + 轮廓辉光: 前者把人按在地上, 后者把人从背景里剥出来
@@ -849,8 +889,7 @@ def build(story: dict, force: bool = False) -> dict[str, Any]:
     bg = _open_rgba(bgp) if bgp else None
     pal = _palette(bg if bg is not None else (figs[0] if figs else None))
     title = str(story.get("title") or "").strip()
-    tease = str(story.get("one_liner") or story.get("synopsis") or "").strip()
-    tease = tease.replace("\n", " ")[:70]
+    tease = _clip(str(story.get("one_liner") or story.get("synopsis") or ""), 82)
 
     COVER_DIR.mkdir(parents=True, exist_ok=True)
     out: dict[str, Any] = {"cast": len(figs), "fp": fp, "fonts": has_fonts()}
