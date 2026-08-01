@@ -529,6 +529,7 @@ class RunState(BaseModel):
     clock: Optional[dict[str, Any]] = None  # ⏳ {day,slot,label,deadline?} (None = no clock)
     promises: list[dict[str, Any]] = []  # 🤝 open appointments [{name,what,when,place,romantic}]
     player_events: list[dict[str, Any]] = []  # 🗓 玩家自己的行程 [{id,text,day,slot,told,when,passed}]
+    player_notes: list[dict[str, Any]] = []   # 📔 玩家备忘录 [{id,text}] — 叙事罗盘
     phone_unread: int = 0  # 📱 unread incoming messages (badge)
     phone_on: bool = True  # 📵 false = this story has no signal (texting/calls/mail dead)
     verdict: Optional[dict[str, Any]] = None  # 🔍 the case-closing panel (None until unlocked)
@@ -581,6 +582,11 @@ class CalendarIn(BaseModel):
     day: int = 1
     slot: str = ""      # "" = 全天, 或 晨/午/夜
     told: str = "all"   # all = 角色们知道会关心; none = 私密备忘, 绝不入戏
+
+
+class NoteIn(BaseModel):
+    """📔 玩家备忘录: 一条笔记 (新增/改写共用)"""
+    text: str = ""
 
 
 class GoalIn(BaseModel):

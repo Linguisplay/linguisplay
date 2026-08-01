@@ -23,7 +23,7 @@ from ..models import Persona as PersonaModel
 from ..models import Run as RunModel
 from ..models import Story as StoryModel
 from ..models import StoryMeta, StorySnapshot, User
-from ..schemas import (Beat, CalendarIn, ChooseIn, ConfrontIn, FollowIn, GoalIn, MarketBuyIn, MoveIn, PhoneSendIn, RenameIn,
+from ..schemas import (Beat, CalendarIn, ChooseIn, ConfrontIn, FollowIn, GoalIn, MarketBuyIn, MoveIn, NoteIn, PhoneSendIn, RenameIn,
                        SocialCommentIn, SocialLikeIn, TransferIn,
                        PlayIn, RewindIn, Run, RunCreate, RunState, RunSummary, VerdictIn)
 from .stories import _to_secret, _to_story
@@ -411,6 +411,7 @@ def _to_run(r: RunModel) -> Run:
             clock=runtime.clock_view(r.pinned_content or {}, st),
             promises=runtime.promises_view(r.pinned_content or {}, st),
             player_events=runtime.player_events_view(r.pinned_content or {}, st),
+            player_notes=runtime.player_notes_view(st),
             phone_unread=runtime.phone_total_unread(r.pinned_content or {}, st),
             phone_on=runtime.phone_enabled(r.pinned_content or {}),
             verdict=runtime.verdict_view(r.pinned_content or {}, st),
@@ -1459,6 +1460,80 @@ def calendar_del(run_id: str, event_id: str,
     flag_modified(r, "state")
     db.commit()
     return {"events": runtime.player_events_view(r.pinned_content or {}, st)}
+
+
+# ── 📔 玩家备忘录 (Yi 定 2026-07-31): 亲手记/改/删, 是接下来剧情的叙事罗盘 ────
+
+def _notes_commit(r, st, db):
+    r.state = st
+    flag_modified(r, "state")
+    db.commit()
+    return {"notes": runtime.player_notes_view(st)}
+
+
+@router.post("/{run_id}/notes")
+def note_add(run_id: str, body: NoteIn,
+             user: User = Depends(current_user), db: Session = Depends(get_db)):
+    import uuid as _uuid
+    r = _own_run(run_id, user, db)
+    st = dict(r.state or {})
+    text = (body.text or "").strip()[:80]
+    if len(text) < 2:
+        raise HTTPException(400, "写清楚一点：至少两个字")
+    notes = list(st.get("player_notes") or [])
+    if len(notes) >= 12:
+        raise HTTPException(400, "本子记满了（12 条）——删掉不再要紧的")
+    notes.append({"id": _uuid.uuid4().hex[:8], "text": text})
+    st["player_notes"] = notes
+    return _notes_commit(r, st, db)
+
+
+@router.patch("/{run_id}/notes/{note_id}")
+def note_edit(run_id: str, note_id: str, body: NoteIn,
+              user: User = Depends(current_user), db: Session = Depends(get_db)):
+    r = _own_run(run_id, user, db)
+    st = dict(r.state or {})
+    text = (body.text or "").strip()[:80]
+    if len(text) < 2:
+        raise HTTPException(400, "写清楚一点：至少两个字")
+    notes = list(st.get("player_notes") or [])
+    n = next((x for x in notes if x.get("id") == note_id), None)
+    if not n:
+        raise HTTPException(404, "没有这条笔记")
+    n["text"] = text
+    st["player_notes"] = notes
+    return _notes_commit(r, st, db)
+
+
+@router.delete("/{run_id}/notes/{note_id}")
+def note_del(run_id: str, note_id: str,
+             user: User = Depends(current_user), db: Session = Depends(get_db)):
+    r = _own_run(run_id, user, db)
+    st = dict(r.state or {})
+    st["player_notes"] = [x for x in (st.get("player_notes") or [])
+                          if x.get("id") != note_id]
+    return _notes_commit(r, st, db)
+
+
+@router.post("/{run_id}/character/{char_id}/shared_phone")
+def shared_phone(run_id: str, char_id: str,
+                 user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """📱 好感够了, TA把手机递给你看 (通讯录入口, Yi 定 2026-07-31)。
+    与偷看共用内容缓存, 但无骰无代价; 关系不够给人话 403。"""
+    from ..engine.llm import get_llm
+    r = _own_run(run_id, user, db)
+    content = r.pinned_content or {}
+    st = dict(r.state or {})
+    c = runtime._char_by_id(content, char_id)
+    if not c:
+        raise HTTPException(404, "这个剧本里没有该角色")
+    view = runtime.shared_phone_view(content, st, c, get_llm())
+    if view is None:
+        raise HTTPException(403, "关系还不够近——TA还不会把手机递给你")
+    r.state = st   # shared_once/缓存可能落了账
+    flag_modified(r, "state")
+    db.commit()
+    return {"view": view}
 
 
 @router.post("/{run_id}/character/{char_id}/rename")

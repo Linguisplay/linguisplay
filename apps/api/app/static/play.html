@@ -351,6 +351,9 @@
     border-color: transparent; font-weight: 600; }
   .pcalpriv { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #a79e8c; }
   .pcalpriv input { width: auto; margin: 0; }
+  /* 📱 通讯录里的看手机解锁位 */
+  .ppeek { margin-left: 7px; padding: 0 4px; cursor: pointer; font-size: 13px; }
+  .ppeek.locked { opacity: .55; }
   /* 🎯 门面 */
   .hero { padding: 6px 2px 12px; border-bottom: 1px solid #201c15; }
   .hero-t { font-size: 22px; font-weight: 800; letter-spacing: 1px; color: #f0f2f8; line-height: 1.4; }
@@ -2386,7 +2389,9 @@ function renderPeek(v) {
   const ths = (v.threads || []).map(t =>
     `<div class="pkwith">${B("和", "With ")}${escapeHtml(t.with || "?")}${B("的对话", "")}</div>` +
     (t.msgs || []).map(m => `<div class="pkmsg">${escapeHtml(m)}</div>`).join("")).join("");
-  const hint = v.mode === "shallow"
+  const hint = v.mode === "shared"
+    ? `<div class="pkhint">${B("TA把手机递给你，自己别过头去。你能看到的，是TA愿意给你看的。", "They handed it over and looked away. What you see is what they let you see.")}</div>`
+    : v.mode === "shallow"
     ? `<div class="pkhint">${B("屏幕还亮着——再翻一次就是深翻（风险更高）", "Screen's still on — go again to dig deeper (riskier)")}</div>`
     : `<div class="pkhint">${B("你把能看的都看了。放回去之前，别留下痕迹。", "You saw it all. Leave no trace.")}</div>`;
   ov.innerHTML = `<div class="pkcard" onclick="event.stopPropagation()">
@@ -2426,7 +2431,8 @@ async function openPhone() {
     <div class="papp" onclick="document.getElementById('phoneov').remove(); openRelWeb()">🕸<small>关系网</small></div>
     <div class="papp" onclick="openBag()">🎒<small>背包</small></div>
     <div class="papp" onclick="openCalendar()">🗓<small>日历</small></div>
-    <div class="papp" onclick="document.getElementById('phoneov').remove(); openJournal()">📔<small>备忘录</small></div>
+    <div class="papp" onclick="openNotes()">📝<small>${B("备忘录","Notes")}</small></div>
+    <div class="papp" onclick="document.getElementById('phoneov').remove(); openJournal()">📔<small>${B("档案","Dossier")}</small></div>
   </div>`;
   phoneShell(inner, phoneDevice === "手机" ? "📱 小手机" : `📮 ${phoneDevice}`);
 }
@@ -2684,14 +2690,23 @@ async function openContacts() {
       : c.here ? B("　· 就在眼前", " · right here")
       : c.away ? B("　· 此刻联系不上", " · unreachable now")
       : (c.where ? B(`　· 在${escapeHtml(c.where)}`, ` · at ${escapeHtml(c.where)}`) : "");
+    // 📱 好感解锁位: 够近的人手机可以直接看; 不够的挂锁, 点了给人话
+    const peek = c.dead ? ""
+      : c.peek_ok ? `<a class="ppeek" data-peek="${escapeHtml(c.char_id)}" title="${B("看TA的手机", "View their phone")}">📱</a>`
+      : `<a class="ppeek locked" data-lock="1" title="${B("关系还不够近", "Not close enough yet")}">🔒</a>`;
     return `<div class="pthread" data-cid="${escapeHtml(c.char_id)}">${av}<div class="pmeta">
-      <div class="pname">${c.dead ? "🕯 " : ""}${escapeHtml(c.name||"")}<a class="cinfo" data-info="${escapeHtml(c.char_id)}">ⓘ</a></div>
+      <div class="pname">${c.dead ? "🕯 " : ""}${escapeHtml(c.name||"")}<a class="cinfo" data-info="${escapeHtml(c.char_id)}">ⓘ</a>${peek}</div>
       <div class="plast">${escapeHtml(c.role||"")}${at}${c.has_thread ? "" : B("　· 还没聊过", " · no thread yet")}</div></div></div>`;
   }).join("") || `<div class="jempty">${B("通讯录空空如也。<br>先去见见这个世界里的人。", "No contacts yet.<br>Go meet someone first.")}</div>`;
   const ov = phoneShell(rows, "👥 通讯录", "openPhone()");
   ov.querySelectorAll(".pthread").forEach(el => { el.onclick = () => openThread(el.dataset.cid); });
   ov.querySelectorAll(".cinfo").forEach(el => {
     el.onclick = (e) => { e.stopPropagation(); document.getElementById("phoneov").remove(); openCharCard(el.dataset.info); };
+  });
+  ov.querySelectorAll(".ppeek").forEach(el => {
+    el.onclick = (e) => { e.stopPropagation();
+      if (el.dataset.lock) { pushToast(B("🔒 关系还不够近——TA还不会把手机递给你", "🔒 Not close enough — they won't hand it over yet"), "", 2600); return; }
+      openTheirPhone(el.dataset.peek); };
   });
   resyncWorld();   // 🔒 这一屏是实时读的; 顺手把在场条也对回真源, 关掉面板两边不打架
 }
@@ -2754,6 +2769,55 @@ function openCalendar() {
     `<div class="jh">${B("约定", "Promises")}</div>${prs}${qs ? `<div class="jh">${B("在办的差事", "Open jobs")}</div>${qs}` : ""}`, "🗓 日历", "openPhone()");
 }
 function calPick(el, gid){ [...document.getElementById(gid).children].forEach(c=>c.classList.toggle("on", c===el)); }
+// ── 📝 备忘录: 亲手记/改/删, 世界会顺着你在意的线出牌 ──────────────────────
+let _noteEditing = null;   // 正在改的笔记 id (null = 新增)
+function openNotes(){
+  const rows = (playerNotes || []).map(n =>
+    `<div class="pcalitem"><span onclick="editNote('${n.id}')" style="cursor:pointer">📝 ${escapeHtml(n.text)}</span>` +
+    `<a class="pcaldel" onclick="delNote('${n.id}')">✕</a></div>`).join("")
+    || `<div class="jempty">${B("本子还是空的。记下你在意的事，世界会顺着它出牌。", "Empty so far. Write what you care about — the world will deal you cards along it.")}</div>`;
+  const form = `<div class="pcalform">
+      <input id="noteText" maxlength="80" placeholder="${B("记一条：信封里的钱不对劲 / 想知道他为什么改名…", "e.g. the envelope money is off / why did he change his name…")}">
+      <div class="pcalrow"><span class="muted" style="font-size:11px">${B("角色看不见这个本子，但故事会顺着你记的线走", "Characters can't see this, but the story follows your threads")}</span>
+        <button class="sm" id="noteBtn" onclick="saveNote()">${B("记上", "Add")}</button></div>
+      <div class="muted" id="noteMsg" style="font-size:11px"></div></div>`;
+  _noteEditing = null;
+  phoneShell(`<div class="jh">📝 ${B("我的备忘录", "My notes")}</div>${form}${rows}`, `📝 ${B("备忘录", "Notes")}`, "openPhone()");
+}
+function editNote(nid){
+  const n = (playerNotes || []).find(x => x.id === nid); if (!n) return;
+  _noteEditing = nid;
+  const inp = document.getElementById("noteText");
+  inp.value = n.text; inp.focus();
+  document.getElementById("noteBtn").textContent = B("改好", "Save");
+}
+async function saveNote(){
+  const t = (document.getElementById("noteText").value || "").trim();
+  const msg = document.getElementById("noteMsg");
+  if (t.length < 2) { msg.textContent = B("写清楚一点：至少两个字", "A bit more detail, please"); return; }
+  try {
+    const r = _noteEditing
+      ? await j(`/runs/${runId}/notes/${_noteEditing}`, { method:"PATCH", body: JSON.stringify({ text: t }) })
+      : await j(`/runs/${runId}/notes`, { method:"POST", body: JSON.stringify({ text: t }) });
+    playerNotes = r.notes || [];
+    openNotes();
+  } catch(e) { msg.textContent = "✗ " + e.message; }
+}
+async function delNote(nid){
+  try {
+    const r = await j(`/runs/${runId}/notes/${nid}`, { method:"DELETE" });
+    playerNotes = r.notes || [];
+    openNotes();
+  } catch(e) {}
+}
+// 📱 好感够了, TA把手机递给你看 (通讯录入口; 复用偷看的手机壳渲染)
+async function openTheirPhone(cid){
+  try {
+    const r = await j(`/runs/${runId}/character/${cid}/shared_phone`, { method:"POST" });
+    const ov = document.getElementById("phoneov"); if (ov) ov.remove();
+    renderPeek(r.view);
+  } catch(e) { pushToast("🔒 " + escapeHtml(e.message || ""), "", 2600); }
+}
 async function addCalEvent(){
   const t = (document.getElementById("calText").value||"").trim();
   const msg = document.getElementById("calMsg");
@@ -3269,6 +3333,7 @@ function renderState(st) {
   if (st.cultivation !== undefined) renderCult(st.cultivation);
   if (st.promises !== undefined) renderPromises(st.promises);
   if (st.player_events !== undefined) playerEvents = st.player_events || [];
+  if (st.player_notes !== undefined) playerNotes = st.player_notes || [];
   if (st.phone_unread !== undefined) setPhoneBadge(st.phone_unread);
   if (st.verdict !== undefined) renderVerdictBar(st.verdict);
 }
@@ -3443,6 +3508,7 @@ async function submitVerdict(oid, label) {
 // 🤝 open appointments hang visibly in the bar — the come-back hook you can't unsee
 let lastPromises = [];
 let playerEvents = [];   // 🗓 玩家自己写的行程 (公开的角色会关心, 私密的只是备忘)
+let playerNotes = [];    // 📔 玩家备忘录 (亲手记/改/删, 是接下来剧情的叙事罗盘)
 function renderPromises(list) {
   queueMicrotask(refreshStrip);
   lastPromises = list || [];

@@ -852,6 +852,15 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append(f"【那天过去了】TA之前提过（{pd['passed']}），日子已经过了。"
                      "你若在意TA，这一轮找个自然的口子问一句结果如何——一句就好，问过就翻篇。")
 
+    pn = prompt.get("player_notes") or []
+    if pn:
+        lines.append("")
+        lines.append("【叙事罗盘·玩家的备忘录】玩家私下在本子上记着："
+                     + "；".join(str(x)[:80] for x in pn)
+                     + "。这个本子任何角色都看不见，角色绝不能提及或凭空知道其中内容；"
+                       "但它标出了玩家在意的方向——写这一轮的戏时，让与之相关的细节、"
+                       "契机、人物动向有机会自然浮现，给玩家顺着在意的线往下走的抓手。")
+
     conf = prompt.get("confrontation") or {}
     if conf:
         verdict = {

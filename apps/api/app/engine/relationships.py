@@ -403,6 +403,23 @@ def derive_mode(char: dict[str, Any], scores: dict[str, int], tuning: dict | Non
 # them up over several good exchanges.
 FOLLOW_MIN_CLOSENESS = 25
 
+# 📱 把自己手机递给你看, 比同行亲密得多 — 暧昧/恋人自然可以, 其余要处到这个数。
+# (好感解锁看TA手机, Yi 定 2026-07-31; 深处的日记与搜索仍要冒险偷看, 这里只是
+# 「TA大方给你看」那一层。)
+PHONE_SHARE_MIN_CLOSENESS = 45
+
+
+def can_view_phone(char: dict[str, Any], scores: dict[str, int],
+                   tuning: dict | None = None) -> bool:
+    """TA 愿不愿意把手机递给你看: 敌人永不, 暧昧/恋人随时, 其余看亲近。"""
+    mode = derive_mode(char, scores, tuning)
+    if mode == "enemy":
+        return False
+    if mode in ("flirt", "lover"):
+        return True
+    return int(scores.get("closeness", START_CLOSENESS)) >= \
+        _tv(tuning, "phone_share_min_closeness", PHONE_SHARE_MIN_CLOSENESS)
+
 
 def can_follow(char: dict[str, Any], scores: dict[str, int], tuning: dict | None = None) -> bool:
     """Will this character agree to travel with the player? Needs warmth (closeness ≥ floor,

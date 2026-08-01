@@ -5020,6 +5020,43 @@ def peek_attempt(content: dict[str, Any], state: dict[str, Any], player_input: s
             "moments": moments, "view": view}
 
 
+def shared_phone_view(content: dict[str, Any], state: dict[str, Any],
+                      c: dict[str, Any], llm: LLM) -> dict[str, Any] | None:
+    """💞 关系够近, TA大方把手机递给你看 (通讯录入口, 无骰无代价, Yi 定 2026-07-31)。
+    只有「TA愿意给你看」那一层: 备注/和你的置顶/和别人的最后一句 — 内容与偷看共用
+    _peek_cache (一次生成永远一致, 偷看过再光明正大看, 两边对得上)。日记、搜索、
+    全文这些深处仍然只能冒险偷看。关系不够 → None (调用方给人话)。"""
+    cid = c.get("id")
+    scores = (state.get("rel") or {}).get(cid) or relationships.new_scores()
+    tun = tuning_for(content)
+    if cid in _dead_ids(state) or not relationships.can_view_phone(c, scores, tun):
+        return None
+    cache = _peek_cache(content, state, c, llm)
+    pk = _peek_state(state, cid)
+    if not pk.get("shared_once"):
+        # 第一次递手机是个时刻 — 记进TA的账, 戏里可以被提起
+        pk["shared_once"] = True
+        mem = (state.get("memory_by_char", {}) or {}).get(cid) or ""
+        state.setdefault("memory_by_char", {})[cid] = \
+            (mem + f"；TA把自己的{phone_device(content)}大方递给你看过").strip("；")
+    my_th = (((state.get("phone") or {}).get("threads") or {}).get(cid) or {}).get("msgs") or []
+    return {"mode": "shared", "device": phone_device(content),
+            "nickname": cache.get("nickname"),
+            "owner": {"name": c.get("name"), "avatar_url": c.get("avatar_url")},
+            "threads": [{"with": t.get("with"), "msgs": [(t.get("msgs") or ["……"])[-1]]}
+                        for t in (cache.get("threads") or {}).values()],
+            "mine_last": (my_th or [{}])[-1].get("text") if my_th else None}
+
+
+# ── 📔 玩家备忘录 (Yi 定 2026-07-31): 玩家亲手记/改/删的本子, 影响接下来的戏 ──
+# 笔记是玩家私人的 (角色看不见本子), 但它是玩家在意的方向 — 主叙者的提示词拿它
+# 当叙事罗盘: 相关的细节、契机、人物动向要有机会浮现。绝无 LLM 后台调用。
+
+def player_notes_view(state: dict[str, Any]) -> list[dict[str, Any]]:
+    return [{"id": n.get("id"), "text": n.get("text") or ""}
+            for n in state.get("player_notes") or []]
+
+
 # ── 🏦📸 小手机新 app: 银行 + 社媒 (Yi 拍板 2026-07-20, P0 纯内环) ────────────
 # 银行 = money/money_log 账本的视图 + 转账(传令落账: 真钱动了, TA 短信里真会回应);
 # 社媒 = 活世界账本的可见面: 角色动态从 npc_rel 演变/在办的事/约定渲染, 一次生成
@@ -5429,6 +5466,10 @@ def phone_threads_view(content: dict[str, Any], state: dict[str, Any]) -> dict[s
             row["here"] = cid in _here_ids
             if pos != AWAY and _avail.get(pos):
                 row["where"] = (_location_by_id(content, pos) or {}).get("name") or ""
+        # 📱 关系够近, TA愿意把手机递给你看 (通讯录里的解锁位)
+        _sc = (state.get("rel") or {}).get(cid) or relationships.new_scores()
+        row["peek_ok"] = (cid not in dead
+                          and relationships.can_view_phone(c, _sc, tuning_for(content)))
         contacts.append(row)
     apps = phone_apps(content)
     if not economy_on(state):
@@ -9060,6 +9101,7 @@ def run_turn_stream(
             "pressure_view": None, "clock_view": clock_view(content, state),
             "promises": promises_view(content, state),
             "player_events": player_events_view(content, state),
+            "player_notes": player_notes_view(state),
             "phone_unread": phone_total_unread(content, state),
             "verdict": verdict_view(content, state),
             "pending_choice": state.get("pending_choice"), "rel_deltas": {},
@@ -10051,6 +10093,9 @@ def run_turn_stream(
             "rumor": (serve_rumor(state) if is_primary and not observer else ""),
             # 🗓 玩家公开的行程: 将来的可以顺着关心, 刚过去的问一句结果 (只主叙者问)
             "player_diary": (player_diary_for_prompt(content, state)
+                             if is_primary and not observer else None),
+            # 📔 玩家备忘录: 叙事罗盘 (角色看不见本子, 但相关线头要有机会浮现)
+            "player_notes": ([n.get("text") for n in (state.get("player_notes") or [])][:8]
                              if is_primary and not observer else None),
             # 📱 what you two texted lately — the scene remembers the phone
             "sms_tail": sms_tail_line(state, sp_id),
@@ -11211,6 +11256,7 @@ def run_turn_stream(
         "clock_view": clock_view(content, state),  # ⏳ {day,slot,label,deadline?} or None
         "promises": promises_view(content, state),  # 🤝 open appointments, soonest first
         "player_events": player_events_view(content, state),  # 🗓 玩家自己的行程
+        "player_notes": player_notes_view(state),  # 📔 玩家备忘录 (叙事罗盘)
         "phone_unread": phone_total_unread(content, state),  # 📱 badge (texts + letters)
         "verdict": verdict_view(content, state),  # 🔍 case-closing panel (None until unlocked)
 
