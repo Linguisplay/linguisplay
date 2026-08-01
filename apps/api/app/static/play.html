@@ -335,6 +335,22 @@
   .pcalnow, .pcalddl { font-size: 13.5px; color: #e5ddcc; padding: 6px 4px; }
   .pcalddl { color: #ffb27a; }
   .pcalitem { font-size: 13px; color: #d5cfe0; padding: 7px 4px; border-bottom: 1px solid #282622; }
+  /* 🗓 我的行程: 玩家亲手写的日子 */
+  .pcalitem.past { opacity: .55; }
+  .pcaldel { float: right; color: #857c6b; padding: 0 6px; cursor: pointer; }
+  .pcalform { padding: 4px 0 10px; border-bottom: 1px solid #282622; }
+  .pcalform input[type="text"], .pcalform input:not([type]) { width: 100%; padding: 9px 11px;
+    border-radius: 10px; border: .5px solid rgba(216,181,122,.25); background: rgba(20,16,11,.6);
+    color: #ede6d8; font-size: 13px; }
+  .pcalrow { display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .pcalrow .chips { display: flex; gap: 5px; flex-wrap: wrap; }
+  .pcalrow .chk { font-size: 11.5px; padding: 4px 10px; border-radius: 999px; cursor: pointer;
+    border: .5px solid rgba(216,181,122,.25); color: #a79e8c; background: rgba(24,20,14,.5); }
+  .pcalrow .chk.on { color: #241c0e; background: linear-gradient(180deg,#e6cb99,#cfa965);
+    border-color: transparent; font-weight: 600; }
+  .pcalpriv { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #a79e8c; }
+  .pcalpriv input { width: auto; margin: 0; }
   /* 🎯 门面 */
   .hero { padding: 6px 2px 12px; border-bottom: 1px solid #201c15; }
   .hero-t { font-size: 22px; font-weight: 800; letter-spacing: 1px; color: #f0f2f8; line-height: 1.4; }
@@ -2720,7 +2736,44 @@ function openCalendar() {
     `<div class="pcalitem">📋 ${escapeHtml(q.title||"")}${q.reward ? B(`（酬 ${q.reward}${escapeHtml(curCurrency)}）`, ` (pay ${q.reward}${escapeHtml(curCurrency)})`) : ""}${q.deadline_day ? B(` · 限第${q.deadline_day}天内`, ` · by day ${q.deadline_day}`) : ""}<span class="jwho">（${escapeHtml(q.giver||"")}）</span></div>`
   ).join("");
   const g = lastGoal ? `<div class="jh">🎯 ${B("当前目标", "Current goal")}</div><div class="pcalitem">${escapeHtml(lastGoal)}</div>` : "";
-  phoneShell(`${now}${ddl}${g}<div class="jh">${B("约定", "Promises")}</div>${prs}${qs ? `<div class="jh">${B("在办的差事", "Open jobs")}</div>${qs}` : ""}`, "🗓 日历", "openPhone()");
+  // 🗓 我的行程: 你写下的日子, 世界会记得 (公开=角色关心; 私密=纯备忘)
+  const mine = (playerEvents || []).map(ev =>
+    `<div class="pcalitem${ev.passed ? " past" : ""}">${ev.told === "none" ? "🔒" : "🗓"} <b>${escapeHtml(ev.when)}</b> · ${escapeHtml(ev.text)}` +
+    `<a class="pcaldel" onclick="delCalEvent('${ev.id}')">✕</a></div>`).join("");
+  const form = `<div class="pcalform">
+      <input id="calText" maxlength="60" placeholder="${B("记一笔：周五考试 / 明晚加班…", "e.g. exam Friday / late shift tomorrow…")}">
+      <div class="pcalrow"><span class="chips" id="calDay">
+        ${[0,1,2].map(o=>`<span class="chk${o===0?" on":""}" data-o="${o}" onclick="calPick(this,'calDay')">${o===0?B("今天","Today"):o===1?B("明天","Tomorrow"):B("后天","Day after")}</span>`).join("")}
+      </span><span class="chips" id="calSlot">
+        ${[["",B("全天","All day")],["晨",B("晨","AM")],["午",B("午","Noon")],["夜",B("夜","Night")]].map(([v,l],i)=>`<span class="chk${i===0?" on":""}" data-v="${v}" onclick="calPick(this,'calSlot')">${l}</span>`).join("")}
+      </span></div>
+      <div class="pcalrow"><label class="pcalpriv"><input type="checkbox" id="calPriv"> ${B("私密（只有你看得到，角色不知道）", "Private (characters won't know)")}</label>
+        <button class="sm" onclick="addCalEvent()">${B("记上", "Add")}</button></div>
+      <div class="muted" id="calMsg" style="font-size:11px"></div></div>`;
+  phoneShell(`${now}${ddl}${g}<div class="jh">${B("我的行程", "My plans")}</div>${form}${mine}` +
+    `<div class="jh">${B("约定", "Promises")}</div>${prs}${qs ? `<div class="jh">${B("在办的差事", "Open jobs")}</div>${qs}` : ""}`, "🗓 日历", "openPhone()");
+}
+function calPick(el, gid){ [...document.getElementById(gid).children].forEach(c=>c.classList.toggle("on", c===el)); }
+async function addCalEvent(){
+  const t = (document.getElementById("calText").value||"").trim();
+  const msg = document.getElementById("calMsg");
+  if (t.length < 2) { msg.textContent = B("写清楚一点：至少两个字", "A bit more detail, please"); return; }
+  const off = +(document.querySelector("#calDay .on")||{}).dataset?.o || 0;
+  const slot = (document.querySelector("#calSlot .on")||{}).dataset?.v || "";
+  const day = ((curClock && curClock.day) || 1) + off;
+  try {
+    const r = await j(`/runs/${runId}/calendar`, { method:"POST",
+      body: JSON.stringify({ text: t, day, slot, told: document.getElementById("calPriv").checked ? "none" : "all" }) });
+    playerEvents = r.events || [];
+    openCalendar();
+  } catch(e) { msg.textContent = "✗ " + e.message; }
+}
+async function delCalEvent(eid){
+  try {
+    const r = await j(`/runs/${runId}/calendar/${eid}`, { method:"DELETE" });
+    playerEvents = r.events || [];
+    openCalendar();
+  } catch(e) {}
 }
 // 到达即发现: physical truths that unlocked the moment we arrived
 function renderDiscoveries(list) {
@@ -3215,6 +3268,7 @@ function renderState(st) {
   if (st.location !== undefined) renderPlace(st.location);
   if (st.cultivation !== undefined) renderCult(st.cultivation);
   if (st.promises !== undefined) renderPromises(st.promises);
+  if (st.player_events !== undefined) playerEvents = st.player_events || [];
   if (st.phone_unread !== undefined) setPhoneBadge(st.phone_unread);
   if (st.verdict !== undefined) renderVerdictBar(st.verdict);
 }
@@ -3388,6 +3442,7 @@ async function submitVerdict(oid, label) {
 
 // 🤝 open appointments hang visibly in the bar — the come-back hook you can't unsee
 let lastPromises = [];
+let playerEvents = [];   // 🗓 玩家自己写的行程 (公开的角色会关心, 私密的只是备忘)
 function renderPromises(list) {
   queueMicrotask(refreshStrip);
   lastPromises = list || [];

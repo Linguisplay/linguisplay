@@ -23,7 +23,7 @@ from ..models import Persona as PersonaModel
 from ..models import Run as RunModel
 from ..models import Story as StoryModel
 from ..models import StoryMeta, StorySnapshot, User
-from ..schemas import (Beat, ChooseIn, ConfrontIn, FollowIn, GoalIn, MarketBuyIn, MoveIn, PhoneSendIn, RenameIn,
+from ..schemas import (Beat, CalendarIn, ChooseIn, ConfrontIn, FollowIn, GoalIn, MarketBuyIn, MoveIn, PhoneSendIn, RenameIn,
                        SocialCommentIn, SocialLikeIn, TransferIn,
                        PlayIn, RewindIn, Run, RunCreate, RunState, RunSummary, VerdictIn)
 from .stories import _to_secret, _to_story
@@ -410,6 +410,7 @@ def _to_run(r: RunModel) -> Run:
             sanity=runtime.sanity_view_of(r.pinned_content or {}, st),
             clock=runtime.clock_view(r.pinned_content or {}, st),
             promises=runtime.promises_view(r.pinned_content or {}, st),
+            player_events=runtime.player_events_view(r.pinned_content or {}, st),
             phone_unread=runtime.phone_total_unread(r.pinned_content or {}, st),
             phone_on=runtime.phone_enabled(r.pinned_content or {}),
             verdict=runtime.verdict_view(r.pinned_content or {}, st),
@@ -1415,6 +1416,49 @@ def set_player_goal(run_id: str, body: GoalIn,
     flag_modified(r, "state")  # 浅拷贝共享内层 goals 列表, 不打标 SQLAlchemy 会漏 UPDATE (审计实弹)
     db.commit()
     return {"goal": goal}
+
+
+@router.post("/{run_id}/calendar")
+def calendar_add(run_id: str, body: CalendarIn,
+                 user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """🗓 玩家往日历上记一笔行程 (路线图对照后采纳的日历功能, 2026-07-31 Yi 定):
+    公开的行程角色会顺着关心, 日子过了在意你的人会问一句结果; 私密的只是备忘。
+    只有账本, 没有 LLM — 「无点击不推进」照旧。"""
+    import uuid as _uuid
+    r = _own_run(run_id, user, db)
+    st = dict(r.state or {})
+    if (st.get("mode") or "character") == "god":
+        raise HTTPException(403, "旁观模式没有自己的日历")
+    text = (body.text or "").strip()[:60]
+    if len(text) < 2:
+        raise HTTPException(400, "写清楚一点：至少两个字")
+    ck = st.get("clock") or {}
+    today = int(ck.get("day", 1) or 1)
+    day = max(today, int(body.day or today))
+    slot = body.slot if body.slot in ("晨", "午", "夜") else ""
+    evs = list(st.get("player_events") or [])
+    if len(evs) >= 20:
+        raise HTTPException(400, "日历记满了（20 条）——先删掉过去的")
+    evs.append({"id": _uuid.uuid4().hex[:8], "text": text, "day": day, "slot": slot,
+                "told": "none" if body.told == "none" else "all", "status": "open"})
+    st["player_events"] = evs
+    r.state = st
+    flag_modified(r, "state")
+    db.commit()
+    return {"events": runtime.player_events_view(r.pinned_content or {}, st)}
+
+
+@router.delete("/{run_id}/calendar/{event_id}")
+def calendar_del(run_id: str, event_id: str,
+                 user: User = Depends(current_user), db: Session = Depends(get_db)):
+    r = _own_run(run_id, user, db)
+    st = dict(r.state or {})
+    evs = [e for e in (st.get("player_events") or []) if e.get("id") != event_id]
+    st["player_events"] = evs
+    r.state = st
+    flag_modified(r, "state")
+    db.commit()
+    return {"events": runtime.player_events_view(r.pinned_content or {}, st)}
 
 
 @router.post("/{run_id}/character/{char_id}/rename")

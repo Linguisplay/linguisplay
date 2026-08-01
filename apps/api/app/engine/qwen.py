@@ -840,6 +840,18 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append(f"【TA爽约了】你们本约好了（{bp}），TA却没来。你心里存着这件事——这一轮用你自己的方式"
                      "让TA知道（讥一句、冷一点、装不在意、或直接质问，贴你的性格），说完这一场就翻篇，别没完没了。")
 
+    pd = prompt.get("player_diary") or {}
+    if pd.get("upcoming"):
+        lines.append("")
+        lines.append("【你知道TA的安排】对面这个人提过接下来的打算："
+                     + "；".join(pd["upcoming"])
+                     + "。这不是任务，是你心里装着的事——话题自然靠近时才顺着关心一句，"
+                       "或替TA着想着安排（贴你的性格），绝不要报日程式地逐条问。")
+    if pd.get("passed"):
+        lines.append("")
+        lines.append(f"【那天过去了】TA之前提过（{pd['passed']}），日子已经过了。"
+                     "你若在意TA，这一轮找个自然的口子问一句结果如何——一句就好，问过就翻篇。")
+
     conf = prompt.get("confrontation") or {}
     if conf:
         verdict = {

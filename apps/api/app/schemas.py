@@ -528,6 +528,7 @@ class RunState(BaseModel):
     sanity: Optional[dict[str, Any]] = None  # 🧠 {name,value,max,label} (or None)
     clock: Optional[dict[str, Any]] = None  # ⏳ {day,slot,label,deadline?} (None = no clock)
     promises: list[dict[str, Any]] = []  # 🤝 open appointments [{name,what,when,place,romantic}]
+    player_events: list[dict[str, Any]] = []  # 🗓 玩家自己的行程 [{id,text,day,slot,told,when,passed}]
     phone_unread: int = 0  # 📱 unread incoming messages (badge)
     phone_on: bool = True  # 📵 false = this story has no signal (texting/calls/mail dead)
     verdict: Optional[dict[str, Any]] = None  # 🔍 the case-closing panel (None until unlocked)
@@ -572,6 +573,14 @@ class RunSummary(BaseModel):
     scene_bg: Optional[str] = None      # /scene/bg/<lid>.jpg (文件真存在才给)
     scene_name: Optional[str] = None
     faces: list[dict] = []              # [{id, name, avatar}] ≤3, 有头像的优先
+
+
+class CalendarIn(BaseModel):
+    """🗓 玩家往自己日历上记一笔行程"""
+    text: str = ""
+    day: int = 1
+    slot: str = ""      # "" = 全天, 或 晨/午/夜
+    told: str = "all"   # all = 角色们知道会关心; none = 私密备忘, 绝不入戏
 
 
 class GoalIn(BaseModel):

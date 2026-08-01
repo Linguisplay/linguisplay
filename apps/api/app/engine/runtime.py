@@ -4216,6 +4216,53 @@ def promises_view(content: dict[str, Any], state: dict[str, Any]) -> list[dict[s
     return out
 
 
+# ── 🗓 玩家自己的行程 (2026-07-31 Yi 采纳路线图里的日历方向): 玩家在日历上写
+#    「周五考试」这类安排, 世界要记得 — 公开的行程, 角色会顺着关心; 日子过了,
+#    在意你的人会主动问一句结果 (问过即翻篇, 同爽约的 voiced-once 家法)。
+#    私密的只是备忘, 绝不入戏。「无点击不推进」照旧: 这里只有账本和提示词。 ──
+
+def _player_event_passed(state: dict[str, Any], ev: dict[str, Any]) -> bool:
+    ck = state.get("clock") or {}
+    d, s = int(ck.get("day", 1) or 1), int(ck.get("slot", 0) or 0)
+    ed = int(ev.get("day", 1) or 1)
+    if ed != d:
+        return ed < d
+    try:
+        si = SLOTS.index(ev.get("slot") or "")
+    except ValueError:
+        return False   # 当天不带时段的, 过完这一天才算过去
+    return si < s
+
+
+def player_events_view(content: dict[str, Any], state: dict[str, Any]) -> list[dict[str, Any]]:
+    """玩家行程表 (UI 用), 未过期在前、近的在前。"""
+    evs = []
+    for ev in state.get("player_events") or []:
+        evs.append({"id": ev.get("id"), "text": ev.get("text") or "",
+                    "day": int(ev.get("day", 1) or 1), "slot": ev.get("slot") or "",
+                    "told": ev.get("told") or "all",
+                    "when": promise_when_label(content, ev, state),
+                    "passed": _player_event_passed(state, ev)})
+    return sorted(evs, key=lambda e: (e["passed"], e["day"]))
+
+
+def player_diary_for_prompt(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
+    """本回合值得让角色知道的玩家行程: 将来的最多 3 条 + 刚过去还没问过的 1 条。
+    只取公开 (told=all) 的; 私密备忘永不入戏。"""
+    evs = [e for e in state.get("player_events") or [] if (e.get("told") or "all") == "all"]
+    if not evs:
+        return None
+    up = [f"{promise_when_label(content, e, state)}，{e.get('text')}"
+          for e in evs if not _player_event_passed(state, e)][:3]
+    passed = next((e for e in evs if _player_event_passed(state, e)
+                   and e.get("status") != "asked"), None)
+    if not (up or passed):
+        return None
+    return {"upcoming": up,
+            "passed": (passed.get("text") or "") if passed else "",
+            "_passed_id": passed.get("id") if passed else None}
+
+
 def void_promises_of(state: dict[str, Any], cid: str) -> list[dict[str, Any]]:
     """A death cancels that character's open promises — no 爽约 penalties from the
     grave. Returns the voided ones so the caller can mourn them in a beat."""
@@ -9012,6 +9059,7 @@ def run_turn_stream(
             "hint": "", "moments": [], "dice": None, "content_mutated": seek_minted,
             "pressure_view": None, "clock_view": clock_view(content, state),
             "promises": promises_view(content, state),
+            "player_events": player_events_view(content, state),
             "phone_unread": phone_total_unread(content, state),
             "verdict": verdict_view(content, state),
             "pending_choice": state.get("pending_choice"), "rel_deltas": {},
@@ -10001,6 +10049,9 @@ def run_turn_stream(
                                     if p.get("status") == "missed" and p.get("char_id") == sp_id), None),
             # 🌆 a rumor from offscreen life, told once when the moment fits
             "rumor": (serve_rumor(state) if is_primary and not observer else ""),
+            # 🗓 玩家公开的行程: 将来的可以顺着关心, 刚过去的问一句结果 (只主叙者问)
+            "player_diary": (player_diary_for_prompt(content, state)
+                             if is_primary and not observer else None),
             # 📱 what you two texted lately — the scene remembers the phone
             "sms_tail": sms_tail_line(state, sp_id),
             # the sim sheet: body state + standing intention + how the LAST scene left them
@@ -10078,6 +10129,12 @@ def run_turn_stream(
             for p in (state.get("promises") or []):
                 if p.get("status") == "missed" and p.get("char_id") == sp_id:
                     p["status"] = "missed_noted"
+        _pd = prompt.get("player_diary") or {}
+        if _pd.get("_passed_id"):
+            # 「那天怎么样」问过一次就翻篇 — 别每个回合都追问 (同爽约家法)
+            for e in state.get("player_events") or []:
+                if e.get("id") == _pd["_passed_id"]:
+                    e["status"] = "asked"
         # LOGIC BACKSTOP (primary/addressed character only): verify the turn against the live
         # scene before streaming it — no absent character walks in, no locked secret leaks.
         if is_primary and not observer and get_settings().logic_guard:
@@ -11153,6 +11210,7 @@ def run_turn_stream(
         "sanity_view": sanity_view_of(content, state),  # 🧠 {name,value,max,label} (or None)
         "clock_view": clock_view(content, state),  # ⏳ {day,slot,label,deadline?} or None
         "promises": promises_view(content, state),  # 🤝 open appointments, soonest first
+        "player_events": player_events_view(content, state),  # 🗓 玩家自己的行程
         "phone_unread": phone_total_unread(content, state),  # 📱 badge (texts + letters)
         "verdict": verdict_view(content, state),  # 🔍 case-closing panel (None until unlocked)
 
