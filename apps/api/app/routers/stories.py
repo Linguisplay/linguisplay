@@ -524,7 +524,8 @@ def create_story(
 
 
 _PUBLIC_CHAR_KEYS = ("id", "name", "role", "avatar_url", "is_lead", "playable",
-                     "presence", "appears_from_act", "relation_default")
+                     "presence", "appears_from_act", "relation_default",
+                     "voice")   # 🎙 配音选角是演出层不是剧透 (实弹: 白名单漏了它, 玩家全程无声)
 
 
 def _public_story_view(out: Story) -> Story:
