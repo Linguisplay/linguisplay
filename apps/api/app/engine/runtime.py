@@ -1080,6 +1080,16 @@ def sync_real_clock(content: dict[str, Any], state: dict[str, Any]) -> dict[str,
         state["real_epoch"] = d0.isoformat()
     day = max(1, (now.date() - d0).days + 1)
     slot = 0 if 5 <= now.hour < 12 else (1 if 12 <= now.hour < 18 else 2)
+    if lang_of(content) == "en":
+        # 🌐 en 剧本时间四件在源头就写英文 (GH 清剿: state 里不留中文, 免下游各自转换)
+        _wd_en = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")[now.weekday()]
+        _season_en = ("Winter", "Winter", "Spring", "Spring", "Spring", "Summer", "Summer",
+                      "Summer", "Autumn", "Autumn", "Autumn", "Winter")[now.month - 1]
+        state["clock"] = {"day": day, "slot": slot, "turns_in_slot": 0,
+                          "real": f"{now.hour:02d}:{now.minute:02d}",
+                          "wd": _wd_en, "date": f"{now.month}/{now.day}",
+                          "season": _season_en}
+        return clock_view(content, state)
     _wd = "一二三四五六日"[now.weekday()]
     _season = ("冬", "冬", "春", "春", "春", "夏", "夏", "夏", "秋", "秋", "秋", "冬")[now.month - 1]
     state["clock"] = {"day": day, "slot": slot, "turns_in_slot": 0,
@@ -8546,7 +8556,7 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
         if is_primary:
             flags["dir_ran"] = True   # 主拍在场证明: world_seed 结算凭它区分「真填无」与「没问过」
         if is_primary and directed.get("suggestions"):
-            _sg_items = [str(x).strip()[:20] for x in directed["suggestions"] if str(x).strip()]
+            _sg_items = [str(x).strip()[:48] for x in directed["suggestions"] if str(x).strip()]
             if lang_of(content) == "en":
                 # 🌐 合同护栏 (GH 实弹 2026-08-01: 英文本子建议 chips 冒中文): _lang_rule
                 # 白纸黑字管着 suggestions, 模型随机违约 → 含中文的建议整条丢弃走兜底,

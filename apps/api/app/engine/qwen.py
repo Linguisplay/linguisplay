@@ -1911,8 +1911,8 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
     if "creature_hit" in d:
         out["creature_hit"] = str(d.get("creature_hit") or "").strip()
     if "suggestions" in d:
-        out["suggestions"] = [str(x).strip()[:20] for x in (d.get("suggestions") or [])
-                              if str(x).strip()][:2]
+        out["suggestions"] = [str(x).strip()[:48] for x in (d.get("suggestions") or [])
+                              if str(x).strip()][:2]   # 48: 英文一句话的身位 (中文建议本就≤16字)
     if "identity_change" in d:
         out["identity"] = str(d.get("identity_change") or "").strip()
     for k_in, k_out in (("item_gained", "gained"), ("item_lost", "lost"),
