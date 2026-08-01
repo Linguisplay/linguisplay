@@ -117,6 +117,10 @@ class Character(BaseModel):
     known_facts: Optional[str] = None
     gender: Optional[str] = None          # 男 | 女 | 其他
     age_band: Optional[str] = None        # 少年 | 青年 | 中年 | 老年
+    # 🎙 配音选角 {"id": CosyVoice音色名, "speed": 语速}: 语气音精灵按 id 取
+    # /scene/voice/<id>/ 下的短音频; 台词播放键按 id+speed 现场合成。缺省 = 无配音,
+    # 全链路静默降级 (玩家可扮角色按 galgame 惯例不配)。选角只是演出层, 不进正史。
+    voice: dict[str, Any] = {}
     # 🐱 非人角色的物种 (猫/犬/龙…): 立绘与头像提示词据此换词——「男性青年」对猫角色
     # 会召唤出人类身影 (猫铃堂实弹: 布偶猫背后站了个男青年)
     species: Optional[str] = None
@@ -681,6 +685,13 @@ class RenameIn(BaseModel):
 
 class PhoneSendIn(BaseModel):
     # 📱 a text message the player sends from the 信息 app
+    text: str
+
+
+class TTSIn(BaseModel):
+    # 🎙 台词播放键: which character says the line + the exact line text.
+    # 服务端按角色卡 voice 字段选音色; 文本超长截断 (engine/voice.MAX_CHARS)。
+    speaker_name: str
     text: str
 
 

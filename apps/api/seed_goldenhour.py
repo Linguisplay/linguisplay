@@ -71,6 +71,8 @@ OPENING = ('The ferry gets in at 6:40 and nobody tells you that the island decid
 
 CHARACTERS = [{'id': 'gh_elias',
   'name': 'Elias Varda',
+  # 🎙 casting: British male, slowed — a director whose quiet makes people lean in
+  'voice': {'id': 'loongeric_v3', 'speed': 0.92},
   'role': 'Director. His right hand shakes.',
   'persona_text': 'Fifty-two. Heavy through the shoulders and going soft, bad left knee from '
                   'a dolly track in 2009, half-moon glasses on a cord he does not take off. '
@@ -221,6 +223,7 @@ CHARACTERS = [{'id': 'gh_elias',
   'relation_allowed': ['peer', 'friend', 'flirt', 'lover', 'enemy']},
  {'id': 'gh_rafael',
   'name': 'Rafael Cortez',
+  'voice': {'id': 'loongdavid_v3', 'speed': 1.0},   # US male — the face on airport walls
   'role': 'The lead; never touches anyone first',
   'persona_text': 'Twenty-nine. The face on the airport wall in nine countries, and he '
                   'flinches half a beat before every photograph. Arrives forty minutes '
@@ -337,6 +340,7 @@ CHARACTERS = [{'id': 'gh_elias',
   'relation_allowed': ['peer', 'friend', 'flirt', 'lover', 'enemy']},
  {'id': 'gh_niko',
   'name': 'Niko Petrides',
+  'voice': {'id': 'loongandy_v3', 'speed': 1.06},   # US male, quickened — sunny stunt double
   'role': 'Stunt double; winks before he jumps',
   'persona_text': 'Twenty four, born in the harbour houses, does the falling for a living. '
                   'Built short and thick through the shoulders from a childhood spent under '
@@ -458,6 +462,8 @@ CHARACTERS = [{'id': 'gh_elias',
   'relation_allowed': ['peer', 'friend', 'flirt', 'lover', 'enemy']},
  {'id': 'gh_ilya',
   'name': 'Ilya Sørensen',
+  # bilingual timbre: the faint accent reads as Danish, not as a flaw
+  'voice': {'id': 'longanlang_v3', 'speed': 0.95},
   'role': 'cinematographer; talks only about light',
   'persona_text': 'Danish, tall, forearms freckled and peeling from a sunburn he has not '
                   'treated. Two grey shirts, worn on alternate days, washed in the sink and '
@@ -600,6 +606,7 @@ CHARACTERS = [{'id': 'gh_elias',
   'relation_allowed': ['peer', 'friend', 'flirt', 'lover', 'enemy']},
  {'id': 'gh_marek',
   'name': 'Marek Duna',
+  'voice': {'id': 'loongluca_v3', 'speed': 1.0},   # UK male — deliberately unremarkable
   'role': 'The fixer. Never lies, only goes quiet',
   'persona_text': 'Thirty-three, and ordinary on purpose. A work shirt washed pale blue, '
                   'sleeves down in the heat, canvas shoes, nothing on him that catches '

@@ -67,6 +67,8 @@ CHARACTERS = [
         "relation_default": "stranger",
         "relation_allowed": ["stranger", "peer", "friend"],
         "name": "龙卷风",
+        # 🎙 配音选角: 百炼唯一粤语男声, 降速压出话事人的沧桑分量 (真·港味只此一家)
+        "voice": {"id": "longanyue_v3", "speed": 0.9},
         "bio_layers": [
             {"closeness_min": 0, "text": "城寨的话事人，开一间小理发店。不收保护费，只认一个理：进了城寨门，就是自己人。"},
             {"closeness_min": 20, "text": "他给人理发时话最多也最软。有人说他年轻时不是这样的——那双握剃刀的手，稳得不像只拿过剃刀。"},
@@ -96,6 +98,7 @@ CHARACTERS = [
         "relation_default": "stranger",
         "relation_allowed": ["stranger", "peer", "friend", "flirt", "lover", "enemy"],
         "name": "蓝信一",
+        "voice": {"id": "longtian_v3", "speed": 1.0},   # 磁性理智 — 笑里藏话的观察者
         "bio_layers": [
             {"closeness_min": 0, "text": "城寨四子之一，常年守在暗巷。嘴角叼着根没点的烟，笑里藏话，是最早盯上生面孔的人。"},
             {"closeness_min": 20, "text": "他在城寨长大，每条暗巷都摸得透。那根烟从来不点——据说是戒给某个人看的。"},
@@ -125,6 +128,7 @@ CHARACTERS = [
         "relation_default": "stranger",
         "relation_allowed": ["stranger", "peer", "friend", "enemy"],
         "name": "十二少",
+        "voice": {"id": "longfei_v3", "speed": 1.05},   # 热血磁性 — 情绪全写在脸上的愣头青
         "bio_layers": [
             {"closeness_min": 0, "text": "城寨四子里最壮的一个，眉骨上一道旧疤，情绪全写在脸上。"},
             {"closeness_min": 20, "text": "跟着龙卷风从死人堆边上混出来的。他把四子和大哥，当成这世上唯一的家。"},
@@ -154,6 +158,7 @@ CHARACTERS = [
         "relation_allowed": ["stranger", "peer", "friend", "enemy"],
         "items": [{"name": "翻烂的小本子", "detail": "记满了城寨大小消息的宝贝，他的吃饭家伙。"}],
         "name": "四仔",
+        "voice": {"id": "longjielidou_v3", "speed": 1.0},   # 阳光顽皮 — 大牌档包打听
         "bio_layers": [
             {"closeness_min": 0, "text": "大牌档老板兼包打听，兜里揣个翻烂的小本子，城寨里大小事没他不知道的。"},
             {"closeness_min": 20, "text": "靠倒腾消息和小买卖立足，见谁都先笑眯眯。他的原则明码标价：够意思，换够意思。"},
@@ -181,6 +186,7 @@ CHARACTERS = [
         "relation_default": "enemy",
         "relation_allowed": ["enemy", "stranger"],
         "name": "王九",
+        "voice": {"id": "longcheng_v3", "speed": 0.95},   # 冷而利落 — 话极少动手极快
         "agenda": "替大老板探清城寨的虚实、施压逼龙卷风就范，找机会立威。他不讲道理，只认结果，"
         "把挡路的人一个个掂量过去。",
         "eq_style": "冷酷寡言，几乎不带共情，但极擅长读出对方的恐惧与软肋，并精准地往那里压。"
@@ -201,6 +207,7 @@ CHARACTERS = [
         "relation_default": "stranger",
         "relation_allowed": ["stranger", "peer", "enemy"],
         "name": "大老板",
+        "voice": {"id": "longanzhi_v3", "speed": 0.92},   # 睿智轻熟 — 笑里藏刀
         "agenda": "连人带命脉吞下整座城寨，了结他和龙卷风几十年的旧账。惯用人情、利害与旧债一层层施压，"
         "笑着把人逼到墙角，绝不轻易撕破脸。",
         "eq_style": "高段位的操纵者：笑里藏刀，越和气越叫人发凉。极会读人心、拿捏对方在乎什么，"

@@ -713,6 +713,9 @@ body.vn.vnlog #chat { visibility: visible; position: fixed; inset: 56px 0 0 0; z
 #chat .bedit { position: absolute; right: 4px; top: 2px; opacity: .35; cursor: pointer;
   font-size: 13px; padding: 4px 6px; z-index: 2; }
 #chat .bedit:active, #chat .bedit:hover { opacity: 1; }
+/* 🎙 台词播放键: 气泡尾随的小喇叭, 常态半隐 */
+.vbtn { cursor: pointer; font-size: 12px; opacity: .45; margin-left: 6px; user-select: none; }
+.vbtn:active, .vbtn:hover { opacity: 1; }
 #chat .desc, #chat .beat, #chat .row { position: relative; }
 #chat .bedit-box { margin-top: 6px; }
 #chat .bedit-box textarea { width: 100%; min-height: 64px; background: #151311;
@@ -945,7 +948,7 @@ body.dread #dread { opacity:1; }
   <div id="scenehudlist" class="hidden"></div>
   <div id="vnbox" onclick="vnAdvance()">
     <div id="vnname" class="hidden"></div>
-    <div id="vnctl"><span id="vnctlh" onclick="event.stopPropagation();vnCtlToggle()" title="菜单">☰</span><span onclick="event.stopPropagation();vnHearts()" title="好感度">好感</span><span onclick="event.stopPropagation();vnToggleStat()" title="目标/理智/警觉等状态">状态</span><span onclick="event.stopPropagation();vnHide()" title="隐藏界面看立绘">隐藏</span><span id="vnauto" onclick="event.stopPropagation();vnToggleAuto()" title="自动播放">自动</span><span onclick="event.stopPropagation();vnToggleLog()" title="回想">记录</span><span onclick="event.stopPropagation();vnRewindLast()" title="撤回上一个回合">撤回</span></div>
+    <div id="vnctl"><span id="vnctlh" onclick="event.stopPropagation();vnCtlToggle()" title="菜单">☰</span><span onclick="event.stopPropagation();vnHearts()" title="好感度">好感</span><span onclick="event.stopPropagation();vnToggleStat()" title="目标/理智/警觉等状态">状态</span><span onclick="event.stopPropagation();vnHide()" title="隐藏界面看立绘">隐藏</span><span id="vnauto" onclick="event.stopPropagation();vnToggleAuto()" title="自动播放">自动</span><span onclick="event.stopPropagation();vnToggleLog()" title="回想">记录</span><span id="vnvoice" onclick="event.stopPropagation();vnHearLine()" title="听TA说这句（按需配音）">配音</span><span onclick="event.stopPropagation();vnRewindLast()" title="撤回上一个回合">撤回</span></div>
     <div id="vntext"></div>
     <!-- 选项住在对话面板内部: 文字和选项同一个流, 物理上不可能互相遮挡 -->
     <div id="vnchoices" class="hidden" onclick="event.stopPropagation()"></div>
@@ -954,6 +957,7 @@ body.dread #dread { opacity:1; }
 </div>
 <audio id="bgm" loop></audio>
 <audio id="sfx"></audio>
+<audio id="vox"></audio><!-- 🎙 配音通道: 语气音精灵 + 台词播放键, 独立元素不与 sfx 抢 -->
 <div id="app">
   <header>
     <b><span id="brandName">LinguisPlay ·</span> <span class="muted" style="font-weight:400">AI 虚构内容</span></b>
@@ -965,7 +969,8 @@ body.dread #dread { opacity:1; }
       <button id="journalBtn" class="iconbtn hidden" title="档案" onclick="openJournal()">📔</button>
       <button id="spdBtn" class="iconbtn hidden" title="文字速度" onclick="cycleSpeed()">🐇</button>
       <button id="worldBtn" class="iconbtn hidden" title="活世界：你不在的时候，世界照样往前走" onclick="toggleLiving()">🌍</button>
-      <button id="soundBtn" class="iconbtn hidden" title="背景音乐" onclick="toggleSound()">🔊</button>
+      <button id="soundBtn" class="iconbtn hidden" title="背景音乐与音效" onclick="toggleSound()">🔊</button>
+      <button id="voxBtn" class="iconbtn hidden" title="角色语音（语气音与台词配音）" onclick="toggleVox()">🎙</button>
       <button id="backBtn" class="ghost hidden" style="padding:5px 10px" onclick="backToPick()">← 剧本</button>
       <span id="who" class="muted"></span>
       <a id="logoutBtn" class="hidden" style="font-size:13px" onclick="doLogout()">退出</a>
@@ -1196,6 +1201,8 @@ function applyUiLang() {
 applyUiLang();
 let runId = null, personaId = null, myName = "我";
 let soundOn = true, curBgmMood = null;
+// 🎙 语音开关独立于音乐开关 (Yi 定): 有人只要人声不要曲, 反之亦然; 语音记忆跨局
+let voxOn = true; try { voxOn = localStorage.getItem("lp_vox") !== "0"; } catch (e) {}
 // 聊天头像: name → portrait url (built from the story's full cast so replayed bubbles of
 // dead/absent characters keep their face; cast/here updates merge in emergent characters)
 let avatarMap = {};
@@ -1247,6 +1254,8 @@ const ICONS = {
   world: '<circle cx="12" cy="12" r="9.2"/><path d="M4 12h3l2-4 3 8 2.5-6 1.5 2h4"/>',
   vol: '<path d="M4 9.5v5h3.5L12 18V6L7.5 9.5H4z"/><path d="M15.5 9a4.5 4.5 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11"/>',
   volx: '<path d="M4 9.5v5h3.5L12 18V6L7.5 9.5H4z"/><path d="m16 9.5 5 5m0-5-5 5"/>',
+  mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4M9 21h6"/>',
+  micx: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4M9 21h6"/><path d="m4.5 4.5 15 15"/>',
   play: '<path d="M8 5.5v13l10-6.5-10-6.5z"/>',
   menu: '<path d="M4.5 7h15M4.5 12h15M4.5 17h15"/>',
   clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
@@ -1293,7 +1302,7 @@ const IC = (n, s = 17) => `<svg class="ic" width="${s}" height="${s}" viewBox="0
     const badge = el.querySelector(".pbadge"); el.innerHTML = IC(name, size || 18); if (badge) el.appendChild(badge); };
   set("helpBtn", "help"); set("langBtn", "globe"); set("phoneBtn", "phone");
   set("mapBtn", "map"); set("journalBtn", "book"); set("worldBtn", "world");
-  set("soundBtn", "vol"); set("phoneFab", "phone", 20); set("driveBtn", "play");
+  set("soundBtn", "vol"); set("voxBtn", voxOn ? "mic" : "micx"); set("phoneFab", "phone", 20); set("driveBtn", "play");
   const h = document.getElementById("vnctlh"); if (h) h.innerHTML = IC("menu", 16);
 })();
 // 🎛 弹丸论破演出调参台: /play?tune=1 开 (记住), 拉杆即时生效, 「复制参数」发给引擎侧固化
@@ -1727,8 +1736,11 @@ async function enterRun(run) {
   // 立绘按天带版本戳: 服务端换图后老玩家至多一天内就能看到新脸 (客户端触发的
   // 重画仍走 Date.now() 即时失效)
   const dayv = new Date().toISOString().slice(0, 13).replace(/[-T]/g, "");
+  voiceMap = {};
   ((st0 && st0.characters) || []).forEach(c => {
     if (c.name && c.id) { spriteMap[c.name] = c.id; spriteVer[c.id] = spriteVer[c.id] || dayv; }
+    // 🎙 配音选角表: 无选角的角色 (含玩家角色/涌现角色) 全链路静默无声
+    if (c.name && c.voice && c.voice.id) voiceMap[c.name] = c.voice;
   });
   vnShow(vnMode);
   playMode = (run.state && run.state.mode) || "character";
@@ -1741,6 +1753,8 @@ async function enterRun(run) {
   maybeShowHowto(st0, run, tutOpen);
   // 📱 小手机走右上角悬浮键 (Yi 定); 顶栏 phoneBtn 退役, 顺带给按钮串减负
   hide("pick"); show("play"); show("backBtn"); show("soundBtn"); show("journalBtn"); show("mapBtn"); show("phoneFab"); show("spdBtn"); applySpeedIcon();
+  // 🎙 语音开关只在有配音选角的本子里出现 (没有配音的本子给个哑开关是骗人)
+  if (Object.keys(voiceMap).length) show("voxBtn"); else hide("voxBtn");
   // 🌍 活世界开关: 沙盒且有钟的故事才有 (世界心跳挂在游戏内时钟上)
   livingCfg = (run.state && run.state.living) || null;
   if (isSandbox) { show("worldBtn"); applyWorldIcon(); }
@@ -1798,12 +1812,12 @@ function sendLeave() { if (runId) { try { navigator.sendBeacon(`${API}/runs/${ru
 window.addEventListener("pagehide", sendLeave);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") sendLeave(); });
 
-function backToPick() { sendLeave(); runId = null; stopBgm(); vnShow(false); vnMode = false; hide("play"); hide("backBtn"); hide("soundBtn"); hide("journalBtn"); hide("mapBtn"); hide("phoneBtn"); hide("phoneFab"); hide("worldBtn"); show("pick"); }
+function backToPick() { sendLeave(); runId = null; stopBgm(); try { vox.pause(); } catch (e) {} vnShow(false); vnMode = false; hide("play"); hide("backBtn"); hide("soundBtn"); hide("voxBtn"); hide("journalBtn"); hide("mapBtn"); hide("phoneBtn"); hide("phoneFab"); hide("worldBtn"); show("pick"); }
 async function doLogout() {
   sendLeave();  // must fire while the session cookie is still valid
   try { await j("/auth/logout", { method:"POST" }); } catch(e){}
   runId = null; stopBgm();
-  hide("play"); hide("pick"); hide("role"); hide("backBtn"); hide("soundBtn"); hide("journalBtn"); hide("mapBtn"); hide("phoneFab"); hide("logoutBtn");
+  hide("play"); hide("pick"); hide("role"); hide("backBtn"); hide("soundBtn"); hide("voxBtn"); hide("journalBtn"); hide("mapBtn"); hide("phoneFab"); hide("logoutBtn");
   show("auth");
 }
 
@@ -1837,6 +1851,7 @@ function renderBeat(b) {
   } else {
     node = makeRow("left", b.speaker_name || "", b.text, true, true);
     if (b.mood) attachMood(node, b.mood);
+    armVox(node, b.speaker_name || "", b.text);   // 🎙 台词播放键 (回想/VN backlog 同享)
   }
   if (b.id) armEdit(node, b);   // ✏️ 回想里可编辑正史 (自己的话/台词/旁白)
   chat.appendChild(node); chat.scrollTop = chat.scrollHeight;
@@ -1950,6 +1965,54 @@ function attachMood(row, mood) {
   const m = document.createElement("div"); m.className = "mood";
   m.textContent = `📟 ${mood}`;
   bub.appendChild(m);
+}
+// 🎙 台词播放键: 点了才合成才花钱 (要不要花由玩家定); 服务端按句缓存, 重播零成本。
+// 只有配了音的角色出键; 玩家角色/涌现角色无选角, 键根本不出现。
+function armVox(node, name, text) {
+  if (!voiceMap[name] || !(text || "").trim()) return;
+  const bub = node.querySelector(".bubble");
+  if (!bub || bub.querySelector(".vbtn")) return;
+  const btn = document.createElement("span");
+  btn.className = "vbtn"; btn.textContent = "🔊";
+  btn.title = B("听TA说这句", "Hear this line");
+  btn.onclick = async (e) => {
+    e.stopPropagation();
+    if (!voxOn) toggleVox();   // 点台词键=明确想听: 自动打开语音, 不许扣了费却无声
+    if (btn.dataset.url) { playVox(btn.dataset.url); return; }
+    if (btn.dataset.busy) return;   // 同句在途去重 — 连点不重复扣费
+    btn.dataset.busy = "1"; btn.textContent = "⏳";
+    try {
+      const r = await j(`/runs/${runId}/tts`, { method: "POST",
+        body: JSON.stringify({ speaker_name: name, text }) });
+      btn.dataset.url = r.url; playVox(r.url);
+    } catch (e2) {   // 🔞未过审/音色故障: 提示但不打断阅读
+      pushToast(B("⚠️ 这句配不了音", "⚠️ Can't voice this line"), "", 2200);
+    }
+    delete btn.dataset.busy; btn.textContent = "🔊";
+  };
+  bub.appendChild(btn);
+}
+// 🎙 VN「配音」键: 给当前这句按需配音 — 与聊天流的 armVox 走同一后端与缓存
+let vnCurBeat = null, _voxUrls = {};
+async function vnHearLine() {
+  const b = vnCurBeat;
+  if (!b || !runId) return;
+  const name = b.speaker_name || "";
+  if (!voiceMap[name] || !(b.text || "").trim()) {
+    pushToast(B("这位角色没有配音", "No voice for this character"), "", 2000); return;
+  }
+  if (!voxOn) toggleVox();   // 点「配音」=明确想听: 自动打开语音
+  const key = `${name}|${b.text}`;
+  if (_voxUrls[key]) { playVox(_voxUrls[key]); return; }
+  const el = document.getElementById("vnvoice");
+  if (el && el.dataset.busy) return;   // 在途去重 — 连点不重复扣费
+  if (el) { el.dataset.busy = "1"; el.textContent = "…"; }
+  try {
+    const r = await j(`/runs/${runId}/tts`, { method: "POST",
+      body: JSON.stringify({ speaker_name: name, text: b.text }) });
+    _voxUrls[key] = r.url; playVox(r.url);
+  } catch (e2) { pushToast(B("⚠️ 这句配不了音", "⚠️ Can't voice this line"), "", 2200); }
+  if (el) { delete el.dataset.busy; el.textContent = B("配音", "Voice"); }
 }
 // `spoken` = wrap the text in 「」 and style it as speech, so a dialogue bubble is
 // unmistakably "words said out loud" vs the narration band.
@@ -3754,6 +3817,7 @@ async function typeInto(el, text, ms=22) {
 }
 // ── 🎀 VN window (galgame 演出): beats play into the dialogue box, click advances ──
 let vnMode = false, vnAutoOn = false, vnAdvanceResolve = null, spriteMap = {};
+let voiceMap = {};   // 🎙 配音选角: 角色名 → {id, speed} (来自剧本角色卡 voice 字段)
 function vnShow(on) {
   document.getElementById("vnui").classList.toggle("hidden", !on);
   document.body.classList.toggle("vn", on);
@@ -4404,6 +4468,7 @@ async function playBeatVN(b, skipLog) {
   // 「 起头的台词悬挂缩进 — 引号吊在版心外, 行首齐(中文排印工艺)
   box.classList.toggle("hang", !isNarr && /^[「『]/.test(b.text || ""));
   vnSprite(isNarr ? null : b.speaker_name, isNarr ? undefined : b.expr);
+  if (!isNarr) { voxSprite(b.speaker_name || "", b.expr, b.text); vnCurBeat = b; }   // 🎙 开口那声简语音 + 记住当前句给「配音」键
   box.className = isNarr ? "narr" : "";
   // 📖 分页 (Yi: 一页字太多): 长拍按句读切成 ≤76 字的页, 逐页点击翻
   for (const page of paginate(b.text)) {
@@ -4483,10 +4548,15 @@ async function playBeat(b) {
       await sleep(450 + Math.random()*500);   // "thinking" beat before they speak
       hideTyping();
     }
+    voxSprite(b.speaker_name || "", b.expr, b.text);   // 🎙 开口那声简语音
     const txt = makeTypingRow("left", b.speaker_name || "");
     if (b._instant) { txt.textContent = b.text || ""; }
     else await typeInto(txt, b.text, 22);
-    if (b.mood) { const row = txt.closest(".row"); if (row) attachMood(row, b.mood); }
+    const row = txt.closest(".row");
+    if (row) {
+      if (b.mood) attachMood(row, b.mood);
+      armVox(row, b.speaker_name || "", b.text);   // 🎙 台词播放键
+    }
   }
   chat.scrollTop = chat.scrollHeight;
 }
@@ -4539,6 +4609,31 @@ function playSfx(name) {           // fade in + duck the music underneath
     _ramp(bgm, BGM_VOL * 0.45, 300);
     sfx.onended = () => _ramp(bgm, BGM_VOL, 900);
   }
+}
+// ── 🎙 配音通道 (语气音精灵 + 台词播放键共用一张嘴) ──────────
+const VOX_VOL = 0.5;   // 人声在音乐之上, 但不许跳脸
+vox.volume = VOX_VOL;
+function playVox(url) {
+  if (!voxOn || !url) return;
+  vox.src = url; vox.volume = 0;
+  vox.play().catch(()=>{});
+  _ramp(vox, VOX_VOL, 120);
+  // 缺素材/被拦 → onerror 也要把音乐抬回来, 不许永久闷着
+  vox.onerror = () => { if (!bgm.paused) _ramp(bgm, BGM_VOL, 600); };
+  if (!bgm.paused) {
+    _ramp(bgm, BGM_VOL * 0.45, 200);
+    vox.onended = () => _ramp(bgm, BGM_VOL, 900);
+  }
+}
+// 语气音精灵 (galgame 简语音): 角色开口那一拍, 按导演 expr 注记播一声短叹词。
+// expr 也可能是动作名 (挥手/抱臂…) — 不在四情表里就落常态; 素材 404 静默降级。
+const EXPR_CAT = { "惊": "surprise", "怒": "anger", "哀": "sad", "喜": "joy" };
+function voxSprite(name, expr, text) {
+  const v = voiceMap[name]; if (!v || !v.id) return;
+  if (!vox.paused) return;   // 正在说话 (台词/叹词) 不被打断
+  const cat = EXPR_CAT[expr] || "neutral";
+  const n = 1 + ((text || "").length % 2);   // 变体轮换定于文本, 不靠随机
+  playVox(`/scene/voice/${v.id}/${cat}_${n}.mp3`);
 }
 
 function applyScene(scene) {
@@ -4625,6 +4720,16 @@ document.addEventListener("keydown", kickAudio, true);
 function toggleSound() {
   soundOn = !soundOn;
   soundBtn.innerHTML = IC(soundOn ? "vol" : "volx", 18);
+}
+// 🎙 语音开关 (独立于音乐/音效): 关掉时立刻收声, 并把被 duck 的音乐抬回来
+function toggleVox() {
+  voxOn = !voxOn;
+  try { localStorage.setItem("lp_vox", voxOn ? "1" : "0"); } catch (e) {}
+  voxBtn.innerHTML = IC(voxOn ? "mic" : "micx", 18);
+  if (!voxOn) {
+    try { vox.pause(); } catch (e) {}
+    if (soundOn && !bgm.paused) _ramp(bgm, BGM_VOL, 600);
+  }
   if (soundOn) { bgm.volume = 0; bgm.play().catch(()=>{}); _ramp(bgm, BGM_VOL, 2000); } else { bgm.pause(); }
 }
 function stopBgm(){ try { bgm.pause(); bgm.removeAttribute("src"); curBgmMood=null; } catch(e){} }

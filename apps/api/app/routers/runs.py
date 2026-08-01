@@ -17,6 +17,7 @@ from ..db import SessionLocal, get_db
 from ..deps import current_user
 from ..engine import director, factions as factions_mod, living, runtime
 from ..engine import taste as taste_mod
+from ..engine import voice as voice_mod
 from ..engine.llm import get_llm
 from ..models import Beat as BeatModel
 from ..models import Persona as PersonaModel
@@ -25,7 +26,7 @@ from ..models import Story as StoryModel
 from ..models import StoryMeta, StorySnapshot, User
 from ..schemas import (Beat, CalendarIn, ChooseIn, ConfrontIn, FollowIn, GoalIn, MarketBuyIn, MoveIn, NoteIn, PhoneSendIn, RenameIn,
                        SocialCommentIn, SocialLikeIn, TransferIn,
-                       PlayIn, RewindIn, Run, RunCreate, RunState, RunSummary, VerdictIn)
+                       PlayIn, RewindIn, Run, RunCreate, RunState, RunSummary, TTSIn, VerdictIn)
 from .stories import _to_secret, _to_story
 
 router = APIRouter(prefix="/runs", tags=["runs"])
@@ -756,6 +757,30 @@ def get_run(run_id: str, user: User = Depends(current_user), db: Session = Depen
 def delete_run(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     db.delete(_own_run(run_id, user, db))
     db.commit()
+
+
+@router.post("/{run_id}/tts")
+async def tts_line(run_id: str, body: TTSIn,
+                   user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """🎙 台词播放键: 玩家点了才合成 (要不要花这笔钱由玩家定), 服务端按句缓存。
+    选角读现行剧本而非 run 的钉住副本 — 配音是演出层不是正史, 换音色即刻
+    对所有在途 run 生效; 涌现角色无选角 → 404, 前端本就不给他们播放键。"""
+    r = _own_run(run_id, user, db)
+    story = db.get(StoryModel, r.story_id)
+    chars = (story.characters if story is not None else None) or \
+        ((r.pinned_content or {}).get("story") or {}).get("characters") or []
+    name = (body.speaker_name or "").strip()
+    v = next((c.get("voice") for c in chars
+              if isinstance(c, dict) and c.get("name") == name and isinstance(c.get("voice"), dict)),
+             None) or {}
+    if not v.get("id"):
+        raise HTTPException(404, "这个角色没有配音选角")
+    try:
+        url = await voice_mod.tts_line_cached(body.text, str(v["id"]),
+                                              float(v.get("speed") or 1.0))
+    except voice_mod.TTSError as e:
+        raise HTTPException(502, f"配音失败: {e}")
+    return {"url": url}
 
 
 @router.get("/{run_id}/market")

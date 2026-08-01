@@ -31,7 +31,7 @@
 | plaza(posts/comments/likes) | ⏸ P1 先冻 | Community 已移出 MVP |
 | worlds 实体(locations/presence) | ❌ 取代 | Story+Run+小手机替代；多角色聊天经验保留为参考 |
 | groups 群聊 | ⏸ 停放 | DM/多人同台后移 |
-| voice 克隆(fish/minimax) | ⏸ 停放 | 语音 TTS 停放 |
+| voice 克隆(fish/minimax) | 🔁 改造 | TTS 已启用 (2026-07-31, CosyVoice 预置音色): 语气音精灵 + 台词播放键 POST /runs/{id}/tts; 声音克隆仍停放 |
 | SQLite 存储层(models.py) | ❌ 重写 | Postgres + SQLAlchemy + pgvector |
 
 ## 完全没有、必须从零做(工作量大头)

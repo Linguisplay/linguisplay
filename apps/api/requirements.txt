@@ -13,4 +13,5 @@ httpx==0.28.1
 pillow
 rembg[cpu]
 pywebpush>=2.0
+dashscope>=1.20   # 🎙 CosyVoice TTS (语气音精灵离线生成 + 台词播放键)
 tzdata; sys_platform == "win32"
