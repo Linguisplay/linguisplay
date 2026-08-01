@@ -354,6 +354,17 @@
   /* 📱 通讯录里的看手机解锁位 */
   .ppeek { margin-left: 7px; padding: 0 4px; cursor: pointer; font-size: 13px; }
   .ppeek.locked { opacity: .55; }
+  /* 🗓 手账页签 + 折叠式添加行 + 编辑中的行 */
+  .ptabs { display: flex; gap: 8px; margin: 2px 0 12px; }
+  .ptabs .pt { flex: 1; text-align: center; font-size: 13px; padding: 8px 0;
+    border-radius: 11px; cursor: pointer; color: #a79e8c;
+    border: .5px solid rgba(216,181,122,.22); background: rgba(24,20,14,.5); }
+  .ptabs .pt.on { color: #241c0e; font-weight: 600; border-color: transparent;
+    background: linear-gradient(180deg,#e6cb99,#cfa965); }
+  .pcaladd { padding: 10px 12px; margin: 4px 0 6px; border-radius: 10px; cursor: pointer;
+    border: 1px dashed rgba(216,181,122,.35); color: #d8b57a; font-size: 13px; }
+  .pcaladd:active { background: rgba(216,181,122,.08); }
+  .pcalitem.editing { background: rgba(216,181,122,.09); border-radius: 8px; }
   /* 🎯 门面 */
   .hero { padding: 6px 2px 12px; border-bottom: 1px solid #201c15; }
   .hero-t { font-size: 22px; font-weight: 800; letter-spacing: 1px; color: #f0f2f8; line-height: 1.4; }
@@ -2430,8 +2441,7 @@ async function openPhone() {
     ${curMoney != null ? `<div class="papp" onclick="openMarket()">🛒<small>集市</small></div>` : ""}
     <div class="papp" onclick="document.getElementById('phoneov').remove(); openRelWeb()">🕸<small>关系网</small></div>
     <div class="papp" onclick="openBag()">🎒<small>背包</small></div>
-    <div class="papp" onclick="openCalendar()">🗓<small>日历</small></div>
-    <div class="papp" onclick="openNotes()">📝<small>${B("备忘录","Notes")}</small></div>
+    <div class="papp" onclick="openPlanner()">🗓<small>${B("手账","Planner")}</small></div>
     <div class="papp" onclick="document.getElementById('phoneov').remove(); openJournal()">📔<small>${B("档案","Dossier")}</small></div>
   </div>`;
   phoneShell(inner, phoneDevice === "手机" ? "📱 小手机" : `📮 ${phoneDevice}`);
@@ -2736,7 +2746,20 @@ async function openBag() {
     ${stash ? `<div class="jtitle" style="margin:12px 0 4px">${B("📦 存放的", "📦 Stashed")}</div>${stash}` : ""}
     ${tip}</div>`, "🎒 背包", "openPhone()");
 }
-function openCalendar() {
+// ── 🗓 手账 = 日程 + 笔记 一本子两页 (Yi: 备忘录和日历放一起, UX 收口) ─────────
+let _plannerTab = "cal";   // 记住上次停在哪一页
+function openPlanner(tab) {
+  _plannerTab = tab || _plannerTab;
+  const tabs = `<div class="ptabs">
+    <span class="pt${_plannerTab === "cal" ? " on" : ""}" onclick="openPlanner('cal')">📅 ${B("日程", "Schedule")}</span>
+    <span class="pt${_plannerTab === "notes" ? " on" : ""}" onclick="openPlanner('notes')">📝 ${B("笔记", "Notes")}</span>
+  </div>`;
+  const body = _plannerTab === "notes" ? _notesTab() : _calTab();
+  phoneShell(tabs + body, `🗓 ${B("手账", "Planner")}`, "openPhone()");
+  const inp = document.getElementById(_plannerTab === "notes" ? "noteText" : "calText");
+  if (inp && _noteEditing) inp.focus();
+}
+function _calTab() {
   const ck = curClock;
   const now = ck && ck.label ? `<div class="pcalnow">${B("🕐 现在：", "🕐 Now: ")}<b>${escapeHtml(ck.label)}</b></div>` : "";
   let ddl = "";
@@ -2746,50 +2769,58 @@ function openCalendar() {
   }
   const prs = (lastPromises || []).map(p =>
     `<div class="pcalitem">${p.romantic ? "💞" : "🤝"} <b>${escapeHtml(p.when)}</b>${p.place ? " · " + escapeHtml(p.place) : ""} · ${escapeHtml(p.what)}<span class="jwho">（${escapeHtml(p.name)}）</span></div>`
-  ).join("") || `<div class="jempty">日历上暂时没有约定。</div>`;
+  ).join("") || `<div class="jempty">${B("还没有和谁定下约。", "No promises yet.")}</div>`;
   const qs = (curQuests || []).filter(q => q.status === "open").map(q =>
     `<div class="pcalitem">📋 ${escapeHtml(q.title||"")}${q.reward ? B(`（酬 ${q.reward}${escapeHtml(curCurrency)}）`, ` (pay ${q.reward}${escapeHtml(curCurrency)})`) : ""}${q.deadline_day ? B(` · 限第${q.deadline_day}天内`, ` · by day ${q.deadline_day}`) : ""}<span class="jwho">（${escapeHtml(q.giver||"")}）</span></div>`
   ).join("");
   const g = lastGoal ? `<div class="jh">🎯 ${B("当前目标", "Current goal")}</div><div class="pcalitem">${escapeHtml(lastGoal)}</div>` : "";
-  // 🗓 我的行程: 你写下的日子, 世界会记得 (公开=角色关心; 私密=纯备忘)
+  // 我的行程: 你写下的日子, 世界会记得 (公开=角色关心; 私密=纯备忘)
   const mine = (playerEvents || []).map(ev =>
     `<div class="pcalitem${ev.passed ? " past" : ""}">${ev.told === "none" ? "🔒" : "🗓"} <b>${escapeHtml(ev.when)}</b> · ${escapeHtml(ev.text)}` +
     `<a class="pcaldel" onclick="delCalEvent('${ev.id}')">✕</a></div>`).join("");
-  const form = `<div class="pcalform">
-      <input id="calText" maxlength="60" placeholder="${B("记一笔：周五考试 / 明晚加班…", "e.g. exam Friday / late shift tomorrow…")}">
+  // ✍️ 折叠式添加 (UX 收口): 一行「+ 记一笔」, 点开才展开表单, 页面不被表单占满
+  const form = `<div class="pcaladd" id="calAdd" onclick="plannerExpand('calAdd','calText')">＋ ${B("记一笔行程…", "Add a plan…")}</div>
+    <div class="pcalform hidden" id="calFormBox">
+      <input id="calText" maxlength="60" placeholder="${B("周五考试 / 明晚加班…", "exam Friday / late shift tomorrow…")}">
       <div class="pcalrow"><span class="chips" id="calDay">
         ${[0,1,2].map(o=>`<span class="chk${o===0?" on":""}" data-o="${o}" onclick="calPick(this,'calDay')">${o===0?B("今天","Today"):o===1?B("明天","Tomorrow"):B("后天","Day after")}</span>`).join("")}
       </span><span class="chips" id="calSlot">
         ${[["",B("全天","All day")],["晨",B("晨","AM")],["午",B("午","Noon")],["夜",B("夜","Night")]].map(([v,l],i)=>`<span class="chk${i===0?" on":""}" data-v="${v}" onclick="calPick(this,'calSlot')">${l}</span>`).join("")}
       </span></div>
-      <div class="pcalrow"><label class="pcalpriv"><input type="checkbox" id="calPriv"> ${B("私密（只有你看得到，角色不知道）", "Private (characters won't know)")}</label>
+      <div class="pcalrow"><label class="pcalpriv"><input type="checkbox" id="calPriv"> ${B("私密（角色不知道）", "Private (characters won't know)")}</label>
         <button class="sm" onclick="addCalEvent()">${B("记上", "Add")}</button></div>
       <div class="muted" id="calMsg" style="font-size:11px"></div></div>`;
-  phoneShell(`${now}${ddl}${g}<div class="jh">${B("我的行程", "My plans")}</div>${form}${mine}` +
-    `<div class="jh">${B("约定", "Promises")}</div>${prs}${qs ? `<div class="jh">${B("在办的差事", "Open jobs")}</div>${qs}` : ""}`, "🗓 日历", "openPhone()");
+  return `${now}${ddl}${g}<div class="jh">${B("我的行程", "My plans")}</div>${form}${mine}` +
+    `<div class="jh">${B("约定", "Promises")}</div>${prs}${qs ? `<div class="jh">${B("在办的差事", "Open jobs")}</div>${qs}` : ""}`;
 }
-function calPick(el, gid){ [...document.getElementById(gid).children].forEach(c=>c.classList.toggle("on", c===el)); }
-// ── 📝 备忘录: 亲手记/改/删, 世界会顺着你在意的线出牌 ──────────────────────
-let _noteEditing = null;   // 正在改的笔记 id (null = 新增)
-function openNotes(){
+function _notesTab() {
   const rows = (playerNotes || []).map(n =>
-    `<div class="pcalitem"><span onclick="editNote('${n.id}')" style="cursor:pointer">📝 ${escapeHtml(n.text)}</span>` +
+    `<div class="pcalitem${_noteEditing === n.id ? " editing" : ""}"><span onclick="editNote('${n.id}')" style="cursor:pointer">📝 ${escapeHtml(n.text)}</span>` +
     `<a class="pcaldel" onclick="delNote('${n.id}')">✕</a></div>`).join("")
     || `<div class="jempty">${B("本子还是空的。记下你在意的事，世界会顺着它出牌。", "Empty so far. Write what you care about — the world will deal you cards along it.")}</div>`;
   const form = `<div class="pcalform">
       <input id="noteText" maxlength="80" placeholder="${B("记一条：信封里的钱不对劲 / 想知道他为什么改名…", "e.g. the envelope money is off / why did he change his name…")}">
       <div class="pcalrow"><span class="muted" style="font-size:11px">${B("角色看不见这个本子，但故事会顺着你记的线走", "Characters can't see this, but the story follows your threads")}</span>
-        <button class="sm" id="noteBtn" onclick="saveNote()">${B("记上", "Add")}</button></div>
+        <span>${_noteEditing ? `<button class="sm ghost" onclick="_noteEditing=null;openPlanner('notes')">${B("算了", "Cancel")}</button> ` : ""}<button class="sm" id="noteBtn" onclick="saveNote()">${_noteEditing ? B("改好", "Save") : B("记上", "Add")}</button></span></div>
       <div class="muted" id="noteMsg" style="font-size:11px"></div></div>`;
-  _noteEditing = null;
-  phoneShell(`<div class="jh">📝 ${B("我的备忘录", "My notes")}</div>${form}${rows}`, `📝 ${B("备忘录", "Notes")}`, "openPhone()");
+  return form + rows;
 }
+function plannerExpand(rowId, focusId){
+  document.getElementById(rowId).classList.add("hidden");
+  document.getElementById("calFormBox").classList.remove("hidden");
+  const el = document.getElementById(focusId); if (el) el.focus();
+}
+// 兼容旧入口名
+function openCalendar(){ openPlanner("cal"); }
+function openNotes(){ _noteEditing = null; openPlanner("notes"); }
+function calPick(el, gid){ [...document.getElementById(gid).children].forEach(c=>c.classList.toggle("on", c===el)); }
+let _noteEditing = null;   // 正在改的笔记 id (null = 新增)
 function editNote(nid){
   const n = (playerNotes || []).find(x => x.id === nid); if (!n) return;
   _noteEditing = nid;
+  openPlanner("notes");   // 重画: 行高亮 + 按钮变「改好」+ 有「算了」退路
   const inp = document.getElementById("noteText");
   inp.value = n.text; inp.focus();
-  document.getElementById("noteBtn").textContent = B("改好", "Save");
 }
 async function saveNote(){
   const t = (document.getElementById("noteText").value || "").trim();
