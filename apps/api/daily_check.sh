@@ -14,5 +14,7 @@ LOG=/opt/linguisplay/apps/api/daily_check.log
   .venv/bin/python smoke_stories.py 2>&1 | tail -4
   echo "── guards (24h) ──"
   .venv/bin/python metrics_report.py --hours 24 2>&1 | tail -10
+  echo "── 🌙 夜巡 (真玩家路径 × 体验判官, 每晚轮换 2 本 × 2 回合) ──"
+  (set -a; . ./.env; set +a; QA_STORIES=2 QA_TURNS=2 timeout 600 .venv/bin/python qa_playtour.py 2>&1 | tail -16)
 } >> "$LOG" 2>&1
 tail -n 800 "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"
