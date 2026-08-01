@@ -140,6 +140,13 @@ def _judge(story, beats, turns_meta, state, suggestions, phone, mapv, feed):
     # 建议常驻 (在 GET /runs 顶层, 不在 state 里 — 判官自己踩过这坑)
     if not suggestions:
         errs.append("回合后没有建议 (建议常驻回归)")
+    # 🎭 建议视角: 这是玩家的下一步 — 「你/You」开头 = 角色在劝玩家, 视角串了
+    # (Yi 实弹 2026-08-02 二犯; 引擎已有护栏, 这里盯复发)
+    for sg in suggestions or []:
+        if re.match(r"^(你|請你|请你|You\b|Your\b)", str(sg), re.IGNORECASE):
+            errs.append(f"建议串了角色视角: 「{sg}」")
+        if en and CJK.search(str(sg)):
+            errs.append(f"英文本子建议冒中文: 「{sg}」")
 
     # 📣 开卷欢迎通告
     posts = (feed or {}).get("posts") or []

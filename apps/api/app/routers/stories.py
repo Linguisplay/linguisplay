@@ -78,8 +78,21 @@ def _to_story(s: StoryModel) -> Story:
     )
 
 
+def _auto_cover(s: StoryModel) -> dict[str, str] | None:
+    from ..engine import cover as cover_mod
+    try:
+        return cover_mod.urls(s.id)
+    except Exception:
+        return None
+
+
 def _card_art(s: StoryModel) -> str | None:
-    """🎬 卡面图: 作者封面优先; 没有就用第一个已有背景图的地点 (大厅 hero 卡)."""
+    """🎬 卡面图: 自动封面的宽幅 → 作者手填的封面 → 第一个有背景图的地点 (兜底)。
+    自动封面排在作者封面【前面】的唯一理由: 作者封面这个字段全站没人填过, 而
+    自动封面是班底站中间的真门面; 作者哪天真填了, 手点一次"重画封面"即可让位。"""
+    auto = _auto_cover(s)
+    if auto:
+        return auto["wide"]
     if s.cover_url:
         return s.cover_url
     import pathlib
@@ -89,6 +102,18 @@ def _card_art(s: StoryModel) -> str | None:
         if lid and (bg / f"{lid}.jpg").exists():
             return f"/scene/bg/{lid}.jpg"
     return None
+
+
+def _ensure_cover(s: StoryModel) -> None:
+    """素材变了就把封面重排一遍 (立绘/头像/背景都是后来才陆续画出来的)。
+    排版丢后台队列, 绝不卡住调用它的那个请求。"""
+    from ..engine import cover as cover_mod
+    try:
+        story = _to_story(s).model_dump()
+        if cover_mod.is_stale(story):
+            cover_mod.enqueue(story)
+    except Exception:
+        pass
 
 
 def _to_card(s: StoryModel, secrets_count: int = 0) -> StoryCard:
@@ -108,6 +133,7 @@ def _to_card(s: StoryModel, secrets_count: int = 0) -> StoryCard:
         acts_count=len(s.acts or []),
         progression=ladder[:60] or None,
         art_url=_card_art(s),
+        poster_url=(_auto_cover(s) or {}).get("poster"),
         opening_tease=((s.opening or "").strip().splitlines() or [""])[0][:64] or None,
     )
 
@@ -160,6 +186,9 @@ def discover(
     counts = dict(db.query(SecretModel.story_id, func.count(SecretModel.id))
                   .filter(SecretModel.story_id.in_([s.id for s in rows] or [""]))
                   .group_by(SecretModel.story_id).all()) if rows else {}
+    # 🎴 书架顺手自愈: 谁的封面缺了/素材换了就排队重画。判缺只是几次 stat, 排版在后台
+    for s in rows:
+        _ensure_cover(s)
     return StoryCardPage(items=[_to_card(s, counts.get(s.id, 0)) for s in rows],
                          next_cursor=None)
 
@@ -683,6 +712,9 @@ def publish(story_id: str, user: User = Depends(current_user), db: Session = Dep
     s.version = new_version
     s.status = "published"
     db.commit()
+    # 🎴 上架即有脸 (Yi 2026-08-01: 玩家自己做的剧本也要自动出封面)。
+    # 此刻多半还没有立绘 —— 先出一张只有底子和版式的, 等美术陆续落地, 书架会自己重排。
+    _ensure_cover(s)
     return PublishResult(story_id=s.id, version=new_version)
 
 
@@ -846,6 +878,28 @@ def _sniff_image(data: bytes) -> str | None:
     if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return "webp"
     return None
+
+
+@router.get("/{story_id}/cover")
+def get_cover(story_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """🎴 这本的封面现在长什么样 + 还差什么 (工坊用)。"""
+    from ..engine import cover as cover_mod
+    s = _own_story(story_id, user, db)
+    story = _to_story(s).model_dump()
+    cast = cover_mod._cast_ids(story)[:cover_mod.MAX_CAST]
+    have = [cid for cid in cast if cover_mod.figure_ready(cid)]
+    return {**(cover_mod.urls(s.id) or {"poster": None, "wide": None}),
+            "cast": cast, "with_art": have, "stale": cover_mod.is_stale(story),
+            "background": bool(cover_mod._pick_bg(story))}
+
+
+@router.post("/{story_id}/cover")
+def make_cover(story_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """🎴 重画封面 (作者主动): 拿这本自己的立绘/头像/背景现排, 秒级, 不花生图钱。"""
+    from ..engine import cover as cover_mod
+    s = _own_story(story_id, user, db)
+    cover_mod.enqueue(_to_story(s).model_dump(), force=True)
+    return {"queued": True}
 
 
 @router.post("/{story_id}/gen_avatar/{cid}")

@@ -431,9 +431,12 @@ class StoryCard(BaseModel):
     cover_url: Optional[str] = None
     one_liner: Optional[str] = None
     trope_tags: list[str] = []
-    # 🎬 大厅门面 (hero 卡): 卡面图 (封面→首个有图地点兜底) 与开场白引子
+    # 🎬 大厅门面 (hero 卡): 卡面图 (自动封面宽幅→作者封面→首个有图地点兜底) 与开场白引子
     art_url: Optional[str] = None
     opening_tease: Optional[str] = None
+    # 🎴 自动封面的竖版盒绘 (班底站中间 + 烫了标题的成品)。大厅卡用宽幅那张,
+    # 这张给选角页/工坊/分享 —— 它是"这本书"本身, 不是卡面的背景板。
+    poster_url: Optional[str] = None
     # the mystery affordance up front: how much is LOCKED in here (counts only, no titles)
     secrets_count: int = 0
     endings_count: int = 0

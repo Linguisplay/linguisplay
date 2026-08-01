@@ -166,6 +166,21 @@ body.simple details.sec > summary::before { content:""; }
           <span id="enrichMsg" style="color:#8e8e93;font-size:12px;margin-left:8px"></span>
         </div>
       </details>
+      <!-- 🎴 封面: 拿本剧本自己的立绘/头像/背景现排, 不花生图钱, 秒出 -->
+      <div style="margin-top:12px;display:flex;gap:12px;align-items:flex-start">
+        <img id="coverImg" style="width:108px;border-radius:10px;border:1px solid #3c3933;display:none" alt="" />
+        <div style="flex:1;min-width:0">
+          <label style="margin-top:0">🎴 封面</label>
+          <div class="muted" style="font-size:12px;line-height:1.6">
+            自动用这本的角色立绘排出盒绘（班底站中间），发布时会自动生成一次。
+            角色还没画脸时先出底版，等美术画好会自己重排。
+          </div>
+          <div style="margin-top:8px">
+            <button class="sm ghost" type="button" onclick="remakeCover()">🎴 重画封面</button>
+            <span id="coverMsg" style="color:#8e8e93;font-size:12px;margin-left:8px"></span>
+          </div>
+        </div>
+      </div>
       </div></div>
     </details>
 
@@ -448,6 +463,7 @@ function openEditor(){
   f_openpf.checked=((story.tuning||{}).opening_player_first|0)>0;
   initMode(); activeSec="basic";
   renderAll();
+  loadCover();
 }
 function renderAll(){ renderLocs(); renderChars(); renderRelWeb(); renderActs(); renderSecrets(); renderEndings(); renderSystems(); renderPacksCard(); renderMedia(); updateSecMeta(); }
 
@@ -1498,6 +1514,45 @@ async function enrich(){
   }catch(e){ enrichMsg.textContent = "⚠️ 增强失败：" + (e.message||e); }
 }
 
+// ── 🎴 封面：合成不生图，所以敢秒轮询 ──
+async function loadCover(){
+  const img = document.getElementById("coverImg"), msg = document.getElementById("coverMsg");
+  if(!img || !story.id) return null;
+  try{
+    const r = await j(`/stories/${story.id}/cover`);
+    if(r.poster){ img.src = r.poster; img.style.display = "block"; }
+    else { img.style.display = "none"; }
+    if(msg && !msg.dataset.busy){
+      const n = (r.with_art||[]).length, m = (r.cast||[]).length;
+      msg.textContent = r.poster
+        ? `班底 ${n}/${m} 位已有形象${r.background?"":"（还没有地点背景图）"}`
+        : "还没有封面";
+    }
+    return r;
+  }catch(e){ return null; }
+}
+async function remakeCover(){
+  const msg = document.getElementById("coverMsg");
+  if(!story.id){ if(msg) msg.textContent = "请先保存草稿"; return; }
+  try{
+    await save(false);
+    msg.dataset.busy = "1";
+    msg.textContent = "🎴 正在排版…";
+    await j(`/stories/${story.id}/cover`,{method:"POST"});
+    // 合成只要一两秒，短轮询到图变了为止（最多 12 秒）
+    const before = (document.getElementById("coverImg")||{}).src || "";
+    for(let i=0;i<12;i++){
+      await new Promise(r=>setTimeout(r,1000));
+      delete msg.dataset.busy;
+      const r = await loadCover();
+      if(r && r.poster && r.poster !== before){ msg.textContent = "✓ 封面已更新"; return; }
+      msg.dataset.busy = "1";
+    }
+    delete msg.dataset.busy;
+    msg.textContent = "已排队（稍后刷新查看）";
+  }catch(e){ delete msg.dataset.busy; msg.textContent = "⚠️ " + (e.message||e); }
+}
+
 // ── 🧪 lint：把引擎的剧本体检跑在当前草稿上 ──
 async function lint(){
   try{
@@ -1579,6 +1634,7 @@ async function save(publish){
     }
     else saveMsg.innerHTML=`已保存草稿 ✓ <span class="muted">草稿不上线：点「发布」，改动才会进游戏（且只对新开的档生效）。</span>`;
     renderMedia();
+    if (publish) setTimeout(loadCover, 2500);   // 🎴 发布会自动排一张封面，回头取一次
     return true;   // 调用方 (作画/上传前置保存) 靠这个返回值知道保存有没有真成
   }catch(e){ saveMsg.textContent="出错: "+e.message; return false; }
 }

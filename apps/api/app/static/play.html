@@ -48,6 +48,10 @@
   .iconbtn:active { color: #d8b57a; }
   .ic { vertical-align: -3.5px; }
   /* 🎬 大厅 hero 卡: 剧本的场景图即门面, 宋体题压图, 徽章毛玻璃胶囊 */
+  \* 🎴 选角页的盒绘: 竖版封面自带标题, 所以这一屏不再重复排一次题 */
+  #rolePoster { display: block; width: 100%; max-width: 340px; margin: 10px auto 12px;
+    border-radius: 16px; border: .5px solid rgba(216,181,122,.22);
+    box-shadow: 0 10px 30px rgba(0,0,0,.45); }
   .scard { position: relative; margin: 14px 0; border-radius: 20px; overflow: hidden; cursor: pointer;
     border: .5px solid rgba(216,181,122,.22); aspect-ratio: 16/9.6; background: #201c15; }
   .scard .art { position: absolute; inset: 0; background-size: cover; background-position: center;
@@ -1052,6 +1056,8 @@ body.dread #dread { opacity:1; }
   <!-- role / mode picker -->
   <div id="role" class="card hidden">
     <div class="bar" style="justify-content:space-between"><h3 style="margin:0">选择玩法</h3><span class="bar"><a onclick="editCurrentStory()">✏️ 编辑这个剧本</a><a onclick="backToStories()">← 换剧本</a></span></div>
+    <!-- 🎴 盒绘: 开档前先看见这本的班底 (自动封面, 竖版) -->
+    <img id="rolePoster" class="hidden" alt="">
     <div id="storyMeta"></div>
     <div id="wvWrap" class="hidden">
       <p class="muted" style="margin:6px 0 4px">🏖 这是一个无尽沙盒：世界观由你定义，时间和现实一致，剧情永不落幕。你也可能死，死了就只剩下看。</p>
@@ -1545,15 +1551,21 @@ async function afterAuth() {
       `<div class="scrim"></div><div class="body"><div class="t">${escapeHtml(s.title)}</div>` +
       (tease ? `<div class="tease">${tease}</div>` : "") +
       `<div class="meta">${meta.map(m => `<span>${m}</span>`).join("")}</div></div>`;
-    div.onclick = () => chooseRole(s.id);
+    div.onclick = () => chooseRole(s.id, s.poster_url);
     stories.appendChild(div);
   });
   if (!runId) show("pick");
 }
 
 // ── role / mode selection ─────────────────────────────
-async function chooseRole(storyId) {
+async function chooseRole(storyId, posterUrl) {
   currentStoryId = storyId;
+  // 🎴 盒绘先亮: 它自带标题和一句引子, 所以这一屏不用再排一遍题
+  const po = document.getElementById("rolePoster");
+  if (po) {
+    po.classList.toggle("hidden", !posterUrl);
+    if (posterUrl) { po.src = posterUrl; po.onerror = () => po.classList.add("hidden"); }
+  }
   const story = await j(`/stories/${storyId}`);
   // 🌐 an English story flips the UI for the session (unless the player chose a language)
   if (story.language === "en" && uiLang !== "en" && !localStorage.getItem("lp_lang")) {
