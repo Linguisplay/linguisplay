@@ -4918,6 +4918,10 @@ async function streamTurn(url, bodyObj) {
         const ev = JSON.parse(line.slice(5));
         if (ev.event === "beat") { if (firstBeat){ hideTyping(); firstBeat=false; }
           clearLive();
+          // 🔒 正式拍登台 = 直播永久封版 (狗笼实弹 2026-08-01: 尾部迟到的 token 在拍演完后
+          // 复活直播, 拿整回合的原始流缓冲重切首页盖回对话框 — A+B 段拼接、半角标点混入,
+          // 正文变尸块。vnLiveDone 只在无人占台的空档才立得起来, 时序一歪就漏)
+          vnLiveDone = true;
           if (liveText && ev.beat && ev.beat.text
               && _normLive(liveText).indexOf(_normLive(ev.beat.text).slice(0, 30)) >= 0) ev.beat._instant = true;
           playQ.push(ev.beat); pump(); }

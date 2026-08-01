@@ -10470,7 +10470,8 @@ def run_turn_stream(
                           "mature": bool(state.get("mature"))}) or {}
         g_text = dedash((g.get("text") or "").strip())
         if g_text:
-            g_title = (g.get("title") or "").strip()[:16] or "金色瞬间"
+            # 标题消毒: 模型自带的括号会跟外层「」套娃 (实弹: ✨「【绿宝与板车轮声】」)
+            g_title = (g.get("title") or "").strip().strip("《》「」【】『』“”") [:16] or "金色瞬间"
             state["golden_cd"] = tun["golden_cooldown"]
             sid_g = star.get("id")
             yield emit({"type": "description", "speaker_name": None,

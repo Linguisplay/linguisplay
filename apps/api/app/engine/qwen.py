@@ -1722,6 +1722,40 @@ def _strip_quotes(s: str) -> str:
     return s
 
 
+def _free_smuggled_speech(beats: list[dict], speaker: str) -> list[dict]:
+    """旁白里私藏的台词拆出来 (狗笼实弹 2026-08-01: 渲染拍违反行协议直写散文,
+    「蓝信一：最后一箱了」整段沦为旁白 — 台词失去气泡/配音/心象位)。
+    只认【本拍说话人名 + 行首 + 冒号】的铁证; 别人的名字不猜 (宁漏勿误杀)。"""
+    if not speaker or not beats:
+        return beats
+    import re
+    rx = re.compile(rf"^\s*{re.escape(speaker)}\s*[:：]\s*(.+)$")
+    out: list[dict] = []
+    for b in beats:
+        if b.get("type") != "description" or not (b.get("text") or "").strip():
+            out.append(b)
+            continue
+        segs: list[dict] = []
+        cur: list[str] = []
+        for line in b["text"].splitlines():
+            m = rx.match(line)
+            if m:
+                if "\n".join(cur).strip():
+                    segs.append({"type": "description", "speaker_name": None,
+                                 "text": "\n".join(cur).strip()})
+                cur = []
+                segs.append({"type": "dialogue", "speaker_name": speaker,
+                             "text": _strip_quotes(m.group(1))})
+            else:
+                cur.append(line)
+        if "\n".join(cur).strip():
+            segs.append({"type": "description", "speaker_name": None,
+                         "text": "\n".join(cur).strip()})
+        segs = [s for s in segs if (s.get("text") or "").strip()]
+        out.extend(segs or [b])
+    return out
+
+
 def _beats_from(narration: str, speech: str, speaker: str, channel: str,
                 group_mode: str | None, will_respond: bool = True) -> list[dict]:
     """Build beats from already-separated narration + speech (the JSON path's job is done by
@@ -1739,7 +1773,7 @@ def _beats_from(narration: str, speech: str, speaker: str, channel: str,
         beats.append({"type": "description", "speaker_name": None, "text": narration})
     if speech:
         beats.append({"type": "dialogue", "speaker_name": speaker, "text": speech})
-    return beats
+    return _free_smuggled_speech(beats, speaker)
 
 
 def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
@@ -3629,6 +3663,8 @@ class QwenLLM:
                "第二行是这个瞬间本身，60~120字：一个突然到来的、值得记一辈子的小片段，"
                "可以是TA罕见的失态或温柔、一次心照不宣的对视、一件只给你看的东西、一句压了很久的话。"
                "必须扣住此时此地与TA的性格，具体可感，不许出现任何秘密或未揭露的剧情。不用破折号。"
+               "用第二人称写：玩家永远是「你」，绝不许用「她/他」指代玩家（狗笼实弹：卡面散文人称漂移）。"
+               "这是动作之外的定格侧写：不要复述刚才对话里已经演过的动作和台词，写那一瞬多出来的细节。"
                + ("（本局为成人向，允许更亲密的肢体细节，但这一段以心动为主。）"
                   if prompt.get("mature") else "") + _lang_rule(prompt))
         u = (f"地点：{prompt.get('place','') or '（未知）'}；时间：{prompt.get('clock','') or '不明'}\n"
@@ -3641,7 +3677,7 @@ class QwenLLM:
             txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
         except Exception:
             return {}
-        lines = [l.strip().strip("《》「」#* ") for l in txt.splitlines() if l.strip()]
+        lines = [l.strip().strip("《》「」【】『』“”#* ") for l in txt.splitlines() if l.strip()]
         if not lines:
             return {}
         title = lines[0][:16]
@@ -4382,6 +4418,7 @@ class QwenLLM:
         beats = (_parse_line_beats(text)
                  or (_parse_reply(text, speaker, channel, group_mode).get("beats") or [])) \
             if text else []
+        beats = _free_smuggled_speech(beats, speaker)   # 兜底解析后的旁白也不许私藏台词
         if group_mode == "member":
             dlg = [b for b in beats if b.get("type") == "dialogue"
                    and (b.get("text") or "").strip("。！!（）() ") not in ("无", "")]
