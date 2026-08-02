@@ -48,10 +48,17 @@
   .iconbtn:active { color: #d8b57a; }
   .ic { vertical-align: -3.5px; }
   /* 🎬 大厅 hero 卡: 剧本的场景图即门面, 宋体题压图, 徽章毛玻璃胶囊 */
-  /* 🎴 选角页的盒绘: 竖版封面自带标题, 所以这一屏不再重复排一次题 */
-  #rolePoster { display: block; width: 100%; max-width: 340px; margin: 10px auto 12px;
-    border-radius: 16px; border: .5px solid rgba(216,181,122,.22);
-    box-shadow: 0 10px 30px rgba(0,0,0,.45); }
+  /* 🎴 选角页的盒绘: 竖版封面自带标题, 所以这一屏不再重复排一次题。
+     ⚠️ 必须按【屏高】封顶, 不能按宽度铺满 —— 900×1200 的海报按宽度是 400px 高,
+     直接把十个角色按钮全顶出首屏 (Yi 实弹「现在显示不全」)。点一下全屏看大图。 */
+  #rolePoster { display: block; width: auto; max-width: 62%; max-height: 30vh;
+    margin: 8px auto 10px; border-radius: 14px; cursor: zoom-in;
+    border: .5px solid rgba(216,181,122,.22); box-shadow: 0 8px 26px rgba(0,0,0,.5); }
+  #posterZoom { position: fixed; inset: 0; z-index: 60; display: flex; cursor: zoom-out;
+    align-items: center; justify-content: center; background: rgba(10,8,6,.92);
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+  #posterZoom img { max-width: 92vw; max-height: 92vh; border-radius: 12px;
+    box-shadow: 0 14px 44px rgba(0,0,0,.6); }
   .scard { position: relative; margin: 14px 0; border-radius: 20px; overflow: hidden; cursor: pointer;
     border: .5px solid rgba(216,181,122,.22); aspect-ratio: 16/9.6; background: #201c15; }
   .scard .art { position: absolute; inset: 0; background-size: cover; background-position: center;
@@ -1074,7 +1081,8 @@ body.dread #dread { opacity:1; }
 
   <!-- role / mode picker -->
   <div id="role" class="card hidden">
-    <div class="bar" style="justify-content:space-between"><h3 style="margin:0">选择玩法</h3><span class="bar"><a onclick="editCurrentStory()">✏️ 编辑这个剧本</a><a onclick="backToStories()">← 换剧本</a></span></div>
+    <!-- .bar 没有通用样式, 两个链接会贴成「编辑这个剧本← 换剧本」—— 这里自带间距 -->
+    <div class="bar" style="justify-content:space-between"><h3 style="margin:0">选择玩法</h3><span class="bar" style="display:inline-flex;gap:14px"><a onclick="editCurrentStory()">✏️ 编辑这个剧本</a><a onclick="backToStories()">← 换剧本</a></span></div>
     <!-- 🎴 盒绘: 开档前先看见这本的班底 (自动封面, 竖版) -->
     <img id="rolePoster" class="hidden" alt="">
     <div id="storyMeta"></div>
@@ -1581,6 +1589,17 @@ async function afterAuth() {
   if (!runId) show("pick");
 }
 
+// 🎴 盒绘看大图: 选角页上的海报只占三成屏高 (要给玩法按钮让位), 想看清点一下
+function zoomPoster(url) {
+  const old = document.getElementById("posterZoom");
+  if (old) old.remove();
+  const o = document.createElement("div");
+  o.id = "posterZoom";
+  o.innerHTML = `<img src="${url}" alt="">`;
+  o.onclick = () => o.remove();
+  document.body.appendChild(o);
+}
+
 // ── role / mode selection ─────────────────────────────
 async function chooseRole(storyId, posterUrl) {
   currentStoryId = storyId;
@@ -1588,7 +1607,11 @@ async function chooseRole(storyId, posterUrl) {
   const po = document.getElementById("rolePoster");
   if (po) {
     po.classList.toggle("hidden", !posterUrl);
-    if (posterUrl) { po.src = posterUrl; po.onerror = () => po.classList.add("hidden"); }
+    if (posterUrl) {
+      po.src = posterUrl;
+      po.onerror = () => po.classList.add("hidden");
+      po.onclick = () => zoomPoster(posterUrl);
+    }
   }
   const story = await j(`/stories/${storyId}`);
   // 🌐 an English story flips the UI for the session (unless the player chose a language)
