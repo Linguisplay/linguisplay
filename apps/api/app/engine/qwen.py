@@ -601,6 +601,19 @@ def _build_system(prompt: dict[str, Any]) -> str:
     if rel_pb:
         lines.append("")
         lines.append(rel_pb)
+    # 💞 关系大事记切片 (同事建议 2026-08-01, Yi 拍板混合式): 模式剧本当粗锚,
+    # 具体事件当细节 — 反应长在「咱俩之间发生过的事」上, 而不只是关系标签上。
+    # 一个关键事件可以让态度突变, 不必等数字慢慢爬。
+    _rr = [str(x).strip() for x in (prompt.get("rel_recent") or []) if str(x).strip()]
+    if _rr:
+        if (prompt.get("language") or "zh") == "en":
+            lines.append("· What has passed between you two lately: " + "; ".join(_rr)
+                         + ". Let this moment's reaction grow out of these concrete events — "
+                           "a single one of them may outweigh the relationship label.")
+        else:
+            lines.append("· 你们之间最近的事：" + "；".join(_rr)
+                         + "。此刻的反应要长在这些具体的事上——其中一件关键的事，"
+                           "可以压过关系标签该有的态度。")
     _facb = (prompt.get("faction_block") or "").strip()
     if _facb:
         lines.append("")

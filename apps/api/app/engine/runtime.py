@@ -10275,6 +10275,11 @@ def run_turn_stream(
             # 📇 申报口只在「还没拿到这人联系方式」时挂载 (拿到后字段消失, 一次性状态翻转)
             "can_give_contact": _can_give_contact if is_primary else False,
             "relationship_playbook": rel_playbook,  # current relationship mode toward player
+            # 💞 大事记切片 (同事建议, Yi 拍板混合式): 说话人自己与玩家之间最近的事,
+            # 让反应长在具体事件上 — 模式剧本是粗锚, 事件是细节 (文本已随剧本 _t 双语)
+            "rel_recent": ([str(e.get("text") or "") for e in
+                            list((state.get("rel_log") or {}).get(sp_id) or [])[-4:]
+                            if e.get("text")] if rel_active else []),
             # 🪞 玩家档案: 这个角色自己相处出来的印象 (认知边界: 只有见证过的才有)
             "player_read": profile_mod.impression_of(state, sp_id),
             # 🌌 跨存档残响: 前一段人生的回声 (仅上一档暖过的角色)
