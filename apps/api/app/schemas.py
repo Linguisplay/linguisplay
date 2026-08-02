@@ -602,6 +602,9 @@ class RunSummary(BaseModel):
     scene_bg: Optional[str] = None      # /scene/bg/<lid>.jpg (文件真存在才给)
     scene_name: Optional[str] = None
     faces: list[dict] = []              # [{id, name, avatar}] ≤3, 有头像的优先
+    # 🎵 进档那一屏的演出单 {bgm, cue, mood, tint}。以前 direct 只在回合流里发,
+    # 于是新开一档【第一屏是没有音乐的】—— 得等玩家打完第一个回合才响。开场曲就是这么没的。
+    direct: dict[str, Any] = {}
 
 
 class CalendarIn(BaseModel):

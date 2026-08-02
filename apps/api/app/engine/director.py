@@ -45,6 +45,73 @@ BGM_TRACKS: dict[str, dict] = {
 MOOD_LABEL = {"daily": "日常", "warm": "温馨", "romantic": "浪漫", "sad": "悲伤",
               "lonely": "孤独", "mystery": "悬疑", "eerie": "诡异", "ancient": "古风",
               "grimdark": "黑暗", "tense": "紧张", "battle": "战斗"}
+
+# 🎬 剧情节拍 (Yi 2026-08-02:「一段故事有不同的情绪…开场、日常感、危机、高潮、暧昧」)
+#
+# 上面那张 BGM_TRACKS 管的是【这一场是什么气氛】(诡异/孤独/古风) —— 抽象, 作者不好回答。
+# 这一层管的是【故事走到哪一步】—— 写故事的人一想就知道该配什么。
+# 作者主要配的是这一层; 气氛那层留给不想细配的人当兜底。
+#
+# 节拍从引擎【已经在算的状态】里认出来, 不新增字段、不问模型:
+#   落幕=有结局 · 高潮=命运抉择当口 · 亲密=heat≥2 · 危机=威胁告警或压力≥70
+#   暧昧=heat=1 或这一拍关系涨了一截 · 开场=这一档还没走满两回合 · 其余=日常
+# 排在前面的先认 —— 结局那一拍不许被"危机"抢了曲子。
+STORY_CUES: list[dict[str, Any]] = [
+    {"key": "finale",   "label": "落幕", "when": "结局画面",           "mood": "sad"},
+    {"key": "climax",   "label": "高潮", "when": "命运抉择当口",       "mood": "battle"},
+    {"key": "intimate", "label": "亲密", "when": "床笫之间",           "mood": "romantic"},
+    {"key": "crisis",   "label": "危机", "when": "威胁告警 / 压力拉满", "mood": "tense"},
+    {"key": "flirt",    "label": "暧昧", "when": "心动、试探、关系升温", "mood": "romantic"},
+    {"key": "opening",  "label": "开场", "when": "新档头两回合",       "mood": "warm"},
+    {"key": "daily",    "label": "日常", "when": "其余时候（跟着场景气氛走）", "mood": ""},
+]
+CUE_KEYS = [c["key"] for c in STORY_CUES]
+
+
+def cue_of(final: dict[str, Any] | None, state: dict[str, Any] | None = None) -> str:
+    """这一拍故事走到哪一步。认不出就是"日常"(交给场景气氛那一层)。"""
+    final = final or {}
+    st = state if state is not None else (final.get("state") or {})
+    if final.get("ending"):
+        return "finale"
+    if final.get("pending_choice"):
+        return "climax"
+    heat = 0
+    if isinstance(st.get("heat"), dict):
+        try:
+            heat = int(st["heat"].get("stage") or 0)
+        except (TypeError, ValueError):
+            heat = 0
+    if heat >= 2:
+        return "intimate"
+    tv = final.get("threat_view") or {}
+    try:
+        pressure = int((final.get("pressure_view") or {}).get("value") or 0)
+    except (TypeError, ValueError):
+        pressure = 0
+    if tv.get("alert") or pressure >= 70:
+        return "crisis"
+    if heat >= 1:
+        return "flirt"
+    # 这一拍关系涨了一截 = 有人被打动了 —— 暧昧曲的正当理由
+    try:
+        if max([int(v) for v in (final.get("rel_deltas") or {}).values()] or [0]) >= 2:
+            return "flirt"
+    except (TypeError, ValueError):
+        pass
+    if str((final.get("scene") or {}).get("mood") or "") == "romantic":
+        return "flirt"
+    try:
+        if int(st.get("turn_seq") or 0) <= 2:
+            return "opening"
+    except (TypeError, ValueError):
+        pass
+    return "daily"
+
+
+def cue_menu() -> list[dict[str, Any]]:
+    """工坊配乐面板的主栏。"""
+    return [{**c, "default": default_track(c["mood"] or "daily")} for c in STORY_CUES]
 # 🎵 曲名 (甘茶の音楽工房, 免费商用无需署名)。作者在工坊里挑的就是这张表;
 # 表里没有的文件仍然能用, 只是显示成文件名。
 TRACK_NAME = {
@@ -93,19 +160,31 @@ def default_track(key: str) -> str:
     return got[0] if got else f"gal_{key}"
 
 
-def resolve_bgm(content: dict[str, Any] | None, key: str, salt: str) -> str:
-    """情绪 → 真正要播的曲子。
+def resolve_bgm(content: dict[str, Any] | None, key: str, salt: str,
+                cue: str = "") -> str:
+    """选曲的四级优先, 从硬到软:
 
-    作者在剧本里按情绪点了名 (tuning.bgm) 就用他的, 而且【不再轮换变奏】——
-    点名就是点名。没点名才走默认: 先看这格有没有真曲, 没有就落到 fallback, 再轮变奏。
+      ① 作者按【剧情节拍】点的名 (tuning.bgm["opening"/"climax"…]) —— 他最想管的就是这一层
+      ② 作者按【场景气氛】点的名 (tuning.bgm["eerie"…]) —— 想细配的人才用
+      ③ 引擎自己的选曲 (pick_bgm 已经算好, 见 key) + 变奏轮换
+
+    作者点名的一律【不轮变奏】—— 点名就是点名, 换地方换天都不变。
+
+    ⚠️ 节拍【不带默认覆盖】。第一版让节拍自带的气氛无条件压过引擎选曲, 当场压出两条回归:
+    乐师读了正文判「孤独」被"开场"盖成温馨、战斗曲被"危机"盖成紧张曲 —— 而引擎里明写着
+    「危机不夺 battle/grimdark 的戏」。那套硬状态规则是调过的, 新加一层默认就会把它压坏。
+    所以节拍只做两件事: 给作者一个能点名的槽, 和把判到的那一步报出来。
     """
     tun = ((content or {}).get("story") or {}).get("tuning")
     custom = tun.get("bgm") if isinstance(tun, dict) else None
     # 作者手填的字段什么形状都可能 (实弹: 写成一个字符串) —— 不是字典就当没填, 绝不炸回合
-    pick = str(custom.get(key) or "").strip() if isinstance(custom, dict) else ""
-    if pick:
-        return pick
-    # 这一格有真曲就用它的变奏; 一首都没有 (ancient/grimdark/eerie 这类空格) 才落 fallback
+    if not isinstance(custom, dict):
+        custom = {}
+    for k in (cue, key):
+        pick = str(custom.get(k) or "").strip() if k else ""
+        if pick:
+            return pick
+    # 这一格有真曲就用它的变奏; 一首都没有 (ancient/grimdark 这类空格) 才落 fallback
     if real_variants(key):
         return pick_variant(key, salt)
     alt = BGM_TRACKS.get(key, {}).get("fallback")
@@ -358,8 +437,10 @@ def stage_turn(final: dict[str, Any], content: dict[str, Any] | None = None) -> 
     if judged and judged in BGM_TRACKS and heat < 2 and not hot:
         base = judged
     salt = f"{st.get('location_id') or ''}|{(st.get('clock') or {}).get('day', 0)}"
-    out["bgm"] = resolve_bgm(content, base, salt)
-    out["mood"] = base                       # 作者调试用: 这一拍判到的是哪一格情绪
+    cue = cue_of(final, st)
+    out["bgm"] = resolve_bgm(content, base, salt, cue)
+    # 作者调试用: 这一拍判到的是哪一步 / 哪种气氛
+    out["cue"], out["mood"] = cue, base
     if hot:
         out["tint"] = "danger"
     elif frail:

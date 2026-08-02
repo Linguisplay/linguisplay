@@ -171,10 +171,18 @@ body.simple details.sec > summary::before { content:""; }
       <div style="margin-top:14px">
         <label style="margin-top:0">🎵 配乐（按情绪）</label>
         <div class="muted" style="font-size:12px;line-height:1.6">
-          每回合导演会按剧情判一格情绪，这里定这格情绪该响哪首曲子。留「默认」就走引擎自带的。
-          ▶ 可以试听。
+          一段故事会走过几种情绪：开场、日常、暧昧、危机、高潮、落幕。
+          引擎每回合认出走到了哪一步，这里定那一步该响哪首曲子。留「默认」就走引擎自带的。▶ 试听。
         </div>
-        <div id="bgmRows" style="margin-top:8px"></div>
+        <div id="cueRows" style="margin-top:8px"></div>
+        <details style="margin-top:10px">
+          <summary style="cursor:pointer" class="muted">按场景气氛细配（可选：诡异 / 孤独 / 古风…）</summary>
+          <div class="muted" style="font-size:12px;line-height:1.6;margin:6px 0">
+            上面那层管「故事走到哪一步」，这一层管「这一场是什么气氛」。
+            两层都配了以剧情节拍为准；都不配就走引擎默认曲库。
+          </div>
+          <div id="bgmRows"></div>
+        </details>
       </div>
       <audio id="bgmPreview" style="display:none"></audio>
 
@@ -1533,11 +1541,11 @@ async function enrich(){
 // ── 🎵 配乐：按情绪配曲（story.tuning.bgm = {情绪: 曲名}）──
 let bgmLib = null;
 async function loadBgm(){
-  const host = document.getElementById("bgmRows");
-  if(!host) return;
+  const cueHost = document.getElementById("cueRows"), host = document.getElementById("bgmRows");
+  if(!cueHost || !host) return;
   if(!bgmLib){ try{ bgmLib = await j("/stories/bgm/list"); }catch(e){ return; } }
   const chosen = (story.tuning||{}).bgm || {};
-  // 曲子按情绪分组，作者一眼看得出哪几首是同一路的
+  // 曲子按气氛分组，作者一眼看得出哪几首是同一路的
   const byMood = {};
   (bgmLib.tracks||[]).forEach(t => { (byMood[t.mood||"其他"] = byMood[t.mood||"其他"]||[]).push(t); });
   const label = m => ((bgmLib.moods||[]).find(x=>x.key===m)||{}).label || m;
@@ -1545,13 +1553,16 @@ async function loadBgm(){
       `<optgroup label="${esc(label(m))}">` + byMood[m].map(t =>
         `<option value="${esc(t.file)}"${t.file===sel?" selected":""}>${esc(t.name)}${t.real?"":"（旧合成器·24秒）"}</option>`
       ).join("") + `</optgroup>`).join("");
-  host.innerHTML = (bgmLib.moods||[]).map(m => `
+  const row = (k, name, sub, wide) => `
     <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #201c15">
-      <div style="flex:0 0 78px"><b style="font-size:13px">${esc(m.label)}</b>
-        <div class="muted" style="font-size:10.5px">${esc((m.tags||[]).slice(0,3).join("·"))}</div></div>
-      <select style="flex:1;min-width:0" onchange="setBgm('${m.key}', this.value)">${opts(chosen[m.key]||"")}</select>
-      <button class="sm ghost" type="button" onclick="previewBgm('${m.key}')">▶</button>
-    </div>`).join("");
+      <div style="flex:0 0 ${wide?104:78}px"><b style="font-size:13px">${esc(name)}</b>
+        <div class="muted" style="font-size:10.5px">${esc(sub)}</div></div>
+      <select style="flex:1;min-width:0" onchange="setBgm('${k}', this.value)">${opts(chosen[k]||"")}</select>
+      <button class="sm ghost" type="button" onclick="previewBgm('${k}')">▶</button>
+    </div>`;
+  cueHost.innerHTML = (bgmLib.cues||[]).map(c => row(c.key, c.label, c.when, true)).join("");
+  host.innerHTML = (bgmLib.moods||[]).map(m =>
+    row(m.key, m.label, (m.tags||[]).slice(0,3).join("·"))).join("");
 }
 function setBgm(mood, file){
   story.tuning = story.tuning || {};
@@ -1562,8 +1573,10 @@ function setBgm(mood, file){
 }
 function previewBgm(mood){
   const a = document.getElementById("bgmPreview");
+  const lib = bgmLib || {};
   const chosen = ((story.tuning||{}).bgm||{})[mood]
-    || (((bgmLib||{}).moods||[]).find(x=>x.key===mood)||{}).default || mood;
+    || ((lib.cues||[]).find(x=>x.key===mood)||{}).default
+    || ((lib.moods||[]).find(x=>x.key===mood)||{}).default || mood;
   if(!a) return;
   if(!a.paused && a.dataset.k === chosen){ a.pause(); a.dataset.k=""; return; }
   a.dataset.k = chosen; a.volume = 0.5;

@@ -889,7 +889,8 @@ def bgm_list():
     """🎵 配乐面板的两张表: 十一种情绪 + 曲库里真的存在的曲子。
     注意: 本路由是两段路径, 与 /{story_id} 不冲突; 但必须在 /{story_id}/xxx 之前注册。"""
     from ..engine import director
-    return {"moods": director.mood_menu(), "tracks": director.list_bgm()}
+    return {"cues": director.cue_menu(), "moods": director.mood_menu(),
+            "tracks": director.list_bgm()}
 
 
 @router.get("/{story_id}/cover")

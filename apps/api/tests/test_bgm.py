@@ -98,6 +98,71 @@ def test_an_unknown_or_empty_pick_falls_back_instead_of_going_silent():
         assert got and got.startswith("daily") or got.startswith("gal_"), got
 
 
+# ── ②b 剧情节拍: 故事走到哪一步 ────────────────────────────────────────────
+def _final(**kw):
+    f = {"scene": {}, "state": {"turn_seq": 9}}
+    f.update(kw)
+    return f
+
+
+def test_the_story_beats_are_read_off_state_the_engine_already_keeps():
+    """节拍不新增字段、不问模型 —— 全部从引擎已经在算的东西里认。"""
+    assert director.cue_of(_final(ending={"id": "e1"})) == "finale"
+    assert director.cue_of(_final(pending_choice={"prompt": "?"})) == "climax"
+    assert director.cue_of(_final(state={"heat": {"stage": 2}, "turn_seq": 9})) == "intimate"
+    assert director.cue_of(_final(threat_view={"alert": True})) == "crisis"
+    assert director.cue_of(_final(pressure_view={"value": 80})) == "crisis"
+    assert director.cue_of(_final(state={"heat": {"stage": 1}, "turn_seq": 9})) == "flirt"
+    assert director.cue_of(_final(rel_deltas={"a": 3})) == "flirt"
+    assert director.cue_of(_final(scene={"mood": "romantic"})) == "flirt"
+    assert director.cue_of(_final(state={"turn_seq": 0})) == "opening"
+    assert director.cue_of(_final()) == "daily"
+
+
+def test_the_ending_beat_is_never_stolen_by_the_crisis_beat():
+    """结局那一拍常常同时压力拉满 —— 落幕必须压过危机, 不然谢幕在放追逐曲。"""
+    assert director.cue_of(_final(ending={"id": "e"}, threat_view={"alert": True},
+                                  pressure_view={"value": 99})) == "finale"
+    assert director.cue_of(_final(pending_choice={"p": 1},
+                                  pressure_view={"value": 99})) == "climax"
+
+
+def test_a_fresh_run_opens_with_the_opening_beat_not_silence():
+    """以前 direct 只在回合流里发, 新档第一屏是静的。现在进档就判得出节拍。"""
+    out = director.stage_turn({"scene": {}, "state": {"turn_seq": 0}}, None)
+    assert out["cue"] == "opening" and out["bgm"]
+
+
+def test_author_can_score_a_beat_and_it_beats_the_scene_mood():
+    c = _content({"opening": "gal_warm2", "eerie": "gal_mystery"})
+    final = {"scene": {"mood": "eerie"}, "state": {"turn_seq": 0}}
+    assert director.stage_turn(final, c)["bgm"] == "gal_warm2", "节拍要压过气氛"
+    later = {"scene": {"mood": "eerie"}, "state": {"turn_seq": 9}}
+    assert director.stage_turn(later, c)["bgm"] == "gal_mystery", "不在节拍上时才轮到气氛"
+
+
+def test_a_beat_alone_never_changes_the_engines_own_pick():
+    """节拍不带默认覆盖 —— 作者没点名时, 选曲跟没有这一层时一模一样。
+    第一版让节拍自带气氛压过引擎, 当场压坏了「危机不夺战斗曲的戏」那条既有规则。"""
+    for final in ({"scene": {"mood": "battle"}, "state": {"turn_seq": 0},
+                   "threat_view": {"alert": True}},
+                  {"scene": {"mood": "lonely"}, "state": {"turn_seq": 0}},
+                  {"scene": {"mood": "eerie"}, "state": {"heat": {"stage": 1}}}):
+        st = final["state"]
+        salt = f"{st.get('location_id') or ''}|{(st.get('clock') or {}).get('day', 0)}"
+        want = director.resolve_bgm(None, director.pick_bgm(
+            final["scene"]["mood"],
+            pressure=0, hot=bool((final.get("threat_view") or {}).get("alert")),
+            heat=int((st.get("heat") or {}).get("stage") or 0)), salt)
+        assert director.stage_turn(final, None)["bgm"] == want
+
+
+def test_every_beat_has_a_human_name_and_a_default():
+    for c in director.cue_menu():
+        assert c["label"] and c["when"] and c["default"], c
+    assert [c["key"] for c in director.cue_menu()][0] == "finale", "顺序即优先级"
+
+
 # ── ③ 硬状态不容改判 ──────────────────────────────────────────────────────
 def test_engine_still_owns_the_hard_states():
     assert director.pick_bgm("daily", heat=2) == "romantic"      # 床笫
