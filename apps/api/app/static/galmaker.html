@@ -48,8 +48,10 @@
     </div>
     <p class="muted" id="outHint" style="margin:2px 0 8px;font-size:12.5px">
       成品本：AI 全自动出可玩的选项式本子。引擎本：AI 起草角色/三幕/秘密，进工坊精修后可玩真互动（秘密门控、自由行动）。</p>
+    <div id="titleRow">
     <label>作品标题</label>
     <input id="title" maxlength="24" placeholder="给你的 galgame 起个名字">
+    </div>
     <div id="engineOnly" style="display:none">
       <label>演出语言</label>
       <select id="dLang">
@@ -62,17 +64,17 @@
       <label>故事文本（≥200 字；越具体，人物和画面越准）</label>
       <textarea id="src" placeholder="把你的故事贴在这里——短篇小说、剧本、一段完整的情节都可以。"></textarea>
     </div>
+    <!-- ✍️ 可保存问卷向导 (Yi 2026-08-02): 一屏一问、步步落库、拓写跟着答案走 -->
     <div id="paneC" style="display:none">
-      <label>题材</label>
-      <select id="qGenre"><option>校园恋爱</option><option>悬疑推理</option>
-        <option>奇幻冒险</option><option>科幻</option><option>恐怖</option></select>
-      <label>世界观一句话（可空）</label>
-      <input id="qWorld" placeholder="例：雨永远下不停的港口小城">
-      <label>主角与感情对象（可空）</label>
-      <input id="qWho" placeholder="例：转学生 × 图书馆里总在睡觉的学姐">
-      <label>口味</label>
-      <select id="qTone"><option>甜</option><option>甜中带虐</option><option>虐</option></select>
-      <button class="ghost" onclick="genIdea()">✨ 生成梗概</button>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0 2px">
+        <span class="muted" id="wzStep" style="font-size:12px"></span>
+        <span class="muted" id="wzSave" style="font-size:11.5px;color:#7ddf9a"></span>
+      </div>
+      <div id="wzBody" style="min-height:150px"></div>
+      <div style="display:flex;gap:8px">
+        <button class="ghost" id="wzPrev" onclick="wzGo(-1)">‹ 上一步</button>
+        <button id="wzNext" onclick="wzGo(1)">下一步 ›</button>
+      </div>
     </div>
     <div id="paneB" style="display:none">
       <label>想法 / 梗概（两三句话就够）</label>
@@ -128,17 +130,196 @@ const $id = x => document.getElementById(x);
 function setMode(m) {
   MODE = m;
   $id("paneA").style.display = m === "text" ? "" : "none";
-  $id("paneB").style.display = (m === "expand" || m === "survey") ? "" : "none";
+  $id("paneB").style.display = m === "expand" ? "" : "none";   // 问卷自带梗概站, 不再共用 B 档
   $id("paneC").style.display = m === "survey" ? "" : "none";
+  // 问卷自带标题/画风/文风/🔞 与开建键 — 外层公用表单收起, 一屏只有一件事 (丝滑铁律)
+  $id("titleRow").style.display = m === "survey" ? "none" : "";
+  $id("go").style.display = m === "survey" ? "none" : "";
+  $id("galOnly").style.display = (m !== "survey" && OUT === "gal") ? "" : "none";
   ["tabA", "tabB", "tabC"].forEach((t, i) =>
     $id(t).style.borderColor = ["text", "expand", "survey"][i] === m ? "#ffd479" : "#45456a");
+  if (m === "survey") wzInit(new URLSearchParams(location.search).get("draft"));
 }
-async function genIdea() {
+// ── ✍️ 问卷向导 (可保存: 每一步 PATCH 落库, 关页/换设备回来接着答) ──────────
+const ART = [["电影写实", ""],
+  ["日漫清新", "日漫风格插画，清新明亮的色彩，干净的线条，赛璐璐上色，唯美光效"],
+  ["暗黑惊悚", "阴郁冷调的恐怖片美术，低饱和色，深重阴影，胶片噪点，令人不安的构图"],
+  ["古风水墨", "中国古风工笔画意，水墨氤氲，绢本设色，古典服饰与建筑，含蓄留白"],
+  ["赛博霓虹", "赛博朋克霓虹夜色，雨湿街道反光，冷紫与青色光源，未来都市质感"]];
+const WSTY = [["自动", ""],
+  ["轻小说·轻快", "轻快的轻小说腔：短句多、对话密、吐槽有节奏。忌沉重长段；忌华丽辞藻"],
+  ["纯文学·细腻", "细腻克制的纯文学腔：白描见情，留白多。忌直给情绪词；忌网络用语；忌滥用比喻"],
+  ["网文·爽利", "热血直给的网文腔：节奏快、钩子密、情绪拉满。忌拖沓景物描写"],
+  ["悬疑·冷冽", "冷冽压抑的悬疑腔：短促、感官化、信息克制。忌解释过度；忌轻佻"]];
+const QS = [
+  { k: "题材", q: "想要一个什么题材的故事？",
+    chips: ["校园恋爱", "都市心动", "悬疑推理", "奇幻冒险", "科幻", "恐怖", "古风情缘"], free: "或自己写一个题材" },
+  { k: "口味", q: "口味呢？", chips: ["甜", "甜中带虐", "虐", "黑深残"], mature: true },
+  { k: "世界观", q: "用一句话形容这个世界（想不好可以跳过）", free: "例：雨永远下不停的港口小城", skip: true },
+  { k: "主角性别与性格", q: "主角是个什么样的人？", free: "例：嘴硬心软的转学生（女）" },
+  { k: "可攻略角色", q: "想攻略几位？各是什么类型？", chips: ["1位", "2位", "3位"],
+    chipKey: "可攻略角色数", free: "例：毒舌学长 / 总在天台睡觉的神秘同级生" },
+  { k: "篇幅", q: "篇幅与结局", chips: ["短篇·3章", "标准·4章", "长篇·5章"],
+    chips2: ["2个结局", "3个结局"], chipKey2: "结局数" },
+];
+const N_ART = QS.length, N_IDEA = QS.length + 1, N_OUTLINE = QS.length + 2, N_DONE = QS.length + 3;
+let WD = null;   // {id, answers, step, idea, outline, art, wsty, mature, title}
+let _wzT = null;
+function wzSaveNow(extra) {
+  if (!WD || !WD.id) return;
+  clearTimeout(_wzT);
+  _wzT = setTimeout(async () => {
+    try {
+      await j(`/gal/${WD.id}/survey`, { method: "PATCH", body: JSON.stringify(
+        { answers: WD.answers, step: WD.step, idea: WD.idea || "",
+          outline: WD.outline || [], ...(extra || {}) }) });
+      $id("wzSave").textContent = "已保存 ✓";
+      setTimeout(() => { if ($id("wzSave").textContent === "已保存 ✓") $id("wzSave").textContent = ""; }, 1800);
+    } catch (e) { $id("wzSave").textContent = "⚠️ 没存上：" + e.message; }
+  }, 350);
+}
+async function wzInit(draftId) {
+  if (WD) { wzRender(); return; }
   try {
-    const r = await j("/gal/survey", { method: "POST", body: JSON.stringify({ answers: {
-      "题材": $id("qGenre").value, "世界观": $id("qWorld").value,
-      "主角与感情对象": $id("qWho").value, "口味": $id("qTone").value } }) });
-    $id("idea").value = r.idea;
+    const d = draftId ? await j(`/gal/${draftId}/survey`) : await j("/gal/draft", { method: "POST" });
+    const sv = d.survey || {};
+    WD = { id: d.id, answers: sv.answers || {}, step: +(sv.step || 0),
+           idea: sv.idea || "", outline: sv.outline || [],
+           art: sv.answers && sv.answers["画风"] || "电影写实",
+           wsty: sv.answers && sv.answers["文风"] || "自动",
+           mature: (sv.answers || {})["分级"] === "18+",
+           title: d.title && d.title !== "未命名问卷" ? d.title : "" };
+  } catch (e) {
+    $id("wzBody").innerHTML = e.message === "401"
+      ? '先去 <a href="/play">/play</a> 登录，问卷才能替你保存进度'
+      : "⚠️ " + e.message;
+    return;
+  }
+  wzRender();
+}
+const _chip = (word, on, click) =>
+  `<button class="ghost" style="margin:4px 6px 0 0;padding:8px 14px${on ? ";border-color:#ffd479;color:#ffd479" : ""}" onclick="${click}">${word}</button>`;
+function wzPick(k, v, adv) { WD.answers[k] = v; wzSaveNow(); adv ? wzGo(1) : wzRender(); }
+function wzRender() {
+  const s = WD.step, body = $id("wzBody");
+  $id("wzPrev").style.visibility = s > 0 ? "visible" : "hidden";
+  $id("wzStep").textContent = `第 ${Math.min(s + 1, N_DONE + 1)} / ${N_DONE + 1} 步`;
+  $id("wzNext").style.display = "";
+  if (s < QS.length) {
+    const q = QS[s], a = WD.answers;
+    let h = `<label style="font-size:15px;color:#e7eaf3;margin-top:14px">${q.q}</label>`;
+    if (q.chips) h += "<div>" + q.chips.map(c =>
+      _chip(c, a[q.chipKey || q.k] === c, `wzPick('${q.chipKey || q.k}','${c}',${!q.free && !q.chips2 && !q.mature})`)).join("") + "</div>";
+    if (q.chips2) h += "<div>" + q.chips2.map(c =>
+      _chip(c, a[q.chipKey2] === c, `wzPick('${q.chipKey2}','${c}',false)`)).join("") + "</div>";
+    if (q.free) h += `<input id="wzFree" style="margin-top:10px" placeholder="${q.free}" value="${(a[q.k] && !q.chips ? a[q.k] : (q.chipKey && a[q.k]) || "").replace(/"/g, "&quot;")}">`;
+    if (q.mature) h += `<label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:12px">
+      <input type="checkbox" id="wzMature" style="width:auto" ${WD.mature ? "checked" : ""}> 🔞 含成人内容（18+）</label>`;
+    body.innerHTML = h;
+    $id("wzNext").textContent = q.skip && !(a[q.k] || "").trim() ? "跳过 ›" : "下一步 ›";
+    const f = $id("wzFree"); if (f) f.onkeydown = e => { if (e.key === "Enter") wzGo(1); };
+  } else if (s === N_ART) {
+    body.innerHTML = `<label style="font-size:15px;color:#e7eaf3;margin-top:14px">画风</label><div>`
+      + ART.map(([n]) => _chip(n, WD.art === n, `WD.art=WD.answers['画风']='${n}';wzSaveNow();wzRender()`)).join("") + `</div>
+      <label style="font-size:15px;color:#e7eaf3;margin-top:14px">文风</label><div>`
+      + WSTY.map(([n]) => _chip(n, WD.wsty === n, `WD.wsty=WD.answers['文风']='${n}';wzSaveNow();wzRender()`)).join("") + `</div>`;
+  } else if (s === N_IDEA) {
+    body.innerHTML = `<label style="font-size:15px;color:#e7eaf3;margin-top:14px">📜 故事梗概——按你的回答写的，可以直接改</label>
+      <textarea id="wzIdea" style="min-height:150px">${WD.idea || ""}</textarea>
+      <button class="ghost" onclick="wzIdeaGen()">✨ ${WD.idea ? "按答案重写一版" : "生成梗概"}</button>
+      <span class="muted" id="wzIdeaMsg" style="font-size:12px;margin-left:8px"></span>`;
+    if (!WD.idea) wzIdeaGen();
+    $id("wzNext").textContent = "就按这个梗概 ›";
+  } else if (s === N_OUTLINE) {
+    const ol = WD.outline || [];
+    body.innerHTML = `<label style="font-size:15px;color:#e7eaf3;margin-top:14px">📑 章节大纲——拓写跑偏整本报废，这一关值得把好</label>
+      <div id="wzOl">${ol.map(x => `<input class="ol" style="margin-bottom:6px" value="${x.replace(/"/g, "&quot;")}">`).join("")}</div>
+      <button class="ghost" onclick="wzOutlineGen()">📑 ${ol.length ? "重新生成大纲" : "生成大纲"}</button>
+      <span class="muted" id="wzOlMsg" style="font-size:12px;margin-left:8px"></span>`;
+    if (!ol.length) wzOutlineGen();
+    $id("wzNext").textContent = "就按这个大纲 ›";
+  } else {
+    const a = WD.answers;
+    body.innerHTML = `<label style="font-size:15px;color:#e7eaf3;margin-top:14px">🎬 成书</label>
+      <div class="muted" style="font-size:12.5px;margin:4px 0 8px">${["题材", "口味", "篇幅", "结局数", "画风", "文风"]
+        .map(k => a[k] ? `${k}·${a[k]}` : "").filter(Boolean).join("　")}${WD.mature ? "　🔞" : ""}</div>
+      <label>作品标题</label>
+      <input id="wzTitle" maxlength="24" placeholder="给它起个名字" value="${(WD.title || "").replace(/"/g, "&quot;")}">
+      <div style="display:flex;gap:8px">
+        <button onclick="wzBuild()">🎀 开始建造成品本</button>
+        <button class="ghost" onclick="wzEngine()">🧩 转成引擎本草稿</button>
+      </div>
+      <div class="muted" style="font-size:12px;margin-top:6px">成品本：全自动出可玩的选项式 galgame。引擎本：进工坊精修，玩真互动。</div>`;
+    $id("wzNext").style.display = "none";
+  }
+}
+function wzCollectFree() {
+  const s = WD.step;
+  if (s < QS.length) {
+    const q = QS[s], f = $id("wzFree");
+    if (f && f.value.trim()) WD.answers[q.k] = f.value.trim();
+    const m = $id("wzMature"); if (m) { WD.mature = m.checked; WD.answers["分级"] = m.checked ? "18+" : "全年龄"; }
+  }
+  if (s === N_IDEA) { const t = $id("wzIdea"); if (t) WD.idea = t.value.trim(); }
+  if (s === N_OUTLINE) WD.outline = [...document.querySelectorAll("#wzOl .ol")].map(i => i.value.trim()).filter(Boolean);
+}
+function wzGo(dir) {
+  wzCollectFree();
+  if (dir > 0 && WD.step === N_IDEA && (WD.idea || "").length < 50) {
+    $id("wzIdeaMsg").textContent = "梗概还太短——先生成或多写两句"; return;
+  }
+  if (dir > 0 && WD.step === N_OUTLINE && (WD.outline || []).length < 2) {
+    $id("wzOlMsg").textContent = "至少要两章"; return;
+  }
+  WD.step = Math.max(0, Math.min(N_DONE, WD.step + dir));
+  wzSaveNow();
+  wzRender();
+}
+async function wzIdeaGen() {
+  wzCollectFree();
+  $id("wzIdeaMsg").textContent = "在写了…（十几秒）";
+  try {
+    const r = await j("/gal/survey", { method: "POST", body: JSON.stringify({ answers: WD.answers }) });
+    WD.idea = r.idea; wzSaveNow(); wzRender();
+  } catch (e) { $id("wzIdeaMsg").textContent = "⚠️ " + e.message; }
+}
+async function wzOutlineGen() {
+  wzCollectFree();
+  const n = (WD.answers["篇幅"] || "").includes("3") ? 3 : (WD.answers["篇幅"] || "").includes("5") ? 5 : 4;
+  $id("wzOlMsg").textContent = "在排了…";
+  try {
+    const r = await j("/gal/outline", { method: "POST", body: JSON.stringify({ idea: WD.idea, n }) });
+    if (r.title && !WD.title) WD.title = r.title;
+    WD.outline = r.outline || []; wzSaveNow(); wzRender();
+  } catch (e) { $id("wzOlMsg").textContent = "⚠️ " + e.message; }
+}
+async function wzBuild() {
+  wzCollectFree();
+  WD.title = ($id("wzTitle") || {}).value || WD.title;
+  const art = (ART.find(([n]) => n === WD.art) || [])[1] || "";
+  const wst = (WSTY.find(([n]) => n === WD.wsty) || [])[1] || "";
+  try {
+    const w = await j(`/gal/${WD.id}/build_from_survey`, { method: "POST", body: JSON.stringify(
+      { title: WD.title, art_style: art, style: wst, mature: WD.mature,
+        idea: WD.idea, outline: WD.outline }) });
+    $id("wzBody").innerHTML = `<div class="muted" style="margin-top:12px">🎬 开拍了——下面看进度。</div>`;
+    poll(w.id);
+  } catch (e) { alert("⚠️ " + e.message); }
+}
+async function wzEngine() {
+  wzCollectFree();
+  const go = $id("wzNext");
+  try {
+    const jb = await j("/stories/draft_engine", { method: "POST",
+      body: JSON.stringify({ text: WD.idea, title: ($id("wzTitle") || {}).value || WD.title, language: "" }) });
+    $id("wzBody").innerHTML = `<div class="muted" style="margin-top:12px">🧩 AI 起草中…（角色→三幕→秘密→自检）</div>`;
+    const t = setInterval(async () => {
+      try {
+        const r = await j(`/stories/draft_engine/${jb.job}`);
+        if (r.status === "done") { clearInterval(t); location.href = `/studio?story=${r.story_id}`; }
+        else if (r.status === "error") { clearInterval(t); alert("⚠️ " + r.error); wzRender(); }
+      } catch (e) { clearInterval(t); alert("⚠️ " + e.message); wzRender(); }
+    }, 2500);
   } catch (e) { alert("⚠️ " + e.message); }
 }
 async function genOutline() {
@@ -158,13 +339,15 @@ function setOut(o){
   OUT = o;
   document.getElementById("outGal").style.borderColor = o==="gal" ? "#8ea2ff" : "";
   document.getElementById("outEngine").style.borderColor = o==="engine" ? "#8ea2ff" : "";
-  // 引擎本用不上 gal 专属项 (画风/文风/配图/18+) — 藏起来别误导
-  document.getElementById("galOnly").style.display = o==="gal" ? "" : "none";
+  // 引擎本用不上 gal 专属项 (画风/文风/配图/18+) — 藏起来别误导; 问卷模式自带这些
+  document.getElementById("galOnly").style.display = (o==="gal" && MODE!=="survey") ? "" : "none";
   // 演出语言只有引擎本认 (gal 成品管线写死转写中文) — 同理只在引擎本露出
   document.getElementById("engineOnly").style.display = o==="engine" ? "" : "none";
   document.getElementById("go").textContent = o==="gal" ? "开始建造" : "开始起草（完成后进工坊精修）";
 }
 setOut("gal");
+// ?draft=xx → 直达问卷续答 (书架「继续创作」的落点)
+if (new URLSearchParams(location.search).get("draft")) setMode("survey");
 async function build() {
   const go = document.getElementById("go");
   if (OUT === "engine") {   // 🧩 引擎本草稿: 走 /stories/draft_engine, 完成跳工坊
@@ -251,12 +434,13 @@ async function loadMine() {
     if (!rows.length) { el.textContent = "还没有作品。上面贴一个故事试试。"; return; }
     el.innerHTML = rows.map(w => {
       const cls = w.status === "ready" ? "ready" : w.status === "failed" ? "failed" : "building";
-      const lab = { ready: "已完成", failed: "失败" }[w.status] || "建造中";
+      const lab = { ready: "已完成", failed: "失败", survey: "✍️ 问卷草稿" }[w.status] || "建造中";
       return `<div class="work">${w.cover ? `<img src="${w.cover}">` : `<img>`}
         <div style="flex:1"><b>${w.title}</b><div class="muted">${w.progress || ""}</div></div>
         <span class="st ${cls}">${lab}</span>
         ${w.status === "ready" ? `<a href="/galplay?work=${w.id}">▶ 游玩</a>` : ""}
-        ${w.status !== "ready" && w.status !== "failed" ? `<a href="javascript:poll('${w.id}')">进度</a>` : ""}
+        ${w.status === "survey" ? `<a href="/maker?draft=${w.id}" onclick="setMode('survey');return false">✍️ 继续创作</a>` : ""}
+        ${w.status !== "ready" && w.status !== "failed" && w.status !== "survey" ? `<a href="javascript:poll('${w.id}')">进度</a>` : ""}
         ${w.status === "failed" || w.status === "ready" ? `<a href="javascript:rebuild('${w.id}')" title="补齐缺图/重试">↻</a>` : ""}
       </div>`;
     }).join("");

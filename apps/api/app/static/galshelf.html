@@ -69,7 +69,7 @@ async function load() {
     const b = document.createElement("div");
     b.className = "book";
     const cls = w.status === "ready" ? "ready" : w.status === "failed" ? "failed" : "building";
-    const lab = { ready: "可游玩", failed: "建造失败" }[w.status] || "建造中…";
+    const lab = { ready: "可游玩", failed: "建造失败", survey: "✍️ 问卷答到一半" }[w.status] || "建造中…";
     // 进度账本: 结局解锁 + CG 收集，都记在本地既读账本里
     let prog = "";
     if (w.status === "ready") {
@@ -91,6 +91,7 @@ async function load() {
       `<div class="muted" style="margin-top:6px">${prog}</div></div>`;
     b.onclick = () => {
       if (w.status === "ready") location.href = `/galplay?work=${w.id}`;
+      else if (w.status === "survey") location.href = `/maker?draft=${w.id}`;   // ✍️ 续答问卷
       else if (w.status === "failed") {
         j(`/gal/${w.id}/rebuild`, { method: "POST" }).then(load).catch(e => alert("⚠️ " + e.message));
       } else location.href = "/maker";

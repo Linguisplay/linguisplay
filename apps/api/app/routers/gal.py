@@ -150,6 +150,116 @@ def _own_work(work_id: str, user: User, db: Session) -> Story:
     return s
 
 
+# ── ✍️ 可保存问卷式创作 (Yi 2026-08-02; 蓝图 §8 早留了 gal["survey"] 字段位) ──
+# 问卷草稿 = Story(kind="gal", gal.status="survey")。它不在建造判活集合里 —
+# 天然不占 beta 配额; 配额闸挪到 build_from_survey 那一步才把关。
+class SurveyPatch(BaseModel):
+    answers: dict | None = None
+    step: int | None = None
+    idea: str | None = None
+    outline: list[str] | None = None
+    title: str | None = None
+
+
+@router.post("/draft")
+def survey_draft(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """找到未完成的问卷就续上 (刷新/换设备回来接着答), 没有才开新的。"""
+    mine = (db.query(Story).filter(Story.owner_id == user.id, Story.kind == "gal")
+            .order_by(Story.updated_at.desc()).all())
+    for s in mine:
+        if (s.gal or {}).get("status") == "survey":
+            return {"id": s.id, "title": s.title,
+                    "survey": (s.gal or {}).get("survey") or {}}
+    s = Story(id=uuid.uuid4().hex, owner_id=user.id, kind="gal", title="未命名问卷",
+              visibility="private", status="draft",
+              gal={"status": "survey", "survey": {"answers": {}, "step": 0}})
+    db.add(s)
+    db.commit()
+    return {"id": s.id, "title": s.title, "survey": {"answers": {}, "step": 0}}
+
+
+@router.get("/{work_id}/survey")
+def survey_get(work_id: str, user: User = Depends(current_user),
+               db: Session = Depends(get_db)):
+    s = _own_work(work_id, user, db)
+    return {"id": s.id, "title": s.title, "status": (s.gal or {}).get("status"),
+            "survey": (s.gal or {}).get("survey") or {}}
+
+
+@router.patch("/{work_id}/survey")
+def survey_patch(work_id: str, body: SurveyPatch,
+                 user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """每答一步落一次库 — 「可保存」不是存表单, 是问卷本身长在草稿上。"""
+    s = _own_work(work_id, user, db)
+    g = dict(s.gal or {})
+    if g.get("status") != "survey":
+        raise HTTPException(409, "这本已经开建了，问卷改不动了")
+    sv = dict(g.get("survey") or {})
+    if body.answers is not None:
+        sv["answers"] = {str(k)[:24]: str(v)[:200] for k, v in body.answers.items()}
+    if body.step is not None:
+        sv["step"] = max(0, int(body.step))
+    if body.idea is not None:
+        sv["idea"] = str(body.idea)[:2000]
+    if body.outline is not None:
+        sv["outline"] = [str(x).strip()[:200] for x in body.outline if str(x).strip()][:8]
+    g["survey"] = sv
+    s.gal = g
+    if body.title is not None and body.title.strip():
+        s.title = body.title.strip()[:24]
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(s, "gal")
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/{work_id}/build_from_survey", status_code=201)
+def build_from_survey(work_id: str, body: GalCreate,
+                      user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """问卷答完 → 就地开建 (expand 档, 同一行不换 id)。配额闸在这里把关。"""
+    s = _own_work(work_id, user, db)
+    g = dict(s.gal or {})
+    if g.get("status") != "survey":
+        raise HTTPException(409, "这本不在问卷阶段")
+    idea = (body.idea or (g.get("survey") or {}).get("idea") or "").strip()
+    outline = [str(x).strip()[:200] for x in
+               (body.outline or (g.get("survey") or {}).get("outline") or [])
+               if str(x).strip()][:8]
+    if len(idea) < 50 or len(outline) < 2:
+        raise HTTPException(400, "先生成并确认梗概与章节大纲——拓写跑偏整本报废，这一关值得把好")
+    mine = db.query(Story).filter(Story.owner_id == user.id, Story.kind == "gal").all()
+    if any((x.gal or {}).get("status") == "ready" for x in mine):
+        raise HTTPException(403, "beta 期间每人限 1 本已完成的作品")
+    if any((x.gal or {}).get("status") in ("queued", "expanding", "parsing",
+                                           "compiling", "art") for x in mine):
+        raise HTTPException(409, "你有一本正在建造中——等它完成或失败后再开新的")
+    if (body.title or "").strip():
+        s.title = body.title.strip()[:24]
+    if (body.art_style or "").strip():
+        s.tuning = {**(s.tuning or {}), "art_style": body.art_style.strip()[:200]}
+    g.update({"status": "expanding", "progress": "排队拓写…",
+              "mature": bool(body.mature), "enrich": bool(body.enrich),
+              "idea": idea[:2000], "outline": outline})
+    if (body.style or "").strip():
+        g["style"] = body.style.strip()[:120]
+    s.gal = g
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(s, "gal")
+    db.commit()
+    with _BUILD_LOCK:
+        _BUILDING.add(s.id)
+
+    def _run():
+        try:
+            gal_mod.expand_work(s.id, SessionLocal)   # chains into build_work
+        finally:
+            with _BUILD_LOCK:
+                _BUILDING.discard(s.id)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"id": s.id, "status": "expanding"}
+
+
 @router.get("/mine")
 def my_works(user: User = Depends(current_user), db: Session = Depends(get_db)):
     rows = (db.query(Story)
