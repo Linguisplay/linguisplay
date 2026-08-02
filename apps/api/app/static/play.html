@@ -2645,7 +2645,12 @@ async function openPhone() {
     <div class="papp" onclick="openPlanner()">🗓<small>${B("手账","Planner")}</small></div>
     <div class="papp" onclick="document.getElementById('phoneov').remove(); openJournal()">📔<small>${B("档案","Dossier")}</small></div>
   </div>`;
-  phoneShell(inner, phoneDevice === "手机" ? "📱 小手机" : `📮 ${phoneDevice}`);
+  // 📱 设备名判定曾只认中文字面量「手机」— 英文本子 phone.device="phone" 落到
+  // 信箱分支, 标题成了「📮 phone」(2026-08-02 体检截图实锤)。现代设备一律走小手机,
+  // 只有真·非手机设备 (信鸽/传讯符/电台) 才用信箱皮
+  const _modern = ["手机", "phone", "mobile", "cell", "cellphone", "smartphone"]
+    .includes((phoneDevice || "").toLowerCase().trim());
+  phoneShell(inner, _modern ? B("📱 小手机", "📱 Phone") : `📮 ${phoneDevice}`);
 }
 // 📮 信箱: the letters characters have written — a love letter reads different from a text
 async function openMailbox() {
