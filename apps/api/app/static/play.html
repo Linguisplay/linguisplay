@@ -4449,7 +4449,8 @@ async function openRelWeb() {
   const nodes = (d.nodes || []).slice(0, _dt ? 16 : 12);
   const modeById = {}; (d.player || []).forEach(p => modeById[p.id] = p);
   // 💞 玩家边升主角 (UX 升级): 档位定色、亲近定粗、本幕有变呼吸; 点边看细账
-  const MCOL = { lover: "#e0576b", flirt: "#e08bb0", friend: "#d8b57a",
+  // 💗 恋爱线是粉色 (Yi 定): 暧昧浅粉 → 恋人深粉
+  const MCOL = { lover: "#ff85ad", flirt: "#efb3cd", friend: "#d8b57a",
                  enemy: "#c96a5e", elder: "#9c8f7a", junior: "#9c8f7a" };
   const KICON = { meet: "👋", gift: "🎁", promise: "🤝", confront: "🎯", reveal: "🔍",
                   rel_up: "💗", golden: "✨", death: "☠️", hurt: "🩸", follow: "🚶", fate: "🎲" };
@@ -4470,11 +4471,17 @@ async function openRelWeb() {
   const showEdge = (i) => {
     const e = d.edges[i];
     const nm = id => (nodes.find(n => n.id === id) || {}).name || "?";
+    // 🕸 拆向细账: 两行带箭头, 各说各的那一面
+    const dirLine = (from, to, v) => (v && v.stance)
+      ? `<div><b>${escapeHtml(nm(from))}</b> → ${escapeHtml(nm(to))}：`
+        + `<span style="color:${v.stance > 0 ? "#d8b57a" : "#e0968b"}">${escapeHtml(v.label || "")}</span></div>`
+      : "";
+    const dual = dirLine(e.a, e.b, e.ab) + dirLine(e.b, e.a, e.ba);
     const logs = (e.log || []).map(l =>
       `<div>· ${B(`第${l.act}幕`, `Act ${l.act}`)} ${l.delta > 0 ? "↑" : "↓"} ${escapeHtml(l.why || "")}</div>`).join("");
     document.getElementById("rwinfo").innerHTML =
-      `<b>${escapeHtml(nm(e.a))} ↔ ${escapeHtml(nm(e.b))}</b>：`
-      + `<span style="color:${e.stance > 0 ? "#d8b57a" : "#e0968b"}">${escapeHtml(e.label || "")}</span>`
+      (dual || `<b>${escapeHtml(nm(e.a))} ↔ ${escapeHtml(nm(e.b))}</b>：`
+        + `<span style="color:${e.stance > 0 ? "#d8b57a" : "#e0968b"}">${escapeHtml(e.label || "")}</span>`)
       + (logs ? `<div style="margin-top:4px">${logs}</div>` : `<div class="muted" style="margin-top:4px">${B("（开局便是如此）", "(As authored)")}</div>`);
   };
   // 💞 玩家边的细账: 档位 + 双轨读数 + 差一点就到下一档 + 大事记 (反应就长在这些事上)
@@ -4529,20 +4536,33 @@ async function openRelWeb() {
         svg += chip((cx + q.x) / 2, (cy + q.y) / 2, "💗" + (p.mode_name || ""), col,
                     `class="rw-pedge" data-id="${p.id}"`);
     });
-    (d.edges || []).forEach((e, i) => {   // NPC 立场边 + 独立词牌
+    (d.edges || []).forEach((e, i) => {   // 🕸 NPC 立场边 (拆向): 不对等 = 双色渐变
       const a = pos[e.a], b = pos[e.b]; if (!a || !b) return;
-      const col = e.stance > 0 ? "#d8b57a" : "#c96a5e";
+      const sAB = ((e.ab || {}).stance | 0) || e.stance || 0;
+      const sBA = ((e.ba || {}).stance | 0) || e.stance || 0;
+      const colOf = s => s > 0 ? "#d8b57a" : s < 0 ? "#c96a5e" : "#6a6356";
+      const cA = colOf(sAB), cB = colOf(sBA);
+      let stroke = cA;
+      if (cA !== cB) {   // 一头敬一头恨, 一眼可读 (Yi 认的画法)
+        svg += `<defs><linearGradient id="rwg${i}" gradientUnits="userSpaceOnUse"`
+          + ` x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}">`
+          + `<stop offset="0" stop-color="${cA}"/><stop offset="1" stop-color="${cB}"/>`
+          + `</linearGradient></defs>`;
+        stroke = `url(#rwg${i})`;
+      }
+      const w = Math.max(1.5, Math.max(Math.abs(sAB), Math.abs(sBA)) * 2.5);
       const elog = e.log || [];
       const fresh = elog.length && +elog[elog.length - 1].act === +(d.act || 0);
       svg += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"`
-        + ` stroke="${col}" stroke-width="${Math.abs(e.stance) * 2.5}" stroke-opacity=".8">`
+        + ` stroke="${stroke}" stroke-width="${w}" stroke-opacity=".8">`
         + (fresh ? '<animate attributeName="stroke-opacity" values=".85;.3;.85" dur="1.6s" repeatCount="indefinite"/>' : "")
         + `</line>`
         + `<line class="rw-edge" data-i="${i}" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"`
         + ` stroke="#000" stroke-opacity="0" stroke-width="16" style="cursor:pointer"/>`;
-      const word = (e.label || "").slice(0, 8);
-      if (word) svg += chip((a.x + b.x) / 2, (a.y + b.y) / 2, word, col,
-                            `class="rw-edge" data-i="${i}"`);
+      const word = [...new Set([(e.ab || {}).label, (e.ba || {}).label]
+        .filter(Boolean))].join("·").slice(0, 10) || (e.label || "").slice(0, 8);
+      if (word) svg += chip((a.x + b.x) / 2, (a.y + b.y) / 2, word,
+                            cA !== cB ? "#d8b57a" : cA, `class="rw-edge" data-i="${i}"`);
     });
     const nodeHtml = (id, name, av, dead) => {
       const p = pos[id];

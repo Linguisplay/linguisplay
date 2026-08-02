@@ -2340,7 +2340,11 @@ def conflict_pairs(content: dict[str, Any], state: dict[str, Any]) -> list[dict[
             continue
         if a_id in dead or b_id in dead or a_id not in chars or b_id not in chars:
             continue
-        if not int(e.get("stance") or 0) and not e.get("label"):
+        ev = _npc_dirs(e)
+        s_ab = int((ev.get("ab") or {}).get("stance") or 0)
+        s_ba = int((ev.get("ba") or {}).get("stance") or 0)
+        if not (s_ab or s_ba or (ev.get("ab") or {}).get("label")
+                or (ev.get("ba") or {}).get("label")):
             continue
         a, b = chars[a_id], chars[b_id]
         ga = char_agenda(content, state, a).get("goal") or ""
@@ -2349,7 +2353,9 @@ def conflict_pairs(content: dict[str, Any], state: dict[str, Any]) -> list[dict[
             continue
         out.append({"a": a.get("name"), "b": b.get("name"),
                     "a_id": a_id, "b_id": b_id,
-                    "label": e.get("label") or "", "stance": int(e.get("stance") or 0),
+                    "label": (ev.get("ab") or {}).get("label")
+                    or (ev.get("ba") or {}).get("label") or "",
+                    "stance": s_ab if abs(s_ab) >= abs(s_ba) else s_ba,
                     "a_goal": ga[:30], "b_goal": gb[:30]})
     out.sort(key=lambda p: -abs(p["stance"]))
     return out
@@ -4182,37 +4188,68 @@ def _pair_key(a: str, b: str) -> str:
     return "|".join(sorted([a or "", b or ""]))
 
 
+def _npc_dirs(e: dict[str, Any]) -> dict[str, Any]:
+    """🕸 拆向懒升级 (合伙人⑤, Yi 拍板 2026-08-02): 老档单向 {stance,label} →
+    双向 {ab, ba, log}。ab = 键序第一个 id 眼中的第二个; 事件日志共用 —
+    事只发生一次, 两边感受不同, 这正是不对等的本体。玩家↔角色不拆
+    (rel 本就是「角色对玩家」的单向感受, 替玩家记感情是越位)。"""
+    if "ab" in e:
+        return e
+    v = {"stance": int(e.get("stance") or 0), "label": e.get("label")}
+    return {"ab": dict(v), "ba": dict(v), "log": list(e.get("log") or [])}
+
+
 def _ensure_npc_rel(content: dict[str, Any], state: dict[str, Any]) -> None:
-    """Seed authored ties (character.ties: [{char_id, stance, label?}]) into the live web —
-    idempotent: an existing pair entry (already seeded or already evolved) is never reset."""
+    """Seed authored ties into the live web — 拆向后按方向种: 谁的卡写的 tie 落谁的
+    视角 (情同父子/亲信眼线 从此各归各); 对向若空以同 stance 无 label 兜底
+    (单方写仇, 对方大概率也不善), 等对方的 ties 或事件来改写。
+    幂等: 演化过的边 (log 非空) 与已带电的方向绝不重置。"""
     web = dict(state.get("npc_rel") or {})
     ids = {c.get("id") for c in _characters(content)}
+    mirrors: list[tuple[str, str, int]] = []
     for c in _characters(content):
         cid = c.get("id")
         for t in (c.get("ties") or []):
             other = t.get("char_id")
             if not cid or other not in ids or other == cid:
                 continue
-            key = _pair_key(cid, other)
-            if key in web:
-                continue
             try:
                 stance = max(-2, min(2, int(t.get("stance") or 0)))
             except (TypeError, ValueError):
                 continue
-            web[key] = {"stance": stance, "label": (t.get("label") or "").strip() or None,
-                        "log": []}
+            key = _pair_key(cid, other)
+            e = _npc_dirs(dict(web.get(key) or {"ab": {"stance": 0, "label": None},
+                                                "ba": {"stance": 0, "label": None},
+                                                "log": []}))
+            if e.get("log"):
+                web[key] = e
+                continue   # 演化过的边不重种
+            dk = "ab" if cid == key.split("|", 1)[0] else "ba"
+            if not int((e.get(dk) or {}).get("stance") or 0):
+                e[dk] = {"stance": stance,
+                         "label": (t.get("label") or "").strip() or None}
+                mirrors.append((key, "ba" if dk == "ab" else "ab", stance))
+            web[key] = e
+    for key, mk, stance in mirrors:   # 对向兜底 — 只填还空着的
+        e = web.get(key) or {}
+        if not int((e.get(mk) or {}).get("stance") or 0):
+            e[mk] = {"stance": stance, "label": None}
     state["npc_rel"] = web
 
 
 def npc_stance(state: dict[str, Any], a: str, b: str) -> dict[str, Any] | None:
-    """The current stance between two characters: {stance, label} (label = authored flavor
-    if any, else the engine name for the level). None when they have no charged relation."""
-    e = (state.get("npc_rel") or {}).get(_pair_key(a, b))
-    if not e or not int(e.get("stance") or 0):
+    """【a 眼中的 b】(拆向后方向敏感): {stance, label}; 无带电立场 → None。
+    全引擎读立场一律走这里 — 别自己解 npc_rel 形状 (位置账本同款收口)。"""
+    key = _pair_key(a, b)
+    e = (state.get("npc_rel") or {}).get(key)
+    if not e:
         return None
-    stance = int(e["stance"])
-    return {"stance": stance, "label": e.get("label") or _STANCE_LABEL.get(stance, "")}
+    e = _npc_dirs(e)
+    v = e["ab"] if a == key.split("|", 1)[0] else e["ba"]
+    stance = int((v or {}).get("stance") or 0)
+    if not stance:
+        return None
+    return {"stance": stance, "label": (v or {}).get("label") or _STANCE_LABEL.get(stance, "")}
 
 
 def apply_npc_shift(content: dict[str, Any], state: dict[str, Any], a_ref: str, b_ref: str,
@@ -4239,11 +4276,18 @@ def apply_npc_shift(content: dict[str, Any], state: dict[str, Any], a_ref: str, 
         return None
     web = dict(state.get("npc_rel") or {})
     key = _pair_key(ca["id"], cb["id"])
-    e = dict(web.get(key) or {"stance": 0, "label": None, "log": []})
-    new_stance = max(-2, min(2, int(e.get("stance") or 0) + delta))
-    if new_stance == int(e.get("stance") or 0):
+    e = _npc_dirs(dict(web.get(key) or {"ab": {"stance": 0, "label": None},
+                                        "ba": {"stance": 0, "label": None}, "log": []}))
+    changed = False
+    for _dk in ("ab", "ba"):   # v1 事件对称 (Yi 拍板): 不对等来自 ties 与后续单向事件
+        _old = int((e.get(_dk) or {}).get("stance") or 0)
+        _ns = max(-2, min(2, _old + delta))
+        if _ns != _old:
+            e[_dk] = {"stance": _ns, "label": None}  # evolved past the authored flavor
+            changed = True
+    if not changed:
         return None
-    e["stance"], e["label"] = new_stance, None  # evolved past the authored flavor
+    new_stance = int((e.get("ab") or {}).get("stance") or 0)
     log = list(e.get("log") or [])
     log.append({"act": int(act), "delta": delta, "why": (why or "").strip()[:60]})
     e["log"] = log[-12:]
@@ -4312,10 +4356,16 @@ def offscreen_drama(content: dict[str, Any], state: dict[str, Any],
     if delta:
         web = dict(state.get("npc_rel") or {})
         key = _pair_key(a.get("id"), b.get("id"))
-        e = dict(web.get(key) or {"stance": 0, "label": None, "log": []})
-        ns = max(-2, min(2, int(e.get("stance") or 0) + delta))
-        if ns != int(e.get("stance") or 0):
-            e["stance"], e["label"] = ns, None
+        e = _npc_dirs(dict(web.get(key) or {"ab": {"stance": 0, "label": None},
+                                            "ba": {"stance": 0, "label": None}, "log": []}))
+        _moved = False
+        for _dk in ("ab", "ba"):   # v1 事件对称 (拆向家法同上)
+            _old = int((e.get(_dk) or {}).get("stance") or 0)
+            _ns2 = max(-2, min(2, _old + delta))
+            if _ns2 != _old:
+                e[_dk] = {"stance": _ns2, "label": None}
+                _moved = True
+        if _moved:
             log = list(e.get("log") or [])
             log.append({"act": int(state.get("act", 1) or 1), "delta": delta,
                         "why": rumor[:60]})

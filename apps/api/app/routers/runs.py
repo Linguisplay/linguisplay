@@ -2052,12 +2052,23 @@ def get_relweb(run_id: str, user: User = Depends(current_user), db: Session = De
     edges = []
     for key, e in (st.get("npc_rel") or {}).items():
         a, _, b = key.partition("|")
-        stance = int(e.get("stance") or 0)
-        if a in ids and b in ids and stance:
-            edges.append({"a": a, "b": b, "stance": stance,
-                          "label": e.get("label")
-                          or runtime._STANCE_LABEL.get(stance, ""),
-                          "log": list(e.get("log") or [])[-4:]})
+        ev = runtime._npc_dirs(e)   # 🕸 拆向: 双方向视图 (老档懒升级)
+        s_ab = int((ev.get("ab") or {}).get("stance") or 0)
+        s_ba = int((ev.get("ba") or {}).get("stance") or 0)
+        if a in ids and b in ids and (s_ab or s_ba):
+            edges.append({"a": a, "b": b,
+                          "ab": {"stance": s_ab,
+                                 "label": (ev.get("ab") or {}).get("label")
+                                 or runtime._STANCE_LABEL.get(s_ab, "")},
+                          "ba": {"stance": s_ba,
+                                 "label": (ev.get("ba") or {}).get("label")
+                                 or runtime._STANCE_LABEL.get(s_ba, "")},
+                          # 兼容字段: 老形状读者仍能拿到主立场
+                          "stance": s_ab if abs(s_ab) >= abs(s_ba) else s_ba,
+                          "label": (ev.get("ab") or {}).get("label")
+                          or (ev.get("ba") or {}).get("label")
+                          or runtime._STANCE_LABEL.get(s_ab or s_ba, ""),
+                          "log": list(ev.get("log") or [])[-4:]})
     tun = runtime.tuning_for(content)
     rel_all = st.get("rel") or {}
     player = []
