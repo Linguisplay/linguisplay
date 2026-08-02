@@ -865,6 +865,25 @@ body.dread #dread { opacity:1; }
   body.vn.vnstat #cast, body.vn.vnstat #bars { width: min(720px, var(--sw)); }
 }
 
+/* ── 🖥 桌面剧场 (Yi 2026-08-01: 桌面不能只是竖起来的手机) ──
+   VN: 竖版画框让位宽银幕 — 舞台铺满 (上限 ~16:9), 立牌横向站开,
+   对话框保持全宽字幕带、正文与选项居中限宽 (影院字幕排法)。
+   聊天: 栏加宽、气泡收窄、留白加大 — 桌面阅读的呼吸感。 */
+@media (min-width: 1100px) {
+  body.vn { --sw: min(100vw - 32px, 172vh); }
+  body.vn .standee img { height: 56vh; max-width: none; }
+  body.vn .standee.lit img { height: 61vh; }
+  body.vn #vntext { max-width: 860px; margin: 0 auto; }
+  body.vn #vnbox > #vnname { margin-left: max(0px, calc((100% - 860px) / 2)); }
+  body.vn #vnchoices { max-width: 860px; margin: 0 auto; }
+  body:not(.vn) #app { max-width: 1000px; }
+  body:not(.vn) #chat { padding: 20px 36px; gap: 14px; }
+  body:not(.vn) .row { max-width: 70%; }
+  body:not(.vn) #suggest { padding: 0 36px 6px; }
+  body:not(.vn) #state { padding: 6px 36px; }
+  #vnhearts .hcard { width: min(560px, 90vw); }
+}
+
 /* ── mobile: uncramp the pinned stack, bigger readable text ── */
 #barsToggle { display: none; }  /* mobile-only strip; desktop keeps the full bars */
 @media (max-width: 640px) {
@@ -4369,8 +4388,11 @@ async function openRelWeb() {
   ov = document.createElement("div"); ov.id = "relwebov";
   ov.style.cssText = "position:fixed;inset:0;z-index:70;background:rgba(6,7,12,.94);display:flex;flex-direction:column";
   ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
-  const W = Math.min(innerWidth, 520), H = Math.min(innerHeight - 120, 520);
-  const nodes = (d.nodes || []).slice(0, 12);
+  // 🖥 桌面给关系网真正的画布 (Yi: 桌面不能只是竖起来的手机)
+  const _dt = innerWidth >= 1100;
+  const W = Math.min(innerWidth - (_dt ? 120 : 0), _dt ? 880 : 520),
+        H = Math.min(innerHeight - 140, _dt ? 720 : 520);
+  const nodes = (d.nodes || []).slice(0, _dt ? 16 : 12);
   const modeById = {}; (d.player || []).forEach(p => modeById[p.id] = p);
   // 💞 玩家边升主角 (UX 升级): 档位定色、亲近定粗、本幕有变呼吸; 点边看细账
   const MCOL = { lover: "#e0576b", flirt: "#e08bb0", friend: "#d8b57a",
