@@ -2051,10 +2051,18 @@ def get_relweb(run_id: str, user: User = Depends(current_user), db: Session = De
         if not sc:
             continue
         view = rel_mod.state_for(c, sc, tun, lang=runtime.lang_of(content)) or {}
-        player.append({"id": c["id"], "mode_name": view.get("mode_name") or "",
+        player.append({"id": c["id"], "mode": view.get("mode") or "",
+                       "mode_name": view.get("mode_name") or "",
                        "closeness": int(sc.get("closeness", 0) or 0),
-                       "romance": int(sc.get("romance", 0) or 0)})
+                       "romance": int(sc.get("romance", 0) or 0),
+                       # ⤴ 差一点就到下一档 (每日回访钩) + 💞 大事记尾巴: 玩家边的「渊源」
+                       # (UX 升级 2026-08-01: NPC 边一直有 log 可点, 玩家边此前是哑的)
+                       "next": view.get("next"),
+                       "recent": [{"act": e.get("act"), "kind": e.get("kind"),
+                                   "text": e.get("text")}
+                                  for e in list((st.get("rel_log") or {}).get(c["id"]) or [])[-3:]]})
     return {"nodes": nodes, "edges": edges, "player": player,
+            "act": int(st.get("act", 1) or 1),
             "player_name": (st.get("player_character_id") and
                             runtime._char_name(content, pcid)) or None}
 
