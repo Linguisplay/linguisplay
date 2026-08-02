@@ -33,7 +33,10 @@ BG_DIR = _STATIC / "bg"
 COVER_DIR = _STATIC / "cover"
 
 # 版式版本号: 改了排版/配色/字号就 +1 —— 指纹里带着它, 全站封面自动重排
-ALGO = "c4"
+ALGO = "d1"
+# 三款版式。研究真封面 (Grisaia / 薄樱鬼 / Little Busters / Steins;Gate) 之后重做的 ——
+# v1 那版是电影海报的做法 (标题在顶、班底站一排、整体压暗), Yi 一句「设计的不行」，对。
+DEFAULT_STYLE = "crowd"
 
 POSTER = (900, 1200)     # 3:4 盒绘
 WIDE = (1440, 864)       # 16:9.6 —— 与 play.html .scard 的 aspect-ratio 对齐
@@ -437,109 +440,219 @@ def _keylight(size) -> "Any":
     return m
 
 
-def _ground(size, pal, bg, top_scrim: float = 0.0, bot_scrim: float = 0.34):
-    """舞台: 纵向渐变打底 → 地点背景虚化铺上去 → 顶光 → 压字用的暗场。
-    背景图必须被【打散】成氛围 —— 不虚化它就跟人抢戏, 变成"人站在照片前面";
-    但也不能压死, 第一版压到 0.52 亮度, 整张封面只剩一坨褐色。"""
-    from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter
+def _bg_plate(size, bg, blur: float, color: float, bright: float):
+    """地点背景铺满画布并【打散成氛围】—— 不虚化它就跟人抢戏, 变成"人站在照片前面"。"""
+    from PIL import Image, ImageEnhance, ImageFilter
+    W, H = size
+    bw, bh = bg.size
+    s = max(W / bw, H / bh)
+    b = bg.convert("RGB").resize((max(1, int(bw * s)), max(1, int(bh * s))), Image.LANCZOS)
+    b = b.crop(((b.width - W) // 2, (b.height - H) // 3,
+                (b.width - W) // 2 + W, (b.height - H) // 3 + H))
+    if blur > 0:
+        b = b.filter(ImageFilter.GaussianBlur(max(2, H * blur)))
+    b = ImageEnhance.Color(b).enhance(color)
+    return ImageEnhance.Brightness(b).enhance(bright)
+
+
+def _scrim(img, top_frac: float = 0.0, bot_frac: float = 0.0, strength: int = 168,
+           rgb=(0, 0, 0)):
+    """压字的那条带子。留白那一款底子是纸, 压黑就脏了 —— 它压的是【白】。"""
+    from PIL import Image, ImageDraw
+    W, H = img.size
+    sc = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(sc)
+    for frac, at_top in ((top_frac, True), (bot_frac, False)):
+        n = int(H * frac)
+        for i in range(n):
+            a = int(strength * (1 - i / n) ** 1.5)
+            d.line(((0, i), (W, i)) if at_top else ((0, H - 1 - i), (W, H - 1 - i)),
+                   fill=(*rgb, a))
+    return Image.alpha_composite(img.convert("RGBA"), sc).convert("RGB")
+
+
+def _ground(size, pal, bg, style: str, seed: int):
+    """三种底子。研究了一圈真封面 (Grisaia / 薄樱鬼 / Steins;Gate) 之后定的三条路:
+
+      · crowd 群像 —— 地点背景当实景, 人压满画面。亮、实、挤。
+      · void  留白 —— 纸白(或墨黑)空场 + 一枚淡色晕, 人像悬在里面边缘化开。
+                      Steins;Gate 那一路, 最"设计"的一款。
+      · gilt  烫金 —— 暖调渐变 + 光束 + 花瓣 + 光斑, 乙女向包装那一路。
+    """
+    from PIL import Image, ImageChops
     W, H = size
     deep, mid, accent, cool = pal["deep"], pal["mid"], pal["accent"], pal["cool"]
+    grad = Image.linear_gradient("L").resize((W, H), Image.BILINEAR)
+
+    if style == "void":
+        # 纸: 强调色掺进白里, 底部略沉。不铺地点背景 —— 空场就是这一款的主张
+        paper = tuple(min(252, int(238 + c * 0.06)) for c in accent)
+        floor = tuple(min(250, int(214 + c * 0.10)) for c in cool)
+        base = Image.composite(Image.new("RGB", (W, H), floor),
+                               Image.new("RGB", (W, H), paper), grad)
+        halo = Image.new("RGB", (W, H), tuple(min(255, int(c * 0.35 + 168)) for c in accent))
+        base = Image.composite(halo, base, _keylight(size).point(lambda v: int(v * 0.55)))
+        if bg is not None:      # 地点只留一层几乎看不见的影子, 给纸一点内容
+            base = Image.blend(base, ImageChops.lighter(
+                base, _bg_plate(size, bg, 0.035, 0.25, 1.35)), 0.30)
+        return base
+
     top = tuple(min(255, int(d * 0.7 + a * 0.34)) for d, a in zip(deep, accent))
     bot = tuple(min(255, int(d * 0.45 + c * 0.42)) for d, c in zip(deep, cool))
-    grad = Image.linear_gradient("L").resize((W, H), Image.BILINEAR)
-    base = Image.new("RGB", (W, H), top)
-    base = Image.composite(Image.new("RGB", (W, H), bot), base, grad)
+    if style == "gilt":         # 暖调: 上暖下沉, 不走冷补色
+        top = tuple(min(255, int(a * 0.72 + 60)) for a in accent)
+        bot = tuple(min(255, int(d * 0.8 + a * 0.16)) for d, a in zip(deep, accent))
+    base = Image.composite(Image.new("RGB", (W, H), bot),
+                           Image.new("RGB", (W, H), top), grad)
 
     if bg is not None:
-        bw, bh = bg.size
-        s = max(W / bw, H / bh)
-        b = bg.convert("RGB").resize((max(1, int(bw * s)), max(1, int(bh * s))), Image.LANCZOS)
-        b = b.crop(((b.width - W) // 2, (b.height - H) // 3,
-                    (b.width - W) // 2 + W, (b.height - H) // 3 + H))
-        b = b.filter(ImageFilter.GaussianBlur(max(5, H // 58)))
-        b = ImageEnhance.Color(b).enhance(0.62)
-        b = ImageEnhance.Brightness(b).enhance(0.70)
-        base = Image.blend(base, b, 0.66)
-        # 冷阴影: 暗部往补色推 (越暗染得越多)。暖光留给顶光那一层, 一冷一暖才立体
-        dark = base.convert("L").point(lambda v: 255 - v)
-        base = Image.composite(Image.blend(base, ImageChops.multiply(
-            base, Image.new("RGB", (W, H), tuple(min(255, c + 96) for c in cool))), 0.75),
-            base, dark.point(lambda v: int(v * 0.55)))
+        # 群像那一款要"实景": 少虚化、提亮; 烫金那一款背景只当氛围
+        b = _bg_plate(size, bg, 0.011 if style == "crowd" else 0.030,
+                      0.80 if style == "crowd" else 0.55,
+                      0.92 if style == "crowd" else 0.85)
+        base = Image.blend(base, b, 0.74 if style == "crowd" else 0.52)
+        if style == "crowd":    # 冷阴影: 暗部往补色推, 一冷一暖才立体
+            dark = base.convert("L").point(lambda v: 255 - v)
+            base = Image.composite(Image.blend(base, ImageChops.multiply(
+                base, Image.new("RGB", (W, H), tuple(min(255, c + 96) for c in cool))), 0.75),
+                base, dark.point(lambda v: int(v * 0.45)))
 
     base = Image.composite(Image.new("RGB", (W, H), tuple(min(255, int(c * 0.62 + m * 0.55))
                                                           for c, m in zip(accent, mid))),
                            base, _keylight(size).point(lambda v: int(v * 0.34)))
-
-    # 压字的暗场: 海报的字在顶, 大厅卡的字(HTML)在底 —— 各压各的那一头
-    sc = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    d = ImageDraw.Draw(sc)
-    for frac, at_top in ((top_scrim, True), (bot_scrim, False)):
-        n = int(H * frac)
-        for i in range(n):
-            a = int(168 * (1 - i / n) ** 1.5)
-            d.line(((0, i), (W, i)) if at_top else ((0, H - 1 - i), (W, H - 1 - i)),
-                   fill=(0, 0, 0, a))
-    return Image.alpha_composite(base.convert("RGBA"), sc).convert("RGB")
+    return base
 
 
-def _stage_line(img, pal, y_frac: float):
-    """台缘: 一道横向辉光 + 一根淡淡的细线。人是"站在什么上面"的, 有这一道才不飘。"""
+# ── 装饰件 (真封面上"看着像个包装"的那些东西) ──────────────────────────────
+def _rng(seed: int):
+    import random
+    return random.Random(seed)
+
+
+def _bokeh(img, pal, seed: int, n: int = 26, alpha: int = 42):
+    """光斑: 大小不一的柔圆。空气里有东西, 画面就不是一块死板。"""
     from PIL import Image, ImageDraw, ImageFilter
     W, H = img.size
-    y = int(H * y_frac)
+    r = _rng(seed)
     lay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(lay)
-    a = pal["accent"]
-    d.ellipse((int(-W * 0.15), y - int(H * 0.05), int(W * 1.15), y + int(H * 0.05)),
-              fill=(*a, 110))
-    lay = lay.filter(ImageFilter.GaussianBlur(H // 28))
-    d = ImageDraw.Draw(lay)
-    for i in range(W):
-        # 两端淡出的细线 —— 满幅硬线太像表格框
-        t = 1 - abs(i / W - 0.5) * 2
-        d.point((i, y), fill=(*a, int(120 * max(0.0, t) ** 1.5)))
+    tint = tuple(min(255, int(c * 0.4 + 150)) for c in pal["accent"])
+    for _ in range(n):
+        x, y = r.uniform(-0.05, 1.05) * W, r.uniform(-0.05, 0.95) * H
+        rad = r.uniform(0.008, 0.055) * H
+        a = int(alpha * r.uniform(0.35, 1.0))
+        d.ellipse((x - rad, y - rad, x + rad, y + rad), fill=(*tint, a))
+    lay = lay.filter(ImageFilter.GaussianBlur(H * 0.006))
     return Image.alpha_composite(img.convert("RGBA"), lay)
 
 
-def _watermark(img, pal, glyph: str):
-    """标题的头一个字/字母, 放到巨大、压到 6% 不透明度、切出画面。
-    海报的老把戏: 白给一层尺度感和纵深, 又绝不跟脸抢注意力。"""
-    if not glyph:
+def _petals(img, pal, seed: int, n: int = 34):
+    """花瓣: 乙女向包装的标配 (薄樱鬼满屏落樱)。旋转的小水滴形, 近大远小。"""
+    from PIL import Image, ImageDraw, ImageFilter
+    W, H = img.size
+    r = _rng(seed + 7)
+    lay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    warm = tuple(min(255, int(c * 0.55 + 128)) for c in pal["accent"])
+    for _ in range(n):
+        x, y = r.uniform(-0.04, 1.02), r.uniform(-0.03, 1.0)
+        # 🚫 不许落在脸区。第一版满屏乱撒, 几片正好糊在主角脸上, 看着像头皮屑 (实弹)
+        if 0.22 < x < 0.88 and 0.28 < y < 0.68:
+            continue
+        s = r.uniform(0.006, 0.017) * H
+        cell = Image.new("RGBA", (int(s * 3.0), int(s * 3.0)), (0, 0, 0, 0))
+        cd = ImageDraw.Draw(cell)
+        cd.ellipse((s * 0.3, s * 1.0, s * 2.7, s * 2.0),      # 细长的一瓣, 不是圆点
+                   fill=(*warm, int(r.uniform(34, 96))))
+        cell = cell.rotate(r.uniform(0, 360), resample=Image.BICUBIC, expand=True)
+        cell = cell.filter(ImageFilter.GaussianBlur(max(1.0, s * 0.16)))
+        lay.alpha_composite(cell, (int(x * W), int(y * H)))
+    return Image.alpha_composite(img.convert("RGBA"), lay)
+
+
+def _rays(img, pal, seed: int):
+    """顶上斜下来的几束光。给平的渐变一个方向感。"""
+    from PIL import Image, ImageDraw, ImageFilter
+    W, H = img.size
+    r = _rng(seed + 3)
+    lay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(lay)
+    tint = tuple(min(255, int(c * 0.35 + 168)) for c in pal["accent"])
+    ox, oy = W * r.uniform(0.55, 0.8), -H * 0.15
+    for _ in range(5):
+        w0 = r.uniform(0.02, 0.09) * W
+        dx = r.uniform(-0.9, 0.15) * W
+        d.polygon([(ox, oy), (ox + dx - w0, H * 1.1), (ox + dx + w0 * 2.4, H * 1.1)],
+                  fill=(*tint, int(r.uniform(16, 34))))
+    return Image.alpha_composite(img.convert("RGBA"),
+                                 lay.filter(ImageFilter.GaussianBlur(H * 0.02)))
+
+
+def _frame(img, pal, ink, inset: float = 0.035):
+    """内框: 双细线 + 四角短记号。廉价装饰的反面 —— 只用直线, 不画藤蔓。"""
+    from PIL import Image, ImageDraw
+    W, H = img.size
+    lay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(lay)
+    m = int(min(W, H) * inset)
+    d.rectangle((m, m, W - m - 1, H - m - 1), outline=(*ink, 120), width=1)
+    m2 = m + max(3, int(min(W, H) * 0.008))
+    seg = int(min(W, H) * 0.06)
+    for (x0, y0, x1, y1) in ((m2, m2, m2 + seg, m2), (m2, m2, m2, m2 + seg),
+                             (W - m2 - seg, m2, W - m2, m2), (W - m2, m2, W - m2, m2 + seg),
+                             (m2, H - m2, m2 + seg, H - m2), (m2, H - m2 - seg, m2, H - m2),
+                             (W - m2 - seg, H - m2, W - m2, H - m2),
+                             (W - m2, H - m2 - seg, W - m2, H - m2)):
+        d.line((x0, y0, x1, y1), fill=(*pal["accent"], 190), width=2)
+    return Image.alpha_composite(img.convert("RGBA"), lay)
+
+
+def _seal(img, pal, text: str, ink):
+    """右上角的小印: 一枚旋一点角度的圆角方章。就这一件, 整张图立刻像"件商品"。"""
+    if not text:
         return img
     from PIL import Image, ImageDraw
     W, H = img.size
-    f = _font("display", int(H * 0.72))
+    f = _font("display", int(H * 0.026))
     if f is None:
         return img
-    lay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    d = ImageDraw.Draw(lay)
-    tint = tuple(min(255, int(c * 0.5 + 120)) for c in pal["accent"])
-    try:
-        d.text((int(W * 0.82), int(H * 0.34)), glyph, font=f, fill=(*tint, 34), anchor="mm")
-    except Exception:
-        return img
-    return Image.alpha_composite(img.convert("RGBA"), lay)
+    s = int(H * 0.072)
+    cell = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    cd = ImageDraw.Draw(cell)
+    cd.rounded_rectangle((0, 0, s - 1, s - 1), radius=int(s * 0.22),
+                         fill=(*pal["accent"], 232))
+    lines = text.split("\n")[:2]
+    lh = int(H * 0.030)
+    y = s // 2 - lh * len(lines) // 2
+    for ln in lines:
+        cd.text((s // 2, y), ln, font=f, fill=(*ink, 255), anchor="ma")
+        y += lh
+    cell = cell.rotate(-7, resample=Image.BICUBIC, expand=True)
+    out = img.convert("RGBA")
+    out.alpha_composite(cell, (W - cell.width - int(W * 0.055), int(H * 0.045)))
+    return out
 
 
-def _grade(img, pal):
+def _grade(img, pal, style: str = "crowd"):
     """收尾统一调色: 大气罩(人和地共用的那束顶光罩在最上层) → 暗角 → 提一点浓度
     → 胶片颗粒。五个角色的立绘来自不同批次不同光线, 全靠最后这一道压成同一张照片 ——
-    少了它就是拼贴感的正主。"""
+    少了它就是拼贴感的正主。留白那一款底子是纸, 暗角要极轻, 否则纸变成脏抹布。"""
     from PIL import Image, ImageChops, ImageEnhance
     W, H = img.size
     rgb = img.convert("RGB")
-    # 大气罩: 顶光的形状再罩一次 (screen), 前后景一起吃同一口光, 人才像"在场"
     haze = Image.new("RGB", (W, H), tuple(min(255, int(c * 0.5 + 70)) for c in pal["accent"]))
     rgb = Image.composite(ImageChops.screen(rgb, haze), rgb,
-                          _keylight((W, H)).point(lambda v: int(v * 0.22)))
+                          _keylight((W, H)).point(lambda v: int(v * (0.10 if style == "void"
+                                                                     else 0.22))))
     vig = Image.radial_gradient("L").resize((W, H), Image.BILINEAR)
-    vig = vig.point(lambda v: 255 - int((v / 255) ** 1.8 * 120))
+    depth = {"void": 26, "gilt": 96, "crowd": 120}[style]
+    vig = vig.point(lambda v: 255 - int((v / 255) ** 1.8 * depth))
     rgb = ImageChops.multiply(rgb, Image.merge("RGB", (vig, vig, vig)))
-    rgb = ImageEnhance.Color(rgb).enhance(1.08)
+    rgb = ImageEnhance.Color(rgb).enhance(1.14 if style == "gilt" else 1.08)
     rgb = ImageEnhance.Contrast(rgb).enhance(1.06)
     try:
         noise = Image.effect_noise((W, H), 22).convert("L")
-        rgb = Image.blend(rgb, ImageChops.overlay(rgb, Image.merge("RGB", (noise,) * 3)), 0.07)
+        rgb = Image.blend(rgb, ImageChops.overlay(rgb, Image.merge("RGB", (noise,) * 3)),
+                          0.05 if style == "void" else 0.07)
     except Exception:
         pass
     return rgb
@@ -583,80 +696,132 @@ def _clip(s: str, n: int) -> str:
     return cut.rstrip(" ,、，；;:—") + "…"
 
 
-def _text_block(img, pal, title: str, eyebrow: str, tease: str):
-    """海报的字: 眉标(疏排小字) → 标题(衬线大字, 自动缩到放得下) → 细线 → 一句引子。
-    左对齐留边, 顶部一条竖向的强调色标尺 —— 不居中、不加框, 靠对齐和留白站住。"""
+def _fit(draw, title: str, maxw: int, hi: int, lo: int):
+    """标题自动缩到放得下。一行永远比两行像 logo —— 所以一路缩到 lo 都要争取单行,
+    实在放不下才折两行 (v2 实弹: 「…学院（旧」/「版）」这种断法丑到出戏)。"""
+    size, lines = hi, []
+    while True:
+        f = _font("display", size)
+        if f is None:
+            return None, [], size
+        lines = _wrap(draw, title, f, maxw, 2)
+        if len(lines) <= 1 or size <= lo:
+            break
+        size -= max(2, hi // 26)
+    return _font("display", size), lines, size
+
+
+def _logotype(img, pal, title: str, eyebrow: str, tease: str, style: str):
+    """标题块 —— 这是 v1 最大的病灶所在。
+
+    v1 把标题当【编辑排版】处理: 眉标 + 左对齐大标题 + 引子, 全压在顶部。那是电影
+    海报/流媒体卡的做法。翻了一圈真封面 (Grisaia / 薄樱鬼 / Little Busters /
+    Steins;Gate) 才看明白, galgame 封面的共同法则是反的:
+
+      · 标题在【底部】, 而且是【logo】不是排版字 —— 描边、副行、细线、小印章
+      · art 占满整张, 标题压在画上, 不给它单开一块空地
+
+    所以这里: 副行(疏排小字) 在上 → 标题带描边居中 → 细线 → 引子小字。
+    三款各有各的墨色: 群像白字黑边、留白墨字白边、烫金金字褐边。
+    """
     from PIL import Image, ImageDraw, ImageFilter
     W, H = img.size
-    m = int(W * 0.085)
-    maxw = W - m * 2
+    ink, stroke = {
+        "crowd": ((250, 246, 238), (14, 12, 10)),
+        "void": (tuple(int(c * 0.55) for c in pal["deep"]), (255, 255, 255)),
+        "gilt": ((255, 246, 224), tuple(int(c * 0.45) for c in pal["deep"])),
+    }[style]
+    maxw = int(W * 0.84)
     lay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(lay)
-    ink = (247, 242, 232)
-    y = int(H * 0.062)
+    cx = W // 2
 
-    fe = _font("body", int(H * 0.0175))
+    ft, lines, size = _fit(d, title, maxw, int(H * 0.078), int(H * 0.032))
+    tl = int(size * 1.16)
+    fe = _font("body", int(H * 0.0165))
+    fb = _font("body", int(H * 0.0195))
+    tease_lines = _wrap(d, tease, fb, int(maxw * 0.90), 2) if (tease and fb) else []
+
+    # 📐 整块字从【底边】倒着排。v2 是从标题往上塞眉标, 标题一折两行, 眉标就被顶到
+    # 人脸上去了 (实弹: ENDLESS SANDBOX 横在主角胸口)。倒排之后, 不管标题几行,
+    # 这一块永远贴着下沿、永远落在压暗的那条带子里。
+    eb_h = int(H * 0.030) if (eyebrow and fe) else 0
+    ti_h = tl * max(1, len(lines)) + int(H * 0.026) if (ft and lines) else 0
+    te_h = int(H * 0.0275) * len(tease_lines)
+    y = int(H * 0.955) - (eb_h + ti_h + te_h)
+
     if eyebrow and fe:
-        x = m
+        gap = int(H * 0.0062)
+        wid = sum(d.textlength(c, font=fe) + gap for c in eyebrow.upper()) - gap
+        x = cx - wid / 2
         for ch in eyebrow.upper():
-            d.text((x, y), ch, font=fe, fill=(*pal["accent"], 225))
-            x += d.textlength(ch, font=fe) + int(H * 0.0058)   # 疏排
-        y += int(H * 0.031)
+            d.text((x, y), ch, font=fe, fill=(*pal["accent"], 240))
+            x += d.textlength(ch, font=fe) + gap
+        y += eb_h
 
-    size = int(H * 0.072)
-    lines: list[str] = []
-    while size > int(H * 0.030):
-        ft = _font("display", size)
-        if ft is None:
-            break
-        lines = _wrap(d, title, ft, maxw, 2)
-        if len(lines) <= 1 or size <= int(H * 0.052):
-            break
-        size -= 4
-    ft = _font("display", size)
     if ft and lines:
-        # 字下垫一层模糊的黑, 亮背景上也读得清 (直接描边会糊掉衬线的骨)
+        sw = max(2, int(size * 0.075))
+        # 先垫一层模糊的暗影托住, 再描边 —— 亮背景上也压得住
         sh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         sd = ImageDraw.Draw(sh)
         yy = y
         for ln in lines:
-            sd.text((m, yy), ln, font=ft, fill=(0, 0, 0, 190))
-            yy += int(size * 1.22)
-        lay = Image.alpha_composite(lay, sh.filter(ImageFilter.GaussianBlur(int(H * 0.011))))
+            sd.text((cx, yy), ln, font=ft, fill=(*stroke, 150), anchor="ma")
+            yy += tl
+        lay = Image.alpha_composite(lay, sh.filter(ImageFilter.GaussianBlur(int(H * 0.012))))
         d = ImageDraw.Draw(lay)
         for ln in lines:
-            d.text((m, y), ln, font=ft, fill=(*ink, 255))
-            y += int(size * 1.22)
-        y += int(H * 0.004)
-        d.line((m, y, m + int(maxw * 0.22), y), fill=(*pal["accent"], 205), width=2)
-        y += int(H * 0.020)
+            d.text((cx, y), ln, font=ft, fill=(*ink, 255),
+                   stroke_width=sw, stroke_fill=(*stroke, 235), anchor="ma")
+            y += tl
+        y += int(H * 0.010)
+        half = int(maxw * 0.30)
+        d.line((cx - half, y, cx + half, y), fill=(*pal["accent"], 215), width=2)
+        y += int(H * 0.016)
 
-    fb = _font("body", int(H * 0.0205))
-    if tease and fb:
-        for ln in _wrap(d, tease, fb, int(maxw * 0.92), 2):
-            d.text((m + 1, y + 1), ln, font=fb, fill=(0, 0, 0, 150))
-            d.text((m, y), ln, font=fb, fill=(224, 214, 196, 235))
-            y += int(H * 0.0295)
-
-    # 左上竖标尺: 全篇唯一的硬边几何, 把整块字锚在版心上
-    d.rectangle((m - int(W * 0.028), int(H * 0.058),
-                 m - int(W * 0.028) + 3, y - int(H * 0.006)), fill=(*pal["accent"], 190))
+    if tease_lines:
+        sub = (*ink, 225) if style != "void" else (*ink, 205)
+        for ln in tease_lines:
+            d.text((cx + 1, y + 1), ln, font=fb, fill=(*stroke, 175), anchor="ma")
+            d.text((cx, y), ln, font=fb, fill=sub, anchor="ma")
+            y += int(H * 0.0275)
     return Image.alpha_composite(img.convert("RGBA"), lay)
 
 
+# 每一档: 脸带高占画面高的比例 / 脸顶落在哪条视平线 / 左右站位。
+# v1 的班底是"规规矩矩站一排、四周留空", 真封面全是【压满画面、互相压、被画框切掉】——
+# 所以这里的脸比 v1 大了三成, 站位也往两侧顶出去。
 _LAYOUT = {
-    # 每一档: 脸带高占画面高的比例 / 脸顶落在哪条视平线 —— 主角脸最大最高, 越往后越小越低
-    "poster": {"face": [0.086, 0.078, 0.078, 0.069, 0.069],
-               "eye": [0.330, 0.362, 0.362, 0.392, 0.392],
-               "xs": [0.50, 0.275, 0.725, 0.105, 0.895], "stage": 0.905},
-    # 宽幅是大厅 hero 卡的图床: 标题/引子/徽章是 HTML 压在左下角的, 所以班底整体
-    # 右移并放大, 把左下那块留白让给字 —— 不然文字永远糊在人脸上
-    "wide": {"face": [0.104, 0.093, 0.093, 0.082, 0.082],
-             "eye": [0.200, 0.240, 0.240, 0.276, 0.276],
-             "xs": [0.615, 0.415, 0.815, 0.255, 0.945], "stage": 0.0},
+    "crowd": {
+        "poster": {"face": [0.112, 0.101, 0.101, 0.089, 0.089],
+                   "eye": [0.285, 0.330, 0.330, 0.372, 0.372],
+                   "xs": [0.50, 0.225, 0.775, 0.035, 0.965]},
+        "wide": {"face": [0.132, 0.118, 0.118, 0.104, 0.104],
+                 "eye": [0.180, 0.228, 0.228, 0.272, 0.272],
+                 "xs": [0.625, 0.400, 0.845, 0.225, 0.975]},
+    },
+    # 留白: 人小一点、聚成一簇悬在纸中央, 底下留给 logo。松是这一款的主张
+    "void": {
+        "poster": {"face": [0.082, 0.074, 0.074, 0.066, 0.066],
+                   "eye": [0.215, 0.252, 0.252, 0.288, 0.288],
+                   "xs": [0.50, 0.290, 0.710, 0.140, 0.860]},
+        "wide": {"face": [0.100, 0.090, 0.090, 0.080, 0.080],
+                 "eye": [0.150, 0.192, 0.192, 0.232, 0.232],
+                 "xs": [0.620, 0.430, 0.810, 0.275, 0.945]},
+    },
+    "gilt": {
+        "poster": {"face": [0.104, 0.094, 0.094, 0.083, 0.083],
+                   "eye": [0.245, 0.292, 0.292, 0.334, 0.334],
+                   "xs": [0.50, 0.245, 0.755, 0.070, 0.930]},
+        "wide": {"face": [0.124, 0.111, 0.111, 0.098, 0.098],
+                 "eye": [0.165, 0.212, 0.212, 0.256, 0.256],
+                 "xs": [0.620, 0.410, 0.835, 0.240, 0.970]},
+    },
 }
-# 景深: 越往后越暗越灰。手别重 —— 第一版压到 0.76 亮度, 后排的人直接掉进背景里没了
+# 景深: 越往后越暗越灰。手别重 —— 曾压到 0.76 亮度, 后排的人直接掉进背景里没了
 _DIM = [(1.0, 1.02), (0.94, 0.96), (0.94, 0.96), (0.88, 0.90), (0.88, 0.90)]
+# 留白那一款的底子是纸不是夜, 后排要往【亮】里退才是空气透视, 往暗里退就成了污渍
+_DIM_LIGHT = [(1.0, 0.98), (1.06, 0.86), (1.06, 0.86), (1.12, 0.74), (1.12, 0.74)]
 
 
 FACE_TOP_MIN, FACE_TOP_MAX = 0.085, 0.62
@@ -691,18 +856,37 @@ def place_top(H: int, eye: float, rank: int, nh: int, face_off: float,
     return top, fade
 
 
-def _cast_layer(size, figs, kind, pal):
+def _dissolve(im, pal, style: str):
+    """留白那一款: 人形四周整体化开、往纸色里褪。Steins;Gate 封面的招牌手法 ——
+    人不是"贴"在纸上, 是从纸里显出来的。"""
+    if style != "void":
+        return im
+    from PIL import Image, ImageChops, ImageFilter
+    w, h = im.size
+    mask = Image.new("L", (w, h), 0)
+    from PIL import ImageDraw
+    ImageDraw.Draw(mask).ellipse((-w * 0.22, -h * 0.10, w * 1.22, h * 1.02), fill=255)
+    mask = mask.filter(ImageFilter.GaussianBlur(max(6, h * 0.06)))
+    out = im.copy()
+    out.putalpha(ImageChops.multiply(im.getchannel("A"), mask))
+    return out
+
+
+def _cast_layer(size, figs, kind, pal, style: str):
     from PIL import Image, ImageEnhance, ImageFilter
     W, H = size
-    cfg = _LAYOUT[kind]
+    cfg = _LAYOUT[style][kind]
     lay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     n = len(figs)
-    xs = cfg["xs"][:n]
-    # 人少时把位置收回来, 免得两个人分踞左右像通缉令
-    if kind == "poster":
-        xs = {1: [0.5], 2: [0.365, 0.635], 3: [0.50, 0.245, 0.755]}.get(n, xs)
-    else:
-        xs = {1: [0.66], 2: [0.53, 0.79], 3: [0.615, 0.40, 0.83]}.get(n, xs)
+    # 站位按【人数】整套换, 不是把五人位切一段用 —— 切一段就会在少人时留出一大块空地
+    # (v2 实弹: 四个人的封面中间左侧空一片, 因为第五个位置在画外)
+    slots = {
+        "poster": {1: [0.50], 2: [0.355, 0.645], 3: [0.50, 0.215, 0.785],
+                   4: [0.44, 0.735, 0.155, 0.945], 5: cfg["xs"]},
+        "wide": {1: [0.66], 2: [0.545, 0.815], 3: [0.625, 0.390, 0.865],
+                 4: [0.60, 0.815, 0.395, 0.975], 5: cfg["xs"]},
+    }[kind]
+    xs = slots.get(n, cfg["xs"])[:n] if n <= 5 else cfg["xs"][:n]
     # 先量后摆: 一整台班底是【全身立绘】还是【半身像】, 决定两种完全不同的摆法。
     # 半身像按视平线挂着, 下面就空一大块 (实弹: Golden Hour 五个男人吊在上半张,
     # 底下三分之一是空的)。半身班底改成【齐底】—— 一排人从画面下沿长出来, 版面才满。
@@ -735,29 +919,38 @@ def _cast_layer(size, figs, kind, pal):
             nw, nh = max(2, int(im.width * sc)), max(2, int(im.height * sc))
         f = _feather_cropped(im.resize((nw, nh), Image.LANCZOS))
 
-        bright, satu = _DIM[min(i, 4)]
+        bright, satu = (_DIM_LIGHT if style == "void" else _DIM)[min(i, 4)]
         f = ImageEnhance.Brightness(f).enhance(bright)
         f = ImageEnhance.Color(f).enhance(satu)
         if i >= 3:
             f = f.filter(ImageFilter.GaussianBlur(1.1))   # 空气透视: 最后一排微微发虚
+        f = _dissolve(f, pal, style)
 
         top, faded = place_top(H, cfg["eye"][min(i, 4)], i, nh, ftop * sc, bust)
         if faded:
             f = _fade_bottom(f, 0.20)
         left = int(W * xs[i] - nw / 2)
 
-        # 底影 + 轮廓辉光: 前者把人按在地上, 后者把人从背景里剥出来
         alpha = f.getchannel("A")
-        shadow = Image.new("RGBA", (nw, nh), (0, 0, 0, 0))
-        shadow.putalpha(alpha.point(lambda v: int(v * 0.55)))
-        shadow = shadow.filter(ImageFilter.GaussianBlur(max(4, nh // 48)))
-        lay.alpha_composite(shadow, (left + max(3, nw // 55), top + max(6, nh // 60)))
-        rim = Image.new("RGBA", (nw, nh), (0, 0, 0, 0))
-        # 轮廓光用【提亮过的】强调色 —— 直接用原色等于给人镶一圈泥
-        glow = tuple(min(255, int(c * 0.55 + 128)) for c in pal["accent"])
-        rim.paste(Image.new("RGBA", (nw, nh), (*glow, 255)), mask=alpha)
-        rim.putalpha(alpha.point(lambda v: int(v * 0.26)))
-        lay.alpha_composite(rim.filter(ImageFilter.GaussianBlur(max(5, nh // 42))), (left, top))
+        if style == "void":
+            # 纸上不打影子也不镶边 —— 只在人脚下垫一层极淡的灰, 免得完全飘着
+            soft = Image.new("RGBA", (nw, nh), (0, 0, 0, 0))
+            soft.putalpha(alpha.point(lambda v: int(v * 0.16)))
+            lay.alpha_composite(soft.filter(ImageFilter.GaussianBlur(max(8, nh // 26))),
+                                (left, top + max(6, nh // 55)))
+        else:
+            # 底影 + 轮廓辉光: 前者把人按在地上, 后者把人从背景里剥出来
+            shadow = Image.new("RGBA", (nw, nh), (0, 0, 0, 0))
+            shadow.putalpha(alpha.point(lambda v: int(v * 0.55)))
+            shadow = shadow.filter(ImageFilter.GaussianBlur(max(4, nh // 48)))
+            lay.alpha_composite(shadow, (left + max(3, nw // 55), top + max(6, nh // 60)))
+            rim = Image.new("RGBA", (nw, nh), (0, 0, 0, 0))
+            # 轮廓光用【提亮过的】强调色 —— 直接用原色等于给人镶一圈泥
+            glow = tuple(min(255, int(c * 0.55 + 128)) for c in pal["accent"])
+            rim.paste(Image.new("RGBA", (nw, nh), (*glow, 255)), mask=alpha)
+            rim.putalpha(alpha.point(lambda v: int(v * (0.34 if style == "gilt" else 0.26))))
+            lay.alpha_composite(rim.filter(ImageFilter.GaussianBlur(max(5, nh // 42))),
+                                (left, top))
         lay.alpha_composite(f, (left, top))
     return lay
 
@@ -799,10 +992,21 @@ def _eyebrow(story: dict) -> str:
     return f"{n} 幕 主 线" if n else "剧 本"
 
 
-def _fingerprint(story: dict, cast: list[str], bg: Path | None) -> str:
+def _badge(story: dict) -> str:
+    """右上角小印上的两个字。沙盒就是「沙盒」, 剧情本报幕数。"""
+    en = (story.get("language") or "zh") == "en"
+    if (story.get("sandbox") or {}).get("enabled"):
+        return "SAND\nBOX" if en else "无尽\n沙盒"
+    n = len(story.get("acts") or [])
+    if not n:
+        return ""
+    return f"{n}\nACTS" if en else f"{n}\n幕"
+
+
+def _fingerprint(story: dict, cast: list[str], bg: Path | None, style: str = "") -> str:
     """输入指纹: 素材(立绘/头像/背景 的路径+改动时间+大小) + 文案 + 版式版本。
     立绘后来才画出来 —— 指纹一变封面自动重排, 不靠谁记得手点。"""
-    bits: list[Any] = [ALGO, story.get("title"), story.get("one_liner"),
+    bits: list[Any] = [ALGO, style, story.get("title"), story.get("one_liner"),
                        story.get("language"), _eyebrow(story), cast]
     for cid in cast:
         for p in (SPRITE_DIR / f"{cid}.webp", COVER_DIR / f"_fig_{cid}.webp",
@@ -861,10 +1065,17 @@ def is_stale(story: dict) -> bool:
         got = json.loads(p["stamp"].read_text(encoding="utf-8")).get("fp")
     except Exception:
         return True
-    return got != _fingerprint(story, _cast_ids(story)[:MAX_CAST], _pick_bg(story))
+    return got != _fingerprint(story, _cast_ids(story)[:MAX_CAST], _pick_bg(story),
+                               style_of(story))
 
 
-def build(story: dict, force: bool = False) -> dict[str, Any]:
+def style_of(story: dict) -> str:
+    """这本走哪一款版式。作者可在 tuning.cover_style 里钉死; 缺省走全站默认。"""
+    s = str((story.get("tuning") or {}).get("cover_style") or "").strip()
+    return s if s in _LAYOUT else DEFAULT_STYLE
+
+
+def build(story: dict, force: bool = False, style: str | None = None) -> dict[str, Any]:
     """把一本剧本排成封面。story = _to_story(...).model_dump() 那个形状。
     没有任何立绘也照出图 (背景+版式的纯设计封面) —— 玩家刚建的本子当场就有脸。"""
     from PIL import Image
@@ -872,7 +1083,8 @@ def build(story: dict, force: bool = False) -> dict[str, Any]:
     p = paths(sid)
     cast = _cast_ids(story)[:MAX_CAST]
     bgp = _pick_bg(story)
-    fp = _fingerprint(story, cast, bgp)
+    st = style if style in _LAYOUT else style_of(story)
+    fp = _fingerprint(story, cast, bgp, st)
     if not force and p["poster"].exists() and p["wide"].exists():
         try:
             if json.loads(p["stamp"].read_text(encoding="utf-8")).get("fp") == fp:
@@ -891,27 +1103,41 @@ def build(story: dict, force: bool = False) -> dict[str, Any]:
     title = str(story.get("title") or "").strip()
     tease = _clip(str(story.get("one_liner") or story.get("synopsis") or ""), 82)
 
+    seed = int(hashlib.md5(sid.encode()).hexdigest()[:8], 16)
+    ink = tuple(int(c * 0.4) for c in pal["deep"])
     COVER_DIR.mkdir(parents=True, exist_ok=True)
-    out: dict[str, Any] = {"cast": len(figs), "fp": fp, "fonts": has_fonts()}
+    out: dict[str, Any] = {"cast": len(figs), "fp": fp, "fonts": has_fonts(), "style": st}
     for kind, size, dst in (("poster", POSTER, p["poster"]), ("wide", WIDE, p["wide"])):
-        # 海报的字在顶(压顶), 大厅卡的字是 HTML 排在底(压底) —— 各压各的那一头
-        img = _ground(size, pal, bg, top_scrim=0.30 if kind == "poster" else 0.0,
-                      bot_scrim=0.20 if kind == "poster" else 0.40)
-        img = _watermark(img, pal, title[:1])
-        if _LAYOUT[kind]["stage"]:   # 宽幅是齐大腿的近景, 没有地面可站 → 不画台缘
-            img = _stage_line(img, pal, _LAYOUT[kind]["stage"])
+        img = _ground(size, pal, bg, st, seed)
+        if st == "gilt":
+            img = _rays(img, pal, seed)
+        if st != "void":
+            img = _bokeh(img, pal, seed, 22, 38)
         if figs:
             img = Image.alpha_composite(img.convert("RGBA"),
-                                        _cast_layer(size, figs, kind, pal))
-        img = _grade(img, pal)
+                                        _cast_layer(size, figs, kind, pal, st))
+        if st == "gilt":
+            img = _petals(img, pal, seed, 30)     # 花瓣落在人【前面】才有前后景
+        # 大厅卡的标题/引子/徽章是 HTML 压在左下角的 —— 给它压一层暗场, 别烫字。
+        # 留白那一款压的是白: 纸底压黑就成了脏抹布 (v2 实弹, 引子直接看不清)
+        if st == "void":
+            img = _scrim(img, bot_frac=0.34 if kind == "poster" else 0.42,
+                         strength=205, rgb=(252, 251, 248))
+        else:
+            img = _scrim(img, bot_frac=0.42 if kind == "wide" else 0.32,
+                         strength=150 if kind == "wide" else 126)
+        img = _grade(img, pal, st)
+        if st in ("void", "gilt"):
+            img = _frame(img, pal, ink if st == "void" else (245, 236, 214))
         if kind == "poster":
             # 字只烫在海报上: 大厅卡的标题是 HTML 排的, 烫上去就是两个标题打架
-            img = _text_block(img, pal, title, _eyebrow(story), tease).convert("RGB")
+            img = _logotype(img, pal, title, _eyebrow(story), tease, st)
+            img = _seal(img, pal, _badge(story), ink).convert("RGB")
         buf = io.BytesIO()
-        img.save(buf, format="WEBP", quality=84, method=4)
+        img.convert("RGB").save(buf, format="WEBP", quality=84, method=4)
         dst.write_bytes(buf.getvalue())
         out[kind + "_bytes"] = len(buf.getvalue())
-    p["stamp"].write_text(json.dumps({"fp": fp, "cast": cast, "algo": ALGO},
+    p["stamp"].write_text(json.dumps({"fp": fp, "cast": cast, "algo": ALGO, "style": st},
                                      ensure_ascii=False), encoding="utf-8")
     out.update(urls(sid) or {})
     return out
