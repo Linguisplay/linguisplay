@@ -166,6 +166,18 @@ body.simple details.sec > summary::before { content:""; }
           <span id="enrichMsg" style="color:#8e8e93;font-size:12px;margin-left:8px"></span>
         </div>
       </details>
+      <!-- 🎵 配乐: 导演每回合按剧情判一格情绪, 这里定这格情绪响哪首曲子。
+           不填 = 走引擎默认曲库 (作者不管音乐也不会没声) -->
+      <div style="margin-top:14px">
+        <label style="margin-top:0">🎵 配乐（按情绪）</label>
+        <div class="muted" style="font-size:12px;line-height:1.6">
+          每回合导演会按剧情判一格情绪，这里定这格情绪该响哪首曲子。留「默认」就走引擎自带的。
+          ▶ 可以试听。
+        </div>
+        <div id="bgmRows" style="margin-top:8px"></div>
+      </div>
+      <audio id="bgmPreview" style="display:none"></audio>
+
       <!-- 🎴 封面: 拿本剧本自己的立绘/头像/背景现排, 不花生图钱, 秒出。
            总开关在 engine/cover.py 的 ENABLED —— 关着时整块面板不露面, 不留死按钮 -->
       <div id="coverBox" class="hidden" style="margin-top:12px;display:flex;gap:12px;align-items:flex-start">
@@ -467,6 +479,7 @@ function openEditor(){
   initMode(); activeSec="basic";
   renderAll();
   loadCover();
+  loadBgm();
 }
 function renderAll(){ renderLocs(); renderChars(); renderRelWeb(); renderActs(); renderSecrets(); renderEndings(); renderSystems(); renderPacksCard(); renderMedia(); updateSecMeta(); }
 
@@ -1515,6 +1528,47 @@ async function enrich(){
     const r = await j(`/stories/${story.id}/enrich`,{method:"POST"});
     enrichMsg.textContent = `✓ 已为 ${r.enriched}/${r.characters} 个角色生成知识库（重新载入可见）`;
   }catch(e){ enrichMsg.textContent = "⚠️ 增强失败：" + (e.message||e); }
+}
+
+// ── 🎵 配乐：按情绪配曲（story.tuning.bgm = {情绪: 曲名}）──
+let bgmLib = null;
+async function loadBgm(){
+  const host = document.getElementById("bgmRows");
+  if(!host) return;
+  if(!bgmLib){ try{ bgmLib = await j("/stories/bgm/list"); }catch(e){ return; } }
+  const chosen = (story.tuning||{}).bgm || {};
+  // 曲子按情绪分组，作者一眼看得出哪几首是同一路的
+  const byMood = {};
+  (bgmLib.tracks||[]).forEach(t => { (byMood[t.mood||"其他"] = byMood[t.mood||"其他"]||[]).push(t); });
+  const label = m => ((bgmLib.moods||[]).find(x=>x.key===m)||{}).label || m;
+  const opts = sel => `<option value="">默认</option>` + Object.keys(byMood).map(m =>
+      `<optgroup label="${esc(label(m))}">` + byMood[m].map(t =>
+        `<option value="${esc(t.file)}"${t.file===sel?" selected":""}>${esc(t.name)}${t.real?"":"（旧合成器·24秒）"}</option>`
+      ).join("") + `</optgroup>`).join("");
+  host.innerHTML = (bgmLib.moods||[]).map(m => `
+    <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #201c15">
+      <div style="flex:0 0 78px"><b style="font-size:13px">${esc(m.label)}</b>
+        <div class="muted" style="font-size:10.5px">${esc((m.tags||[]).slice(0,3).join("·"))}</div></div>
+      <select style="flex:1;min-width:0" onchange="setBgm('${m.key}', this.value)">${opts(chosen[m.key]||"")}</select>
+      <button class="sm ghost" type="button" onclick="previewBgm('${m.key}')">▶</button>
+    </div>`).join("");
+}
+function setBgm(mood, file){
+  story.tuning = story.tuning || {};
+  const b = Object.assign({}, story.tuning.bgm || {});
+  if(file) b[mood] = file; else delete b[mood];
+  story.tuning.bgm = b;
+  saveMsg.textContent = "配乐已改，记得保存";
+}
+function previewBgm(mood){
+  const a = document.getElementById("bgmPreview");
+  const chosen = ((story.tuning||{}).bgm||{})[mood]
+    || (((bgmLib||{}).moods||[]).find(x=>x.key===mood)||{}).default || mood;
+  if(!a) return;
+  if(!a.paused && a.dataset.k === chosen){ a.pause(); a.dataset.k=""; return; }
+  a.dataset.k = chosen; a.volume = 0.5;
+  a.src = `/scene/bgm/${chosen}.mp3`;
+  a.play().catch(()=>{ saveMsg.textContent = "这首放不出来（文件可能不在）"; });
 }
 
 // ── 🎴 封面：合成不生图，所以敢秒轮询 ──

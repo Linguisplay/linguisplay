@@ -4802,8 +4802,12 @@ function _ramp(el, to, ms, then) {
   requestAnimationFrame(step);
 }
 function swapBgm(mood) {           // crossfade instead of a hard src cut
-  const base = String(mood || "").replace(/\d+$/, "");
-  const tries = [...new Set([`gal_${mood}`, `gal_${base}`, base])];
+  const m = String(mood || "");
+  const base = m.replace(/\d+$/, "");
+  // 🎵 作者在工坊里按情绪点过名时, 服务端下发的已经是【曲名】(gal_lonely) 而不是情绪名,
+  // 再拼一次 gal_ 前缀就成了 gal_gal_lonely — 认出来直接用
+  const tries = m.startsWith("gal_") ? [...new Set([m, base, base.slice(4)])]
+    : [...new Set([`gal_${m}`, `gal_${base}`, base])];
   // 同曲重复请求 = 不动 (审查实锤: scene 与 direct 各切一次, 整局 BGM 来回拉锯)
   if (!bgm.paused && tries.some(t => bgm.src.endsWith(`/${t}.mp3`))) return;
   const start = () => {

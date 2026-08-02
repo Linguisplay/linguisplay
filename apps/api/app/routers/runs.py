@@ -1137,7 +1137,9 @@ def play(
                     yield _event({"event": "sanity", "sanity": final["sanity_view"]})
                 yield _event({"event": "place", "location": final.get("location")})
                 try:   # 🎬 回合演出单: BGM 选曲 + 色调 (danger>frail>night>none)
-                    yield _event({"event": "direct", "direct": director.stage_turn(final)})
+                    # content 带进去 —— 作者在剧本里按情绪点过名的曲子要压过默认曲库
+                    yield _event({"event": "direct",
+                                  "direct": director.stage_turn(final, content)})
                 except Exception:
                     pass
                 if final.get("new_day"):

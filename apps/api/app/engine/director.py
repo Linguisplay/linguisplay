@@ -33,11 +33,80 @@ BGM_TRACKS: dict[str, dict] = {
     "lonely":   {"tags": {"孤独", "空寂", "夜"}, "energy": 1, "variants": 2},
     "mystery":  {"tags": {"悬疑", "调查", "线索"}, "energy": 2, "variants": 2},
     "eerie":    {"tags": {"诡异", "阴森", "不安", "夜"}, "energy": 2, "variants": 2},
-    "ancient":  {"tags": {"古风", "修行", "宗门"}, "energy": 2, "variants": 1},
-    "grimdark": {"tags": {"黑暗", "宏大", "压抑"}, "energy": 3, "variants": 1},
+    # 🈳 这两格没有真曲 (曲库里只有 24 秒的老合成器片, 循环一整局很难听) ——
+    # fallback 指到情绪最近的真曲上。作者在工坊里点了名的, 永远压过这条兜底。
+    "ancient":  {"tags": {"古风", "修行", "宗门"}, "energy": 2, "variants": 1,
+                 "fallback": "lonely"},
+    "grimdark": {"tags": {"黑暗", "宏大", "压抑"}, "energy": 3, "variants": 1,
+                 "fallback": "tense"},
     "tense":    {"tags": {"紧张", "恐惧", "追逐", "危机"}, "energy": 3, "variants": 2},
     "battle":   {"tags": {"战斗", "厮杀", "激烈"}, "energy": 4, "variants": 2},
 }
+MOOD_LABEL = {"daily": "日常", "warm": "温馨", "romantic": "浪漫", "sad": "悲伤",
+              "lonely": "孤独", "mystery": "悬疑", "eerie": "诡异", "ancient": "古风",
+              "grimdark": "黑暗", "tense": "紧张", "battle": "战斗"}
+# 🎵 曲名 (甘茶の音楽工房, 免费商用无需署名)。作者在工坊里挑的就是这张表;
+# 表里没有的文件仍然能用, 只是显示成文件名。
+TRACK_NAME = {
+    "gal_daily": "放課後の夕空", "gal_daily2": "日常 · 其二", "gal_daily3": "日常 · 其三",
+    "gal_warm": "小さな足あと", "gal_warm2": "温馨 · 其二",
+    "gal_romantic": "月明かりの灯台",
+    "gal_sad": "雨のプレリュード", "gal_sad2": "悲伤 · 其二",
+    "gal_lonely": "午前2時の虚しさ", "gal_lonely2": "孤独 · 其二",
+    "gal_mystery": "闇に沈む光", "gal_mystery2": "悬疑 · 其二",
+    "gal_eerie2": "诡异 · 其二",
+    "gal_tense": "深い闇の奥で", "gal_tense2": "紧张 · 其二",
+    "gal_battle": "騎兵戦", "gal_battle2": "战斗 · 其二",
+}
+
+
+def bgm_dir():
+    from pathlib import Path
+    return Path(__file__).resolve().parents[1] / "static" / "scene" / "bgm"
+
+
+def list_bgm() -> list[dict[str, Any]]:
+    """曲库里【真的存在】的曲子 —— 工坊的下拉菜单吃这个, 不许列出点了没声的曲子。"""
+    out = []
+    try:
+        files = sorted(p.stem for p in bgm_dir().glob("*.mp3"))
+    except OSError:
+        return out
+    for stem in files:
+        base = re.sub(r"\d+$", "", stem[4:] if stem.startswith("gal_") else stem)
+        out.append({"file": stem, "name": TRACK_NAME.get(stem, stem),
+                    "mood": base if base in BGM_TRACKS else "",
+                    "real": stem.startswith("gal_")})
+    return out
+
+
+def mood_menu() -> list[dict[str, Any]]:
+    """工坊配乐面板的左栏: 十一种情绪, 各自的默认曲与什么时候会响。"""
+    return [{"key": k, "label": MOOD_LABEL.get(k, k), "energy": v["energy"],
+             "tags": sorted(v["tags"]), "default": default_track(k)}
+            for k, v in BGM_TRACKS.items()]
+
+
+def default_track(key: str) -> str:
+    """没有作者指定时这个情绪实际会响哪一首 (把 fallback 也算进去)。"""
+    key = BGM_TRACKS.get(key, {}).get("fallback") or key
+    return f"gal_{key}"
+
+
+def resolve_bgm(content: dict[str, Any] | None, key: str, salt: str) -> str:
+    """情绪 → 真正要播的曲子。
+
+    作者在剧本里按情绪点了名 (tuning.bgm) 就用他的, 而且【不再轮换变奏】——
+    点名就是点名。没点名才走默认: 先看这格有没有真曲, 没有就落到 fallback, 再轮变奏。
+    """
+    tun = ((content or {}).get("story") or {}).get("tuning")
+    custom = tun.get("bgm") if isinstance(tun, dict) else None
+    # 作者手填的字段什么形状都可能 (实弹: 写成一个字符串) —— 不是字典就当没填, 绝不炸回合
+    pick = str(custom.get(key) or "").strip() if isinstance(custom, dict) else ""
+    if pick:
+        return pick
+    key = BGM_TRACKS.get(key, {}).get("fallback") or key
+    return pick_variant(key, salt)
 
 
 def pick_variant(key: str, salt: str) -> str:
@@ -223,7 +292,7 @@ def logic_audit(beats: list[dict[str, Any]], *, slot: str | None = None,
     return finds
 
 
-def stage_turn(final: dict[str, Any]) -> dict[str, Any]:
+def stage_turn(final: dict[str, Any], content: dict[str, Any] | None = None) -> dict[str, Any]:
     """回合演出单 {bgm, tint} from the turn's final meta. 都总是给:
     bgm 走标签选曲 (导演每回合选, 客户端同曲不切), tint 阶梯 danger>frail>night>none."""
     out: dict[str, Any] = {}
@@ -258,7 +327,8 @@ def stage_turn(final: dict[str, Any]) -> dict[str, Any]:
     if judged and judged in BGM_TRACKS and heat < 2 and not hot:
         base = judged
     salt = f"{st.get('location_id') or ''}|{(st.get('clock') or {}).get('day', 0)}"
-    out["bgm"] = pick_variant(base, salt)
+    out["bgm"] = resolve_bgm(content, base, salt)
+    out["mood"] = base                       # 作者调试用: 这一拍判到的是哪一格情绪
     if hot:
         out["tint"] = "danger"
     elif frail:
