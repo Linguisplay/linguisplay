@@ -1295,7 +1295,12 @@ async function j(path, opts={}) {
 }
 const show = (id) => document.getElementById(id).classList.remove("hidden");
 const hide = (id) => document.getElementById(id).classList.add("hidden");
-function escapeHtml(s){ return (s||"").replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+// 🔒 转义器是全页的安全合约, 必须一次管住全部 5 个元字符 —— 页面里大量
+// attr="${escapeHtml(x)}", 而角色名/地点名/avatar_url 都是外部可控文本
+// (作者填 或 模型现编)。只转 &<> 的旧版留着引号, 一个 " 就能逃出属性写
+// onerror= (2026-08-02 审查复现: 已发布剧本的作者可在他人浏览器执行 JS)。
+function escapeHtml(s){ return (s==null?"":String(s)).replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 // 🎬 片场图标集: 手绘线性 24 网格, currentColor 单色 — emoji 图标全面退役 (高级感的地基)
 const ICONS = {
   help: '<circle cx="12" cy="12" r="9"/><path d="M9.2 9a2.9 2.9 0 0 1 5.6 1c0 1.8-2.4 2.2-2.8 3.6"/><circle cx="12" cy="17.3" r=".6" fill="currentColor" stroke="none"/>',

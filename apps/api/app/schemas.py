@@ -28,6 +28,27 @@ def _lax_opt_int(v: Any) -> Any:
 LaxInt = Annotated[int, BeforeValidator(_lax_int)]
 LaxOptInt = Annotated[Optional[int], BeforeValidator(_lax_opt_int)]
 
+
+# 🔒 作者可填的资产 URL: 只认【本站相对路径】, 其余一律清成 None (存储型 XSS 第二道闸;
+# 第一道是前端转义 tests/client_units.test.js)。实弹 2026-08-02 审查:
+# avatar_url 零校验 + 前端 src="${...}" 直插属性 = 已发布剧本的作者可在其他玩家
+# 浏览器里执行 JS。清洗而不抛错 — 本模型入库出库共用, 抛错会让库里已有的脏行
+# 整本读不出 (500); 清洗则恶意值进不了库、老脏行也读得出且无害。
+def _safe_asset_url(v: Any) -> Any:
+    if v is None or v == "":
+        return v
+    s = str(v).strip()
+    # 必须以单个 / 开头 (「//host」是协议相对地址, 会跳站外), 且不含引号/尖括号/
+    # 反斜杠/控制字符 (属性逃逸与伪协议的载体), 也不许 .. 穿越
+    if not s.startswith("/") or s.startswith("//"):
+        return None
+    if any(c in s for c in '"\'<>\\ \t\n\r') or ".." in s:
+        return None
+    return s
+
+
+AssetUrl = Annotated[Optional[str], BeforeValidator(_safe_asset_url)]
+
 # ── auth ──────────────────────────────────────────────────
 class SignupIn(BaseModel):
     email: EmailStr
@@ -56,13 +77,13 @@ class Me(BaseModel):
     id: str
     email: str
     display_name: Optional[str] = None
-    avatar_url: Optional[str] = None
+    avatar_url: AssetUrl = None
     subscription_tier: str = "free"
 
 
 class MePatch(BaseModel):
     display_name: Optional[str] = None
-    avatar_url: Optional[str] = None
+    avatar_url: AssetUrl = None
 
 
 class Settings(BaseModel):
@@ -83,7 +104,7 @@ class PersonaInput(BaseModel):
     pronouns_custom: Optional[str] = None
     tagline: Optional[str] = None
     background: Optional[str] = None
-    avatar_url: Optional[str] = None
+    avatar_url: AssetUrl = None
 
 
 class Persona(PersonaInput):
@@ -97,7 +118,7 @@ class Character(BaseModel):
     name: str = ""
     role: Optional[str] = None
     is_lead: bool = False
-    avatar_url: Optional[str] = None
+    avatar_url: AssetUrl = None
     persona_text: Optional[str] = None
     background: Optional[str] = None
     # ── 🎭 角色卡 v2 (剧组重建 P0, docs/troupe-design.md) ──
@@ -222,7 +243,7 @@ class CharacterCardInput(BaseModel):
 
 class CharacterCard(CharacterCardInput):
     id: str
-    avatar_url: Optional[str] = None
+    avatar_url: AssetUrl = None
     updated_at: Optional[datetime] = None
     author: Optional[str] = None   # 🌐 广场: who shared this card (display name)
     mine: bool = True              # whether the requesting user owns it
@@ -354,7 +375,7 @@ class StoryInput(BaseModel):
     # "zh" | "en" — the language the engine performs this story in (output directive +
     # localized deterministic narration). Default zh keeps every existing story unchanged.
     language: Optional[str] = None
-    cover_url: Optional[str] = None
+    cover_url: AssetUrl = None
     one_liner: Optional[str] = None
     synopsis: Optional[str] = None
     world_long: Optional[str] = None
@@ -393,7 +414,7 @@ class Story(BaseModel):
     # 客户端保存时回传 if_rev, 不一致 409 (实弹: 陈旧标签页整本覆盖回滚了修好的草稿)
     updated_at: Optional[str] = None
     language: str = "zh"
-    cover_url: Optional[str] = None
+    cover_url: AssetUrl = None
     one_liner: Optional[str] = None
     synopsis: Optional[str] = None
     world_long: Optional[str] = None
@@ -428,7 +449,7 @@ class Story(BaseModel):
 class StoryCard(BaseModel):
     id: str
     title: str
-    cover_url: Optional[str] = None
+    cover_url: AssetUrl = None
     one_liner: Optional[str] = None
     trope_tags: list[str] = []
     # 🎬 大厅门面 (hero 卡): 卡面图 (自动封面宽幅→作者封面→首个有图地点兜底) 与开场白引子
@@ -568,7 +589,7 @@ class RunSummary(BaseModel):
     id: str
     story_id: str
     story_title: str
-    cover_url: Optional[str] = None
+    cover_url: AssetUrl = None
     persona_id: str
     last_beat_preview: Optional[str] = None
     unread: bool = False

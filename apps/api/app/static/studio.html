@@ -362,7 +362,9 @@ function blankStory(){ return { id:null, title:"", language:"zh", one_liner:"", 
   trope_tags:[], visibility:"private", mature:false, characters:[], acts:[], endings:[], locations:[],
   tuning:{}, pressure:null, clock:null, phone:null, verdict:null, sandbox:null }; }
 function gid(p){ return p + Math.random().toString(36).slice(2,8); }
-function esc(s){ return (s||"").toString().replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+// 🔒 与 play.html 的 escapeHtml 同一合约: 5 个元字符全转 (单引号属性同样常见)
+function esc(s){ return (s==null?"":String(s)).replace(/[&<>"']/g,
+  c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 async function j(path, opts={}) {
   const r = await fetch(API+path, { credentials:"include", headers:{"Content-Type":"application/json"}, ...opts });
   if (!r.ok){ const b=await r.json().catch(()=>({})); throw new Error(humanDetail(b.detail)||r.status); }
