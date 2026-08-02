@@ -42,7 +42,9 @@
   input:focus { outline: none; border-color: rgba(216,181,122,.55); box-shadow: 0 0 0 3px rgba(216,181,122,.12); }
   button { padding: 9px 16px; border: 0; border-radius: 12px; background: linear-gradient(180deg,#e6cb99,#cfa965); box-shadow: inset 0 1px 0 rgba(255,255,255,.38), 0 1px 3px rgba(0,0,0,.32); color: #241c0e; cursor: pointer; font-weight: 600; transition: transform .12s ease, opacity .12s ease; }
   button:active { transform: scale(.96); }
-  button.ghost { background: #201c15; color: #a79e8c; }
+  /* 👆 次要按钮同守 44 高 (体检: ← 剧本 66×29、合上 64×39 都按不准)。
+     只提高度不提字号 — 视觉分量不变, 判定区变准 */
+  button.ghost { background: #201c15; color: #a79e8c; min-height: 44px; }
   button:disabled { opacity: .5; cursor: default; }
   /* 👆 触控铁律 (2026-08-02 体检: 顶栏图标实测 26×23, 手指按不准): 可点区域 ≥44×44。
      视觉大小仍由 font-size 决定 — 用 min-width/height + 居中把【判定区】撑开,
@@ -50,6 +52,9 @@
   .iconbtn { background: transparent; padding: 5px 7px; font-size: 16px; color: #c9bfa9;
     min-width: 44px; min-height: 44px; display: inline-flex;
     align-items: center; justify-content: center; }
+  /* 退出是文字链但坐在按钮堆里, 同守 44 (体检: 实测 26×17) */
+  #logoutBtn { font-size: 13px; min-height: 44px; display: inline-flex;
+    align-items: center; padding: 0 6px; }
   .iconbtn:active { color: #d8b57a; }
   .ic { vertical-align: -3.5px; }
   /* 🎬 大厅 hero 卡: 剧本的场景图即门面, 宋体题压图, 徽章毛玻璃胶囊 */
@@ -364,7 +369,10 @@
   .pcalrow { display: flex; align-items: center; justify-content: space-between;
     gap: 8px; margin-top: 8px; flex-wrap: wrap; }
   .pcalrow .chips { display: flex; gap: 5px; flex-wrap: wrap; }
-  .pcalrow .chk { font-size: 11.5px; padding: 4px 10px; border-radius: 999px; cursor: pointer;
+  /* 👆 筹码是并排小标签, 撑到 44 宽会挤爆面板 — 只加【高】到 44 (竖向才是手指
+     最常打偏的方向), 宽度靠 padding 保持紧凑。字号同步提到 12.5 (体检: 11.5px 费眼) */
+  .pcalrow .chk { font-size: 12.5px; padding: 0 12px; min-height: 44px;
+    display: inline-flex; align-items: center; border-radius: 999px; cursor: pointer;
     border: .5px solid rgba(216,181,122,.25); color: #a79e8c; background: rgba(24,20,14,.5); }
   .pcalrow .chk.on { color: #241c0e; background: linear-gradient(180deg,#e6cb99,#cfa965);
     border-color: transparent; font-weight: 600; }
@@ -1065,7 +1073,7 @@ body.dread #dread { opacity:1; }
       </div>
       <button id="backBtn" class="ghost hidden" style="padding:5px 10px" onclick="backToPick()">← 剧本</button>
       <span id="who" class="muted"></span>
-      <a id="logoutBtn" class="hidden" style="font-size:13px" onclick="doLogout()">退出</a>
+      <a id="logoutBtn" class="hidden" onclick="doLogout()">退出</a>
     </span>
   </header>
 
