@@ -218,6 +218,33 @@ def test_the_teaser_is_never_cut_mid_word():
     assert cover._clip("", 24) == ""
 
 
+def test_chinese_lines_never_begin_with_a_closing_mark():
+    """避头尾: 中文换行不许把逗号句号甩到下一行行首 (实弹: 「，挖出真相」)。"""
+    from PIL import Image, ImageDraw
+    d = ImageDraw.Draw(Image.new("RGB", (10, 10)))
+    f = cover._font("body", 22)
+    if f is None:
+        pytest.skip("本机没有可用字体")
+    txt = "深夜的精神病院，铁门在你身后锁死。巡夜人循声而猎，活下去，挖出真相，或者成为14床。"
+    for w in range(160, 520, 17):
+        for ln in cover._wrap(d, txt, f, w, 4)[1:]:
+            assert ln and ln[0] not in cover._NO_LINE_START, f"行首出现「{ln[0]}」: {ln}"
+
+
+def test_english_wrapping_still_breaks_on_words():
+    from PIL import Image, ImageDraw
+    d = ImageDraw.Draw(Image.new("RGB", (10, 10)))
+    f = cover._font("body", 22)
+    if f is None:
+        pytest.skip("本机没有可用字体")
+    txt = "One island, one summer, and five men who all need you to write the ending."
+    lines = cover._wrap(d, txt, f, 260, 4)
+    assert len(lines) >= 2
+    for ln in lines:
+        for word in ln.split():
+            assert word.strip(",.") in txt, f"西文被断在词中间: {ln}"
+
+
 def test_offstage_characters_stay_off_the_cover():
     _put_sprite("live", _person())
     _put_sprite("ghost", _person())

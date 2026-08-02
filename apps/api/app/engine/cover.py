@@ -36,7 +36,7 @@ COVER_DIR = _STATIC / "cover"
 ALGO = "d1"
 # 三款版式。研究真封面 (Grisaia / 薄樱鬼 / Little Busters / Steins;Gate) 之后重做的 ——
 # v1 那版是电影海报的做法 (标题在顶、班底站一排、整体压暗), Yi 一句「设计的不行」，对。
-DEFAULT_STYLE = "crowd"
+DEFAULT_STYLE = "gilt"        # Yi 2026-08-02 从三款里挑的
 
 POSTER = (900, 1200)     # 3:4 盒绘
 WIDE = (1440, 864)       # 16:9.6 —— 与 play.html .scard 的 aspect-ratio 对齐
@@ -659,19 +659,33 @@ def _grade(img, pal, style: str = "crowd"):
 
 
 # ── 版式 ──────────────────────────────────────────────────────────────────
+# 避头尾: 行首不许出现的收尾标点 / 行末不许出现的起首标点。少了这一条, 中文换行会
+# 出现「，挖出真相」这种以逗号开头的行 (实弹, 寂声疗养院的引子)
+_NO_LINE_START = "、。，．：；？！）」』】》〉”’…—·%"
+_NO_LINE_END = "（「『【《〈“‘"
+
+
 def _wrap(draw, text: str, font, max_w: int, max_lines: int) -> list[str]:
-    """中文按字断, 西文按词断。超出行数就在末行收 …"""
+    """中文按字断 (带避头尾), 西文按词断。超出行数就在末行收 …"""
     if not text:
         return []
-    words = text.split(" ") if sum(ord(c) < 128 for c in text) > len(text) * 0.6 \
-        else list(text)
-    join = " " if len(words) != len(text) else ""
+    cjk = sum(ord(c) < 128 for c in text) <= len(text) * 0.6
+    words = list(text) if cjk else text.split(" ")
+    join = "" if cjk else " "
     lines, cur = [], ""
     for w in words:
         t = (cur + join + w) if cur else w
         if draw.textlength(t, font=font) <= max_w or not cur:
             cur = t
         else:
+            if cjk:
+                # 标点被挤到下一行行首 → 让它跟着上一行走 (哪怕这一行稍微超一点点)
+                while w and w[0] in _NO_LINE_START:
+                    cur, w = cur + w[0], w[1:]
+                    if not w:
+                        break
+                while cur and cur[-1] in _NO_LINE_END:
+                    w, cur = cur[-1] + w, cur[:-1]
             lines.append(cur)
             cur = w
             if len(lines) == max_lines:
