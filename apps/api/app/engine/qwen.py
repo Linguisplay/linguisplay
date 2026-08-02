@@ -601,6 +601,10 @@ def _build_system(prompt: dict[str, Any]) -> str:
     if rel_pb:
         lines.append("")
         lines.append(rel_pb)
+    # 🛡 信任/戒备 (合伙人 2026-08-02): 与喜欢正交的第二根轴 — 文本已按剧本语言生成
+    _tn = (prompt.get("trust_note") or "").strip()
+    if _tn:
+        lines.append(_tn)
     # 💞 关系大事记切片 (同事建议 2026-08-01, Yi 拍板混合式): 模式剧本当粗锚,
     # 具体事件当细节 — 反应长在「咱俩之间发生过的事」上, 而不只是关系标签上。
     # 一个关键事件可以让态度突变, 不必等数字慢慢爬。

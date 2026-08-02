@@ -2249,6 +2249,8 @@ function applyRunUpdate(run) {
   renderCast(); updatePlaceholder();
   if (st.location !== undefined) renderPlace(st.location);
   if (st.cultivation !== undefined) renderCult(st.cultivation);
+  // 🎵 进档就有音乐: direct 以前只在回合流里发, 新开一档第一屏是静的 —— 开场曲就是这么没的
+  if (run && run.direct && run.direct.bgm) applyDirect(run.direct);
 }
 // 🔒 把本地缓存对回服务端真源。GET /runs/{id} 的 state.here 读的是 runtime.char_position
 // 那一套九级级联 —— 地图、通讯录、对白名册、电话问的是同一个函数, 所以对完这一次,
@@ -4486,7 +4488,10 @@ async function openRelWeb() {
     document.getElementById("rwinfo").innerHTML =
       `<b>${escapeHtml(d.player_name || myName || B("我", "Me"))} ↔ ${escapeHtml(nm)}</b>：`
       + `<span style="color:${MCOL[p.mode] || "#d8b57a"}">${escapeHtml(p.mode_name || "")}</span>`
-      + ` <span class="muted">${B("亲近", "Close")} ${p.closeness || 0} · 💗 ${p.romance || 0}</span>`
+      + ` <span class="muted">${B("亲近", "Close")} ${p.closeness || 0} · 💗 ${p.romance || 0}`
+      + ` · 🛡 ${p.trust || 0}${(p.trust || 0) < 25 ? B("（戒备中）", " (guarded)") : ""}</span>`
+      + ((p.tags || []).length ? `<div style="margin-top:2px">${p.tags.map(t =>
+          `<span class="hmode" style="margin-right:5px">${escapeHtml(t)}</span>`).join("")}</div>` : "")
       + (nx ? `<div style="margin-top:2px;color:#d8b57a">⤴ ${nx}</div>` : "")
       + (logs ? `<div style="margin-top:4px">${logs}</div>`
               : `<div class="muted" style="margin-top:4px">${B("（你们之间还没有值得记的事）", "(Nothing on record yet)")}</div>`);

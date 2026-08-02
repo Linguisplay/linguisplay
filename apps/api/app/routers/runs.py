@@ -356,6 +356,17 @@ def _ensure_char_avatars(content: dict, vn: bool = False) -> bool:
     return changed
 
 
+def _boot_direct(r: RunModel, st: dict) -> dict:
+    """进档那一屏的演出单。回合流里的 stage_turn 吃的是"这一回合发生了什么",
+    这里只有存档 —— 所以用同一套节拍判据跑一遍当前状态, 至少让开场曲响起来。"""
+    try:
+        return director.stage_turn(
+            {"scene": st.get("scene") or {}, "state": st, "ending": st.get("ending")},
+            r.pinned_content or {})
+    except Exception:
+        return {}
+
+
 # ── converters / helpers ──────────────────────────────────
 def _to_run(r: RunModel) -> Run:
     st = r.state or {}
@@ -380,6 +391,8 @@ def _to_run(r: RunModel) -> Run:
             scene=st.get("scene"),
             ended=st.get("ended", False),
             ending=st.get("ending"),
+            # 🎵 进档就有音乐: 拿当前存档现判一次节拍 (新档 turn_seq=0 → 开场曲)
+            direct=_boot_direct(r, st),
             mode=mode,
             player_character_id=pcid,
             goal=st.get("goal", "") or runtime.goal_for(r.pinned_content or {}, st),
@@ -2053,10 +2066,30 @@ def get_relweb(run_id: str, user: User = Depends(current_user), db: Session = De
         if not sc:
             continue
         view = rel_mod.state_for(c, sc, tun, lang=runtime.lang_of(content)) or {}
+        # 🏷 经历性标签 (合伙人③): 从大事记确定性推导, 零 LLM
+        _en = runtime.lang_of(content) == "en"
+        _lg = list((st.get("rel_log") or {}).get(c["id"]) or [])
+        _kinds = [e.get("kind") for e in _lg]
+        _txt = " ".join(str(e.get("text") or "") for e in _lg)
+        tags = []
+        if ("如约" in _txt) or ("kept the promise" in _txt):
+            tags.append("Keeps meeting you" if _en else "守约之交")
+        if ("爽约" in _txt) or ("stood them up" in _txt):
+            tags.append("Stood up before" if _en else "被你放过鸽子")
+        if "golden" in _kinds:
+            tags.append("A golden moment" if _en else "有过金色瞬间")
+        if "gift" in _kinds:
+            tags.append("Gifts exchanged" if _en else "有来有往")
+        if "confront" in _kinds:
+            tags.append("Confronted once" if _en else "当面对质过")
+        if "hurt" in _kinds:
+            tags.append("Bad blood" if _en else "结过梁子")
         player.append({"id": c["id"], "mode": view.get("mode") or "",
                        "mode_name": view.get("mode_name") or "",
                        "closeness": int(sc.get("closeness", 0) or 0),
                        "romance": int(sc.get("romance", 0) or 0),
+                       "trust": int(view.get("trust") or 0),
+                       "tags": tags[:3],
                        # ⤴ 差一点就到下一档 (每日回访钩) + 💞 大事记尾巴: 玩家边的「渊源」
                        # (UX 升级 2026-08-01: NPC 边一直有 log 可点, 玩家边此前是哑的)
                        "next": view.get("next"),

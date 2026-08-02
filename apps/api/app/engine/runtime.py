@@ -260,14 +260,16 @@ DEFAULT_TUNING = {
 # 💞 关系事件分类表 (事件记账制的引擎法条, 故事无关):
 # kind: (亲近Δ, 心动Δ, 正面冷却回合, 是否要求角色可恋)。负面事件零冷却 — 伤害不限流;
 # 正面事件带冷却 — 同一角色同类事件冷却内再申报按刷分驳回。日常寒暄不是事件。
+# 五元组: (亲近Δ, 心动Δ, 冷却, 恋爱门, 信任Δ) — 🛡 信任轴 (合伙人 2026-08-02):
+# 交心/帮衬/和好也在攒可靠感; 冒犯/越界同时在塌信任 (慢建快塌在 apply_deltas 管)
 _REL_EVENTS = {
-    "交心": (4, 0, 8, False),    # 说出真心话/交换了真实的自己
-    "帮衬": (5, 0, 6, False),    # 实质帮TA办成/扛下了一件事
-    "心动": (2, 4, 8, True),     # TA被这一拍真正打动
-    "和好": (3, 1, 10, False),   # 冲突后的修复
-    "冒犯": (-5, 0, 0, False),   # 踩雷/羞辱/背弃
-    "争执": (-3, 0, 0, False),   # 正面冲突撕破脸
-    "越界": (0, -3, 0, True),    # 油腻/廉价/冒进
+    "交心": (4, 0, 8, False, 3),    # 说出真心话/交换了真实的自己
+    "帮衬": (5, 0, 6, False, 2),    # 实质帮TA办成/扛下了一件事
+    "心动": (2, 4, 8, True, 0),     # TA被这一拍真正打动
+    "和好": (3, 1, 10, False, 2),   # 冲突后的修复
+    "冒犯": (-5, 0, 0, False, -2),  # 踩雷/羞辱/背弃
+    "争执": (-3, 0, 0, False, -1),  # 正面冲突撕破脸
+    "越界": (0, -3, 0, True, -3),   # 油腻/廉价/冒进
 }
 
 MAX_OPEN_PROMISES = 3  # 🤝 open appointments a run may hold at once (per char: one)
@@ -3712,7 +3714,8 @@ def _apply_fate(content: dict[str, Any], state: dict[str, Any], option_id: str) 
         rel_all = state.setdefault("rel", {})
         cd, rd = (8, 6) if kind == "bond" else (-9, -7)
         rel_all[target] = relationships.apply_deltas(
-            rel_all.get(target) or relationships.new_scores(), cd, rd, tun)
+            rel_all.get(target) or relationships.new_scores(), cd, rd, tun,
+            trust_delta=6 if kind == "bond" else -8)   # 🛡 命运抉择连信任一起翻
         nm = _char_name(content, target) or "TA"
         rel_log(state, target, int(state.get("act", 1) or 1), "fate",
                 _t(content,
@@ -5130,7 +5133,8 @@ def peek_attempt(content: dict[str, Any], state: dict[str, Any], player_input: s
     if out == "crit_fail":
         pk["locked"] = True
         pk["window"] = 0
-        state.setdefault("rel", {})[cid] = relationships.apply_deltas(scores, -8, -4, tun)
+        state.setdefault("rel", {})[cid] = relationships.apply_deltas(
+            scores, -8, -4, tun, trust_delta=-6)   # 🛡 偷看被抓现行 = 信任塌方
         mem = (state.get("memory_by_char", {}) or {}).get(cid) or ""
         state.setdefault("memory_by_char", {})[cid] = \
             (mem + f"；对方偷翻你的{dev}被你当场抓住，你从此对TA设了防").strip("；")
@@ -5141,7 +5145,8 @@ def peek_attempt(content: dict[str, Any], state: dict[str, Any], player_input: s
         return {"beats": beats, "frag_ids": [], "moments": moments}
     if out == "fail":
         pk["window"] = 0
-        state.setdefault("rel", {})[cid] = relationships.apply_deltas(scores, -4, -2, tun)
+        state.setdefault("rel", {})[cid] = relationships.apply_deltas(
+            scores, -4, -2, tun, trust_delta=-3)   # 🛡 手脚不干净被察觉
         mem = (state.get("memory_by_char", {}) or {}).get(cid) or ""
         state.setdefault("memory_by_char", {})[cid] = \
             (mem + f"；你撞见对方动过你的{dev}，心里存了个疙瘩").strip("；")
@@ -8117,7 +8122,7 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
         # 💞 事件记账制 (Yi 定: 关系由事写成, 每句话打分作废): 模型只申报
         # {kind, evidence}, 分值查引擎法条; 正面事件按 (角色,类别) 冷却防刷,
         # 负面零冷却; 无事件 = 关系纹丝不动 (闲聊就是闲聊)。
-        this_delta, _rd_event = 0, 0
+        this_delta, _rd_event, _td_event = 0, 0, 0
         _ev = directed.get("rel_event")
         if isinstance(_ev, dict) and sp_id and sp_id != pcid:
             _kind = str(_ev.get("kind") or "").strip()
@@ -8139,6 +8144,7 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
                     _audit(state, "rel.event", False, f"{sp_name}:{_kind}", "冷却中(刷分驳回)")
                 else:
                     this_delta, _rd_event = _law[0], _law[1]
+                    _td_event = _law[4] if len(_law) > 4 else 0   # 🛡 信任Δ随法条走
                     if _law[2]:
                         _cdb[_key] = _seq
                         if len(_cdb) > 60:
@@ -8149,6 +8155,7 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
     else:
         this_delta = int(directed.get("affinity_delta", 0) or 0)
         _rd_event = None
+        _td_event = 0   # 旧打分制没有信任语义
         flags["affinity_delta"] += this_delta
     # ✍️ 编剧拍落账 (剧组 P2): 情绪申报 / 伏笔埋收 / 人生目标推进 — 主答者一人申报。
     # 申报消毒 (实弹: 模型把 schema 碎片回显进 setup_plant): 带结构符号的值一律驳回
@@ -8208,7 +8215,8 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
         _cd_in, _rd_in = relationships.temper(this_delta, _rd_raw, _mood_day)
         if _mood_day and (_cd_in, _rd_in) != (this_delta, _rd_raw):
             _audit(state, "rel.mood", True, f"{sp_name}:{'差' if _mood_day < 0 else '好'}")
-        rel_all[sp_id] = relationships.apply_deltas(old_scores, _cd_in, _rd_in, tun)
+        rel_all[sp_id] = relationships.apply_deltas(old_scores, _cd_in, _rd_in, tun,
+                                                    trust_delta=_td_event)
         mode_after = relationships.derive_mode(sp, rel_all[sp_id], tun)
         dc = int(rel_all[sp_id].get("closeness", 0)) - int(old_scores.get("closeness", 0))
         dr = int(rel_all[sp_id].get("romance", 0)) - int(old_scores.get("romance", 0))
@@ -9913,7 +9921,8 @@ def run_turn_stream(
             old_sc = (state.get("rel") or {}).get(kc) or relationships.new_scores()
             state.setdefault("rel", {})[kc] = relationships.apply_deltas(
                 old_sc, tun["promise_keep_bonus"],
-                tun["promise_keep_bonus"] if promise_kept.get("romantic") else 0, tun)
+                tun["promise_keep_bonus"] if promise_kept.get("romantic") else 0, tun,
+                trust_delta=4)   # 🛡 如约 = 可靠感的头号来源
             got = state["rel"][kc]
             dcl = int(got.get("closeness", 0)) - int(old_sc.get("closeness", 0))
             drm = int(got.get("romance", 0)) - int(old_sc.get("romance", 0))
@@ -10280,6 +10289,9 @@ def run_turn_stream(
             "rel_recent": ([str(e.get("text") or "") for e in
                             list((state.get("rel_log") or {}).get(sp_id) or [])[-4:]
                             if e.get("text")] if rel_active else []),
+            # 🛡 信任/戒备行为学 (合伙人 2026-08-02): 亲近高信任低 = 嘴上热心里防
+            "trust_note": (relationships.trust_note(rel_scores, lang_of(content))
+                           if rel_active else ""),
             # 🪞 玩家档案: 这个角色自己相处出来的印象 (认知边界: 只有见证过的才有)
             "player_read": profile_mod.impression_of(state, sp_id),
             # 🌌 跨存档残响: 前一段人生的回声 (仅上一档暖过的角色)
@@ -11024,7 +11036,8 @@ def run_turn_stream(
                 old_sc = (state.get("rel") or {}).get(mc) or relationships.new_scores()
                 state.setdefault("rel", {})[mc] = relationships.apply_deltas(
                     old_sc, -tun["promise_break_cost"],
-                    -tun["promise_break_cost"] if pr.get("romantic") else 0, tun)
+                    -tun["promise_break_cost"] if pr.get("romantic") else 0, tun,
+                    trust_delta=-5)   # 🛡 爽约塌信任, 比掉好感更疼
                 moments.append({"kind": "promise", "status": "missed",
                                 "name": pr.get("char_name"), "what": pr.get("what")})
                 rel_log(state, mc, old_act, "promise",

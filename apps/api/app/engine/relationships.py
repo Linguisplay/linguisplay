@@ -306,9 +306,14 @@ def playbook_block(mode_id: str, mature: bool = False,
 START_CLOSENESS, START_ROMANCE = 5, 0
 CLOSE_MIN, CLOSE_MAX = -40, 100
 ROM_MIN, ROM_MAX = 0, 100
+# 🛡 信任/戒备轴 (Yi 合伙人 2026-08-02): 信任与喜欢是两根轴 — 「亲近高信任低」
+# (喜欢你但防着你) 是卧底戏/悬疑戏的原材料, 一根好感轴表达不了。慢建快塌。
+START_TRUST = 10
+TRUST_MIN, TRUST_MAX = 0, 100
 # per-turn clamps keep changes believable
 CLOSE_STEP = (-6, 8)
 ROM_STEP = (-4, 6)
+TRUST_STEP = (-8, 6)   # 信任跌得比涨得狠 (slow to build, quick to break)
 # thresholds
 FRIEND_T = 40       # 亲近 ≥ → 朋友
 ENEMY_T = -15       # 亲近 ≤ → 敌人
@@ -318,7 +323,7 @@ LOVER_CLOSE_MIN = 35
 
 
 def new_scores() -> dict[str, int]:
-    return {"closeness": START_CLOSENESS, "romance": START_ROMANCE}
+    return {"closeness": START_CLOSENESS, "romance": START_ROMANCE, "trust": START_TRUST}
 
 
 def _clamp(v: int, lo: int, hi: int) -> int:
@@ -353,7 +358,7 @@ def temper(cd: int, rd: int, mood: int) -> tuple[int, int]:
 
 
 def apply_deltas(scores: dict[str, int], closeness_delta: int, romance_delta: int,
-                 tuning: dict | None = None) -> dict[str, int]:
+                 tuning: dict | None = None, trust_delta: int = 0) -> dict[str, int]:
     """Apply per-turn deltas, clamped per-step and to range, so flow stays gradual.
     GAINS TAPER as the score climbs (the closer you already are, the more a step costs —
     diminishing returns keep 暖场刷分 from racing up the tiers); losses stay full-force,
@@ -368,10 +373,39 @@ def apply_deltas(scores: dict[str, int], closeness_delta: int, romance_delta: in
     if rd > 0:
         scale = max(0.25, 1 - int(scores.get("romance", START_ROMANCE)) / max(1, _tv(tuning, "rom_taper_den", 110)))
         rd = max(1, int(round(rd * scale)))
+    td = _clamp(int(trust_delta or 0),
+                _tv(tuning, "trust_step_min", TRUST_STEP[0]), _tv(tuning, "trust_step_max", TRUST_STEP[1]))
+    if td > 0:
+        scale = max(0.25, 1 - int(scores.get("trust", START_TRUST)) / max(1, _tv(tuning, "trust_taper_den", 120)))
+        td = max(1, int(round(td * scale)))
     return {
         "closeness": _clamp(int(scores.get("closeness", START_CLOSENESS)) + cd, CLOSE_MIN, CLOSE_MAX),
         "romance": _clamp(int(scores.get("romance", START_ROMANCE)) + rd, ROM_MIN, ROM_MAX),
+        "trust": _clamp(int(scores.get("trust", START_TRUST)) + td, TRUST_MIN, TRUST_MAX),
     }
+
+
+def trust_note(scores: dict[str, int], lang: str = "zh") -> str:
+    """🛡 信任读数 → 行为学指令 (喂进说话人 prompt)。三档: 交底 / 常态(空) / 设防;
+    「亲近高·信任低」单列 — 嘴上热心里防, 是这根轴存在的意义。"""
+    t = int(scores.get("trust", START_TRUST))
+    c = int(scores.get("closeness", START_CLOSENESS))
+    en = lang == "en"
+    if t >= 70:
+        return ("[Trust] You count this person as reliable — you can open up and "
+                "entrust them with things that matter." if en else
+                "【信任】你把这个人当可靠的自己人：可以交底，要紧事可以托付。")
+    if t < 25 and c >= FRIEND_T:
+        return ("[Guarded] You LIKE being around them, but you do not trust them: warm "
+                "on the surface, never handing over anything that matters; when they "
+                "probe too deep you steer away." if en else
+                "【戒备】你喜欢跟TA相处，但没把TA当可靠的人——嘴上热络，"
+                "关键的事绝不交底；TA问得深了，你会把话岔开。")
+    if t < 25:
+        return ("[Guarded] You keep your guard up with this person: words held back, "
+                "their claims silently double-checked." if en else
+                "【戒备】你对这个人存着戒心：话留三分，TA说的每句你心里都会过一遍。")
+    return ""
 
 
 def derive_mode(char: dict[str, Any], scores: dict[str, int], tuning: dict | None = None) -> str:
@@ -469,6 +503,7 @@ def state_for(char: dict[str, Any], scores: dict[str, int], tuning: dict | None 
     return {"mode": mode, "mode_name": name_of(mode, lang),
             "closeness": int(scores.get("closeness", START_CLOSENESS)),
             "romance": int(scores.get("romance", START_ROMANCE)),
+            "trust": int(scores.get("trust", START_TRUST)),
             "next": next_tier(char, scores, tuning, lang)}
 
 # ── 🔥 推拉节拍 (Spec F, 2026-07-25): 引擎控制的张弛序列 ─────────────────────
