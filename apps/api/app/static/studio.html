@@ -166,8 +166,9 @@ body.simple details.sec > summary::before { content:""; }
           <span id="enrichMsg" style="color:#8e8e93;font-size:12px;margin-left:8px"></span>
         </div>
       </details>
-      <!-- 🎴 封面: 拿本剧本自己的立绘/头像/背景现排, 不花生图钱, 秒出 -->
-      <div style="margin-top:12px;display:flex;gap:12px;align-items:flex-start">
+      <!-- 🎴 封面: 拿本剧本自己的立绘/头像/背景现排, 不花生图钱, 秒出。
+           总开关在 engine/cover.py 的 ENABLED —— 关着时整块面板不露面, 不留死按钮 -->
+      <div id="coverBox" class="hidden" style="margin-top:12px;display:flex;gap:12px;align-items:flex-start">
         <img id="coverImg" style="width:108px;border-radius:10px;border:1px solid #3c3933;display:none" alt="" />
         <div style="flex:1;min-width:0">
           <label style="margin-top:0">🎴 封面</label>
@@ -1522,6 +1523,9 @@ async function loadCover(){
   if(!img || !story.id) return null;
   try{
     const r = await j(`/stories/${story.id}/cover`);
+    const box = document.getElementById("coverBox");
+    if(box) box.classList.toggle("hidden", r.enabled === false);
+    if(r.enabled === false) return r;
     if(r.poster){ img.src = r.poster; img.style.display = "block"; }
     else { img.style.display = "none"; }
     if(msg && !msg.dataset.busy){

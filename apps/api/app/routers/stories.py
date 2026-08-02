@@ -80,6 +80,8 @@ def _to_story(s: StoryModel) -> Story:
 
 def _auto_cover(s: StoryModel) -> dict[str, str] | None:
     from ..engine import cover as cover_mod
+    if not cover_mod.ENABLED:      # 🔌 关着的时候一张也不下发 (卡面退回地点背景图)
+        return None
     try:
         return cover_mod.urls(s.id)
     except Exception:
@@ -108,6 +110,8 @@ def _ensure_cover(s: StoryModel) -> None:
     """素材变了就把封面重排一遍 (立绘/头像/背景都是后来才陆续画出来的)。
     排版丢后台队列, 绝不卡住调用它的那个请求。"""
     from ..engine import cover as cover_mod
+    if not cover_mod.ENABLED:      # 🔌 关着就一张也不排 (书架不再顺手自愈)
+        return
     try:
         story = _to_story(s).model_dump()
         if cover_mod.is_stale(story):
@@ -885,10 +889,12 @@ def get_cover(story_id: str, user: User = Depends(current_user), db: Session = D
     """🎴 这本的封面现在长什么样 + 还差什么 (工坊用)。"""
     from ..engine import cover as cover_mod
     s = _own_story(story_id, user, db)
+    if not cover_mod.ENABLED:
+        return {"enabled": False, "poster": None, "wide": None, "cast": [], "with_art": []}
     story = _to_story(s).model_dump()
     cast = cover_mod._cast_ids(story)[:cover_mod.MAX_CAST]
     have = [cid for cid in cast if cover_mod.figure_ready(cid)]
-    return {**(cover_mod.urls(s.id) or {"poster": None, "wide": None}),
+    return {"enabled": True, **(cover_mod.urls(s.id) or {"poster": None, "wide": None}),
             "cast": cast, "with_art": have, "stale": cover_mod.is_stale(story),
             "background": bool(cover_mod._pick_bg(story))}
 
@@ -898,6 +904,8 @@ def make_cover(story_id: str, user: User = Depends(current_user), db: Session = 
     """🎴 重画封面 (作者主动): 拿这本自己的立绘/头像/背景现排, 秒级, 不花生图钱。"""
     from ..engine import cover as cover_mod
     s = _own_story(story_id, user, db)
+    if not cover_mod.ENABLED:
+        return {"queued": False, "enabled": False}
     cover_mod.enqueue(_to_story(s).model_dump(), force=True)
     return {"queued": True}
 

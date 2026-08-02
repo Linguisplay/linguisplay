@@ -33,6 +33,12 @@ BG_DIR = _STATIC / "bg"
 COVER_DIR = _STATIC / "cover"
 
 # 版式版本号: 改了排版/配色/字号就 +1 —— 指纹里带着它, 全站封面自动重排
+# 🔌 总开关 (Yi 2026-08-02:「先把封面给取消吧, 看起来太糟糕了」)。
+# False = 不生成、不下发: 大厅卡退回"第一个有背景图的地点", 选角页不再有盒绘。
+# 已经排好的图【留在 /scene/cover 不删】—— 翻回 True 就都回来了, 不用重排。
+# 引擎本身 (build/head_metrics/place_top 那套) 一个字没动, 守卫测试照跑。
+ENABLED = False
+
 ALGO = "d1"
 # 三款版式。研究真封面 (Grisaia / 薄樱鬼 / Little Busters / Steins;Gate) 之后重做的 ——
 # v1 那版是电影海报的做法 (标题在顶、班底站一排、整体压暗), Yi 一句「设计的不行」，对。
