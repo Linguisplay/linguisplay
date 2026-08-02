@@ -88,9 +88,9 @@ def mood_menu() -> list[dict[str, Any]]:
 
 
 def default_track(key: str) -> str:
-    """没有作者指定时这个情绪实际会响哪一首 (把 fallback 也算进去)。"""
-    key = BGM_TRACKS.get(key, {}).get("fallback") or key
-    return f"gal_{key}"
+    """没有作者指定时这个情绪实际会响哪一首 (fallback 与"文件在不在"都算进去)。"""
+    got = real_variants(key) or real_variants(BGM_TRACKS.get(key, {}).get("fallback") or "")
+    return got[0] if got else f"gal_{key}"
 
 
 def resolve_bgm(content: dict[str, Any] | None, key: str, salt: str) -> str:
@@ -105,19 +105,50 @@ def resolve_bgm(content: dict[str, Any] | None, key: str, salt: str) -> str:
     pick = str(custom.get(key) or "").strip() if isinstance(custom, dict) else ""
     if pick:
         return pick
-    key = BGM_TRACKS.get(key, {}).get("fallback") or key
-    return pick_variant(key, salt)
+    # 这一格有真曲就用它的变奏; 一首都没有 (ancient/grimdark/eerie 这类空格) 才落 fallback
+    if real_variants(key):
+        return pick_variant(key, salt)
+    alt = BGM_TRACKS.get(key, {}).get("fallback")
+    return pick_variant(alt or key, salt)
+
+
+_VAR_CACHE: dict[str, Any] = {"stamp": None, "map": {}}
+
+
+def real_variants(key: str) -> tuple[str, ...]:
+    """这个情绪【文件真的在】的真曲变奏, 形如 ("gal_daily", "gal_daily2", "gal_daily3")。
+
+    ⚠️ 别再手写 variants 计数 —— 数字和磁盘一旦对不上, 玩家听到的就是那段 24 秒的
+    老合成器片循环一整局 (实弹: eerie 写着 variants=2, 而磁盘上只有 gal_eerie2)。
+    问磁盘, 不问表。目录改动时间变了才重扫。
+    """
+    d = bgm_dir()
+    try:
+        stamp = d.stat().st_mtime_ns
+    except OSError:
+        return ()
+    if _VAR_CACHE["stamp"] != stamp:
+        _VAR_CACHE["stamp"], _VAR_CACHE["map"] = stamp, {}
+    if key not in _VAR_CACHE["map"]:
+        _VAR_CACHE["map"][key] = tuple(
+            f"gal_{s}" for s in [key] + [f"{key}{i}" for i in range(2, 7)]
+            if (d / f"gal_{s}.mp3").exists())
+    return _VAR_CACHE["map"][key]
 
 
 def pick_variant(key: str, salt: str) -> str:
     """🎵 同情绪多曲目轮换 (Yi: 别老是这一首): 换地方/过一天就换曲,
-    同一场景内稳定不跳 — salt 定曲, 不靠随机 (随机=每回合乱切)."""
-    n = int(BGM_TRACKS.get(key, {}).get("variants", 1) or 1)
-    if n <= 1:
-        return key
+    同一场景内稳定不跳 — salt 定曲, 不靠随机 (随机=每回合乱切)。
+    只在【真的存在】的曲子之间轮; 一首真曲都没有就把 key 原样交出去 (调用方去找 fallback)."""
     import zlib
-    i = zlib.crc32(f"{key}|{salt}".encode("utf-8")) % n
-    return key if i == 0 else f"{key}{i + 1}"
+    got = real_variants(key)
+    if not got:
+        n = int(BGM_TRACKS.get(key, {}).get("variants", 1) or 1)
+        if n <= 1:
+            return key
+        i = zlib.crc32(f"{key}|{salt}".encode("utf-8")) % n
+        return key if i == 0 else f"{key}{i + 1}"
+    return got[zlib.crc32(f"{key}|{salt}".encode("utf-8")) % len(got)]
 
 
 def pick_bgm(mood: str, pressure: int = 0, hot: bool = False, night: bool = False,

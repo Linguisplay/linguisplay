@@ -38,6 +38,18 @@ def test_no_mood_resolves_into_a_slot_we_know_is_empty():
         assert got not in empty, f"{key} 的默认曲解析到了空格 {got}"
 
 
+def test_variants_come_from_the_disk_not_from_a_hand_written_count():
+    """手写的 variants 数字与磁盘对不上时, 玩家听到的就是 24 秒片 (实弹: eerie 写 2, 只有 gal_eerie2)。
+    所以轮换只许在【文件真的在】的曲子之间进行。"""
+    for key in director.BGM_TRACKS:
+        got = director.real_variants(key)
+        for stem in got:
+            assert (director.bgm_dir() / f"{stem}.mp3").exists(), stem
+        if got:
+            picks = {director.pick_variant(key, f"L{i}|{i}") for i in range(40)}
+            assert picks <= set(got), f"{key} 轮到了不存在的曲子: {picks - set(got)}"
+
+
 @has_lib
 def test_every_mood_lands_on_a_real_track():
     missing = []
@@ -53,6 +65,12 @@ def test_every_mood_lands_on_a_real_track():
 def test_the_two_empty_slots_declare_a_fallback():
     for key in ("ancient", "grimdark"):
         assert director.BGM_TRACKS[key].get("fallback"), f"{key} 没有真曲又没写 fallback"
+
+
+@has_lib
+def test_the_empty_slots_actually_play_something_else():
+    for key in ("ancient", "grimdark"):
+        assert not director.real_variants(key), f"{key} 居然有真曲了 — fallback 可以撤了"
         assert director.default_track(key) != f"gal_{key}"
 
 
