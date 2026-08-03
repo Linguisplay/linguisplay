@@ -1624,10 +1624,12 @@ def rename_location(run_id: str, loc_id: str, body: RenameIn,
     loc = next((l for l in locs if l.get("id") == loc_id), None)
     if not loc:
         raise HTTPException(404, "没有这个地方")
-    if not (loc.get("generated") or str(loc_id).startswith("loc_")):
+    # 只认 generated 旗 (审查实锤: loc_ 前缀豁免会被授权图的 loc_* id 击穿)
+    if not loc.get("generated"):
         raise HTTPException(403, "这是作者写定的地点，名字不能改")
-    nm = (body.name or "").strip().strip("「」\"'")[:12]
-    if not runtime.npc_name_ok(nm):
+    nm = (body.name or "").strip().strip("「」\"'")[:40]
+    # 🌐 地名口径按语言分 (npc_name_ok 禁空格, EN 地名 "Old Docks" 曾必 400)
+    if not runtime.place_name_ok(nm):
         raise HTTPException(400, "这个名字不像地名，换一个吧")
     if any(l.get("name") == nm and l.get("id") != loc_id for l in locs):
         raise HTTPException(409, "已有同名地点")

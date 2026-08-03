@@ -43,6 +43,11 @@ def _lang_rule(prompt: dict[str, Any]) -> str:
             "【沉默】) must KEEP that exact Chinese prefix — only the free text after it "
             "is English.")
 
+def place_clip(nm: str, en: bool) -> str:
+    """🗺 铸名裁剪按语言分尺 — 12 字符的 CJK 尺曾把英文名铸成 "The Rusty An" 永久上图。"""
+    return (nm or "")[:40 if en else 12]
+
+
 def _post_chat(url: str, key: str, body: dict, timeout: int = 25,
                kind: str = "aux") -> httpx.Response:
     """Single transport chokepoint for EVERY chat call: one POST, one measured retry on
@@ -3257,20 +3262,42 @@ class QwenLLM:
         name = (prompt.get("place_name") or "").strip()
         world = (prompt.get("world") or "").replace("\n", " ")[:400]
         frm = (prompt.get("from_place") or "").strip()
-        _inv = ("原话若只是泛指（「个地方」「别处」「安静点的地方」这类没有实体的说法），"
-                "就为这个世界【发明】一个贴切的具体去处名（2~8字，贴世界观）。"
-                if prompt.get("invent") else
-                "原话若只是泛指（「个地方」「别处」「安静点的地方」这类没有实体的说法），"
-                "第一行就只输出一个字：无。")
-        sys = ("你在为一个互动剧情游戏即时生成一个新地点。输出两行：\n"
-               "第一行：把玩家的原话提炼成一个干净的【地名】（2~8字，只留地点本体，"
-               "去掉动作、目的和语气，如「去河堤上透透气」→「河堤」、"
-               "「去后巷看看情况」→「后巷」；原话本身已是干净地名就照抄）。"
-               + _inv + "\n"
-               "第二行：这个地点的环境描写：只写此刻实际能看到的具体陈设、光线、声响、气味，"
-               "30~60字，一段话，第三人称、有画面感、贴合世界观；画面里不要出现任何人物，"
-               "不要台词，不要解释或标题（第一行是「无」时第二行也不用写）。" + _lang_rule(prompt))
-        u = f"世界观：{world or '（未知）'}\n玩家的原话：{name}\n玩家刚从「{frm or '别处'}」走过来。\n输出两行。"
+        en = (prompt.get("language") or "zh") == "en"
+        if en:
+            # 🌐 EN 剧本: 字数尺换词数尺 (「2~8字」对英文没有意义, [:12] 会铸出半截名)
+            _inv = ("If the player's words are only a vague gesture (\"somewhere\", "
+                    "\"another place\"), INVENT a fitting concrete place name for this "
+                    "world (1-5 words)."
+                    if prompt.get("invent") else
+                    "If the player's words are only a vague gesture (\"somewhere\", "
+                    "\"another place\"), output exactly: None")
+            sys = ("You are minting a new location for an interactive story game. "
+                   "Output exactly two lines:\n"
+                   "Line 1: distill the player's words into a clean PLACE NAME "
+                   "(1-5 words, the place itself only — drop actions, intent and tone; "
+                   "e.g. \"go catch some air on the embankment\" → \"The Embankment\"; "
+                   "if the words already are a clean place name, copy them). " + _inv + "\n"
+                   "Line 2: the scene: only what is concretely visible right now — "
+                   "fixtures, light, sound, smell; 25-45 words, one paragraph, third "
+                   "person, grounded in the world; no people, no dialogue, no headings "
+                   "(if line 1 is None, skip line 2).")
+            u = (f"World: {world or '(unknown)'}\nPlayer's words: {name}\n"
+                 f"The player just came from \"{frm or 'elsewhere'}\".\nOutput two lines.")
+        else:
+            _inv = ("原话若只是泛指（「个地方」「别处」「安静点的地方」这类没有实体的说法），"
+                    "就为这个世界【发明】一个贴切的具体去处名（2~8字，贴世界观）。"
+                    if prompt.get("invent") else
+                    "原话若只是泛指（「个地方」「别处」「安静点的地方」这类没有实体的说法），"
+                    "第一行就只输出一个字：无。")
+            sys = ("你在为一个互动剧情游戏即时生成一个新地点。输出两行：\n"
+                   "第一行：把玩家的原话提炼成一个干净的【地名】（2~8字，只留地点本体，"
+                   "去掉动作、目的和语气，如「去河堤上透透气」→「河堤」、"
+                   "「去后巷看看情况」→「后巷」；原话本身已是干净地名就照抄）。"
+                   + _inv + "\n"
+                   "第二行：这个地点的环境描写：只写此刻实际能看到的具体陈设、光线、声响、气味，"
+                   "30~60字，一段话，第三人称、有画面感、贴合世界观；画面里不要出现任何人物，"
+                   "不要台词，不要解释或标题（第一行是「无」时第二行也不用写）。" + _lang_rule(prompt))
+            u = f"世界观：{world or '（未知）'}\n玩家的原话：{name}\n玩家刚从「{frm or '别处'}」走过来。\n输出两行。"
         try:
             resp = _post_chat(self._url, self._key,
                               {"model": self._model, "messages": [{"role": "system", "content": sys},
@@ -3278,12 +3305,12 @@ class QwenLLM:
                               timeout=25)
             txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
             lines = [l.strip().strip("「」\"'") for l in txt.splitlines() if l.strip()]
-            clean = lines[0][:12] if lines else ""
+            clean = place_clip(lines[0], en) if lines else ""
             if clean in ("无", "無", "None", "N/A"):   # 🧑‍⚖️ 判官驳回: 原话没有具体去处
                 return {"name": "", "detail": ""}
             detail = " ".join(lines[1:]).strip() if len(lines) > 1 else ""
             if not detail:      # model collapsed to one line
-                if len(lines) == 1 and len(clean) <= 12:
+                if len(lines) == 1 and len(clean) <= (40 if en else 12):
                     detail = ""        # 单行且像地名 → 当地名收, 描写留空
                 else:
                     clean, detail = "", lines[0] if lines else ""
@@ -4394,11 +4421,22 @@ class QwenLLM:
         stand and can grow a map from there. Returns {name, detail} derived from world + act 1."""
         world = (prompt.get("world") or "").replace("\n", " ")[:400]
         setting = (prompt.get("setting") or "").replace("\n", " ")[:300]
-        sys = ("你在为一个互动剧情游戏确定【开场所在地】。根据世界观和开场情节，给出玩家一开始身处的"
-               "具体地点。只输出两行：第一行是这个地点的名字（4~12字，具体，如「末班地铁车厢」「城郊废弃教堂」）；"
-               "第二行是30~50字的环境描写（此刻能看到的陈设、光线、声响、气味，第三人称，不要出现人物或台词）。"
-               "不要解释、不要编号、不要多余的行。" + _lang_rule(prompt))
-        u = f"世界观：{world or '（未知）'}\n开场情节：{setting or '（未知）'}\n输出开场地点（两行）。"
+        en = (prompt.get("language") or "zh") == "en"
+        if en:
+            sys = ("You are picking the OPENING location for an interactive story game. "
+                   "From the world and opening scene, name the concrete place the player "
+                   "starts in. Output exactly two lines: line 1 is the place name "
+                   "(2-5 words, concrete, e.g. \"The Last Metro Car\"); line 2 is a "
+                   "25-40 word scene description (fixtures, light, sound, smell; third "
+                   "person; no people, no dialogue). No explanations, no numbering.")
+            u = (f"World: {world or '(unknown)'}\nOpening: {setting or '(unknown)'}\n"
+                 f"Output the opening place (two lines).")
+        else:
+            sys = ("你在为一个互动剧情游戏确定【开场所在地】。根据世界观和开场情节，给出玩家一开始身处的"
+                   "具体地点。只输出两行：第一行是这个地点的名字（4~12字，具体，如「末班地铁车厢」「城郊废弃教堂」）；"
+                   "第二行是30~50字的环境描写（此刻能看到的陈设、光线、声响、气味，第三人称，不要出现人物或台词）。"
+                   "不要解释、不要编号、不要多余的行。" + _lang_rule(prompt))
+            u = f"世界观：{world or '（未知）'}\n开场情节：{setting or '（未知）'}\n输出开场地点（两行）。"
         try:
             resp = _post_chat(self._url, self._key,
                               {"model": self._model, "messages": [{"role": "system", "content": sys},
@@ -4410,8 +4448,8 @@ class QwenLLM:
         import re
         lines = [re.sub(r"^\s*[-*\d.、。)）：:]+\s*", "", l).strip().strip("「」\"'")
                  for l in txt.splitlines() if l.strip()]
-        name = lines[0][:16] if lines else ""
-        detail = " ".join(lines[1:])[:120] if len(lines) > 1 else ""
+        name = (lines[0][:40] if en else lines[0][:16]) if lines else ""
+        detail = " ".join(lines[1:])[:160 if en else 120] if len(lines) > 1 else ""
         return {"name": name, "detail": detail}
 
     def plan_and_render(self, prompt: dict[str, Any]):

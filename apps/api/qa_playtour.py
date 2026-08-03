@@ -118,7 +118,9 @@ def _judge(story, beats, turns_meta, state, suggestions, phone, mapv, feed):
             warns.append(f"巨拍 {len(t)} 字 (seq={b.get('seq')})")
         if t in player_lines and b.get("author") != "player" and spk != "我":
             errs.append(f"复读玩家原话 (seq={b.get('seq')})")
-        if en:
+        if en and b.get("author") != "player":
+            # 玩家拍豁免: 夜巡故意用中文输入压翻译链路 (TURN_INPUTS 注释),
+            # 首跑实弹: 判官把自己打的中文判成「引擎漏中文」— 用坏尺子量
             if CJK.search(t) and not MARKER_OK.match(t):
                 errs.append(f"英文本子漏中文: …{CJK.search(t).group()}… (seq={b.get('seq')})")
             # 半词截断: 以字母收尾且长度贴着某个硬截口 (60/80/160 及其英文双倍) = 强信号

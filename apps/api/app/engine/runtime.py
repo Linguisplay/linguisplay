@@ -1122,6 +1122,20 @@ def npc_name_ok(nm: str) -> bool:
     return not any(ch in nm for ch in "，。！？；：、,.!?;: \n\t")
 
 
+def place_name_ok(nm: str) -> bool:
+    """地名口径 (rename/铸造校验) — 别复用 npc_name_ok: 它禁空格, EN 地名多词是常态
+    ("Old Docks" 曾必 400)。zh 沿人名尺 (短、无空格标点); EN 走 _bad_place_name 的
+    词数尺, 允许空格/撇号/连字符, 仍禁标点。"""
+    nm = (nm or "").strip()
+    if not nm:
+        return False
+    if _CJK_ANY.search(nm):
+        return npc_name_ok(nm)
+    if _bad_place_name(nm):
+        return False
+    return not any(ch in nm for ch in "，。！？；：、,.!?;:\n\t")
+
+
 def seed_sandbox_cast(content: dict[str, Any], llm: LLM | None = None,
                       mature: bool = False) -> None:
     """🏖 the sandbox opens ALIVE: conjure a small starting cast from the player's
@@ -1665,13 +1679,36 @@ def _lcs_len(a: str, b: str) -> int:
     return best
 
 
+_EN_STOP = {"the", "a", "an", "of", "at", "to", "in", "on", "and", "or", "by",
+            "for", "with", "my", "our", "your", "their", "his", "her", "its",
+            "old", "new", "little", "quiet"}
+
+
+def _en_words(s: str) -> list[str]:
+    """英文地名的实词 (去冠词/介词/常见修饰) — 词级亲缘判定用。"""
+    return [w for w in re.findall(r"[a-z']+", (s or "").lower()) if w not in _EN_STOP]
+
+
 def near_location(content: dict[str, Any], ref: str | None) -> dict[str, Any] | None:
-    """近亲地点: 名字与 ref 有 ≥2 字连续重合的已有地点。只用在「要不要造新地点」的
-    判定上 — 玩家口头的简称对全名时精确/包含匹配都会漏, 差点铸出重复的幽灵地点;
-    硬移动仍走严格 resolve_location: 宁可改道给玩家确认真名, 不可默默把人带错地方。"""
+    """近亲地点: 只用在「要不要造新地点」的判定上 — 玩家口头的简称对全名时精确/包含
+    匹配都会漏, 差点铸出重复的幽灵地点; 硬移动仍走严格 resolve_location:
+    宁可改道给玩家确认真名, 不可默默把人带错地方。
+    尺按语言分 (第二刀实测: 字符级 LCS≥2 对 CJK 是信号, 对英文全是噪音 — Golden Hour
+    12 组邀约 0 正确, "Elias's trailer" 被认成 Taverna 的亲戚):
+      zh = 连续 ≥2 字重合;  en = 共享 ≥1 个实词 (大小写归一, 冠词修饰不算)。"""
     ref = (ref or "").strip()
     if len(ref) < 2:
         return None
+    if lang_of(content) == "en":
+        rw = set(_en_words(ref))
+        if not rw:
+            return None
+        best, best_n = None, 0
+        for loc in _locations(content):
+            n = len(rw & set(_en_words(loc.get("name") or "")))
+            if n > best_n:
+                best, best_n = loc, n
+        return best if best_n >= 1 else None
     best, best_n = None, 1
     for loc in _locations(content):
         n = _lcs_len(ref, loc.get("name") or "")
@@ -1973,10 +2010,13 @@ def ensure_start_location(content: dict[str, Any], state: dict[str, Any],
                        + [e.get("what_happens", "") for e in (act1.get("events") or [])]).strip()
     out: dict[str, Any] = {}
     try:
-        out = (llm or get_llm()).generate({"start_place": True, "world": world, "setting": setting}) or {}
+        # 🌐 语言戳必须裹上 (第二刀实锤: 没裹 lang_llm, EN 无图剧本开局必产中文地名)
+        out = lang_llm(llm or get_llm(), content).generate(
+            {"start_place": True, "world": world, "setting": setting}) or {}
     except Exception:
         out = {}
-    name = (out.get("name") or "").strip() or "此处"
+    name = (out.get("name") or "").strip() \
+        or ("here" if lang_of(content) == "en" else "此处")
     detail = (out.get("detail") or "").strip()
     import uuid as _uuid
     # unique per run: generated places get their own AI background image cached by id,
@@ -6631,9 +6671,28 @@ _BAD_PLACE_RE = re.compile(r"[他她你我您谁]|看看|跟不跟|[吗呢吧么
                            r"|^(情况|动静|热闹|究竟|风景|一眼|一圈|一趟|一下)$")
 
 
+_CJK_ANY = re.compile(r"[一-鿿]")
+# 🌐 EN 泛指/坏词头 (第二刀): 指方向不指实体的词, 和不可能开启地名的词
+_EN_DEICTIC = {"here", "there", "somewhere", "elsewhere", "nearby", "around",
+               "outside", "inside", "away", "anywhere", "someplace", "home"}
+_EN_BAD_LEAD = ("i", "you", "he", "she", "they", "we", "it", "me", "him", "her",
+                "them", "us", "who", "what", "where", "when", "why", "how",
+                "tell", "ask", "let", "see", "do", "does", "did")
+
+
 def _bad_place_name(n: str) -> bool:
     n = (n or "").strip()
-    return not n or len(n) < 2 or len(n) > 12 or n in _DEICTIC or bool(_BAD_PLACE_RE.search(n))
+    if not n or len(n) < 2:
+        return True
+    if _CJK_ANY.search(n):
+        return len(n) > 12 or n in _DEICTIC or bool(_BAD_PLACE_RE.search(n))
+    # 🌐 EN 尺: 12 字符的 CJK 上限曾把 "the old lighthouse" 一刀切驳回 — 文实分家复发。
+    # 英文量词数不量字符: ≤5 词、≤40 字符、词头不是代词/疑问/使役词。
+    if len(n) > 40 or "?" in n or "？" in n:
+        return True
+    ws = n.lower().split()
+    return (len(ws) > 5 or n.lower() in _EN_DEICTIC or ws[0] in _EN_BAD_LEAD
+            or bool(_BAD_PLACE_RE.search(n)))
 
 
 # 🗺 地名准入门 (Yi 实锤: 「去求老爹把秘方卖了」被解析成去处「求老爹把秘方卖」):
@@ -6651,6 +6710,8 @@ def _placey(n: str) -> bool:
     n = (n or "").strip()
     if _bad_place_name(n):
         return False
+    if not _CJK_ANY.search(n):
+        return len(n.split()) <= 4   # 🌐 EN: 词数尺 (句子碎片已被 bad 门滤掉)
     if any(n.endswith(s) for s in _PLACE_SUFFIX):
         return True
     return len(n) <= 6 and not _PLACE_VERBY.search(n)
@@ -6753,7 +6814,8 @@ def player_move_emergent(content: dict[str, Any], state: dict[str, Any], player_
     cands += [m.strip() for m in _MOVE_DEST_EN.findall(text)]
     names = [c.get("name") for c in _characters(content) if c.get("name")]
     for ref in cands:
-        if not ref or len(ref) < 2 or len(ref) > 12 or ref in _DEICTIC:
+        cap = 12 if _CJK_ANY.search(ref or "") else 40   # 🌐 EN 多词名放行到 40
+        if not ref or len(ref) < 2 or len(ref) > cap or ref in _DEICTIC:
             continue
         if ref[0] in "找见寻接等约":
             continue                      # 「去找X」「去见X」 are seeks, not places
