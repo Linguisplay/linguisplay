@@ -1034,7 +1034,7 @@ def play(
             run = db2.get(RunModel, run_id)
             seq = start_seq
             final = None
-            stage = director.TurnStage()   # 🎬 本回合的演出记忆 (音效去重/单次白闪)
+            stage = director.TurnStage(content)   # 🎬 本回合的演出记忆 (音效去重/单次白闪/本子自己的音效词表)
             for kind, payload in runtime.run_turn_stream(
                 content=content, state=state0, persona=persona_dict,
                 player_input=body.input, channel=body.channel,
@@ -1881,7 +1881,7 @@ def confront(run_id: str, body: ConfrontIn, user: User = Depends(current_user),
             run = db2.get(RunModel, run_id)
             seq = start_seq
             final = None
-            stage = director.TurnStage()   # 🎬 本回合的演出记忆 (音效去重/单次白闪)
+            stage = director.TurnStage(content)   # 🎬 本回合的演出记忆 (音效去重/单次白闪/本子自己的音效词表)
             for kind, payload in gen:
                 if kind == "dice":
                     yield _event({"event": "dice", "dice": payload})

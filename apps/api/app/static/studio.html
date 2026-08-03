@@ -308,7 +308,7 @@ body.simple details.sec > summary::before { content:""; }
     <!-- 🎵 配乐: 原本埋在「基本信息」里第 1076 像素处 — 屏高才 844, 作者根本翻不到
          (Yi 实弹「配乐在哪这部分」)。独立成区, 标签栏上一直挂着, 一眼看得见。 -->
     <details class="sec" data-sec="bgm" data-adv="1">
-      <summary>🎵 配乐（按情绪）<span class="seccount" id="sc_bgm"></span></summary>
+      <summary>🎵 配乐与音效<span class="seccount" id="sc_bgm"></span></summary>
       <div class="secbody">
       <div class="muted">一段故事会走过几种情绪：开场、日常、暧昧、危机、高潮、落幕。
         引擎每回合认出走到了哪一步，这里定那一步该响哪首曲子。留「默认」就走引擎自带的。▶ 试听。</div>
@@ -320,6 +320,19 @@ body.simple details.sec > summary::before { content:""; }
           两层都配了以剧情节拍为准；都不配就走引擎默认曲库。
         </div>
         <div id="bgmRows"></div>
+      </details>
+
+      <!-- 🔊 音效 (Yi 2026-08-03:「怎么在编辑剧本里面加音效」) -->
+      <h3 style="margin:16px 0 6px">🔊 音效</h3>
+      <div class="muted">音效是【读正文自动插】的：写到「敲门」就响敲门声，不用逐句标。
+        下面这张是内置词表；你的本子有自己的词（仙侠的「剑鸣」、赛博的「电流」），在这儿补。▶ 试听。</div>
+      <label style="margin-top:8px"><input type="checkbox" id="sfxOn" style="width:auto"
+        onchange="setSfxOn(this.checked)" /> 这本开音效</label>
+      <div id="sfxOwn" style="margin-top:8px"></div>
+      <button class="sm ghost" type="button" style="margin-top:6px" onclick="addSfxWord()">+ 加一个词</button>
+      <details style="margin-top:10px">
+        <summary style="cursor:pointer" class="muted">看内置词表（这些词写进正文就会自己响）</summary>
+        <div id="sfxLib" style="margin-top:6px"></div>
       </details>
       <audio id="bgmPreview" style="display:none"></audio>
       </div>
@@ -589,7 +602,7 @@ function openEditor(){
   initMode(); activeSec="basic";
   renderAll();
   loadCover();
-  loadBgm();
+  loadBgm(); loadSfx();
 }
 function renderAll(){ renderLocs(); renderChars(); renderRelWeb(); renderActs(); renderSecrets(); renderEndings(); renderSystems(); renderPacksCard(); renderMedia(); updateSecMeta(); }
 
@@ -597,7 +610,7 @@ function renderAll(){ renderLocs(); renderChars(); renderRelWeb(); renderActs();
 const CORE_SECS = [["basic","📝 基本"],["chars","👥 角色"],["relweb","🕸 关系"],["acts","🎬 幕"],["endings","🏁 结局"]];
 const ADV_SECS = [["secrets","🔒 秘密"],["locs","🗺 地点"],["clock","⏳ 时钟"],["pressure","⚠️ 危机"],
   ["phone","📱 手机"],["verdict","🔍 结案"],["dice","🎲 骰"],["sandbox","🏖 沙盒"],["packs","💎 收费包"],
-  ["media","🖼 媒体"],["bgm","🎵 配乐"],["tuning","⚙️ 调参"]];
+  ["media","🖼 媒体"],["bgm","🎵 配乐音效"],["tuning","⚙️ 调参"]];
 let activeSec="basic";
 function isSimple(){ return localStorage.getItem("studio_full")!=="1"; }
 function initMode(){
@@ -633,7 +646,8 @@ function _secCounts(){
     sandbox:(story.sandbox&&story.sandbox.enabled)?"✓":0, media:"",
     // 🎵 配乐是常设功能不是可选配置 —— 标签栏永远挂着, 不等作者先配了才出现
     // (不然第一次根本找不到它)。配过几格就显示几格。
-    bgm:Object.keys(((story.tuning||{}).bgm)||{}).length||"✓",
+    bgm:(Object.keys(((story.tuning||{}).bgm)||{}).length
+         + Object.keys((((story.tuning||{}).sfx)||{}).map||{}).length)||"✓",
     tuning:tn||0 };
 }
 function updateSecMeta(){
@@ -1750,6 +1764,70 @@ function previewBgm(mood){
   a.dataset.k = chosen; a.volume = 0.5;
   a.src = `/scene/bgm/${chosen}.mp3`;
   a.play().catch(()=>{ saveMsg.textContent = "这首放不出来（文件可能不在）"; });
+}
+
+// ── 🔊 音效 (Yi 2026-08-03) ────────────────────────────────────────────────
+// 存 tuning.sfx = {enabled, map:{关键词: 音效名}}。作者的词压过内置词表。
+// 词表是【有序的】—— 但 JSON 对象的键序不可靠, 所以界面按输入框顺序整张重写,
+// 引擎那边再按词长排一次 (写了「刀剑相击」又写了「刀」时具体的那条赢)。
+let sfxLib = null;
+async function loadSfx(){
+  const host = document.getElementById("sfxOwn");
+  if(!host) return;
+  if(!sfxLib){ try{ sfxLib = await j("/stories/sfx/list"); }catch(e){ return; } }
+  const cfg = (story.tuning||{}).sfx || {};
+  const on = document.getElementById("sfxOn");
+  if(on) on.checked = cfg.enabled !== false;
+  const pairs = Object.entries(cfg.map || {});
+  const opts = sel => (sfxLib.sfx||[]).map(s =>
+    `<option value="${esc(s.name)}"${s.name===sel?" selected":""}>${esc(s.label)}</option>`).join("");
+  host.innerHTML = pairs.length ? pairs.map(([k,v],i) => `
+    <div class="sub" style="display:flex;align-items:center;gap:6px">
+      <input value="${esc(k)}" placeholder="正文里的词" style="flex:1;min-width:0" onchange="writeSfxMap()" />
+      <span class="muted">→</span>
+      <select style="flex:1;min-width:0" onchange="writeSfxMap()">${opts(v)}</select>
+      <button class="sm ghost" type="button" onclick="previewSfx(this.previousElementSibling.value)">▶</button>
+      <button class="sm del" type="button" onclick="this.closest('.sub').remove(); writeSfxMap()">✕</button>
+    </div>`).join("") : `<div class="muted" style="font-size:12px">还没加词。只用内置那张表也行。</div>`;
+  const lib = document.getElementById("sfxLib");
+  if(lib) lib.innerHTML = (sfxLib.sfx||[]).map(s => `
+    <div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #201c15">
+      <b style="flex:0 0 96px;font-size:12.5px">${esc(s.label)}</b>
+      <span class="muted" style="flex:1;min-width:0;font-size:11px">${esc((s.keywords||[]).join(" / ")) || "（没有内置词，只能自己配）"}</span>
+      <button class="sm ghost" type="button" onclick="previewSfx('${esc(s.name)}')">▶</button>
+    </div>`).join("");
+}
+function addSfxWord(){
+  story.tuning = story.tuning || {};
+  const m = Object.assign({}, (story.tuning.sfx||{}).map || {});
+  if("" in m) return;               // 已经有一行空的了, 别叠
+  m[""] = (sfxLib && sfxLib.sfx[0] ? sfxLib.sfx[0].name : "knock");
+  story.tuning.sfx = Object.assign({enabled:true}, story.tuning.sfx||{}, {map:m});
+  loadSfx();
+}
+// 整张重写: 逐行读界面, 空词丢掉, 后写的同名词覆盖前面的
+function writeSfxMap(){
+  const m = {};
+  document.querySelectorAll("#sfxOwn .sub").forEach(row => {
+    const k = (row.querySelector("input")||{}).value || "";
+    const v = (row.querySelector("select")||{}).value || "";
+    if(k.trim() && v) m[k.trim()] = v;
+  });
+  story.tuning = story.tuning || {};
+  story.tuning.sfx = Object.assign({enabled:true}, story.tuning.sfx||{}, {map:m});
+  saveMsg.textContent = "音效已改，记得保存";
+}
+function setSfxOn(on){
+  story.tuning = story.tuning || {};
+  story.tuning.sfx = Object.assign({map:{}}, story.tuning.sfx||{}, {enabled:!!on});
+  saveMsg.textContent = "音效已改，记得保存";
+}
+function previewSfx(name){
+  const a = document.getElementById("bgmPreview");
+  if(!a || !name) return;
+  a.pause(); a.dataset.k = ""; a.volume = 0.7;
+  a.src = `/scene/sfx/${name}.mp3`;
+  a.play().catch(()=>{ saveMsg.textContent = "这个音效放不出来（文件可能不在）"; });
 }
 
 // ── 🎴 封面：合成不生图，所以敢秒轮询 ──

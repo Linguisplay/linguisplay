@@ -289,25 +289,50 @@ def pose_of(position: str | None) -> str | None:
     return None
 
 
+# ── 🔊 本子自己的音效词表 (Yi 2026-08-03:「怎么在编辑剧本里面加音效」) ──────────
+# 内置那张 _SFX 是现代 / 恐怖向的: 仙侠本里「剑鸣」「拂尘」「钟磬」一个都不触发,
+# 所以那类本子基本是哑的。作者在工坊里补自己的词, 存 tuning.sfx:
+#     {"enabled": true, "map": {"剑鸣": "clash", "拂尘": "creak"}}
+# 作者的词【压过】内置词 —— 同一句里两边都命中时听他的。
+
+
+def story_sfx(content: dict[str, Any] | None) -> tuple[bool, list[tuple[str, str]]]:
+    """→ (音效开着吗, 作者的 [(关键词, 音效名)] 表)。手填字段什么形状都可能, 绝不炸回合。"""
+    tun = ((content or {}).get("story") or {}).get("tuning")
+    cfg = tun.get("sfx") if isinstance(tun, dict) else None
+    if not isinstance(cfg, dict):
+        return True, []
+    on = cfg.get("enabled")
+    m = cfg.get("map")
+    pairs = [(str(k).strip(), str(v).strip())
+             for k, v in m.items() if str(k).strip() and str(v).strip()] \
+        if isinstance(m, dict) else []
+    # 长词先匹配: 作者写了「刀剑相击」又写了「刀」时, 具体的那条该赢
+    pairs.sort(key=lambda kv: -len(kv[0]))
+    return (True if on is None else bool(on)), pairs
+
+
 class TurnStage:
     """One turn's per-beat director memory: sfx dedupe + the single flash."""
 
-    def __init__(self) -> None:
+    def __init__(self, content: dict[str, Any] | None = None) -> None:
         self.used: set[str] = set()
         self.flashed = False
+        self.sfx_on, self.own_sfx = story_sfx(content)
 
     def beat_fx(self, text: str, mood: str | None = None,
                 act: str | None = None) -> dict[str, Any]:
         """演出注记 — rides the streamed beat dict. Keys absent when nothing fires."""
         t = text or ""
         out: dict[str, Any] = {}
-        for kw, name in _SFX:
+        for kw, name in (self.own_sfx + _SFX if self.sfx_on else []):
             if kw in t:
                 if name not in self.used:
                     self.used.add(name)
                     out["sfx"] = name
                 break
-        if "sfx" not in out and "heartbeat" not in self.used and _HEARTBEAT_RE.search(t):
+        if (self.sfx_on and "sfx" not in out and "heartbeat" not in self.used
+                and _HEARTBEAT_RE.search(t)):
             self.used.add("heartbeat")
             out["sfx"] = "heartbeat"
         if not self.flashed and _FLASH_RE.search(t):

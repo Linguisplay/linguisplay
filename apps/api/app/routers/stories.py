@@ -928,6 +928,35 @@ def bgm_list():
             "tracks": director.list_bgm()}
 
 
+@router.get("/sfx/list")
+def sfx_list():
+    """🔊 音效面板的两张表: 库里【真的存在】的音效文件 + 内置自动词表。
+
+    问磁盘, 不问表 —— 手写一份清单迟早和 /scene/sfx 里的东西对不上, 作者点了名
+    却没有文件, 玩家那边就是一片静默 (BGM 的 variants 已经栽过这一跤)。"""
+    import pathlib as _pl
+
+    from ..engine.scene import _SFX
+    d = _pl.Path(__file__).resolve().parents[1] / "static" / "scene" / "sfx"
+    have = sorted(p.stem for p in d.glob("*.mp3")) if d.is_dir() else []
+    kw: dict[str, list[str]] = {}
+    for k, name in _SFX:
+        kw.setdefault(name, []).append(k)
+    return {"sfx": [{"name": n, "label": SFX_LABEL.get(n, n), "keywords": kw.get(n, [])}
+                    for n in have]}
+
+
+# 内置音效的人话名 — 作者在下拉里读的是这个, 不是 creak / laser
+SFX_LABEL = {
+    "knock": "敲门", "door": "开关门", "footsteps": "脚步", "rain": "下雨",
+    "wind": "风声", "buzz": "手机震动", "thunder": "打雷", "waves": "海浪",
+    "heartbeat": "心跳", "ringtone": "电话铃", "draw": "拔刀出鞘", "sword": "挥剑破空",
+    "clash": "金铁交击", "coin": "钱币", "glass": "玻璃碎裂", "punch": "拳脚落肉",
+    "explosion": "爆炸", "laser": "枪响 / 能量束", "magic": "施法", "bell": "钟声",
+    "book": "翻书", "creak": "吱呀 (门轴 / 木板)",
+}
+
+
 @router.get("/{story_id}/cover")
 def get_cover(story_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     """🎴 这本的封面现在长什么样 + 还差什么 (工坊用)。"""
