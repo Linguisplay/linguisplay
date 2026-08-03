@@ -22,7 +22,10 @@
   label { display: block; font-size: 12px; color: #999; margin: 8px 0 2px; }
   input, textarea, select { width: 100%; padding: 10px 12px; border-radius: 12px; border: .5px solid rgba(216,181,122,.2); background: rgba(20,16,11,.55); color: #ede6d8; font: inherit; }
   input:focus, textarea:focus, select:focus { outline: none; border-color: rgba(216,181,122,.55); box-shadow: 0 0 0 3px rgba(216,181,122,.1); }
-  textarea { resize: vertical; min-height: 54px; }
+  /* 📝 长文框给得下一段话 (Yi 报障 2026-08-02「手机端看不见编辑剧本里的内容」:
+     54px 只有两行, 世界观/梗概/开场白全被切在半句 — 内容在那儿, 就是读不到)。
+     124px ≈ 4 行; 仍可手动拉高 */
+  textarea { resize: vertical; min-height: 124px; line-height: 1.6; }
   button { padding: 8px 16px; border: 0; border-radius: 12px; background: linear-gradient(180deg,#e6cb99,#cfa965); box-shadow: inset 0 1px 0 rgba(255,255,255,.38), 0 1px 3px rgba(0,0,0,.3); color: #241c0e; cursor: pointer; font-weight: 600; transition: transform .12s ease; }
   button:active { transform: scale(.96); }
   button.ghost { background: #201c15; color: #a79e8c; } button.sm { padding: 4px 9px; font-size: 12px; }
@@ -74,11 +77,26 @@ details.sec > summary::before { content:"▸"; color:#7a746a; font-weight:400; }
 details.sec[open] > summary::before { content:"▾"; }
 details.sec > .secbody { padding:0 14px 12px; }
 .seccount { color:#a8a091; font-size:12px; font-weight:400; margin-left:auto; }
+/* 🗂 页签横滑不换行 (真机实测: 10 个页签 wrap 成三排占 119px, 加上按钮群,
+   打开编辑器第一屏几乎全是控件, 内容被挤下去)。改横滑: 只占一排 */
 .sectabs { display:none; position:sticky; top:0; z-index:5; background:#100f0d;
-  padding:8px 0 6px; gap:6px; flex-wrap:wrap; }
+  padding:8px 0 6px; gap:6px; overflow-x:auto; scrollbar-width:none; }
+.sectabs::-webkit-scrollbar { display:none; }
 .sectabs button { background:#1d1b19; border:1px solid #292217; color:#b3aa97;
-  border-radius:999px; padding:6px 12px; font-size:13px; cursor:pointer; }
+  border-radius:999px; padding:6px 12px; font-size:13px; cursor:pointer;
+  flex-shrink:0; white-space:nowrap; }
 .sectabs button.on { border-color:#cfa965; color:#241c0e; background:linear-gradient(180deg,#e6cb99,#cfa965); font-weight:600; box-shadow: inset 0 1px 0 rgba(255,255,255,.38); }
+/* 📱 手机断点 (studio.html 此前一个都没有 — 整页照桌面写的, Yi 报障后补):
+   顶栏 space-between 在 390px 下把标题挤折成两行, 邮箱还压在上面 */
+@media (max-width: 520px) {
+  header { padding: 10px 0; gap: 8px; }
+  h1 { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  header #who { display: none; }          /* 手机上邮箱不占地 */
+  header .bar { flex-shrink: 0; flex-wrap: nowrap; }
+  /* 👆 工坊的操作钮同守 44 触控 (与 play.html 同一铁律) */
+  button, .sm { min-height: 44px; }
+  .sectabs button { min-height: 40px; }   /* 页签横滑一排, 40 已够准 */
+}
 .sectabs .tbadge { color:#a8a091; font-size:11px; margin-left:3px; }
 /* 简单模式: 分页 — 只显示激活区, 标题行变页头不可折叠 */
 body.simple .sectabs { display:flex; }
@@ -166,26 +184,6 @@ body.simple details.sec > summary::before { content:""; }
           <span id="enrichMsg" style="color:#8e8e93;font-size:12px;margin-left:8px"></span>
         </div>
       </details>
-      <!-- 🎵 配乐: 导演每回合按剧情判一格情绪, 这里定这格情绪响哪首曲子。
-           不填 = 走引擎默认曲库 (作者不管音乐也不会没声) -->
-      <div style="margin-top:14px">
-        <label style="margin-top:0">🎵 配乐（按情绪）</label>
-        <div class="muted" style="font-size:12px;line-height:1.6">
-          一段故事会走过几种情绪：开场、日常、暧昧、危机、高潮、落幕。
-          引擎每回合认出走到了哪一步，这里定那一步该响哪首曲子。留「默认」就走引擎自带的。▶ 试听。
-        </div>
-        <div id="cueRows" style="margin-top:8px"></div>
-        <details style="margin-top:10px">
-          <summary style="cursor:pointer" class="muted">按场景气氛细配（可选：诡异 / 孤独 / 古风…）</summary>
-          <div class="muted" style="font-size:12px;line-height:1.6;margin:6px 0">
-            上面那层管「故事走到哪一步」，这一层管「这一场是什么气氛」。
-            两层都配了以剧情节拍为准；都不配就走引擎默认曲库。
-          </div>
-          <div id="bgmRows"></div>
-        </details>
-      </div>
-      <audio id="bgmPreview" style="display:none"></audio>
-
       <!-- 🎴 封面: 拿本剧本自己的立绘/头像/背景现排, 不花生图钱, 秒出。
            总开关在 engine/cover.py 的 ENABLED —— 关着时整块面板不露面, 不留死按钮 -->
       <div id="coverBox" class="hidden" style="margin-top:12px;display:flex;gap:12px;align-items:flex-start">
@@ -279,6 +277,26 @@ body.simple details.sec > summary::before { content:""; }
       <div class="secbody">
       <div class="muted">给角色上传照片、给地点上传背景图（JPG/PNG/WebP，≤5MB），会替换 AI 生成的图。先保存草稿才有可上传的对象。</div>
       <div id="media"></div>
+      </div>
+    </details>
+
+    <!-- 🎵 配乐: 原本埋在「基本信息」里第 1076 像素处 — 屏高才 844, 作者根本翻不到
+         (Yi 实弹「配乐在哪这部分」)。独立成区, 标签栏上一直挂着, 一眼看得见。 -->
+    <details class="sec" data-sec="bgm" data-adv="1">
+      <summary>🎵 配乐（按情绪）<span class="seccount" id="sc_bgm"></span></summary>
+      <div class="secbody">
+      <div class="muted">一段故事会走过几种情绪：开场、日常、暧昧、危机、高潮、落幕。
+        引擎每回合认出走到了哪一步，这里定那一步该响哪首曲子。留「默认」就走引擎自带的。▶ 试听。</div>
+      <div id="cueRows" style="margin-top:8px"></div>
+      <details style="margin-top:10px">
+        <summary style="cursor:pointer" class="muted">按场景气氛细配（可选：诡异 / 孤独 / 古风…）</summary>
+        <div class="muted" style="font-size:12px;line-height:1.6;margin:6px 0">
+          上面那层管「故事走到哪一步」，这一层管「这一场是什么气氛」。
+          两层都配了以剧情节拍为准；都不配就走引擎默认曲库。
+        </div>
+        <div id="bgmRows"></div>
+      </details>
+      <audio id="bgmPreview" style="display:none"></audio>
       </div>
     </details>
 
@@ -494,7 +512,8 @@ function renderAll(){ renderLocs(); renderChars(); renderRelWeb(); renderActs();
 // ── ✍️ 简单模式分页 (Yi: 核心五区一页一屏, 高级区有内容才长标签, 不乱) ──
 const CORE_SECS = [["basic","📝 基本"],["chars","👥 角色"],["relweb","🕸 关系"],["acts","🎬 幕"],["endings","🏁 结局"]];
 const ADV_SECS = [["secrets","🔒 秘密"],["locs","🗺 地点"],["clock","⏳ 时钟"],["pressure","⚠️ 危机"],
-  ["phone","📱 手机"],["verdict","🔍 结案"],["dice","🎲 骰"],["sandbox","🏖 沙盒"],["packs","💎 收费包"],["media","🖼 媒体"],["tuning","⚙️ 调参"]];
+  ["phone","📱 手机"],["verdict","🔍 结案"],["dice","🎲 骰"],["sandbox","🏖 沙盒"],["packs","💎 收费包"],
+  ["media","🖼 媒体"],["bgm","🎵 配乐"],["tuning","⚙️ 调参"]];
 let activeSec="basic";
 function isSimple(){ return localStorage.getItem("studio_full")!=="1"; }
 function initMode(){
@@ -527,7 +546,11 @@ function _secCounts(){
     clock:cfgd(story.clock)?"✓":0, pressure:cfgd(story.pressure)?"✓":0,
     phone:(story.phone&&story.phone.enabled)?"✓":0,
     verdict:cfgd(story.verdict)?"✓":0, dice:0,
-    sandbox:(story.sandbox&&story.sandbox.enabled)?"✓":0, media:"", tuning:tn||0 };
+    sandbox:(story.sandbox&&story.sandbox.enabled)?"✓":0, media:"",
+    // 🎵 配乐是常设功能不是可选配置 —— 标签栏永远挂着, 不等作者先配了才出现
+    // (不然第一次根本找不到它)。配过几格就显示几格。
+    bgm:Object.keys(((story.tuning||{}).bgm)||{}).length||"✓",
+    tuning:tn||0 };
 }
 function updateSecMeta(){
   const n=_secCounts();
