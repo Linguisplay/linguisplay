@@ -971,20 +971,38 @@ def voice_list():
     return {"voices": out, "speeds": [0.85, 0.92, 1.0, 1.06, 1.15]}
 
 
-# 预置音色的人话名。描述来自选角实录 (patch_voice.py) —— 作者认得出「像谁」,
-# 比「longfei_v3」有用得多。加新音色: gen_voice.py 加一行 + 跑一次排精灵, 再补这里。
-# ⚠️ 女声只有一个 (longjiayi_v3, 粤语)。女角色目前基本无音可配 — 这是硬缺口, 不是 bug。
+# 预置音色的人话名。
+#
+# ⚠️ label 写的是【这个音色本身】什么味道, 抄自阿里官方音色表; like 写的是我们哪个
+# 角色用过它。第一版把两者混了 —— 拿 patch_voice.py 的注释当音色描述, 结果
+# 「冷而利落」其实是王九这个人、「沧桑」其实是龙卷风压到 0.9 的效果, 音色本身是
+# 「欢脱粤语」。作者照着选就会选歪。改标签前先回官方表核, 别照角色写。
+# 加新音色: gen_voice.py 加一行 → 跑一次排精灵 → 补这里 (守卫测试盯着两边不许分家)。
 VOICE_CAST: dict[str, dict] = {
+    # 中文男
     "longtian_v3":     {"label": "磁性理智 · 男", "lang": "zh", "like": "蓝信一"},
     "longfei_v3":      {"label": "热血磁性 · 男", "lang": "zh", "like": "十二少"},
-    "longjielidou_v3": {"label": "阳光顽皮 · 男", "lang": "zh", "like": "四仔"},
-    "longcheng_v3":    {"label": "冷而利落 · 男", "lang": "zh", "like": "王九"},
+    "longcheng_v3":    {"label": "智慧青年 · 男", "lang": "zh", "like": "王九"},
     "longanzhi_v3":    {"label": "睿智轻熟 · 男", "lang": "zh", "like": "大老板"},
     "longyingxun_v3":  {"label": "年轻青涩 · 男", "lang": "zh", "like": "陈洛军"},
-    "longze_v3":       {"label": "元气大只 · 男", "lang": "zh", "like": "Tiger哥"},
-    "longanyang":      {"label": "情感戏路 · 男", "lang": "zh", "like": "狄秋（压速出狠劲）"},
-    "longanyue_v3":    {"label": "沧桑 · 粤语男", "lang": "yue", "like": "龙卷风"},
+    "longze_v3":       {"label": "温暖元气 · 男", "lang": "zh", "like": "Tiger哥"},
+    "longanyang":      {"label": "阳光大男孩 · 男", "lang": "zh", "like": "狄秋"},
+    "longjielidou_v3": {"label": "阳光顽皮 · 男（童声路子）", "lang": "zh", "like": "四仔"},
+    "longshu_v3":      {"label": "沉稳青年 · 男", "lang": "zh"},
+    "longshuo_v3":     {"label": "博才干练 · 男", "lang": "zh"},
+    "longlaotie_v3":   {"label": "东北直率 · 男（方言音色，古装慎用）", "lang": "zh"},
+    # 中文女
+    "longwan_v3":      {"label": "细腻柔声 · 女", "lang": "zh"},
+    "longxiaochun_v3": {"label": "知性积极 · 女", "lang": "zh"},
+    "longxiaoxia_v3":  {"label": "沉稳权威 · 女", "lang": "zh"},
+    "longmiao_v3":     {"label": "抑扬顿挫 · 女", "lang": "zh"},
+    "longyue_v3":      {"label": "温暖磁性 · 女", "lang": "zh"},
+    "longyuan_v3":     {"label": "温暖治愈 · 女", "lang": "zh"},
+    "longhua_v3":      {"label": "元气甜美 · 女", "lang": "zh"},
+    # 粤语 (仍然只有一男一女 — 粤语本子的硬限制照旧)
+    "longanyue_v3":    {"label": "欢脱 · 粤语男", "lang": "yue", "like": "龙卷风（压到0.9出沧桑）"},
     "longjiayi_v3":    {"label": "知性 · 粤语女", "lang": "yue", "like": "蔡妍"},
+    # 英文
     "loongeric_v3":    {"label": "UK male", "lang": "en", "like": "Elias"},
     "loongluca_v3":    {"label": "UK male · plain", "lang": "en", "like": "Marek"},
     "loongdavid_v3":   {"label": "US male", "lang": "en", "like": "Rafael"},

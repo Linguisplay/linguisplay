@@ -38,6 +38,19 @@ VOICES: dict[str, str] = {
     "loongandy_v3":   "en",    # Niko (美音)
     "loongluca_v3":   "en",    # Marek (英音)
     "longanlang_v3":  "en",    # Ilya (双语音色, 微口音正合丹麦人设; 勿再跨语双持)
+    # 🎙 2026-08-03 扩池 (Yi:「寒山的角色都配上吧」)。原来 15 个音色里【女声只有一个】
+    # 且是粤语的 —— 女角色根本无音可配。这十个是拿真实合成调用探出来存在的
+    # (longjing / longxiaobai / longtong / longxiang / longxiaocheng 探了不存在, 别再试)。
+    "longwan_v3":     "zh",    # 龙婉 · 女 · 细腻柔声
+    "longxiaochun_v3": "zh",   # 龙小淳 · 女 · 知性积极
+    "longxiaoxia_v3": "zh",    # 龙小夏 · 女 · 沉稳权威
+    "longmiao_v3":    "zh",    # 龙妙 · 女 · 抑扬顿挫
+    "longyue_v3":     "zh",    # 龙悦 · 女 · 温暖磁性
+    "longyuan_v3":    "zh",    # 龙媛 · 女 · 温暖治愈
+    "longhua_v3":     "zh",    # 龙华 · 女 · 元气甜美
+    "longshu_v3":     "zh",    # 龙书 · 男 · 沉稳青年
+    "longshuo_v3":    "zh",    # 龙硕 · 男 · 博才干练
+    "longlaotie_v3":  "zh",    # 龙老铁 · 男 · 东北直率 (是方言音色, 古装本慎用)
 }
 
 # 精灵台本住在 engine/voice.SPRITES (克隆音即时生成与这里共用一份, 不许分家)。
