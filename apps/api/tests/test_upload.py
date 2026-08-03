@@ -50,12 +50,15 @@ def test_upload_flow():
         assert up("bg", "nope", JPG).status_code == 404
         assert up("cover", "c_up1", JPG).status_code == 400
 
-        # someone else's story → 404 (ownership scoped)
+        # 🤝 共享创作库 (Yi 2026-08-02): 别人的本子也能传图 —— 合写者当然要能改美术。
+        # 这一条从「非主人 → 404」改成「非主人 → 200」, 是有意反转, 不是回归。
+        # 开关在 routers/stories.py 的 SHARED_LIBRARY; 关掉它这里就该重新变 404。
         c.post("/api/v1/auth/logout")
         c.post("/api/v1/auth/signup",
                json={"email": "other@x.com", "password": "password1",
                      "dob": "1990-01-01", "accepted_tos": True})
-        assert up("avatar", "c_up1", JPG).status_code in (403, 404)
+        from app.routers.stories import SHARED_LIBRARY
+        assert up("avatar", "c_up1", JPG).status_code == (200 if SHARED_LIBRARY else 404)
 
     # cleanup the files the test wrote into the real static dir
     for rel in ("avatar/c_up1.jpg", "bg/loc_up1.jpg"):

@@ -165,10 +165,29 @@ def _to_secret(sec: SecretModel) -> Secret:
     )
 
 
+# 🤝 共享创作库 (Yi 2026-08-02:「让所有账号都可以看见编辑剧本和沙盒」)。
+# True = 任何登录用户都能打开并编辑任何一本剧本/沙盒。
+#
+# 这是 2026-06-19 那次「用户数据隔离」的一处【有意】反转, 不是回退 —— 隔离仍然管着
+# 存档、人格、卡库、gal 作品; 放开的只有剧本本体, 因为剧本是要合写的。
+# 删除【不在】放开之列: 它连存档带快照一起抹, 不可逆, 仍然只有主人能做。
+SHARED_LIBRARY = True
+
+
 def _own_story(story_id: str, user: User, db: Session) -> StoryModel:
+    """能不能编辑这一本。共享库打开时, 谁都能编 (删除除外, 见 _my_story)。"""
+    s = db.get(StoryModel, story_id)
+    if not s or (s.owner_id != user.id and not SHARED_LIBRARY):
+        raise HTTPException(404, "story not found")
+    return s
+
+
+def _my_story(story_id: str, user: User, db: Session) -> StoryModel:
+    """只有主人能做的事 (删除)。共享库开着也不放行 —— 删掉是找不回来的。"""
     s = db.get(StoryModel, story_id)
     if not s or s.owner_id != user.id:
-        raise HTTPException(404, "story not found")
+        raise HTTPException(404 if not s else 403,
+                            "只有这本的作者能删除它" if s else "story not found")
     return s
 
 
@@ -584,19 +603,34 @@ def _public_story_view(out: Story) -> Story:
 @router.get("/{story_id}", response_model=Story)
 def get_story(
     story_id: str,
+    edit: bool = False,
     db: Session = Depends(get_db),
     lp_session: str | None = Cookie(default=None),
 ):
+    """一条路由两种读法, 靠 ?edit=1 分开 —— 这一格错了就是剧透事故。
+
+    · 不带 edit (播放页 chooseRole 走的就是这条): 非作者一律吃剧透盾, 结局、答案、
+      幕内事件、角色小传全抹掉。
+    · 带 edit=1 (只有工坊会带): 给全量。共享创作库开着时, 任何登录用户都算作者。
+
+    ⚠️ 曾经想省事: 把"登录用户"直接当作者。结果是【每个玩家一打开剧本就看到结局和
+    答案】—— tests/test_sweep 当场红。开放编辑与开放剧透是同一件事的两面, 所以只在
+    明确要编辑时才掀盖子。
+    """
     s = db.get(StoryModel, story_id)
     if not s:
         raise HTTPException(404, "story not found")
     viewer_id = read_session_token(lp_session) if lp_session else None
-    # Public sees the published story; only the author may view an unpublished draft.
+    is_owner = bool(viewer_id) and viewer_id == s.owner_id
+    may_edit = is_owner or (bool(viewer_id) and SHARED_LIBRARY)
+    # 主人照旧【无条件】拿全量 (老契约不动); 合写者要全量必须明确说 ?edit=1
+    as_author = is_owner or (may_edit and edit)
+    # 草稿只有能编辑的人看得见 (它还没上架, 对玩家而言不存在)
     if s.visibility != "public" or s.status != "published":
-        if viewer_id != s.owner_id:
+        if not may_edit:
             raise HTTPException(404, "story not found")
     out = _to_story(s)
-    if viewer_id != s.owner_id:
+    if not as_author:
         out = _public_story_view(out)
     return out
 
@@ -677,7 +711,8 @@ def update_story(
 
 @router.delete("/{story_id}", status_code=204)
 def delete_story(story_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    s = _own_story(story_id, user, db)
+    # 🔒 共享库放开的是【编辑】, 不是删除 —— 删掉连存档带快照一起没, 找不回来
+    s = _my_story(story_id, user, db)
     db.delete(s)
     db.commit()
 

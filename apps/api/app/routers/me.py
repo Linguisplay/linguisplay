@@ -60,18 +60,22 @@ def patch_settings(
 
 @router.get("/stories")
 def my_stories(user: User = Depends(current_user), db: Session = Depends(get_db)):
-    """The author's own stories (drafts + published) for the studio."""
-    from ..models import Story as StoryModel
+    """工坊的剧本列表。
 
-    rows = (
-        db.query(StoryModel)
-        .filter(StoryModel.owner_id == user.id)
-        .order_by(StoryModel.updated_at.desc())
-        .all()
-    )
+    🤝 共享创作库开着时列【全站】的剧本与沙盒, 不只是自己的 (Yi 2026-08-02:
+    「让所有账号都可以看见编辑剧本和沙盒」) —— 剧本是要合写的。
+    gal 作品不进这张表: 它有自己的书架 (/galshelf), 混进来会把工坊列表冲垮。
+    每行带 mine, 前端好标出哪些是自己的。"""
+    from ..models import Story as StoryModel
+    from .stories import SHARED_LIBRARY
+
+    q = db.query(StoryModel).filter(StoryModel.kind != "gal")
+    if not SHARED_LIBRARY:
+        q = q.filter(StoryModel.owner_id == user.id)
+    rows = q.order_by(StoryModel.updated_at.desc()).all()
     return [
         {"id": s.id, "title": s.title, "status": s.status, "version": s.version,
-         "visibility": s.visibility}
+         "visibility": s.visibility, "mine": s.owner_id == user.id}
         for s in rows
     ]
 

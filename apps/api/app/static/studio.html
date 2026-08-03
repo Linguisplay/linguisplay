@@ -453,7 +453,9 @@ async function loadList(){
   rows.forEach(s=>{
     const d=document.createElement("div"); d.className="card listitem";
     const st = s.status==="published" ? `已发布 v${s.version}` : "草稿";
-    d.innerHTML = `<b>${esc(s.title||"未命名")}</b> <span class="bar"><span class="tag">${st}</span><span class="tag">${s.visibility==="public"?"公开":"私密"}</span></span>`;
+    // 🤝 共享创作库: 列表里有别人的本子 — 标出来, 免得合写时不知道在动谁的东西
+    const own = s.mine === false ? `<span class="tag">👥 他人的</span>` : "";
+    d.innerHTML = `<b>${esc(s.title||"未命名")}</b> <span class="bar"><span class="tag">${st}</span><span class="tag">${s.visibility==="public"?"公开":"私密"}</span>${own}</span>`;
     d.onclick=()=>editStory(s.id);
     stories.appendChild(d);
   });
@@ -477,7 +479,9 @@ function newSandbox(){
   story=s; secrets=[]; openEditor();
 }
 async function editStory(id){
-  story = await j(`/stories/${id}`);
+  // ?edit=1 = 要全量 (结局/幕内事件/角色小传)。不带这个参数拿到的是剧透盾删减版,
+  // 编辑器读了再保存 = 把作者的东西抹掉。播放页故意不带。
+  story = await j(`/stories/${id}?edit=1`);
   loadPacks();
   story.trope_tags=story.trope_tags||[]; story.characters=story.characters||[]; story.acts=story.acts||[];
   story.endings=story.endings||[]; story.locations=story.locations||[]; story.tuning=story.tuning||{};
