@@ -1,12 +1,14 @@
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import Body, FastAPI
+from fastapi import Body, FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+
+from .middleware_perf import CachedStaticFiles, SmartGZipMiddleware, conditional_file
 
 _STATIC = os.path.join(os.path.dirname(__file__), "static")
 _SCENE = os.path.join(_STATIC, "scene")
@@ -76,6 +78,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 🚚 出口带宽实测只有 0.4~0.8 Mbps (服务器本机取 play.html 0.002s, 走公网 3.7~8.6s)。
+# 应用不慢, 线细 —— 唯一的解是少传字节。gzip 后 play.html 353KB → 119KB。
+# ⚠️ 用的是自家的 SmartGZipMiddleware 而非官方 GZipMiddleware: 官方那版流式分支
+#    write 后不 flush, 会把游戏的 SSE 逐拍推流憋死。契约见 tests/test_transport_perf.py。
+app.add_middleware(SmartGZipMiddleware, minimum_size=1000)
+
 API = "/api/v1"
 app.include_router(auth.router, prefix=API)
 app.include_router(me.router, prefix=API)
@@ -97,41 +105,52 @@ def root():
 
 
 # the play/studio HTML changes often during dev — serve it with no-cache so the browser
-# ALWAYS fetches the latest (no more "I deployed a UI fix but you still see the old page").
-_NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"}
+# ALWAYS revalidates (no more "I deployed a UI fix but you still see the old page").
+#
+# 🚚 2026-08-03: 原来这里还带 no-store, 那等于禁掉缓存 —— ETag 一次都用不上,
+# play.html 353KB 每次刷新都整个重下。在 0.5Mbps 的出口上就是每次白等 6 秒
+# (Yi 报「整个网站非常卡」的头号成因)。改成只留 no-cache: 浏览器照旧每次问
+# 服务器"变了吗", 没变就是 304 几百字节, 变了才给新的 —— 既不会看到旧页面,
+# 也不用反复搬同样的字节。
+_NO_CACHE = {"Cache-Control": "no-cache, must-revalidate", "Pragma": "no-cache", "Expires": "0"}
+
+
+def _page(request: Request, filename: str):
+    """伺服一个 HTML 页面, 认 If-None-Match (裸 FileResponse 不认, 详见 middleware_perf)."""
+    return conditional_file(request, os.path.join(_STATIC, filename), _NO_CACHE)
 
 
 @app.get("/play", include_in_schema=False)
-def play_page():
-    return FileResponse(os.path.join(_STATIC, "play.html"), headers=_NO_CACHE)
+def play_page(request: Request):
+    return _page(request, "play.html")
 
 
 @app.get("/studio", include_in_schema=False)
-def studio_page():
-    return FileResponse(os.path.join(_STATIC, "studio.html"), headers=_NO_CACHE)
+def studio_page(request: Request):
+    return _page(request, "studio.html")
 
 
 @app.get("/gal", include_in_schema=False)
-def gal_shelf_page():
+def gal_shelf_page(request: Request):
     """🎀 galgame 书架: 所有本子一屏见封面 — 玩/建/进度的统一入口."""
-    return FileResponse(os.path.join(_STATIC, "galshelf.html"), headers=_NO_CACHE)
+    return _page(request, "galshelf.html")
 
 
 @app.get("/galedit", include_in_schema=False)
-def gal_edit_page():
+def gal_edit_page(request: Request):
     """🛠 修订台: 重画/重编/改字/换画风 (blueprint §5 制作台)."""
-    return FileResponse(os.path.join(_STATIC, "galedit.html"), headers=_NO_CACHE)
+    return _page(request, "galedit.html")
 
 
 @app.get("/maker", include_in_schema=False)
-def maker_page():
+def maker_page(request: Request):
     """🎀 galgame 生成器: 贴故事 → 建造 → 游玩 (docs/galgame-maker.md)."""
-    return FileResponse(os.path.join(_STATIC, "galmaker.html"), headers=_NO_CACHE)
+    return _page(request, "galmaker.html")
 
 
 @app.get("/galplay", include_in_schema=False)
-def galplay_page():
-    return FileResponse(os.path.join(_STATIC, "galplay.html"), headers=_NO_CACHE)
+def galplay_page(request: Request):
+    return _page(request, "galplay.html")
 
 
 # 🔔 PWA 三件套 (活世界 P3): service worker 必须从根作用域伺服, 否则控不住 /play
@@ -160,7 +179,11 @@ def icon_512():
 
 # Scene assets (background images / BGM / SFX). Drop files here per SCENE_ASSETS.md;
 # missing files 404 and the client degrades to gradient background + silence.
-app.mount("/scene", StaticFiles(directory=_SCENE), name="scene")
+# 🚚 带 Cache-Control 挂载: /scene 是 49MB 美术, 原本只有 ETag 没有 Cache-Control,
+# 浏览器只能启发式猜, 同一张立绘反复过线 (0.5Mbps 上一张 400KB 背景要 9~40 秒)。
+# 一天的 max-age: 一天内零请求, 过期后 ETag 换 304 而不是重下。不上 immutable —
+# 前端引图基本不带 ?v=, Yi 重出立绘是常事, 穿不透缓存就等于改了看不见。
+app.mount("/scene", CachedStaticFiles(directory=_SCENE, max_age=86400), name="scene")
 
 
 @app.get(f"{API}/health", tags=["health"])
