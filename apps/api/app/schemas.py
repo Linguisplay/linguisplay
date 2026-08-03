@@ -138,6 +138,10 @@ class Character(BaseModel):
     known_facts: Optional[str] = None
     gender: Optional[str] = None          # 男 | 女 | 其他
     age_band: Optional[str] = None        # 少年 | 青年 | 中年 | 老年
+    # 💗🛡 关系起点 (合伙人①②进编辑器): {"closeness": -40..100, "trust": 0..100} —
+    # 这个角色开局对玩家的好感与信任; 缺省走引擎默认 (5/10)。不进玩家视角白名单
+    # (开局立场是作者底牌)。引擎在 _ensure_player_rel 按它落初值, 只种未建账的角色。
+    rel_start: dict[str, Any] = {}
     # 🎙 配音选角 {"id": CosyVoice音色名, "speed": 语速}: 语气音精灵按 id 取
     # /scene/voice/<id>/ 下的短音频; 台词播放键按 id+speed 现场合成。缺省 = 无配音,
     # 全链路静默降级 (玩家可扮角色按 galgame 惯例不配)。选角只是演出层, 不进正史。

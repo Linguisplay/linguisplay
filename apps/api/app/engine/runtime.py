@@ -4235,6 +4235,13 @@ def _ensure_npc_rel(content: dict[str, Any], state: dict[str, Any]) -> None:
         if not int((e.get(mk) or {}).get("stance") or 0):
             e[mk] = {"stance": stance, "label": None}
     state["npc_rel"] = web
+    # 💗🛡 作者写的关系起点 (编辑器 rel_start): 只种还没建账的角色 — 已经处出来的
+    # 关系绝不被起点覆盖 (与 ties 幂等同法); 顺着本函数的每回合节拍走, 零新调用
+    rel_all = state.setdefault("rel", {})
+    for c in _characters(content):
+        cid = c.get("id")
+        if cid and c.get("rel_start") and cid not in rel_all:
+            rel_all[cid] = relationships.new_scores_for(c)
 
 
 def npc_stance(state: dict[str, Any], a: str, b: str) -> dict[str, Any] | None:

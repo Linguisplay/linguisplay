@@ -326,6 +326,22 @@ def new_scores() -> dict[str, int]:
     return {"closeness": START_CLOSENESS, "romance": START_ROMANCE, "trust": START_TRUST}
 
 
+def new_scores_for(char: dict[str, Any] | None) -> dict[str, int]:
+    """💗🛡 作者写的关系起点 (编辑器 rel_start) 压过引擎默认 — 开局就欠玩家人情的
+    好感写高, 卧底戏开局就疑人的信任写低。越界值一律钳回合法范围。"""
+    s = new_scores()
+    rs = (char or {}).get("rel_start") or {}
+    for k, lo, hi in (("closeness", CLOSE_MIN, CLOSE_MAX),
+                      ("romance", ROM_MIN, ROM_MAX),
+                      ("trust", TRUST_MIN, TRUST_MAX)):
+        if rs.get(k) is not None:
+            try:
+                s[k] = _clamp(int(rs[k]), lo, hi)
+            except (TypeError, ValueError):
+                pass
+    return s
+
+
 def _clamp(v: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, v))
 

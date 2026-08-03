@@ -37,6 +37,21 @@ def test_one_sided_tie_mirrors_stance_without_label():
     assert mirror["label"] == runtime._STANCE_LABEL.get(-2, "")  # 无 label → 档位词
 
 
+def test_rel_start_seeds_only_unbooked(monkeypatch):
+    """💗🛡 关系起点: 作者写的开局好感/信任落初值; 已建账的关系绝不被覆盖。"""
+    from app.engine import relationships as rel
+    content = {"story": {"characters": [
+        {"id": "u", "name": "U", "rel_start": {"closeness": 60, "trust": 3}},
+        {"id": "v", "name": "V", "rel_start": {"closeness": 999, "trust": -5}},  # 越界要钳
+        {"id": "w", "name": "W", "rel_start": {"trust": 90}},
+    ]}}
+    st = {"npc_rel": {}, "rel": {"w": {"closeness": 33, "romance": 1, "trust": 44}}}
+    runtime._ensure_npc_rel(content, st)
+    assert st["rel"]["u"] == {"closeness": 60, "romance": 0, "trust": 3}
+    assert st["rel"]["v"]["closeness"] == rel.CLOSE_MAX and st["rel"]["v"]["trust"] == rel.TRUST_MIN
+    assert st["rel"]["w"]["closeness"] == 33   # 处出来的关系不被起点覆盖
+
+
 def test_evolved_edge_never_reseeded():
     st = {"npc_rel": {"x|y": {"ab": {"stance": -1, "label": None},
                               "ba": {"stance": -1, "label": None},

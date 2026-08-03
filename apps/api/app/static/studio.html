@@ -923,6 +923,13 @@ function renderLocs(){
 }
 
 // ── characters ──
+// 💗🛡 关系起点 (合伙人①②进编辑器): 两根轴的开局值, 空 = 引擎默认 (5/10)
+function setRelStart(i,k,v){
+  const c=story.characters[i];
+  c.rel_start={...(c.rel_start||{})};
+  if(v===""||v===null) delete c.rel_start[k]; else c.rel_start[k]=NUM(v);
+  if(!Object.keys(c.rel_start).length) delete c.rel_start;
+}
 function addChar(){ story.characters.push({id:gid("c_"),name:"",role:"",is_lead:story.characters.length===0,persona_text:"",background:"",avatar_url:"",presence:"present",appears_from_act:0,playable:false,relation_default:"",agenda:"",eq_style:"",home_location_id:null,schedule:[],ties:[],items:[],bio_layers:[]}); _openChar=story.characters.length-1; renderAll(); }
 // 🪄 一大段文字 → 角色卡 (Yi 定): 后端 LLM 解析成卡 v2 全字段, 生成后照常手改
 // 🪄 共用解析通路: 提交秒回任务号 + 短轮询 (长连接会被手机网络/webview 掐断 — 实弹)。
@@ -1187,6 +1194,14 @@ function renderChars(){
           <div><label>情绪表达方式（可选，写成接招棋谱最有效）</label><input value="${esc(c.eq_style||"")}" placeholder="例：嘴硬心软——被撒娇就损人但手上让步；见人低落绝不讲道理，先递吃的" oninput="setChar(${i},'eq_style',this.value)"></div>
           <div><label>🗣 语言指纹（可选：句长/口头禅/绝不说的词/标点脾气）</label><input value="${esc(c.voice_print||"")}" placeholder="例：短句居多，句尾爱带「咯」；从不说客套话；心虚时才用省略号" oninput="setChar(${i},'voice_print',this.value)"></div>
           <div><label>对玩家的初始关系</label><select onchange="setChar(${i},'relation_default',this.value)">${REL_MODES.map(([v,t])=>`<option value="${v}" ${(c.relation_default||"")===v?"selected":""}>${t}</option>`).join("")}</select></div>
+        </div>
+        <div class="row2">
+          <div><label>💗 初始好感（-40~100，默认 5——开局就欠你人情的写高，恨你的写负）</label>
+            <input type="number" min="-40" max="100" value="${(c.rel_start||{}).closeness ?? ""}" placeholder="5"
+              onchange="setRelStart(${i},'closeness',this.value)"></div>
+          <div><label>🛡 初始信任（0~100，默认 10——卧底戏/悬疑戏把它写低，开局就疑你）</label>
+            <input type="number" min="0" max="100" value="${(c.rel_start||{}).trust ?? ""}" placeholder="10"
+              onchange="setRelStart(${i},'trust',this.value)"></div>
         </div>
         <div class="row2">
           <div><label>🎬 行动节奏（可选）</label><input value="${esc(c.act_pace||"")}" placeholder="例：分阶段推进，每步间有确认或观察 ／ 利落一步到位 ／ 冲动急促" oninput="setChar(${i},'act_pace',this.value)"></div>
