@@ -951,6 +951,48 @@ def sfx_list():
                     for n in have]}
 
 
+@router.get("/voice/list")
+def voice_list():
+    """🎙 预置音色表 (角色卡的选角下拉)。
+
+    只列【语气音精灵排齐了的】音色 —— 精灵是角色开口那一下的「嗯 / 哼 / 诶?!」,
+    它才是配音的常态; 逐句台词是玩家点播放键才合成的锦上添花。精灵没排齐就选,
+    玩家听到的是一片静默。同样问磁盘不问表。"""
+    import pathlib as _pl
+
+    from ..engine.voice import SPRITES
+    d = _pl.Path(__file__).resolve().parents[1] / "static" / "scene" / "voice"
+    need = sum(len(v) for v in SPRITES["zh"].values())   # 5 类 × 2 段
+    out = []
+    for vid, meta in VOICE_CAST.items():
+        n = len(list((d / vid).glob("*.mp3"))) if (d / vid).is_dir() else 0
+        if n >= need:
+            out.append({"id": vid, **meta})
+    return {"voices": out, "speeds": [0.85, 0.92, 1.0, 1.06, 1.15]}
+
+
+# 预置音色的人话名。描述来自选角实录 (patch_voice.py) —— 作者认得出「像谁」,
+# 比「longfei_v3」有用得多。加新音色: gen_voice.py 加一行 + 跑一次排精灵, 再补这里。
+# ⚠️ 女声只有一个 (longjiayi_v3, 粤语)。女角色目前基本无音可配 — 这是硬缺口, 不是 bug。
+VOICE_CAST: dict[str, dict] = {
+    "longtian_v3":     {"label": "磁性理智 · 男", "lang": "zh", "like": "蓝信一"},
+    "longfei_v3":      {"label": "热血磁性 · 男", "lang": "zh", "like": "十二少"},
+    "longjielidou_v3": {"label": "阳光顽皮 · 男", "lang": "zh", "like": "四仔"},
+    "longcheng_v3":    {"label": "冷而利落 · 男", "lang": "zh", "like": "王九"},
+    "longanzhi_v3":    {"label": "睿智轻熟 · 男", "lang": "zh", "like": "大老板"},
+    "longyingxun_v3":  {"label": "年轻青涩 · 男", "lang": "zh", "like": "陈洛军"},
+    "longze_v3":       {"label": "元气大只 · 男", "lang": "zh", "like": "Tiger哥"},
+    "longanyang":      {"label": "情感戏路 · 男", "lang": "zh", "like": "狄秋（压速出狠劲）"},
+    "longanyue_v3":    {"label": "沧桑 · 粤语男", "lang": "yue", "like": "龙卷风"},
+    "longjiayi_v3":    {"label": "知性 · 粤语女", "lang": "yue", "like": "蔡妍"},
+    "loongeric_v3":    {"label": "UK male", "lang": "en", "like": "Elias"},
+    "loongluca_v3":    {"label": "UK male · plain", "lang": "en", "like": "Marek"},
+    "loongdavid_v3":   {"label": "US male", "lang": "en", "like": "Rafael"},
+    "loongandy_v3":    {"label": "US male · bright", "lang": "en", "like": "Niko"},
+    "longanlang_v3":   {"label": "EN male · slight accent", "lang": "en", "like": "Ilya"},
+}
+
+
 # 内置音效的人话名 — 作者在下拉里读的是这个, 不是 creak / laser
 SFX_LABEL = {
     "knock": "敲门", "door": "开关门", "footsteps": "脚步", "rain": "下雨",

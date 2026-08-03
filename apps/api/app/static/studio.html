@@ -603,6 +603,8 @@ function openEditor(){
   renderAll();
   loadCover();
   loadBgm(); loadSfx();
+  // 🎙 音色表回来后把角色重画一遍 —— 下拉的选项从这张表来, 早画就是一排空的
+  loadVoices().then(() => renderChars());
 }
 function renderAll(){ renderLocs(); renderChars(); renderRelWeb(); renderActs(); renderSecrets(); renderEndings(); renderSystems(); renderPacksCard(); renderMedia(); updateSecMeta(); }
 
@@ -1245,21 +1247,72 @@ async function uploadCharVoice(i, inp){
   }catch(e){ const m=document.getElementById(`vcmsg_${i}`); if(m) m.textContent = "克隆失败: " + e.message; }
   finally{ inp.value = ""; }
 }
+// 试听先放【语气音精灵】: 免费、即时, 而且正是玩家实际会听到的那一声。
+// 精灵不在 (刚克隆完还在后台排) 才退回合成一句台词 —— 那条要花钱, 也要求已存盘。
 async function hearCharVoice(i){
   const c = story.characters[i];
   const msg = document.getElementById(`vcmsg_${i}`);
+  const v = c.voice || {};
+  if(!v.id) return;
   try{
-    if(msg) msg.textContent = "⏳ 合成试听…";
+    await new Promise((res, rej) => {
+      const a = new Audio(`/scene/voice/${encodeURIComponent(v.id)}/neutral_1.mp3`);
+      a.onerror = rej; a.onplaying = res;
+      a.play().catch(rej);
+    });
+    if(msg) msg.textContent = v.cloned ? "专属声线已克隆" : "开口会带「嗯 / 哼 / 诶？！」";
+    return;
+  }catch(e){ /* 精灵还没排到, 走下面的合成 */ }
+  try{
+    if(msg) msg.textContent = "⏳ 合成试听…（这句要存盘后才准）";
     const fd = new FormData(); fd.append("target_id", c.id);
     const r = await fetch(API+`/stories/${story.id}/voice_preview`,{method:"POST",credentials:"include",body:fd});
     if(!r.ok) throw new Error((await r.json().catch(()=>({}))).detail||r.status);
     new Audio((await r.json()).url).play().catch(()=>{});
-    if(msg) msg.textContent = c.voice&&c.voice.cloned ? "专属声线已克隆" : "预置音色: "+(c.voice&&c.voice.id||"");
+    if(msg) msg.textContent = v.cloned ? "专属声线已克隆" : "预置音色: " + v.id;
   }catch(e){ if(msg) msg.textContent = "试听失败: " + e.message; }
 }
 function clearCharVoice(i){
   story.characters[i].voice = {};   // 存盘后生效; 语气音与台词键随之消失
   _openChar = i; renderChars();
+}
+
+// ── 🎙 预置音色选角 (Yi 2026-08-03:「人物的嗯哼哦哦之类的声音呢」) ────────────
+// 精灵素材早就排好了 (16 个音色 × 10 段), 缺的只是编辑器里选它的那个下拉。
+// 克隆的专属声线不进下拉 —— 它是这个角色独有的, 列进"预置"里会诱人误选别人的声线。
+let voiceLib = null;
+async function loadVoices(){
+  if(voiceLib) return voiceLib;
+  try{ voiceLib = await j("/stories/voice/list"); }catch(e){ voiceLib = {voices:[], speeds:[1.0]}; }
+  return voiceLib;
+}
+function voiceOpts(v){
+  const lib = voiceLib || {voices:[]};
+  const cur = v.id || "";
+  // 克隆音不在表里, 但得让作者看见自己选的是什么 (否则下拉一刷新就显示"没配音")
+  const cloned = cur && v.cloned ? `<option value="${esc(cur)}" selected>专属声线（已克隆）</option>` : "";
+  return `<option value="">没配音（开口是静的）</option>` + cloned +
+    (lib.voices||[]).map(x =>
+      `<option value="${esc(x.id)}"${x.id===cur&&!v.cloned?" selected":""}>${esc(x.label)}${x.like?"（像"+esc(x.like)+"）":""}</option>`).join("");
+}
+function speedOpts(v){
+  const cur = Number(v.speed || 1.0);
+  const NAME = {0.85:"很慢", 0.92:"偏慢", 1:"常速", 1.06:"偏快", 1.15:"很快"};
+  return ((voiceLib||{}).speeds || [1.0]).map(s =>
+    `<option value="${s}"${Math.abs(s-cur)<0.01?" selected":""}>${NAME[s]||s}</option>`).join("");
+}
+function setCharVoice(i, id){
+  const c = story.characters[i];
+  // 从预置里选 = 不再是克隆音; cloned 标记必须跟着掉, 否则试听会去找不存在的声线
+  c.voice = id ? {id:id, speed:(c.voice||{}).speed || 1.0} : {};
+  saveMsg.textContent = "配音已改，记得保存";
+  _openChar = i; renderChars();
+}
+function setCharSpeed(i, s){
+  const c = story.characters[i];
+  if(!(c.voice||{}).id) return;
+  c.voice = Object.assign({}, c.voice, {speed: Number(s)});
+  saveMsg.textContent = "语速已改，记得保存";
 }
 function renderChars(){
   chars.innerHTML="";
@@ -1296,10 +1349,20 @@ function renderChars(){
         <button class="sm ghost" onclick="fillChar(${i})">🪄 AI 补全空白</button>
         <span class="muted" id="avmsg_${i}" style="font-size:12px"></span>
       </div>
-      <div class="bar" style="margin:2px 0 8px">
-        <label class="sm ghost" style="cursor:pointer;margin:0;padding:4px 10px;border:1px solid #292217;border-radius:8px">🎙 上传声音（克隆专属声线）<input type="file" accept="audio/*,.wav,.mp3,.m4a" style="display:none" onchange="uploadCharVoice(${i},this)"></label>
-        ${c.voice&&c.voice.id?`<button class="sm ghost" onclick="hearCharVoice(${i})">▶ 试听</button><button class="sm del" onclick="clearCharVoice(${i})">✖ 去掉配音</button>`:""}
-        <span class="muted" id="vcmsg_${i}" style="font-size:12px">${c.voice&&c.voice.id?(c.voice.cloned?"专属声线已克隆":"预置音色: "+esc(c.voice.id)):"未配音 · 传 10~30 秒清晰人声即可"}</span>
+      <!-- 🎙 配音 (Yi 2026-08-03:「人物的嗯哼哦哦之类的声音呢」)。配了音色, 这个角色
+           开口那一下就带语气音; 之前编辑器里只有"上传人声克隆"一条路, 服务器上现成的
+           预置音色反而选不着 —— 所以 147 个角色里只有 21 个有声音。 -->
+      <div class="bar" style="margin:2px 0 6px">
+        <span class="muted" style="font-size:12px;flex:0 0 42px">🎙 声音</span>
+        <select style="flex:1;min-width:0" id="vsel_${i}" onchange="setCharVoice(${i}, this.value)">
+          ${voiceOpts(c.voice||{})}
+        </select>
+        <select style="flex:0 0 88px" onchange="setCharSpeed(${i}, this.value)">${speedOpts(c.voice||{})}</select>
+        ${c.voice&&c.voice.id?`<button class="sm ghost" type="button" onclick="hearCharVoice(${i})">▶</button>`:""}
+      </div>
+      <div class="bar" style="margin:0 0 8px">
+        <label class="sm ghost" style="cursor:pointer;margin:0;padding:4px 10px;border:1px solid #292217;border-radius:8px">🎙 或上传人声克隆专属声线<input type="file" accept="audio/*,.wav,.mp3,.m4a" style="display:none" onchange="uploadCharVoice(${i},this)"></label>
+        <span class="muted" id="vcmsg_${i}" style="font-size:12px">${c.voice&&c.voice.id?(c.voice.cloned?"专属声线已克隆":"开口会带「嗯 / 哼 / 诶？！」"):"没配音 · 这个角色开口是静的"}</span>
       </div>
       <div class="row2">
         <div><label>名字</label><input value="${esc(c.name)}" oninput="setChar(${i},'name',this.value)"></div>
