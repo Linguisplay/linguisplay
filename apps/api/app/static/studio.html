@@ -549,13 +549,21 @@ function updateSecMeta(){
 
 // ── 🕸 关系网 (创作 UX: 成对编辑, 底下写 ties — 零 schema 变更, 简单操作) ──
 const STANCES = [[-2,"死仇"],[-1,"不睦"],[0,"（平淡）"],[1,"交好"],[2,"生死之交"]];
+// 🕸 拆向 (2026-08-02): ties 天生有向, 一行关系 = 一对角色的【两个方向】
+// {a,b, stance/label = a→b, stance2/label2 = b→a (null = b 没写过这条)}
+// 旧版 _writePair 只写回 a→b, 编辑一次就把对向 tie 静默抹掉 — 实弹已修
 function relPairs(){
   const seen={}, out=[];
   (story.characters||[]).forEach(c=>(c.ties||[]).forEach(t=>{
     if(!t.char_id||t.char_id===c.id) return;
     const k=[c.id,t.char_id].sort().join("|");
-    if(seen[k]) return; seen[k]=1;
-    out.push({a:c.id,b:t.char_id,stance:t.stance|0,label:t.label||""});
+    if(seen[k]){
+      const row=seen[k];
+      if(row.a===t.char_id){ row.stance2=t.stance|0; row.label2=t.label||""; }
+      return;
+    }
+    const row={a:c.id,b:t.char_id,stance:t.stance|0,label:t.label||"",stance2:null,label2:""};
+    seen[k]=row; out.push(row);
   }));
   return out;
 }
@@ -569,6 +577,10 @@ function _writePair(p){
   _clearPair(p.a,p.b);
   const ca=(story.characters||[]).find(c=>c.id===p.a);
   if(ca)(ca.ties=ca.ties||[]).push({char_id:p.b,stance:p.stance|0,label:p.label||""});
+  // 对向只有作者真写过才落 (stance2=null = 这个方向还空着, 引擎会兜底)
+  const cb=(story.characters||[]).find(c=>c.id===p.b);
+  if(cb&&(p.stance2!==null&&p.stance2!==undefined||((p.label2||"").trim())))
+    (cb.ties=cb.ties||[]).push({char_id:p.a,stance:p.stance2|0,label:p.label2||""});
 }
 let relRows=[];
 function addRelRow(){
@@ -577,7 +589,7 @@ function addRelRow(){
 }
 function setRelRow(i,k,v){
   const old={...relRows[i]};
-  relRows[i][k]=(k==="stance")?NUM(v):v;
+  relRows[i][k]=(k==="stance"||k==="stance2")?NUM(v):v;
   if(old.a&&old.b) _clearPair(old.a,old.b);   // 换人时把旧对清掉
   _writePair(relRows[i]);
   if(k==="a"||k==="b") renderRelWeb();
@@ -597,15 +609,24 @@ function renderRelWeb(){
   host.innerHTML = relRows.length? "" : "<p class='muted'>还没有关系——点上面「加一对关系」，或在图里点两个头像。</p>";
   relRows.forEach((p,i)=>{
     const row=document.createElement("div"); row.className="card"; row.id=`relrow_${i}`;
-    row.style.cssText="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:6px 0;padding:8px";
+    row.style.cssText="margin:6px 0;padding:8px";
+    const nm=id=>((story.characters||[]).find(c=>c.id===id)||{}).name||"？";
+    const dirLine=(arrow,skey,lkey,st,lb,ph)=>
+      `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px">`+
+      `<span class="muted" style="min-width:86px">${arrow}</span>`+
+      `<select onchange="setRelRow(${i},'${skey}',this.value)">`+
+        STANCES.map(([v,n])=>`<option value="${v}" ${st!==null&&v===(st|0)?"selected":""}>${n}</option>`).join("")+`</select>`+
+      `<input style="flex:1;min-width:120px" placeholder="${ph}" value="${esc(lb||"")}" onchange="setRelRow(${i},'${lkey}',this.value)">`+
+      `</div>`;
     row.innerHTML =
+      `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">`+
       `<select onchange="setRelRow(${i},'a',this.value)">${charOptions(p.a,true)}</select>`+
-      `<span class="muted">↔</span>`+
+      `<span class="muted">⇄</span>`+
       `<select onchange="setRelRow(${i},'b',this.value)">${charOptions(p.b,true)}</select>`+
-      `<select onchange="setRelRow(${i},'stance',this.value)">`+
-        STANCES.map(([v,n])=>`<option value="${v}" ${v===(p.stance|0)?"selected":""}>${n}</option>`).join("")+`</select>`+
-      `<input style="flex:1;min-width:120px" placeholder="渊源一句（如：同门师兄弟，为一桩旧账生分了）" value="${esc(p.label||"")}" onchange="setRelRow(${i},'label',this.value)">`+
-      `<button class="sm ghost" onclick="delRelRow(${i})">删</button>`;
+      `<span style="flex:1"></span><button class="sm ghost" onclick="delRelRow(${i})">删</button></div>`+
+      // 🕸 两个方向各写各的 (拆向): 情同父子 与 亲信眼线 从此各归各
+      dirLine(`${esc(nm(p.a).slice(0,4))} → ${esc(nm(p.b).slice(0,4))}`,"stance","label",p.stance,p.label,"这一向的渊源（如：情同父子）")+
+      dirLine(`${esc(nm(p.b).slice(0,4))} → ${esc(nm(p.a).slice(0,4))}`,"stance2","label2",p.stance2,p.label2,"反向的渊源（空 = 引擎按对向兜底）");
     host.appendChild(row);
   });
   renderRelGraph();
@@ -648,24 +669,44 @@ function renderRelGraph(){
   relRows.forEach((p) => {
     const a = pos[p.a], b = pos[p.b];
     if(!a || !b) return;
-    const key = _pairK(p.a, p.b), sel = key === _rgEditKey, s = p.stance | 0;
-    const col = s > 0 ? "#d8b57a" : s < 0 ? "#c96a5e" : "#60584b";
-    edges += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${col}"`
-      + ` stroke-width="${(s ? Math.abs(s) * 2.5 : 1.5) + (sel ? 1.5 : 0)}"`
-      + ` stroke-opacity="${sel ? 1 : .8}" ${s ? "" : 'stroke-dasharray="4 4"'}`
-      + ` style="cursor:pointer" onclick="_rgEditOpen('${key}')">`
-      + `<title>${esc(p.label || "")}</title></line>`;
-    // 🏷 独立文字框 (Yi: 词不许和线/头像糊在一起): 圆角小牌, 深底, 描边随立场色;
-    // 渊源优先, 没写渊源标立场词; 点牌 = 点线
-    const word = (p.label || "").trim().slice(0, 8)
-      || (STANCES.find(([v]) => v === s) || [0, ""])[1].replace(/[（）]/g, "");
-    if(word){
-      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, wc = s ? col : "#b0a89b";
-      const w = word.length * 11 + 16;
-      edges += `<g transform="translate(${mx},${my})" style="cursor:pointer" onclick="_rgEditOpen('${key}')">`
-        + `<rect x="${-w/2}" y="-10" width="${w}" height="20" rx="10" fill="#181613" stroke="${wc}" stroke-opacity=".7"/>`
-        + `<text y="4" text-anchor="middle" font-size="10.5" fill="${wc}">${esc(word)}</text></g>`;
+    const key = _pairK(p.a, p.b), sel = key === _rgEditKey;
+    // 🕸 拆向 = 每个方向一条带箭头的弧 (与玩家端关系网同画法); 两向都空 = 虚线占位
+    const mkArc = (from, to, s, lb) => {
+      const col = s > 0 ? "#d8b57a" : "#c96a5e";
+      const w = Math.max(1.5, Math.abs(s) * 2) + (sel ? 1.2 : 0);
+      const dx = to.x - from.x, dy = to.y - from.y, L = Math.hypot(dx, dy) || 1;
+      const px = -dy / L, py = dx / L;
+      const C = {x: (from.x + to.x) / 2 + px * 11, y: (from.y + to.y) / 2 + py * 11};
+      const bez = t => ({x: (1-t)*(1-t)*from.x + 2*(1-t)*t*C.x + t*t*to.x,
+                         y: (1-t)*(1-t)*from.y + 2*(1-t)*t*C.y + t*t*to.y});
+      const tp = bez(.68), tb = bez(.60);
+      const ux = tp.x - tb.x, uy = tp.y - tb.y, UL = Math.hypot(ux, uy) || 1;
+      const ax2 = ux/UL, ay2 = uy/UL, nx2 = -ay2, ny2 = ax2;
+      const tri = `${tp.x+ax2*7},${tp.y+ay2*7} ${tp.x-nx2*4},${tp.y-ny2*4} ${tp.x+nx2*4},${tp.y+ny2*4}`;
+      const dpath = `M${from.x},${from.y} Q${C.x},${C.y} ${to.x},${to.y}`;
+      let out = `<path d="${dpath}" fill="none" stroke="${col}" stroke-width="${w}"`
+        + ` stroke-opacity="${sel ? 1 : .8}" style="cursor:pointer" onclick="_rgEditOpen('${key}')">`
+        + `<title>${esc(lb || "")}</title></path>`
+        + `<polygon points="${tri}" fill="${col}" fill-opacity=".9"/>`;
+      const word = (lb || "").trim().slice(0, 8)
+        || (STANCES.find(([v]) => v === s) || [0, ""])[1].replace(/[（）]/g, "");
+      if(word){
+        const mid = bez(.5), wd = word.length * 11 + 16;
+        out += `<g transform="translate(${mid.x},${mid.y})" style="cursor:pointer" onclick="_rgEditOpen('${key}')">`
+          + `<rect x="${-wd/2}" y="-10" width="${wd}" height="20" rx="10" fill="#181613" stroke="${col}" stroke-opacity=".7"/>`
+          + `<text y="4" text-anchor="middle" font-size="10.5" fill="${col}">${esc(word)}</text></g>`;
+      }
+      return out;
+    };
+    const s1 = p.stance | 0, s2 = p.stance2 === null || p.stance2 === undefined ? null : (p.stance2 | 0);
+    if(!s1 && !s2 && !(p.label || "").trim() && !(p.label2 || "").trim()){
+      edges += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="#60584b"`
+        + ` stroke-width="${1.5 + (sel ? 1.5 : 0)}" stroke-dasharray="4 4"`
+        + ` style="cursor:pointer" onclick="_rgEditOpen('${key}')"/>`;
+      return;
     }
+    if(s1 || (p.label || "").trim()) edges += mkArc(a, b, s1, p.label);
+    if(s2 || (p.label2 || "").trim()) edges += mkArc(b, a, s2 | 0, p.label2);
   });
   const nodes = chars.map(c => {
     const p = pos[c.id], sel = _rgSel === c.id;
@@ -683,14 +724,19 @@ function renderRelGraph(){
     if(i >= 0){
       const p = relRows[i];
       const nm = id => ((story.characters || []).find(c => c.id === id) || {}).name || "?";
-      pop = `<div class="card" style="margin:8px auto;max-width:480px;padding:10px 12px">`
-        + `<b>${esc(nm(p.a))} ↔ ${esc(nm(p.b))}</b>`
-        + `<div style="display:flex;gap:6px;margin:8px 0;flex-wrap:wrap">`
+      // 🕸 拆向编辑卡: 两个方向各自的立场与渊源 (反向留空 = 引擎按对向兜底)
+      const dirBlock = (title, skey, lkey, st, lb) =>
+        `<div class="muted" style="margin-top:8px;font-size:12px">${title}</div>`
+        + `<div style="display:flex;gap:6px;margin:5px 0;flex-wrap:wrap">`
         + STANCES.map(([v, n]) =>
-            `<button class="sm${v === (p.stance | 0) ? "" : " ghost"}" onclick="setRelRow(${i},'stance','${v}')">${n}</button>`).join("")
+            `<button class="sm${st !== null && v === (st | 0) ? "" : " ghost"}" onclick="setRelRow(${i},'${skey}','${v}')">${n}</button>`).join("")
         + `</div>`
-        + `<input style="width:100%" placeholder="渊源一句（如：同门师兄弟，为一桩旧账生分了）"`
-        + ` value="${esc(p.label || "")}" onchange="setRelRow(${i},'label',this.value)">`
+        + `<input style="width:100%" placeholder="这一向的渊源一句"`
+        + ` value="${esc(lb || "")}" onchange="setRelRow(${i},'${lkey}',this.value)">`;
+      pop = `<div class="card" style="margin:8px auto;max-width:480px;padding:10px 12px">`
+        + `<b>${esc(nm(p.a))} ⇄ ${esc(nm(p.b))}</b>`
+        + dirBlock(`${esc(nm(p.a))} → ${esc(nm(p.b))}`, "stance", "label", p.stance, p.label)
+        + dirBlock(`${esc(nm(p.b))} → ${esc(nm(p.a))}`, "stance2", "label2", p.stance2, p.label2)
         + `<div style="text-align:right;margin-top:8px">`
         + `<button class="sm ghost" onclick="_rgEditKey=null;delRelRow(${i})">删除关系</button> `
         + `<button class="sm" onclick="_rgEditKey=null;renderRelGraph()">完成</button></div></div>`;
