@@ -4853,7 +4853,10 @@ async function playBeat(b) {
 
 // ── immersive scene (background / bgm / sfx) ──────────
 // ── audio mixer: gentle levels, fades, ducking — nothing hard-cuts ──────────
-let BGM_VOL = 0.16, SFX_VOL = 0.16;  // soft bed: 音效和音乐同层, 不许跳脸 (Yi 报障太响); 滑杆可调
+// soft bed: 不许跳脸 (Yi 报障太响); 滑杆可调。
+// 🔉 音乐【比音效低一档】(Yi 2026-08-03 报障「bgm 声音太大了」): 音效是一次性点缀,
+// 音乐是全程都在响的垫底 —— 同层时音乐就是那个一直吵的。压音乐不压音效。
+let BGM_VOL = 0.10, SFX_VOL = 0.16;
 bgm.volume = BGM_VOL; sfx.volume = SFX_VOL;
 let fadeTimer = null, pendingSfx = null;
 function _ramp(el, to, ms, then) {
@@ -5023,7 +5026,9 @@ function _vols() {
 }
 function applyVols(m, v, live) {
   try { localStorage.setItem("lp_vol_music", String(m)); localStorage.setItem("lp_vol_vox", String(v)); } catch (e) {}
-  BGM_VOL = m / 100 * 0.32; SFX_VOL = BGM_VOL;   // 滑杆 50 = 旧默认 0.16, 顶格是它两倍
+  // 一根滑杆管两轨, 但两轨【不同层】: 滑杆 50 → 音乐 0.10 / 音效 0.16, 顶格各是两倍。
+  // 想让音乐再轻一点就往下拉滑杆 —— 音效会跟着轻, 但它俩的高低差恒定。
+  BGM_VOL = m / 100 * 0.20; SFX_VOL = m / 100 * 0.32;
   VOX_VOL = v / 100;                              // 滑杆 50 = 旧默认 0.5
   soundOn = m > 0; voxOn = v > 0;
   soundBtn.innerHTML = IC(soundOn || voxOn ? "vol" : "volx", 18);
