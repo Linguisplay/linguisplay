@@ -591,6 +591,11 @@ def _public_story_view(out: Story) -> Story:
     out.characters = [type(c)(**{k: getattr(c, k) for k in _PUBLIC_CHAR_KEYS})
                       for c in (out.characters or [])]
     out.pressure = None
+    # 🗺 locations carry the answer key too: unlock.required_fragment_ids is the
+    # walkthrough map, props.fragment_id/event_id are the evidence keys, and a locked
+    # place's very NAME is a spoiler (map_view ships a count, not names). The play UI
+    # reads map data exclusively from /runs/{id}/map — it never touches story.locations.
+    out.locations = []
     out.threat = None  # 🦇 the hunter's rules are the answer key of a horror story
     out.dooms = None   # 🚪 who gets taken, when, and how to stop it — never leaks
     out.sanity = None  # 🧠 the break threshold is mechanics, not lore

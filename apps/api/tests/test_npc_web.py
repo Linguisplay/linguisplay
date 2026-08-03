@@ -40,8 +40,12 @@ def test_ties_seed_and_prompt_carries_stances():
     st = runtime.default_state()
     out = runtime.run_turn(STORY, st, {"name": "我"}, "大家好", channel="say", llm=llm)
     st = out["state"]
-    assert st["npc_rel"]["a|b"] == {"stance": 2, "label": "过命的交情", "log": []}
-    assert st["npc_rel"]["a|c"]["stance"] == -1 and st["npc_rel"]["a|c"]["label"] is None
+    # 拆向后边是 {ab, ba, log} (0e14595): 授权方向带作者 label, 对向兜底同 stance
+    assert st["npc_rel"]["a|b"]["ab"] == {"stance": 2, "label": "过命的交情"}
+    assert st["npc_rel"]["a|b"]["log"] == []
+    assert runtime.npc_stance(st, "a", "b") == {"stance": 2, "label": "过命的交情"}
+    assert runtime.npc_stance(st, "a", "c")["stance"] == -1
+    assert st["npc_rel"]["a|c"]["ab"]["label"] is None      # 作者没写 label, 原样存
     # the speaker's performance knows their charged stances toward who's HERE (丙 hasn't entered)
     line = llm.prompts[0].get("npc_stances") or ""
     assert "你与乙：过命的交情" in line and "丙" not in line
@@ -56,10 +60,10 @@ def test_judged_shift_applies_with_guardrails():
     out = runtime.run_turn(STORY, st, {"name": "我"}, "你们俩吵什么", channel="say", llm=llm)
     st = out["state"]
     e = st["npc_rel"]["a|b"]
-    assert e["stance"] == 1 and e["label"] is None          # evolved past the authored flavor
+    assert e["ab"]["stance"] == 1 and e["ab"]["label"] is None   # evolved past the authored flavor
     assert e["log"][-1]["why"] == "当众下不来台"
     assert "a|我" not in str(st["npc_rel"])                  # player never enters the web
-    assert (st["npc_rel"].get("a|c") or {}).get("stance") == -1  # absent char untouched
+    assert runtime.npc_stance(st, "a", "c")["stance"] == -1  # absent char untouched
     ms = [m for m in out["moments"] if m["kind"] == "npc_rel"]
     assert ms == [{"kind": "npc_rel", "a": "甲", "b": "乙", "delta": -1, "stance": 1}]
 

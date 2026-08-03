@@ -31,6 +31,14 @@ def test_public_story_view_is_spoiler_free():
             "endings": [{"id": "e_t", "kind": "true", "title": "真", "text": "SPOILER_END"}],
             "verdict": {"prompt": "谁？", "fail_ending_id": "e_t",
                         "options": [{"id": "v1", "label": "甲", "correct": True}]},
+            # 🗺 审查实锤 (2026-08-03): 盾从没碰过 locations — 锁定地点名/解锁攻略图/
+            # 物证答案钥匙全量裸发。玩家端地图数据全走 /runs/{id}/map, 这里整个置空。
+            "locations": [
+                {"id": "l1", "name": "门厅", "detail": "d", "exits": []},
+                {"id": "l2", "name": "SPOILER_PLACE", "detail": "d", "exits": [],
+                 "unlock": {"required_fragment_ids": ["f9"]},
+                 "props": [{"id": "p1", "name": "抽屉", "fragment_id": "SPOILER_KEY"}]},
+            ],
         }).json()
         sid = story["id"]
         c.post(f"/api/v1/stories/{sid}/publish")
@@ -45,8 +53,10 @@ def test_public_story_view_is_spoiler_free():
         pub = c.get(f"/api/v1/stories/{sid}").json()
         blob = str(pub)
         assert pub["verdict"] is None and pub["endings"] == []
+        assert pub["locations"] == []          # 地图数据只走 /runs/{id}/map, 不走公开视图
         for spoiler in ("SPOILER_AGENDA", "SPOILER_LORE", "SPOILER_BIO",
-                        "SPOILER_EVENT", "SPOILER_END", "correct"):
+                        "SPOILER_EVENT", "SPOILER_END", "correct",
+                        "SPOILER_PLACE", "SPOILER_KEY"):
             assert spoiler not in blob
         # …but the play UI still gets what it needs
         ch = pub["characters"][0]

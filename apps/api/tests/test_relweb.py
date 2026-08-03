@@ -39,8 +39,10 @@ def test_relweb_nodes_edges_and_evolution_log():
             st = dict(r.state or {})
             st["met_ids"] = ["a", "b", "c"]
             runtime._ensure_npc_rel(r.pinned_content or {}, st)
-            assert st["npc_rel"]["a|b"]["stance"] == -2   # 授权 ties 播了种
-            st["npc_rel"]["a|b"]["stance"] = -1
+            # 拆向后边是 {ab, ba, log} (0e14595): 方向视图各归各, 读一律走 npc_stance
+            assert runtime.npc_stance(st, "a", "b")["stance"] == -2   # 授权 ties 播了种
+            st["npc_rel"]["a|b"]["ab"]["stance"] = -1
+            st["npc_rel"]["a|b"]["ba"]["stance"] = -1
             st["npc_rel"]["a|b"]["log"] = [{"act": 1, "delta": 1, "why": "乙替甲挡了一刀"}]
             r.state = st
             from sqlalchemy.orm.attributes import flag_modified

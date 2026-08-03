@@ -1363,6 +1363,17 @@ def apply_char_move(content: dict[str, Any], state: dict[str, Any], name_ref: st
     if not dest or not dest.get("id") or dest["id"] == state.get("location_id"):
         return None
     _sim(state, mover["id"])["pos"] = dest["id"]
+    # 🎬 明确落账的离场压过陈钉 (审查实锤: 场账本开场把全 cast 钉在场址, npc_moves
+    # booked 后审计记✓、三面人却纹丝不动 — 钉子在 char_position 里排 sim 之前)。
+    # 场账本合同本就写明「剧情走戏不受限」— booked 即拔钉, cast 同步摘人。
+    pins = state.get("char_pins") or {}
+    if mover["id"] in pins:
+        pins = dict(pins)
+        pins.pop(mover["id"])
+        state["char_pins"] = pins
+    sl = _sl(state)
+    if sl:
+        sl["cast"] = [c for c in (sl.get("cast") or []) if c != mover["id"]]
     return {"id": mover.get("id"), "name": mover.get("name"), "to_name": dest.get("name")}
 
 
@@ -1864,6 +1875,25 @@ def _sl_settle(content: dict[str, Any], state: dict[str, Any], tun: dict[str, An
             _sl_open(state, state.get("location_id"), cast, state.get("clock") or {})
 
 
+def commit_move(content: dict[str, Any], state: dict[str, Any], dest: dict[str, Any],
+                lead_id: str | None = None) -> dict[str, Any]:
+    """🚪 全引擎【玩家真实换场】唯一写入口 (2026-08-03 地图深查后写侧收口)。
+    原子做三件事: 拔旧钉+收场账本 → 写位置 → 钉带路人 (内部挡玩家自己)。
+    原地不算换场 — 不拔钉不收场 (没换场就没收场)。
+    读侧当年收口成 char_position 后同类 bug 绝迹; 写侧五次同型遗漏 (generate_and_move
+    三处/fate 生成/猎手押送 忘拔钉, moved_to 生成路丢带路人) 证明配套动作靠人记不住。
+    守卫: test_move_gate 用 AST 禁止白名单外直写 location_id/char_pins。"""
+    old = state.get("location_id")
+    did = dest.get("id")
+    if did and did != old:
+        _drop_pins_on_leave(state, old)
+        state["location_id"] = did
+        if lead_id and lead_id != state.get("player_character_id"):
+            # 带路的人一起走 (pin, 玩家离开自动释放) — 不然人留在原地话在新地
+            state.setdefault("char_pins", {})[lead_id] = did
+    return dest
+
+
 def settle_prose_arrival(content: dict[str, Any], state: dict[str, Any],
                          all_beats: list[dict[str, Any]], loc0_id: str | None,
                          sp_id: str | None = None) -> bool:
@@ -1896,10 +1926,7 @@ def settle_prose_arrival(content: dict[str, Any], state: dict[str, Any],
             and _route_exists(content, state, loc0_id, dest.get("id"))):
         _audit(state, "move.prose", False, str(dest.get("name")), "不可达或未解锁")
         return False
-    _drop_pins_on_leave(state, loc0_id)
-    state["location_id"] = dest["id"]
-    if sp_id:   # 带路的人不能留在原地 — 旁白写的是「他领着你走」
-        state.setdefault("char_pins", {})[sp_id] = dest["id"]
+    commit_move(content, state, dest, lead_id=sp_id)   # 带路的人不能留在原地
     _audit(state, "move.prose", True, str(dest.get("name")))
     return True
 
@@ -1923,9 +1950,7 @@ def apply_move(content: dict[str, Any], state: dict[str, Any], dest_ref: str) ->
             and dest.get("id") != (cur or {}).get("id") \
             and not _route_exists(content, state, (cur or {}).get("id"), dest["id"]):
         raise ValueError("not reachable from here")
-    _drop_pins_on_leave(state, (cur or {}).get("id"))
-    state["location_id"] = dest["id"]
-    return dest
+    return commit_move(content, state, dest)
 
 
 def ensure_start_location(content: dict[str, Any], state: dict[str, Any],
@@ -2028,7 +2053,8 @@ def _generic_place(nm: str) -> bool:
 
 def generate_and_move(content: dict[str, Any], state: dict[str, Any], place_name: str,
                       persona: dict[str, Any] | None = None, llm: LLM | None = None,
-                      move: bool = True, invent: bool = False) -> dict[str, Any] | None:
+                      move: bool = True, invent: bool = False,
+                      lead_id: str | None = None) -> dict[str, Any] | None:
     """EMERGENT LOCATION: the player agreed to go somewhere that isn't on the authored map.
     Create that place for real — the model writes a concrete, people-free description grounded
     in the world + where you're coming from — wire it two-way to the current place, append it
@@ -2041,8 +2067,13 @@ def generate_and_move(content: dict[str, Any], state: dict[str, Any], place_name
         raise ValueError("unknown location")
     existing = resolve_location(content, place_name)
     if existing and existing.get("id"):
+        # 🔒 撞名锁定地点 = 驳回 (审查实锤: 免检传送越过解锁门; 提及即立档同样不许
+        # 把锁定地点名漏进确认条 — 宁漏勿误杀的对偶: 这里是不许误放)
+        if not location_available(content, state, existing):
+            _audit(state, "loc.mint", False, place_name[:12], "撞名未解锁地点，驳回")
+            return None
         if move:
-            state["location_id"] = existing["id"]
+            commit_move(content, state, existing, lead_id=lead_id)
         return existing
     # 🚧 泛指预筛 (Yi 2026-07-22: 「个地方」上了地图, 这部分走 LLM): 指示代词/泛指
     # 碎片不进 LLM 直接驳回; invent=True (给涌现人物安家) 例外 — 交给模型发明去处
@@ -2073,8 +2104,11 @@ def generate_and_move(content: dict[str, Any], state: dict[str, Any], place_name
     if clean and clean != place_name:
         existing = resolve_location(content, clean)
         if existing and existing.get("id"):
+            if not location_available(content, state, existing):   # 🔒 提炼名同门
+                _audit(state, "loc.mint", False, clean[:12], "撞名未解锁地点，驳回")
+                return None
             if move:
-                state["location_id"] = existing["id"]
+                commit_move(content, state, existing, lead_id=lead_id)
             return existing
     import uuid
     lid = "loc_gen_" + uuid.uuid4().hex[:8]
@@ -2089,7 +2123,7 @@ def generate_and_move(content: dict[str, Any], state: dict[str, Any], place_name
         if final_name not in exits:
             exits.append(final_name)
     if move:
-        state["location_id"] = lid
+        commit_move(content, state, new_loc, lead_id=lead_id)
     return new_loc
 
 
@@ -3702,8 +3736,7 @@ def _apply_fate(content: dict[str, Any], state: dict[str, Any], option_id: str) 
         dest = _location_by_id(content, target)
         try:
             if dest:
-                _drop_pins_on_leave(state, state.get("location_id"))
-                state["location_id"] = dest["id"]
+                commit_move(content, state, dest)
             else:                                # sandbox: the named place becomes real
                 dest = generate_and_move(content, state, str(target))
                 if dest is not None:
@@ -6688,9 +6721,7 @@ def player_move(content: dict[str, Any], state: dict[str, Any], player_input: st
             continue
         if not _route_exists(content, state, (cur or {}).get("id"), dest["id"]):
             continue
-        _drop_pins_on_leave(state, (cur or {}).get("id"))
-        state["location_id"] = dest["id"]
-        return dest
+        return commit_move(content, state, dest)
     # 🚪 「离开/出去」names no place — unambiguous only when there is exactly ONE way out
     if _LEAVE_RE.match(text):
         outs = []
@@ -6700,9 +6731,7 @@ def player_move(content: dict[str, Any], state: dict[str, Any], player_input: st
                     and location_available(content, state, d):
                 outs.append(d)
         if len(outs) == 1:
-            _drop_pins_on_leave(state, (cur or {}).get("id"))
-            state["location_id"] = outs[0]["id"]
-            return outs[0]
+            return commit_move(content, state, outs[0])
     return None
 
 
@@ -7533,12 +7562,11 @@ def mint_sought_character(content: dict[str, Any], state: dict[str, Any], name: 
         _audit(state, "seek.scout", False, nm, "本局涌现人数已到上限")
         return None
     where = (scout.get("where") or "").strip() or _t(content, "附近的去处", "somewhere near")
-    prev = state.get("location_id")
     try:
-        loc = generate_and_move(content, state, where, llm=llm, invent=True)
+        # move=False: 确认片才移动玩家, 铸造只立档 — 也因此绝不惊动现场的钉子/场账本
+        loc = generate_and_move(content, state, where, llm=llm, invent=True, move=False)
     except ValueError:
         loc = None
-    state["location_id"] = prev   # the confirm chip moves the player, not the mint
     if loc is None:
         return None
     char = {
@@ -8362,15 +8390,12 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
             elif dest_l and dest_l.get("id") \
                     and location_available(content, state, dest_l) \
                     and _route_exists(content, state, (cur_l or {}).get("id"), dest_l["id"]):
-                _drop_pins_on_leave(state, (cur_l or {}).get("id"))
-                state["location_id"] = dest_l["id"]
-                if sp_id and sp_id != pcid:
-                    # 带路的人一起走 (pin, 玩家离开自动释放) — 不然人留在原地话在新地
-                    state.setdefault("char_pins", {})[sp_id] = dest_l["id"]
+                commit_move(content, state, dest_l, lead_id=sp_id)   # 带路的人一起走
                 _audit(state, "move.narrated", True, mv_to)
             elif not dest_l and sandbox_on(content) and not _bad_place_name(mv_to):
                 try:
-                    if generate_and_move(content, state, mv_to, llm=llm) is not None:
+                    if generate_and_move(content, state, mv_to, llm=llm,
+                                         lead_id=sp_id) is not None:
                         flags["content_mutated"] = True    # run grew a location → persist content
                         _audit(state, "move.narrated", True, f"{mv_to}（新生成）")
                     else:
@@ -9679,7 +9704,7 @@ def run_turn_stream(
                     early_moments.append(_sev)
                 if stage == "return":
                     _dest = _location_by_id(content, tcfg["return_to"]) or {}
-                    state["location_id"] = _dest.get("id") or _ploc
+                    commit_move(content, state, _dest if _dest.get("id") else {"id": _ploc})
                     th["alert"] = 0
                     yield ("beat", dedash_beat({"type": "description", "speaker_name": None,
                            "text": (cue + " " if cue else "") + _t(content,

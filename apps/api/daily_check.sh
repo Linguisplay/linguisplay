@@ -18,3 +18,6 @@ LOG=/opt/linguisplay/apps/api/daily_check.log
   (set -a; . ./.env; set +a; QA_STORIES=2 QA_TURNS=2 timeout 600 .venv/bin/python qa_playtour.py 2>&1 | tail -16)
 } >> "$LOG" 2>&1
 tail -n 800 "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"
+# 🕯 哨兵: 落「上次跑到这儿」的时间戳 — cron 静默死掉时 (2026-07-25~08-03 实案:
+# git archive 部署剥掉 +x, 断更 9 天没人知道) 部署脚本能一眼看到并喊出来。
+date '+%F %T' > /opt/linguisplay/apps/api/daily_check.last
