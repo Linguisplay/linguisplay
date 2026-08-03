@@ -8,7 +8,7 @@ LOG=/opt/linguisplay/apps/api/daily_check.log
 {
   echo "════════ $(date '+%F %T') ════════"
   echo "· service: $(systemctl is-active linguisplay)"
-  echo "· disk: $(df -h / | awk 'NR==2 {print $5\" used, \"$4\" free\"}')"
+  echo "· disk: $(df -h / | awk 'NR==2 {print $5 " used, " $4 " free"}')"
   echo "· db: $(du -h data/linguisplay.db | cut -f1)"
   echo "── smoke ──"
   .venv/bin/python smoke_stories.py 2>&1 | tail -4
