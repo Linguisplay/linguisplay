@@ -4464,8 +4464,8 @@ async function openRelWeb() {
     + `<svg id="rwsvg" width="${W}" height="${H}" style="margin:0 auto;display:block;touch-action:none">`
     + `<g id="rwpan"></g></svg>`
     + `<div id="rwinfo" class="muted" style="padding:10px 18px;font-size:12.5px;min-height:72px">`
-    + `${B("直线是你的关系：颜色=档位（恋爱线粉色）、越粗越近、呼吸=这一幕有变化。他们彼此是成对的箭头弧线——每个方向一条，各有各的立场，不对等一眼可见。点线看细账，点头像看档案。",
-           "Straight lines are YOUR bonds: color = tier (romance in pink), width = closeness, pulse = changed this act. Between THEM, each direction is its own arrowed arc — asymmetry at a glance. Tap a line for details, an avatar for the dossier.")}</div>`;
+    + `${B("你到每人是平行双线：💗好感线（颜色=档位，恋爱线粉色，越粗越近）+ 🛡信任线（青色，越粗越信，虚线=戒备）——喜欢与信任是两回事。他们彼此是成对的箭头弧线，每个方向一条。点线看细账，点头像看档案。",
+           "Two parallel lines run to each person: 💗 affection (color = tier, romance in pink, width = closeness) + 🛡 trust (teal, width = trust, dashed = guarded) — liking and trusting are different things. Between THEM, each direction is its own arrowed arc. Tap a line for details, an avatar for the dossier.")}</div>`;
   document.body.appendChild(ov);
   const gEl = ov.querySelector("#rwpan"), svEl = ov.querySelector("#rwsvg");
   const showEdge = (i) => {
@@ -4518,20 +4518,29 @@ async function openRelWeb() {
       pos[n.id] = { x: cx + R * Math.cos(a), y: cy + R * Math.sin(a) };
     });
     let svg = "";
-    (d.player || []).forEach(p => {   // 💞 玩家边: 档位定色, 亲近定粗, 本幕有变呼吸
+    (d.player || []).forEach(p => {   // 💞 玩家边 = 平行双线: 两根轴画成两根线 (合伙人①②)
       const q = pos[p.id]; if (!q) return;
+      const fresh = (p.recent || []).some(e => +e.act === +(d.act || 0));
+      const dxp = q.x - cx, dyp = q.y - cy, Lp = Math.hypot(dxp, dyp) || 1;
+      const ox = -dyp / Lp * 3.2, oy = dxp / Lp * 3.2;   // 垂直错开 → 双线并行
+      const pulse = fresh ? '<animate attributeName="stroke-opacity" values=".9;.3;.9" dur="1.6s" repeatCount="indefinite"/>' : "";
+      // 💗 好感线: 档位定色 (恋爱线粉), 亲近定粗; 陌生/平辈虚线
       const col = MCOL[p.mode] || "#8d8574";
       const w = Math.min(5.5, 1.5 + (p.closeness || 0) / 22);
-      const fresh = (p.recent || []).some(e => +e.act === +(d.act || 0));
       const dash = (!p.mode || p.mode === "stranger" || p.mode === "peer")
         ? ' stroke-dasharray="4 4"' : "";
-      svg += `<line x1="${cx}" y1="${cy}" x2="${q.x}" y2="${q.y}" stroke="${col}"`
-        + ` stroke-width="${w}" stroke-opacity=".85"${dash}>`
-        + (fresh ? '<animate attributeName="stroke-opacity" values=".9;.3;.9" dur="1.6s" repeatCount="indefinite"/>' : "")
-        + `</line>`
-        // 细线难点 (老图的通病): 加一条透明胖命中线, 手指头点得中
-        + `<line class="rw-pedge" data-id="${p.id}" x1="${cx}" y1="${cy}" x2="${q.x}" y2="${q.y}"`
-        + ` stroke="#000" stroke-opacity="0" stroke-width="16" style="cursor:pointer"/>`;
+      svg += `<line x1="${cx + ox}" y1="${cy + oy}" x2="${q.x + ox}" y2="${q.y + oy}"`
+        + ` stroke="${col}" stroke-width="${w}" stroke-opacity=".85"${dash}>${pulse}</line>`;
+      // 🛡 信任线: 青色, 信任定粗, 戒备 (<25) 虚线 — 亲近高信任低 = 粗粉线配细虚青线
+      const tv = p.trust || 0;
+      const tw = Math.max(1, 1 + tv / 30);
+      const tdash = tv < 25 ? ' stroke-dasharray="3 4"' : "";
+      svg += `<line x1="${cx - ox}" y1="${cy - oy}" x2="${q.x - ox}" y2="${q.y - oy}"`
+        + ` stroke="${tv < 25 ? "#5a7a88" : "#79b8cf"}" stroke-width="${tw}"`
+        + ` stroke-opacity=".8"${tdash}>${pulse}</line>`;
+      // 细线难点 (老图的通病): 一条透明胖命中线盖住双线, 手指头点得中
+      svg += `<line class="rw-pedge" data-id="${p.id}" x1="${cx}" y1="${cy}" x2="${q.x}" y2="${q.y}"`
+        + ` stroke="#000" stroke-opacity="0" stroke-width="18" style="cursor:pointer"/>`;
       if (p.mode === "lover" || p.mode === "flirt")
         svg += chip((cx + q.x) / 2, (cy + q.y) / 2, "💗" + (p.mode_name || ""), col,
                     `class="rw-pedge" data-id="${p.id}"`);
@@ -4640,6 +4649,8 @@ async function vnHearts() {
       + `<div class="hmid"><div class="hname">${escapeHtml(p.name)} <span class="hmode">${escapeHtml(rel.mode_name || "")}</span>${nxt}</div>`
       + barHtml(B("亲近", "Close"), p.closeness || 0, -40, 100, "#86c48e")
       + barHtml(B("心动", "Heart"), p.romance || 0, 0, 100, "#d98a9c")
+      // 🛡 信任/戒备轴 (合伙人②): 与喜欢正交的第二根轴, 低于25 = 戒备
+      + barHtml(B("信任", "Trust"), rel.trust || 0, 0, 100, (rel.trust || 0) < 25 ? "#5a7a88" : "#79b8cf")
       + `</div></div>`;
   }).join("") || `<div class="jempty">${B("这座城还没人认识你。", "No one knows you yet.")}</div>`;
   // 🏛 阵营名声 (权谋地基): 玩家已有风评的势力一行速览
