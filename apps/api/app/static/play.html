@@ -784,6 +784,27 @@ body.vn.vnlog #chat { visibility: visible; position: fixed; inset: 56px 0 0 0; z
 /* 🎙 台词播放键: 气泡尾随的小喇叭, 常态半隐 */
 .vbtn { cursor: pointer; font-size: 12px; opacity: .45; margin-left: 6px; user-select: none; }
 .vbtn:active, .vbtn:hover { opacity: 1; }
+/* 🕸 关系网 (gal 系设计语言 e9dbb50: 暖墨底/衬线金标题/幽灵文字键/线样图例) */
+#relwebov { position: fixed; inset: 0; z-index: 70; display: flex; flex-direction: column;
+  background: radial-gradient(ellipse at 50% 28%, rgba(28,23,16,.96), rgba(13,11,8,.98));
+  animation: rwfade .22s ease; }
+@keyframes rwfade { from { opacity: 0 } }
+#relwebov .rwhead { display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 18px 8px; }
+#relwebov .rwtitle { font-family: "Source Han Serif SC","Noto Serif CJK SC","Songti SC",Georgia,serif;
+  letter-spacing: 4px; color: #d8b57a; font-size: 16px; padding-bottom: 3px;
+  border-bottom: 1px solid rgba(216,181,122,.45); }
+#relwebov .rwkeys span { color: #c9bfa9; cursor: pointer; padding: 6px 10px;
+  font-size: 13px; opacity: .75; user-select: none; }
+#relwebov .rwkeys span:hover, #relwebov .rwkeys span:active { opacity: 1; color: #d8b57a; }
+#rwlegend { display: flex; gap: 13px; flex-wrap: wrap; align-items: center;
+  padding: 2px 18px 6px; font-size: 11.5px; color: #a79e8c; }
+#rwlegend i { display: inline-block; width: 20px; border-top: 3px solid; border-radius: 2px;
+  margin-right: 5px; vertical-align: middle; }
+#rwlegend .rwnote { color: #857c6b; margin-left: auto; }
+#rwinfo { padding: 10px 18px calc(12px + env(safe-area-inset-bottom, 0px)); font-size: 12.5px;
+  min-height: 76px; color: #cfc6b4; border-top: 1px solid rgba(216,181,122,.16);
+  background: linear-gradient(180deg, rgba(16,13,9,0), rgba(16,13,9,.55)); }
 /* 🔊 音量面板: 🎵音乐/音效 + 🎙语音 双滑杆, 挂在顶栏 🔊 下方 */
 #audioPanel { position: fixed; top: 54px; right: 10px; z-index: 60;
   background: rgba(24,22,18,.96); border: 1px solid rgba(216,181,122,.35);
@@ -4440,7 +4461,6 @@ async function openRelWeb() {
   try { d = await j(`/runs/${runId}/relweb`); }
   catch (e) { pushToast("⚠️ " + escapeHtml(e.message), "", 2400); return; }
   ov = document.createElement("div"); ov.id = "relwebov";
-  ov.style.cssText = "position:fixed;inset:0;z-index:70;background:rgba(6,7,12,.94);display:flex;flex-direction:column";
   ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
   // 🖥 桌面给关系网真正的画布 (Yi: 桌面不能只是竖起来的手机)
   const _dt = innerWidth >= 1100;
@@ -4457,15 +4477,21 @@ async function openRelWeb() {
   // 🔍 内容级缩放 (Yi: 放大=布局拉开而不是整图吹大): s 只放大半径/间距,
   // 头像与文字保持原大 — 像地图, 越放大越疏朗
   const z = { s: 1, x: 0, y: 0 };
-  ov.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px">`
-    + `<b>🕸 ${B("关系网", "Relations")}</b><span>`
-    + `<button class="ghost" id="rwzin">＋</button> <button class="ghost" id="rwzout">－</button> `
-    + `<button class="ghost" onclick="document.getElementById('relwebov').remove()">${B("关闭", "Close")}</button></span></div>`
+  // 🎨 gal 系设计语言 (e9dbb50 token): 衬线金标题 + 幽灵文字键 + 暖墨底; 图例用线样不用课文
+  ov.innerHTML = `<div class="rwhead"><span class="rwtitle">${B("关 系 网", "RELATIONS")}</span><span class="rwkeys">`
+    + `<span id="rwzin">${B("放大", "In")}</span><span id="rwzout">${B("缩小", "Out")}</span>`
+    + `<span onclick="document.getElementById('relwebov').remove()">${B("关闭", "Close")}</span></span></div>`
+    + `<div id="rwlegend">`
+    + `<span><i style="border-color:#ff85ad"></i>${B("恋爱", "Love")}</span>`
+    + `<span><i style="border-color:#d8b57a"></i>${B("情谊", "Bond")}</span>`
+    + `<span><i style="border-color:#79b8cf"></i>${B("信任", "Trust")}</span>`
+    + `<span><i style="border-color:#5a7a88;border-top-style:dashed"></i>${B("戒备", "Guarded")}</span>`
+    + `<span><i style="border-color:#c96a5e"></i>${B("嫌隙", "Bad blood")}</span>`
+    + `<span class="rwnote">${B("粗=深 · 呼吸=近况 · 双弧=他们彼此", "width = depth · pulse = recent · arcs = theirs")}</span></div>`
     + `<svg id="rwsvg" width="${W}" height="${H}" style="margin:0 auto;display:block;touch-action:none">`
     + `<g id="rwpan"></g></svg>`
-    + `<div id="rwinfo" class="muted" style="padding:10px 18px;font-size:12.5px;min-height:72px">`
-    + `${B("你到每人是平行双线：💗好感线（颜色=档位，恋爱线粉色，越粗越近）+ 🛡信任线（青色，越粗越信，虚线=戒备）——喜欢与信任是两回事。他们彼此是成对的箭头弧线，每个方向一条。点线看细账，点头像看档案。",
-           "Two parallel lines run to each person: 💗 affection (color = tier, romance in pink, width = closeness) + 🛡 trust (teal, width = trust, dashed = guarded) — liking and trusting are different things. Between THEM, each direction is its own arrowed arc. Tap a line for details, an avatar for the dossier.")}</div>`;
+    + `<div id="rwinfo">`
+    + `${B("点一条线看细账，点头像看档案。", "Tap a line for its story, an avatar for the dossier.")}</div>`;
   document.body.appendChild(ov);
   const gEl = ov.querySelector("#rwpan"), svEl = ov.querySelector("#rwsvg");
   const showEdge = (i) => {
@@ -4579,10 +4605,11 @@ async function openRelWeb() {
     });
     const nodeHtml = (id, name, av, dead) => {
       const p = pos[id];
-      // 🖼 头像可点进档案卡 (全站惯例: 脸都点得开)
+      // 🖼 头像可点进档案卡 (全站惯例: 脸都点得开); 光环随档位上色 (恋人粉圈一眼认)
       const tap = id !== "_me" ? ` class="rw-node" data-id="${id}" style="cursor:pointer"` : "";
+      const ring = id === "_me" ? "#d8b57a" : (MCOL[(modeById[id] || {}).mode] || "#6a6356");
       return `<g transform="translate(${p.x},${p.y})"${tap} ${dead ? 'opacity=".38"' : ""}>`
-        + `<circle r="24" fill="#26231f" stroke="${id === "_me" ? "#d8b57a" : "#6a6356"}" stroke-width="2"/>`
+        + `<circle r="24" fill="#26231f" stroke="${ring}" stroke-width="2"/>`
         + (av ? `<image href="${av}${id !== "_me" ? _sv(id) : ""}" x="-24" y="-24" width="48" height="48" clip-path="circle(24px at 24px 24px)" preserveAspectRatio="xMidYMid slice"/>` : "")
         + `<text y="40" text-anchor="middle" fill="#cfd4e6" font-size="11">${escapeHtml((name || "").slice(0, 5))}${dead ? "†" : ""}</text>`
         + (modeById[id] && modeById[id].mode_name ? `<text y="53" text-anchor="middle" fill="#a8a091" font-size="9">${escapeHtml(modeById[id].mode_name)}</text>` : "")
