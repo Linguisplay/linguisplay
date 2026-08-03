@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends
+import pathlib
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..db import get_db
@@ -73,11 +76,77 @@ def my_stories(user: User = Depends(current_user), db: Session = Depends(get_db)
     if not SHARED_LIBRARY:
         q = q.filter(StoryModel.owner_id == user.id)
     rows = q.order_by(StoryModel.updated_at.desc()).all()
+    plays = _play_counts(db, [s.id for s in rows])
     return [
         {"id": s.id, "title": s.title, "status": s.status, "version": s.version,
-         "visibility": s.visibility, "mine": s.owner_id == user.id}
+         "visibility": s.visibility, "mine": s.owner_id == user.id,
+         **_shelf_stats(s, plays.get(s.id, 0))}
         for s in rows
     ]
+
+
+# ── 🙈 整理书架 (Yi 2026-08-03:「把之前做的不好的剧本和沙盒都隐藏一下」) ──────
+# 判「好不好」不靠感觉, 靠三条能数出来的证据: 有没有人形 (立绘)、有没有景 (背景图)、
+# 有没有人玩过 (档数)。列表把证据摆在每行上, 由作者自己勾。
+
+_SCENE = pathlib.Path(__file__).resolve().parents[1] / "static" / "scene"
+
+
+def _has_art(sub: str, key: str) -> bool:
+    return any((_SCENE / sub / f"{key}{ext}").exists()
+               for ext in (".webp", ".jpg", ".png"))
+
+
+def _play_counts(db: Session, ids: list[str]) -> dict[str, int]:
+    """一次分组查询数出每本被开过多少档 — 别在循环里查库。"""
+    from sqlalchemy import func
+
+    from ..models import Run as RunModel
+    if not ids:
+        return {}
+    return dict(db.query(RunModel.story_id, func.count(RunModel.id))
+                .filter(RunModel.story_id.in_(ids))
+                .group_by(RunModel.story_id).all())
+
+
+def _shelf_stats(s, runs: int) -> dict:
+    chars, locs = s.characters or [], s.locations or []
+    return {
+        "chars": len(chars), "locs": len(locs), "runs": runs,
+        "sprites": sum(1 for c in chars if _has_art("sprite", c.get("id") or "")),
+        "bgs": sum(1 for x in locs if _has_art("bg", x.get("id") or "")),
+        "sandbox": bool((s.sandbox or {}).get("enabled")),
+    }
+
+
+class VisibilityBatch(BaseModel):
+    ids: list[str] = []
+    visibility: str = "private"
+
+
+@router.post("/stories/visibility")
+def set_visibility(body: VisibilityBatch,
+                   user: User = Depends(current_user),
+                   db: Session = Depends(get_db)):
+    """批量翻可见性 —— 只动这一个字段。
+
+    刻意【不走】PATCH /stories/{id}: 那条要整本回写, 会碰乐观锁和作者正在编的内容。
+    藏起来是可逆的 (私密只是从玩家大厅消失, 工坊照旧能开、存档照旧能续), 所以
+    共享库开着时谁都能整理书架 —— 与删除不同, 这一条不设主人门槛。"""
+    from ..models import Story as StoryModel
+    if body.visibility not in ("private", "public"):
+        raise HTTPException(400, "visibility 只能是 private 或 public")
+    if not body.ids:
+        return {"changed": 0}
+    rows = db.query(StoryModel).filter(StoryModel.id.in_(body.ids),
+                                       StoryModel.kind != "gal").all()
+    n = 0
+    for s in rows:
+        if s.visibility != body.visibility:
+            s.visibility = body.visibility
+            n += 1
+    db.commit()
+    return {"changed": n, "visibility": body.visibility}
 
 
 @router.put("/content-level")

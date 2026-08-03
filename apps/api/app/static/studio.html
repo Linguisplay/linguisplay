@@ -43,6 +43,20 @@
   .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .listitem { display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
   .tag { font-size: 11px; padding: 1px 7px; border-radius: 8px; background: #201c15; color: #aaa; }
+  /* 🙈 整理书架: 勾选模式 — 每行摆出「有没有立绘 / 有没有景 / 有没有人玩过」的证据 */
+  .listitem.pick { align-items: flex-start; }
+  .listitem .box { flex: none; width: 26px; height: 26px; margin-right: 10px; border-radius: 8px;
+                   border: 1.5px solid #4a4235; background: #171410; color: #241c0e;
+                   display: grid; place-items: center; font-weight: 800; font-size: 15px; }
+  .listitem.on .box { background: linear-gradient(180deg,#e6cb99,#cfa965); border-color: #cfa965; }
+  .listitem.on { border-color: rgba(216,181,122,.5); }
+  .lmeta { flex: 1; min-width: 0; }
+  .ev { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+  .ev .tag.bad { background: #2a1416; color: #e0968b; }
+  .ev .tag.good { background: #14231a; color: #9de8b3; }
+  #pickbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+             background: rgba(14,11,8,.97); border-top: 1px solid #2e2820; display: flex; gap: 8px;
+             align-items: center; flex-wrap: wrap; }
   a { color: #d8b57a; cursor: pointer; }
   .fold > .foldbody { display: none; }
   .fold.open > .foldbody { display: block; }
@@ -129,11 +143,22 @@ body.simple details.sec > summary::before { content:""; }
       <span class="bar">
         <button class="ghost" onclick="openCardLib(false)">📚 角色卡库</button>
         <button class="ghost" onclick="location.href='/maker'">🪄 AI 起草</button>
+        <button class="ghost" onclick="togglePick()">🙈 整理书架</button>
         <button onclick="newStory()">+ 新建剧本</button>
         <button onclick="newSandbox()">+ 新建沙盒剧本</button>
       </span>
     </div>
     <div id="stories"></div>
+    <div id="pickbar" class="hidden">
+      <span id="picknum" class="muted"></span>
+      <span class="bar" style="margin-left:auto">
+        <button class="ghost sm" onclick="pickSuggest()">建议勾选</button>
+        <button class="ghost sm" onclick="pickAll(false)">清空</button>
+        <button class="ghost sm" onclick="applyPick('public')">↑ 公开</button>
+        <button class="sm" onclick="applyPick('private')">🙈 隐藏</button>
+        <button class="ghost sm" onclick="togglePick()">退出</button>
+      </span>
+    </div>
   </div>
 
   <!-- editor -->
@@ -443,7 +468,12 @@ afterAuth().catch(()=>{ show("auth"); });
 
 // ── story list ──
 async function loadList(){
-  const rows = await j("/me/stories");
+  shelfRows = await j("/me/stories");
+  renderList();
+}
+// 勾选 / 取消只重画, 不再回服务器要一遍表 (手机上那趟往返看得见)
+function renderList(){
+  const rows = shelfRows;
   // 🎬 片场: 空态不再是一片黑 — 给第一次进门的作者铺条路
   stories.innerHTML = rows.length ? "" : `<div class="card" style="text-align:center;padding:44px 24px;margin-top:18px">
     <div style="font-family:'Songti SC','Noto Serif CJK SC',serif;font-size:22px;color:#d8b57a;letter-spacing:.08em">这里还是一片空场</div>
@@ -455,13 +485,63 @@ async function loadList(){
     const st = s.status==="published" ? `已发布 v${s.version}` : "草稿";
     // 🤝 共享创作库: 列表里有别人的本子 — 标出来, 免得合写时不知道在动谁的东西
     const own = s.mine === false ? `<span class="tag">👥 他人的</span>` : "";
-    d.innerHTML = `<b>${esc(s.title||"未命名")}</b> <span class="bar"><span class="tag">${st}</span><span class="tag">${s.visibility==="public"?"公开":"私密"}</span>${own}</span>`;
-    d.onclick=()=>editStory(s.id);
+    const vis = s.visibility==="public"
+      ? `<span class="tag">公开</span>` : `<span class="tag">🙈 已隐藏</span>`;
+    if (pickMode){
+      d.className += " pick" + (picked.has(s.id) ? " on" : "");
+      d.innerHTML = `<div class="box">${picked.has(s.id)?"✓":""}</div>
+        <div class="lmeta"><b>${esc(s.title||"未命名")}</b>
+          <div class="ev">${vis}<span class="tag">${st}</span>${own}${evidence(s)}</div></div>`;
+      d.onclick=()=>{ picked.has(s.id) ? picked.delete(s.id) : picked.add(s.id); renderList(); };
+    } else {
+      d.innerHTML = `<b>${esc(s.title||"未命名")}</b> <span class="bar"><span class="tag">${st}</span>${vis}${own}</span>`;
+      d.onclick=()=>editStory(s.id);
+    }
     stories.appendChild(d);
   });
+  // 底栏是 fixed 的 — 不留白最后一本会被压在下面点不到 (手机上尤其)
+  stories.style.paddingBottom = pickMode ? "76px" : "";
+  if (pickMode){ show("pickbar"); picknum.textContent = `已勾 ${picked.size} / ${rows.length} 本`; }
+  else hide("pickbar");
   hide("editor"); show("list");
 }
 function backToList(){ loadList(); }
+
+// ── 🙈 整理书架 (Yi 2026-08-03:「把之前做的不好的剧本和沙盒都隐藏一下, 只留下好的」) ──
+// 隐藏 = 设私密: 只从【玩家大厅】消失, 工坊照旧能编、老存档照旧能续, 随时能翻回来。
+// 「好不好」不替作者拍板 — 把能数出来的证据摆在行上 (人形/景/有没有人玩过), 他勾。
+let shelfRows = [], pickMode = false, picked = new Set();
+
+function evidence(s){
+  const t = [];
+  const bad = (n) => n ? "" : " bad";
+  t.push(`<span class="tag${bad(s.chars)}">👤 ${s.chars} 角色</span>`);
+  // 立绘是 VN 里那个人形; 没有就只剩黑灰剪影 — 这是"看起来不好"最直接的一条
+  t.push(`<span class="tag${s.sprites ? (s.sprites>=s.chars&&s.chars?" good":"") : " bad"}">🎨 ${s.sprites} 立绘</span>`);
+  if (s.locs || s.sandbox) t.push(`<span class="tag${bad(s.bgs)}">🖼 ${s.bgs}/${s.locs} 景</span>`);
+  t.push(`<span class="tag${s.runs>=5?" good":bad(s.runs)}">▶ ${s.runs} 档</span>`);
+  if (s.sandbox) t.push(`<span class="tag">🏖 沙盒</span>`);
+  return t.join("");
+}
+// 建议 = 「一个立绘都没有」或「一个角色都没有还没人玩过」。只勾公开的 — 已经藏了的不用再动
+function isWeak(s){
+  return s.visibility === "public" &&
+         (s.sprites === 0 || (s.chars === 0 && s.runs < 3));
+}
+function togglePick(){ pickMode = !pickMode; picked.clear(); renderList(); }
+function pickSuggest(){ picked = new Set(shelfRows.filter(isWeak).map(s=>s.id)); renderList(); }
+function pickAll(on){ picked = on ? new Set(shelfRows.map(s=>s.id)) : new Set(); renderList(); }
+
+async function applyPick(vis){
+  if (!picked.size) return alert("先勾几本");
+  const n = picked.size;
+  if (!confirm(`把勾中的 ${n} 本设为${vis==="private"?"隐藏（只从玩家大厅消失，工坊照旧能编）":"公开"}？`)) return;
+  const r = await j("/me/stories/visibility", {method:"POST",
+    body: JSON.stringify({ids:[...picked], visibility:vis})});
+  picked.clear(); pickMode = false;
+  await loadList();
+  alert(`改了 ${r.changed} 本`);
+}
 
 // ── ✍️ 新建 (Yi 定: 只有两种 — 剧本 与 沙盒剧本; 起草交给 AI 通道) ──
 function newStory(){ story=blankStory(); secrets=[]; openEditor(); }
