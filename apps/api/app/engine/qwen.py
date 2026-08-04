@@ -3803,8 +3803,11 @@ class QwenLLM:
         flash the scene didn't owe the player. Degrades to {} (the drop simply doesn't
         fire this turn; the engine keeps the roll for another day)."""
         ch = prompt.get("char") or {}
-        said = "\n".join(f"{s.get('speaker','')}：{s.get('text','')}"
-                         for s in (prompt.get("said_this_turn") or [])) or "（刚才没有对话）"
+        # 🔑 质量的命门 (Yi 2026-08-04:「没有全部理解最近的对话」): 玩家主动点的那一次
+        # 走 recent —— 存档里最近几十拍; 老的自动摇骰只有 said_this_turn 的四句。
+        _src = prompt.get("recent") or prompt.get("said_this_turn") or []
+        said = "\n".join(f"{s.get('speaker') or '旁白'}：{s.get('text','')}"
+                         for s in _src if (s.get("text") or "").strip()) or "（刚才没有对话）"
         sys = ("你在为互动剧情游戏写一段【金色瞬间】，罕见的、玩家没有预期的一小段奇遇演出，"
                f"主角是「{ch.get('name','')}」（{ch.get('role','')}；人设：{ch.get('persona_text','')}）"
                f"与玩家。你们的关系：{prompt.get('relation','')}。\n"
@@ -3816,13 +3819,21 @@ class QwenLLM:
                "这是动作之外的定格侧写：不要复述刚才对话里已经演过的动作和台词，写那一瞬多出来的细节。"
                + ("（本局为成人向，允许更亲密的肢体细节，但这一段以心动为主。）"
                   if prompt.get("mature") else "") + _lang_rule(prompt))
+        # 玩家主动点的那一次: 明说这是"读完最近这一段再写", 别只盯最后一句
+        _ask = ("这是玩家【主动点】的一次，他愿意为这一段等。先把下面这一整段最近的戏读完，"
+                "抓住其中真正积累起来的那点东西（反复出现的物件、没说破的顾虑、气氛的转折），"
+                "再写那个瞬间——要让玩家认得出这是他这一路走来的结果，而不是随便一段甜。"
+                if prompt.get("on_demand") else "写这个金色瞬间（两行）：")
         u = (f"地点：{prompt.get('place','') or '（未知）'}；时间：{prompt.get('clock','') or '不明'}\n"
-             f"刚才的对话：\n{said}\n\n写这个金色瞬间（两行）：")
+             f"最近这一段（从早到近）：\n{said}\n\n{_ask}\n（两行：标题 / 正文）")
         try:
             resp = _post_chat(self._url, self._key,
                               {"model": self._model, "messages": [{"role": "system", "content": sys},
-                      {"role": "user", "content": u}], "max_tokens": 220, "temperature": 0.95},
-                              timeout=25)
+                      {"role": "user", "content": u}],
+                       # 主动点的一次值得多给点笔墨 (玩家在等, 且这一下是他自己掏的)
+                       "max_tokens": 420 if prompt.get("on_demand") else 220,
+                       "temperature": 0.95},
+                              timeout=40 if prompt.get("on_demand") else 25)
             txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
         except Exception:
             return {}

@@ -1378,6 +1378,42 @@ def map_mark(run_id: str, body: dict = Body(...),
     return {"pins": pins, "hidden": hides}
 
 
+@router.post("/{run_id}/golden")
+def golden_moment(run_id: str, user: User = Depends(current_user),
+                  db: Session = Depends(get_db)):
+    """✨ 玩家主动点一次金色瞬间 (Yi 2026-08-04 改制)。
+
+    原来是程序每回合摇 4% 的骰子自动出, 而喂给模型的上下文只有本回合最后四句 ——
+    写出来的东西没读懂最近的戏, 又贵又空。现在自动摇骰默认关, 改成玩家自己挑时机点;
+    既然是他自己掏的这一下, 就把最近的戏【读完】再写: 从存档捞最近 60 拍喂进去。
+
+    这一下真花钱, 所以: 回合进行中不许点 (上下文正在变), 出货后进冷却。
+    模型哑火不扣冷却 —— 收了钱不给货是耍流氓。
+    """
+    r = _own_run(run_id, user, db)
+    if (r.state or {}).get("ended"):
+        raise HTTPException(409, "这局已经结束了")
+    if run_id in _TURN_ACTIVE:
+        raise HTTPException(409, "这一回合还没演完，等它落定再点")
+    st = dict(r.state or {})
+    if int(st.get("golden_cd", 0) or 0) > 0:
+        raise HTTPException(429, {"cooldown": int(st.get("golden_cd") or 0)})
+    content = r.pinned_content or {}
+    # 📖 最近的戏: 按 seq 倒着取 60 拍再翻正 —— 这就是"理解最近的对话"的全部本钱
+    rows = (db.query(BeatModel)
+            .filter(BeatModel.run_id == run_id)
+            .order_by(BeatModel.seq.desc()).limit(60).all())
+    recent = [{"speaker": b.speaker_name or "", "text": b.text or ""}
+              for b in reversed(rows) if (b.text or "").strip()]
+    got = runtime.golden_moment_now(content, st, get_llm(), recent)
+    if not got:
+        raise HTTPException(503, "这会儿没写出来，过一下再试")
+    r.state = st
+    flag_modified(r, "state")
+    db.commit()
+    return got
+
+
 @router.post("/{run_id}/bg/regen")
 def regen_bg(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     """🖼 玩家对当前地点的背景不满意 → 删掉旧图、重新排队生成一张。

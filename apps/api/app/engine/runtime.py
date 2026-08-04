@@ -245,7 +245,11 @@ DEFAULT_TUNING = {
                                 #    /时钟场内缓拨/已演已问入账。0 = off, 剧本级开 (狗笼试点)
     "promise_keep_bonus": 6,    # 🤝 closeness for showing up to a promise (romantic: 心动 too)
     "promise_break_cost": 4,    # 🤝 closeness lost for standing someone up
-    "golden_chance": 4,         # ✨ 稀有奇遇: % chance per eligible turn (0 = off)
+    # ✨ 稀有奇遇的【自动摇骰】。Yi 2026-08-04 关掉: 每回合白摇一次, 而喂给模型的
+    # 上下文只有本回合最后四句 —— 写出来的东西没读懂最近的戏, 又贵又空。改成玩家
+    # 自己挑时机点 (POST /runs/{id}/golden → golden_moment_now), 那一次喂足几十拍。
+    # 留着这个键是为了可逆 (剧本级设 >0 就恢复自动摇), 不是为了用。
+    "golden_chance": 0,         # ✨ 稀有奇遇: % chance per eligible turn (0 = off)
     "golden_cooldown": 10,      # ✨ turns between two golden moments, minimum
     "snap_chance": 12,          # 📷 随手拍: % chance a character's text carries a photo (0 = off)
     "vn_mode": 0,               # 🎀 galgame 演出: VN window + choice-driven turns (授权本用)
@@ -6646,6 +6650,72 @@ def album_add(content: dict[str, Any], state: dict[str, Any], kind: str, title: 
     album.append(entry)
     state["album"] = album[-40:]
     return entry
+
+
+def golden_moment_now(content: dict[str, Any], state: dict[str, Any], llm: LLM,
+                      recent: list[dict[str, str]],
+                      char_id: str | None = None) -> dict[str, Any] | None:
+    """✨ 玩家主动点的金色瞬间 (Yi 2026-08-04 改制)。
+
+    原来是程序每回合摇一次骰 (golden_chance 4%), 中了就当场写。喂给模型的上下文只有
+    said_this_turn[-4:] —— **本回合最后四句** —— 模型根本不知道最近发生了什么, 写出
+    来的东西又贵又空 (Yi:「没有全部理解最近的对话」)。
+
+    改成玩家自己挑时机点。两条是一体的: 正因为不再每回合白摇, 才付得起「认真读一遍
+    最近的戏」的成本 —— `recent` 由调用方从存档的 beats 里捞几十拍进来。
+
+    返回 {"title","text","char_id","name","closeness","romance"}; 不该出/没出就 None。
+    ⚠️ 模型哑火不扣冷却 —— 那等于收了钱不给货。
+    """
+    if state.get("ended"):
+        return None
+    if int(state.get("golden_cd", 0) or 0) > 0:
+        return None
+    tun = tuning_for(content)
+    rel_all = state.setdefault("rel", {})
+    pool = [c for c in present_characters(content, int(state.get("act", 1) or 1),
+                                          _dead_ids(state))
+            if c.get("id") != state.get("player_character_id")]
+    if char_id:
+        pool = [c for c in pool if c.get("id") == char_id] or pool
+    if not pool:
+        return None
+    star = max(pool, key=lambda c: (
+        int((rel_all.get(c.get("id")) or {}).get("romance", 0)) * 2
+        + int((rel_all.get(c.get("id")) or {}).get("closeness", 0))))
+    sid = star.get("id")
+    scores = rel_all.get(sid) or relationships.new_scores()
+    mode = relationships.derive_mode(star, scores, tun)
+    g = llm.generate({"golden_moment": True,
+                      "char": {"name": star.get("name"), "role": star.get("role") or "",
+                               "persona_text": (star.get("persona_text") or "")[:200],
+                               "eq_style": (star.get("eq_style") or "")[:120]},
+                      "relation": relationships.name_of(mode),
+                      "place": (current_location(content, state) or {}).get("name") or "",
+                      "clock": (clock_view(content, state) or {}).get("label", ""),
+                      # 🔑 质量的命门: 玩家点的这一次要读【最近的戏】, 不是本回合四句
+                      "recent": list(recent or [])[-40:],
+                      "on_demand": True,
+                      "mature": bool(state.get("mature"))}) or {}
+    text = dedash((g.get("text") or "").strip())
+    if not text:
+        return None      # 哑火 — 冷却一分不扣, 玩家可以立刻再点
+    # 标题消毒: 模型自带的括号会跟外层「」套娃 (实弹: ✨「【绿宝与板车轮声】」)
+    title = (g.get("title") or "").strip().strip("《》「」【】『』“”")[:16] or "金色瞬间"
+    state["golden_cd"] = max(1, int(tun.get("golden_cooldown") or 10))
+    old = rel_all.get(sid) or relationships.new_scores()
+    rel_all[sid] = relationships.apply_deltas(
+        old, 2, 2 if mode in ("flirt", "lover") else 1, tun)
+    dc = int(rel_all[sid].get("closeness", 0)) - int(old.get("closeness", 0))
+    dr = int(rel_all[sid].get("romance", 0)) - int(old.get("romance", 0))
+    album_add(content, state, "golden", title, text, star)
+    rel_log(state, sid, int(state.get("act", 1) or 1), "golden",
+            _t(content, f"「{title}」：{text[:40]}", f"“{title}”: {text[:80]}"))
+    # 💘 金色瞬间是一次暖峰 — 有恋爱风格的角色下次会回拉一下
+    if relationships.love_style_of(star):
+        _sim(state, sid)["warm_peak"] = {"t": _time_index(state), "served": False}
+    return {"title": title, "text": text, "char_id": sid,
+            "name": star.get("name") or "", "closeness": dc, "romance": dr}
 
 
 def _last_line_of(said: list[dict[str, str]], name: str) -> str:

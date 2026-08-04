@@ -142,7 +142,7 @@ def test_offline_pulse_needs_returning_and_a_reason():
 
 # ── ② 稀有奇遇 + ③ 相册 ──────────────────────────────────────────────────────────
 
-def test_golden_moment_fires_collects_and_cools_down(monkeypatch):
+def test_golden_moment_fires_collects_and_cools_down(golden_auto_on, monkeypatch):
     monkeypatch.setattr(runtime, "_rng", FixedRng(1))     # the roll always hits
     llm = P2LLM(golden_moment={"title": "檐下躲雨", "text": "GOLD_TEXT 他把伞塞进你手里。"})
     st = _met(runtime.default_state(), "a")

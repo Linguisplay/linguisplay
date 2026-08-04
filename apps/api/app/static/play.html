@@ -1241,6 +1241,9 @@ body.dread #dread { opacity:1; }
       <button id="phoneBtn" class="iconbtn hidden" title="小手机：消息、日历、通讯录" onclick="openPhone()">📱<span id="phoneBadge" class="pbadge hidden"></span></button>
       <button id="mapBtn" class="iconbtn hidden" title="地图" onclick="openMap()">🗺</button>
       <button id="journalBtn" class="iconbtn hidden" title="档案" onclick="openJournal()">📔</button>
+      <!-- ✨ 金色瞬间: 从"程序每回合摇骰"改成玩家自己挑时机点 (Yi 2026-08-04)。
+           自动那版只读本回合最后四句, 写出来的东西不认得你走过的路。 -->
+      <button id="goldenBtn" class="iconbtn hidden" title="金色瞬间：让此刻沉淀成一段值得记住的戏（会读完最近的对话，要等几秒）" onclick="askGolden()">✨</button>
       <button id="spdBtn" class="iconbtn hidden" title="文字速度" onclick="cycleSpeed()">🐇</button>
       <button id="worldBtn" class="iconbtn hidden" title="活世界：你不在的时候，世界照样往前走" onclick="toggleLiving()">🌍</button>
       <button id="soundBtn" class="iconbtn hidden" title="音量（音乐 / 角色语音）" onclick="toggleAudioPanel()">🔊</button>
@@ -2072,7 +2075,7 @@ async function enterRun(run) {
   document.getElementById("driveBtn").classList.toggle("hidden", !isSandbox || playMode === "god");
   maybeShowHowto(st0, run, tutOpen);
   // 📱 小手机走右上角悬浮键 (Yi 定); 顶栏 phoneBtn 退役, 顺带给按钮串减负
-  hide("pick"); show("play"); show("backBtn"); show("soundBtn"); show("journalBtn"); show("mapBtn"); show("phoneFab"); show("spdBtn"); applySpeedIcon();
+  hide("pick"); show("play"); show("backBtn"); show("soundBtn"); show("journalBtn"); show("mapBtn"); show("goldenBtn"); show("phoneFab"); show("spdBtn"); applySpeedIcon();
   // 🎙 语音滑杆只在有配音选角的本子里出现 (没有配音的本子给根哑滑杆是骗人)
   const _vr = document.getElementById("voxRow");
   if (_vr) _vr.style.display = Object.keys(voiceMap).length ? "" : "none";
@@ -2133,12 +2136,12 @@ function sendLeave() { if (runId) { try { navigator.sendBeacon(`${API}/runs/${ru
 window.addEventListener("pagehide", sendLeave);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") sendLeave(); });
 
-function backToPick() { sendLeave(); runId = null; stopBgm(); try { vox.pause(); } catch (e) {} vnShow(false); vnMode = false; hide("play"); hide("backBtn"); hide("soundBtn"); hide("audioPanel"); hide("journalBtn"); hide("mapBtn"); hide("phoneBtn"); hide("phoneFab"); hide("worldBtn"); show("pick"); }
+function backToPick() { sendLeave(); runId = null; stopBgm(); try { vox.pause(); } catch (e) {} vnShow(false); vnMode = false; hide("play"); hide("backBtn"); hide("soundBtn"); hide("audioPanel"); hide("journalBtn"); hide("mapBtn"); hide("goldenBtn"); hide("phoneBtn"); hide("phoneFab"); hide("worldBtn"); show("pick"); }
 async function doLogout() {
   sendLeave();  // must fire while the session cookie is still valid
   try { await j("/auth/logout", { method:"POST" }); } catch(e){}
   runId = null; stopBgm();
-  hide("play"); hide("pick"); hide("role"); hide("backBtn"); hide("soundBtn"); hide("audioPanel"); hide("journalBtn"); hide("mapBtn"); hide("phoneFab"); hide("logoutBtn");
+  hide("play"); hide("pick"); hide("role"); hide("backBtn"); hide("soundBtn"); hide("audioPanel"); hide("journalBtn"); hide("mapBtn"); hide("goldenBtn"); hide("phoneFab"); hide("logoutBtn");
   show("auth");
 }
 
@@ -2475,6 +2478,49 @@ async function moveTo(name) {
     vnPlayFlow([{ author: "engine", type: "description", text: who }],
                run.discoveries, run.suggestions);
   } catch(e) { renderBeat({ author:"engine", type:"description", text:`（${e.message}）` }); }
+}
+// ✨ 金色瞬间: 玩家自己挑时机点 (Yi 2026-08-04 改制)。
+// 原来是程序每回合摇 4% 的骰子自动出, 而它只读【本回合最后四句】—— 写出来的东西
+// 认不出你这一路走过什么。现在自动摇骰关掉, 改成你想要的时候点一下: 服务端会把
+// 最近 60 拍读完再写, 所以要等几秒。
+// 这一下真花 token, 所以要点两次 —— 第一次只是举手, 第二次才真发。
+let _goldArmed = 0, _goldBusy = false;
+async function askGolden() {
+  if (!runId || ended || _goldBusy) return;
+  if (typeof turnInFlight !== "undefined" && turnInFlight) {
+    pushToast(B("等这一回合演完再点 ✨", "Let this turn finish first ✨"), "", 0); return;
+  }
+  const now = Date.now();
+  if (now - _goldArmed > 6000) {          // 举手, 6 秒内再点才算数
+    _goldArmed = now;
+    pushToast(B("再点一次 ✨ 确认：会读完最近的对话再写，要等几秒",
+                "Tap ✨ again to confirm — it reads your recent scenes first"), "", 0);
+    return;
+  }
+  _goldArmed = 0; _goldBusy = true;
+  const btn = document.getElementById("goldenBtn");
+  const face = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "⏳"; }
+  try {
+    const g = await j(`/runs/${runId}/golden`, { method: "POST" });
+    playQ.push({ author: "engine", type: "description",
+                 text: `✨「${g.title}」 ${g.text}` });
+    pump();
+    if (g.closeness || g.romance) {
+      pushToast(B(`✨ 与${g.name}的关系更近了一步`,
+                  `✨ You and ${g.name} grew closer`), "t-unlock", 400);
+    }
+  } catch (e) {
+    // 冷却是个对象 {cooldown: n}; 其余按原样报给玩家
+    const m = e && e.message;
+    const cd = m && m.cooldown;
+    pushToast(cd ? B(`✨ 刚沉淀过一段，再走 ${cd} 个回合`,
+                     `✨ Just had one — ${cd} more turns to go`)
+                 : B(`✨ 这会儿没写出来：${m}`, `✨ Couldn't write it: ${m}`), "", 0);
+  } finally {
+    _goldBusy = false;
+    if (btn) { btn.disabled = false; btn.textContent = face || "✨"; }
+  }
 }
 // 🪪 rename an emergent NPC (fix bad births like「谁看见」) — engine chars only
 async function renameChar(cid) {

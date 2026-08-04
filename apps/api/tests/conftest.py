@@ -74,3 +74,14 @@ def typed_move_on(monkeypatch):
     的用例显式开旗跑 —— 与 map_writes_on 同理, 是休眠代码的回归网。
     """
     monkeypatch.setattr(runtime, "TYPED_MOVE", True)
+
+
+@pytest.fixture
+def golden_auto_on(monkeypatch):
+    """开回金色瞬间的【自动摇骰】(tuning.golden_chance, Yi 2026-08-04 定缺省 0)。
+
+    产品行为: 不再每回合白摇 —— 那一版只读本回合最后四句, 写出来的东西不认得玩家
+    走过的路。改成玩家自己点 (runtime.golden_moment_now), 那一次喂足最近几十拍。
+    测【自动摇骰本身】的用例显式开旗跑, 与 map_writes_on / typed_move_on 同理。
+    """
+    monkeypatch.setitem(runtime.DEFAULT_TUNING, "golden_chance", 4)
