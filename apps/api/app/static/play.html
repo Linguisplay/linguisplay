@@ -312,6 +312,8 @@
     font-size: 15px; font-weight: 600; letter-spacing: .3px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #phoneov .pbar b .ic { color: #d8b57a; flex: none; }
+  /* 二级页里内联的 SVG 图标: 跟文字基线对齐, 不要撑行高 (换掉 emoji 后的补位) */
+  .pt .ic, .lsub .ic { vertical-align: -2px; margin-right: 3px; color: currentColor; }
   #phoneov .pbar-l { justify-self: start; }
   #phoneov .pbar-r { justify-self: end; }
   #phoneov .pback { color: #d8b57a; cursor: pointer; font-size: 13px; white-space: nowrap; }
@@ -2738,9 +2740,12 @@ function phoneShell(inner, title, backTo, titleIcon) {
   const back = go ? `<a class="pback" onclick="${go}">‹ 返回</a>` : "";
   const _w = phoneWall();
   const home = title === HOME;                 // 🏠 桌面: 壁纸铺满、无导航栏
-  // 桌面上壁纸是主角(只压一层薄暗保证图标可读); 二级页面要读长文, 压重一点
-  const _dim = home ? "rgba(10,9,7,.34),rgba(10,9,7,.52)" : "rgba(12,10,7,.82),rgba(12,10,7,.93)";
-  const _wall = _w ? ` style="background-image:linear-gradient(${_dim}),url('/scene/bg/${encodeURIComponent(_w)}.jpg');background-size:cover;background-position:center"` : "";
+  // 🖼 壁纸【只铺桌面】。二级页是实底 —— 真机进了应用就看不见壁纸了, 而且这里全是
+  // 要读的字: 日历数字压在电线和人脸上、消息预览压在天空上, 再压暗也读着累
+  // (实弹截图 2026-08-04: 手账整页数字骑在背景的电线杆上)。
+  const _wall = (home && _w)
+    ? ` style="background-image:linear-gradient(rgba(10,9,7,.34),rgba(10,9,7,.52)),url('/scene/bg/${encodeURIComponent(_w)}.jpg');background-size:cover;background-position:center"`
+    : "";
   // 二级页的顶栏走三栏栅格 (照 iOS navigation bar): 左槽/标题/右槽。
   // 原来是 flex + 标题 flex:1 —— 左槽空着时标题在【剩余空间】里居中, 被右边的合上键
   // 顶得偏左。三栏栅格两侧等宽, 标题永远落在卡片正中。
@@ -2766,7 +2771,7 @@ async function openBestiary() {
         <div style="font-size:12px;margin:3px 0"><span style="color:${HPC[c.hp]||"#ccc"}">●</span> ${escapeHtml(c.hp)}${(c.wounds||[]).length?` · ${B("部位破坏","Broken")}: ${c.wounds.map(escapeHtml).join("/")}`:""}</div>
         <div class="muted" style="font-size:11px">${escapeHtml(c.habits||c.desc||"")}</div></div></div>`).join("");
   const un = v.unseen ? `<p class="muted">${B(`这个世界还有 ${v.unseen} 种你未曾遭遇的生物…`, `${v.unseen} creature(s) not yet encountered…`)}</p>` : "";
-  phoneShell((rows||"")+un || `<p class="muted">${B("还没有遭遇过任何生物。","No encounters yet.")}</p>`, `📖 ${B("图鉴","Bestiary")}`, "openPhone()");
+  phoneShell((rows||"")+un || `<p class="muted">${B("还没有遭遇过任何生物。","No encounters yet.")}</p>`, `${B("图鉴","Bestiary")}`, "openPhone()", "beast");
 }
 // 🏦 银行 app: 余额 + 流水 + 转账 (真钱落账, TA 短信里真会回应)
 async function openBank() {
@@ -2821,7 +2826,7 @@ async function openSocial() {
         <input id="sc_${p.id}" placeholder="${B("评论…","Comment…")}" style="flex:1;font-size:12px;padding:5px 8px">
         <button class="sm ghost" style="padding:3px 10px" onclick="socComment('${p.id}')">${B("发","Go")}</button></div></div>`;
   }).join("") || `<p class="muted">${B("还没有动态——认识的人多了、事情发生了，这里就热闹了。","Quiet for now.")}</p>`;
-  phoneShell(cards, `📸 ${B("动态","Feed")}`, "openPhone()");
+  phoneShell(cards, `${B("动态","Feed")}`, "openPhone()", "feed");
 }
 async function socLike(pid, btn) {
   try { await j(`/runs/${runId}/social/like`, { method:"POST", body: JSON.stringify({ post_id: pid }) });
@@ -2968,14 +2973,14 @@ async function openMailbox() {
       <div class="pname">${escapeHtml(m.name)}${dot}</div>
       <div class="plast">✉️ ${escapeHtml(m.subject||"")}</div></div><small class="pat">${escapeHtml(m.at||"")}</small></div>`;
   }).join("") || `<div class="jempty">信箱里还是空的。<br>有些话，TA们只会写在信里。</div>`;
-  const ov = phoneShell(rows, "📮 信箱", "openPhone()");
+  const ov = phoneShell(rows, B("信箱", "Mail"), "openPhone()", "mail");
   ov.querySelectorAll(".pthread").forEach(el => { el.onclick = () => openLetter(el.dataset.mid); });
 }
 async function openLetter(mid) {
   let m;
   try { m = await j(`/runs/${runId}/mail/${mid}`); } catch (e) { return; }
   setPhoneBadge(phoneUnread - 1);
-  phoneShell(`<div class="pletter"><div class="lsub">✉️ ${escapeHtml(m.subject||"")}</div>
+  phoneShell(`<div class="pletter"><div class="lsub">${IC("mail",14)} ${escapeHtml(m.subject||"")}</div>
     <div class="lbody">${escapeHtml(m.body||"")}</div>
     <div class="ameta" style="margin-top:8px;color:#6f695e;font-size:11px">${escapeHtml(m.name||"")}${m.at ? " · " + escapeHtml(m.at) : ""}</div></div>`,
     "📮 信箱", "openMailbox()");
@@ -3022,7 +3027,7 @@ async function openAlbum() {
   const head = album.length
     ? `<div class="mhint">${B("轻点翻面。稀有的时刻，会自己找上门。", "Tap a card to flip it. The rare moments find you.")}</div>`
     : `<div class="jempty">还没有值得裱起来的瞬间。<br>它们会在你意想不到的时候降临。</div>`;
-  const ov = phoneShell(`${head}<div class="mgrid">${cards}${slots}</div>`, B("📸 回忆册", "📸 Memories"), "openPhone()");
+  const ov = phoneShell(`${head}<div class="mgrid">${cards}${slots}</div>`, B("回忆册", "Memories"), "openPhone()", "film");
   ov.querySelectorAll(".mcard").forEach(el => { el.onclick = () => el.classList.toggle("flipped"); });
   ov.querySelectorAll(".mshare").forEach(b => {
     b.onclick = (e) => { e.stopPropagation(); shareMoment(album[+b.dataset.i]); };
@@ -3064,7 +3069,7 @@ async function openInbox() {
       <div class="pname">${t.dead ? "🕯 " : ""}${escapeHtml(t.name)}${dot}</div>
       <div class="plast">${escapeHtml(t.last)}</div></div><small class="pat">${escapeHtml(t.at||"")}</small></div>`;
   }).join("") || `<div class="jempty">还没有人给你捎过话。<br>关系近了，TA们会主动来找你的。</div>`;
-  const ov = phoneShell(rows, "💬 信息", "openPhone()");
+  const ov = phoneShell(rows, B("信息", "Messages"), "openPhone()", "msg");
   ov.querySelectorAll(".pthread").forEach(el => { el.onclick = () => openThread(el.dataset.cid); });
 }
 async function openThread(cid) {
@@ -3130,13 +3135,13 @@ async function openMarket() {
 }
 function renderMarket(mv) {
   const rows = (mv.items || []).map(it =>
-    `<div class="pthread mkrow">${it.tid ? `<span class="pav plet" style="background:#504a40">🛒<img class="itmicon" src="/scene/item/${escapeHtml(it.tid)}.jpg" onerror="this.remove()"></span>` : ""}<div class="pmeta">
+    `<div class="pthread mkrow">${it.tid ? `<span class="pav plet" style="background:#504a40">${IC("cart",15)}<img class="itmicon" src="/scene/item/${escapeHtml(it.tid)}.jpg" onerror="this.remove()"></span>` : ""}<div class="pmeta">
        <div class="pname">${escapeHtml(it.name)} <span class="mprice">${it.price} ${escapeHtml(mv.currency)}</span></div>
        <div class="plast">${escapeHtml(it.detail || "")}</div></div>
      <button class="mbuy" data-mid="${escapeHtml(it.id)}" ${mv.money < it.price ? "disabled" : ""}>${B("买下", "Buy")}</button></div>`
   ).join("") || `<div class="jempty">${B("今日集市无货，明天再来看看。", "Nothing on the stalls today.")}</div>`;
   const head = `<div style="padding:4px 2px 8px;color:#b8b2a8;font-size:12.5px">💰 ${mv.money} ${escapeHtml(mv.currency)} · ${B("货单每日换新", "restocks daily")}</div>`;
-  const ov = phoneShell(head + rows, "🛒 " + B("集市", "Market"), "openPhone()");
+  const ov = phoneShell(head + rows, B("集市", "Market"), "openPhone()", "cart");
   ov.querySelectorAll(".mbuy").forEach(b => {
     b.onclick = async () => {
       b.disabled = true;
@@ -3241,7 +3246,7 @@ async function openContacts() {
       <div class="pname">${c.dead ? "🕯 " : ""}${escapeHtml(c.name||"")}<a class="cinfo" data-info="${escapeHtml(c.char_id)}">ⓘ</a>${peek}</div>
       <div class="plast">${escapeHtml(c.role||"")}${at}${c.has_thread ? "" : B("　· 还没聊过", " · no thread yet")}</div></div></div>`;
   }).join("") || `<div class="jempty">${B("通讯录空空如也。<br>先去见见这个世界里的人。", "No contacts yet.<br>Go meet someone first.")}</div>`;
-  const ov = phoneShell(rows, "👥 通讯录", "openPhone()");
+  const ov = phoneShell(rows, B("通讯录", "Contacts"), "openPhone()", "users");
   ov.querySelectorAll(".pthread").forEach(el => { el.onclick = () => openThread(el.dataset.cid); });
   ov.querySelectorAll(".cinfo").forEach(el => {
     el.onclick = (e) => { e.stopPropagation(); document.getElementById("phoneov").remove(); openCharCard(el.dataset.info); };
@@ -3263,7 +3268,7 @@ async function openBag() {
     const qty = (i.qty || 1) > 1 ? ` <span class="jwho">×${i.qty}</span>` : "";
     const indiv = i.indiv ? Object.values(i.indiv).filter(Boolean).join("，") : "";
     const icon = i.tid ? `<img class="itmicon" src="/scene/item/${escapeHtml(i.tid)}.jpg" onerror="this.remove()">` : "";
-    return `<div class="pthread"><span class="pav plet" style="background:#504a40">🎒${icon}</span><div class="pmeta">
+    return `<div class="pthread"><span class="pav plet" style="background:#504a40">${IC("bag",15)}${icon}</span><div class="pmeta">
       <div class="pname">${escapeHtml(i.name||"")}${qty}</div>
       <div class="plast">${escapeHtml(indiv || i.detail || "")}</div></div></div>`;
   }).join("")
@@ -3284,11 +3289,11 @@ let _plannerTab = "cal";   // 记住上次停在哪一页
 function openPlanner(tab) {
   _plannerTab = tab || _plannerTab;
   const tabs = `<div class="ptabs">
-    <span class="pt${_plannerTab === "cal" ? " on" : ""}" onclick="openPlanner('cal')">📅 ${B("日程", "Schedule")}</span>
-    <span class="pt${_plannerTab === "notes" ? " on" : ""}" onclick="openPlanner('notes')">📝 ${B("笔记", "Notes")}</span>
+    <span class="pt${_plannerTab === "cal" ? " on" : ""}" onclick="openPlanner('cal')">${IC("cal",14)} ${B("日程", "Schedule")}</span>
+    <span class="pt${_plannerTab === "notes" ? " on" : ""}" onclick="openPlanner('notes')">${IC("archive",14)} ${B("笔记", "Notes")}</span>
   </div>`;
   const body = _plannerTab === "notes" ? _notesTab() : _calTab();
-  phoneShell(tabs + body, `🗓 ${B("手账", "Planner")}`, "openPhone()");
+  phoneShell(tabs + body, `${B("手账", "Planner")}`, "openPhone()", "cal");
   const inp = document.getElementById(_plannerTab === "notes" ? "noteText" : "calText");
   if (inp && _noteEditing) inp.focus();
 }
