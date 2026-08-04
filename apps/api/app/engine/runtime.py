@@ -5630,9 +5630,22 @@ def player_notes_view(state: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def phone_apps(content: dict[str, Any]) -> set[str]:
+    """📱 这个世界的随身设备上有哪几个 app。
+
+    作者显式配了 apps 就听他的 (最高优先, 一个字都不猜)。没配时:
+      · 沙盒 —— 一律全开, 不看设备叫什么 (Yi 2026-08-04:「小手机所有功能不管是
+        什么时代都要全部开启」, 范围定在沙盒)。玩家自己写的世界可能是任何年代,
+        传讯符也好飞鸽也好, 那是【称谓】; 功能是界面, 不该被年代关掉。
+        称谓换皮在客户端做 (古风的「动态」叫「风声」、「银行」叫「账房」)。
+      · 授权剧情本 —— 照旧按设备皮肤判 (作者写死了年代与设备, 引擎不越权改)。
+    ⚠️ 银行还有第二道门在 phone_threads_view: 没有钱账本就不亮。那是【钱账本门】,
+    不是年代门 —— 没有账本的银行是个空壳, 点进去只有一句「无账可管」。
+    """
     cfg = phone_cfg(content)
     if isinstance(cfg.get("apps"), list):
         apps = {str(a) for a in cfg["apps"]}
+    elif sandbox_on(content):
+        apps = {"bank", "social"}
     else:
         apps = {"bank", "social"} if phone_device(content) == "手机" else set()
     if _creatures(content):

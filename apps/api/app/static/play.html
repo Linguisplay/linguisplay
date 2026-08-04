@@ -2982,14 +2982,23 @@ async function openPhone() {
   </div>`;
   // 🏠 桌面 = 壁纸铺满 + 状态栏贴顶 + 实心彩色图标 + 底部 Dock, 没有导航栏。
   // (旧版是「深色卡片 + 空心线图标住小方框 + 顶栏合上键」—— 那是设置菜单不是桌面。)
+  // 📱 现代设备判定曾只认中文字面量「手机」— 英文本子 phone.device="phone" 落到
+  // 信箱分支, 标题成了「📮 phone」(2026-08-02 体检截图实锤)。现代设备一律走小手机,
+  // 只有真·非手机设备 (信鸽/传讯符/电台) 才用信箱皮。
+  // 🏮 这个判定顺带管【称谓换皮】(Yi 2026-08-04: 沙盒的小手机任何年代全开):
+  //    功能一个不少, 但古风世界里那个 app 叫「风声」不叫「动态」、叫「账房」不叫「银行」。
+  const _modern = ["手机", "phone", "mobile", "cell", "cellphone", "smartphone"]
+    .includes((phoneDevice || "").toLowerCase().trim());
+  const _feedName = _modern ? B("动态", "Feed") : B("风声", "Word");
+  const _bankName = _modern ? B("银行", "Bank") : B("账房", "Ledger");
   const grid = [
-    apps.includes("social") && phoneOn ? app("feed", B("动态", "Feed"), "openSocial()", "", false, "feed") : "",
+    apps.includes("social") && phoneOn ? app("feed", _feedName, "openSocial()", "", false, "feed") : "",
     app("film", B("回忆册", "Memories"), "openAlbum()", "", false, "film"),
     app("web", B("关系网", "Web"), "document.getElementById('phoneov').remove(); openRelWeb()", "", false, "web"),
     app("cal", B("手账", "Planner"), "openPlanner()", "", false, "cal"),
     app("bag", B("背包", "Bag"), "openBag()", "", false, "bag"),
     curMoney != null ? app("cart", B("集市", "Market"), "openMarket()", "", false, "cart") : "",
-    apps.includes("bank") && phoneOn ? app("bank", B("银行", "Bank"), "openBank()", "", false, "bank") : "",
+    apps.includes("bank") && phoneOn ? app("bank", _bankName, "openBank()", "", false, "bank") : "",
     apps.includes("bestiary") ? app("beast", B("图鉴", "Bestiary"), "openBestiary()", "", false, "beast") : "",
     app("archive", B("档案", "Dossier"), "document.getElementById('phoneov').remove(); openJournal()", "", false, "archive"),
   ].filter(Boolean).join("");
@@ -3000,11 +3009,6 @@ async function openPhone() {
     <div class="pdock">${comm}</div>
     <div class="phomebar" title="${B("合上", "Close")}"
          onclick="document.getElementById('phoneov').remove()"></div>`;
-  // 📱 设备名判定曾只认中文字面量「手机」— 英文本子 phone.device="phone" 落到
-  // 信箱分支, 标题成了「📮 phone」(2026-08-02 体检截图实锤)。现代设备一律走小手机,
-  // 只有真·非手机设备 (信鸽/传讯符/电台) 才用信箱皮
-  const _modern = ["手机", "phone", "mobile", "cell", "cellphone", "smartphone"]
-    .includes((phoneDevice || "").toLowerCase().trim());
   phoneShell(inner, HOME);
 }
 // 📮 信箱: the letters characters have written — a love letter reads different from a text

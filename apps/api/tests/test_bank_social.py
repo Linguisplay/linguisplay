@@ -43,10 +43,43 @@ def _st(money=100):
 
 def test_apps_skin_law():
     assert runtime.phone_apps(MODERN) == {"bank", "social"}     # 现代默认开
-    assert runtime.phone_apps(PERIOD) == set()                  # 传呼机时代没有 app
     custom = {"story": {**PERIOD["story"], "phone": {"device": "传呼机", "apps": ["bank"]}},
               "secrets": []}
     assert runtime.phone_apps(custom) == {"bank"}               # 作者显式配置优先
+
+
+# ── 📱 沙盒的小手机任何年代全开 (Yi 2026-08-04) ───────────────────────────────
+# ⚠️ 这一条是对旧合同「传呼机时代没有 app」的【有意反转】, 不是回归。
+# 玩家自己写的世界可能是任何年代, 传讯符也好飞鸽也好, 那是称谓; 功能是界面,
+# 不该被年代关掉。称谓换皮在客户端做 (古风叫「风声」「账房」)。
+def test_a_sandbox_keeps_every_app_no_matter_what_the_device_is_called():
+    assert runtime.phone_apps(PERIOD) == {"bank", "social"}, \
+        "沙盒里换个设备名就少一个 app = 年代把功能关掉了"
+    for device in ("传呼机", "传讯符", "飞鸽", "纸鹤", "沃克斯通讯珠", "pager"):
+        c = {"story": {**MODERN["story"], "phone": {"device": device}}, "secrets": []}
+        assert runtime.phone_apps(c) == {"bank", "social"}, f"{device} 少了 app"
+
+
+def test_an_authored_story_still_goes_by_its_device_skin():
+    """放开的只有沙盒。授权剧情本的年代与设备是作者写死的, 引擎不越权替他改。"""
+    period_story = {**MODERN["story"], "phone": {"device": "传讯符"}, "sandbox": {}}
+    assert runtime.phone_apps({"story": period_story, "secrets": []}) == set()
+    modern_story = {**MODERN["story"], "phone": {"device": "手机"}, "sandbox": {}}
+    assert runtime.phone_apps({"story": modern_story, "secrets": []}) == {"bank", "social"}
+
+
+def test_the_bank_is_still_gated_by_the_money_ledger_not_by_the_era():
+    """银行还有第二道门 (phone_threads_view): 没有钱账本就不亮。
+
+    这【不是年代门】—— 没有账本的银行是个空壳, 点进去只有一句「无账可管」,
+    那不叫开启, 叫上了个假图标。这条专门盯着它, 免得下次有人当成漏掉的。
+    """
+    st = runtime.default_state()
+    st["money"] = None                      # 没有钱账本的剧情本
+    view = runtime.phone_threads_view(PERIOD, st)
+    assert view["apps"] == ["social"], "没有账本却亮了银行"
+    st["money"] = 0                         # 有账本 (余额为 0 也算有)
+    assert set(runtime.phone_threads_view(PERIOD, st)["apps"]) == {"bank", "social"}
 
 
 def test_bank_transfer_books_and_echoes():
