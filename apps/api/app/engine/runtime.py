@@ -281,6 +281,22 @@ SLOTS = ("晨", "午", "夜")
 _SLOT_EN = {"晨": "Morning", "午": "Noon", "夜": "Night"}  # display names for en stories
 AWAY = "__away__"  # a scheduled character whose no entry covers this hour: off somewhere, unreachable
 
+# 🔒 对话不许改地图 (Yi 2026-08-04 定)。
+#
+# 引擎原本有八条「模型/对话 → 地图」的写路径, 闸还不统一: 沙盒闸 3 条、自己的旗 2 条,
+# 剩下 3 条 (找人铸去处 / 邀约提及即立档 / 无图剧本开场地点) 压根没有世界级闸 ——
+# 任何剧本都会被 LLM 加地点。Yi 的裁定: 用对话铸造新场景、用对话移动至场景、新场景,
+# 统统取消, 而且【所有剧本一律如此】。
+#
+# 所以这里是模块级常量而不是 tuning 键 —— 作者在剧本里开不了它。留常量是为了可逆
+# (翻成 True 就全回来), 不是为了给谁用。守卫: tests/test_llm_map_lockdown.py。
+#
+# 关掉的只是【对话/模型驱动】那一半。玩家自己驱动的照常活着:
+#   · 地图面板出图、玩家在图上点着走 (apply_move / player_move)
+#   · 作者作息表决定 NPC 在哪 (char_position 第 7 级)
+#   · 🦇 猎手押送等不经对话的系统机制
+LLM_MAP_WRITES = False
+
 _SLOT_NARR = {
     "晨": "（长夜过去，第{day}天的晨光透了进来，街面上有了新的动静。）",
     "午": "（不知不觉，日头已经爬到头顶。）",
@@ -1361,6 +1377,10 @@ def apply_char_move(content: dict[str, Any], state: dict[str, Any], name_ref: st
     the player's scene (the model just narrated them setting off), not following, and
     not owned by an authored 作息 for this hour; the destination must be a real authored
     place. Returns {name, to_name} or None when refused."""
+    # 🔒 模型不许靠一句旁白把 NPC 挪走 (LLM_MAP_WRITES)。谁在哪, 交回作者作息表 +
+    # char_position 的级联去答。
+    if not LLM_MAP_WRITES:
+        return None
     name_ref = (name_ref or "").strip()
     if not name_ref:
         return None
@@ -1939,6 +1959,9 @@ def settle_prose_arrival(content: dict[str, Any], state: dict[str, Any],
     地点门口 — 回合末扫描收账。规矩: 只认唯一命中 + 落地动词 + 可达路线;
     歧义/不可达只记审计不动账。带路的说话者一起挪 (pin, 玩家离开自动释放)。"""
     import re as _re
+    # 🔒 旁白也算对话 (LLM_MAP_WRITES): 模型把人"写"到了别处不作数, 换场只认玩家自己走。
+    if not LLM_MAP_WRITES:
+        return False
     if not loc0_id or state.get("location_id") != loc0_id:
         return False       # 本回合已有真移动 (硬移动/moved_to), 不重复记账
     txt = "。".join((b.get("text") or "") for b in all_beats
@@ -2003,6 +2026,11 @@ def ensure_start_location(content: dict[str, Any], state: dict[str, Any],
         if loc and loc.get("id"):
             state["location_id"] = loc["id"]
         return loc
+    # 🔒 无图剧本不再凭空造开场地点 (LLM_MAP_WRITES) —— 那也是"新场景"。
+    # 退回 char_position 早就支持的无地图模式: 没有地点概念, 谁也不"在哪",
+    # 纯对话推进 (legacy behavior, 不是新分支)。
+    if not LLM_MAP_WRITES:
+        return None
     story = content.get("story") or {}
     world = story.get("world_facts") or story.get("world_long") or ""
     act1 = current_act(content, 1) or {}
@@ -2102,6 +2130,11 @@ def generate_and_move(content: dict[str, Any], state: dict[str, Any], place_name
     there. Mutates `content` (caller must persist it). Returns the new location dict.
 
     Idempotent-ish: if the name actually matches a place that already exists, just go there."""
+    # 🔒 对话不许铸新场景 (LLM_MAP_WRITES)。这是全部六条铸造路的共同咽喉 —— 卡在这里
+    # 一刀断干净, 不用去八个调用点各补一道闸 (那正是当初闸不统一的由来)。
+    if not LLM_MAP_WRITES:
+        _audit(state, "loc.mint", False, (place_name or "")[:12], "对话改地图已关闭")
+        return None
     place_name = (place_name or "").strip()
     if not place_name:
         raise ValueError("unknown location")
@@ -7624,11 +7657,21 @@ def mint_sought_character(content: dict[str, Any], state: dict[str, Any], name: 
         _audit(state, "seek.scout", False, nm, "本局涌现人数已到上限")
         return None
     where = (scout.get("where") or "").strip() or _t(content, "附近的去处", "somewhere near")
-    try:
-        # move=False: 确认片才移动玩家, 铸造只立档 — 也因此绝不惊动现场的钉子/场账本
-        loc = generate_and_move(content, state, where, llm=llm, invent=True, move=False)
-    except ValueError:
-        loc = None
+    if LLM_MAP_WRITES:
+        try:
+            # move=False: 确认片才移动玩家, 铸造只立档 — 也因此绝不惊动现场的钉子/场账本
+            loc = generate_and_move(content, state, where, llm=llm, invent=True, move=False)
+        except ValueError:
+            loc = None
+    else:
+        # 🔒 地图锁上时人照样涌现, 只是【不给他新造一块地】: 把他安置在已有地点上。
+        # 找人是角色涌现 (吃 max_new_characters 的额度), 不是地图玩法 —— 关地图不该
+        # 顺手把它一起关了 (实弹: 头一版直接 return None, 找人系统整个哑了)。
+        loc = resolve_location(content, where)
+        if loc and not location_available(content, state, loc):
+            loc = None
+        if loc is None:
+            loc = current_location(content, state)
     if loc is None:
         return None
     char = {
@@ -8444,6 +8487,11 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
             if _cg_txt:
                 yield emit({"type": "description", "speaker_name": None, "text": _cg_txt})
         mv_to = (directed.get("moved_to") or "").strip() if not observer else ""
+        # 🔒 声明式移动整条关掉 (LLM_MAP_WRITES)。注意这里有两条分支要一起堵: 去【未知】
+        # 地点被铸造闸挡住了, 去【已有】地点却是直接 commit_move —— 只堵铸造等于只堵一半。
+        if mv_to and not LLM_MAP_WRITES:
+            _audit(state, "move.narrated", False, mv_to, "对话改地图已关闭")
+            mv_to = ""
         if mv_to:
             cur_l = current_location(content, state)
             dest_l = resolve_location(content, mv_to)

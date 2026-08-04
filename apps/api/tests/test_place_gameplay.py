@@ -294,7 +294,7 @@ class _ScoutBase:
                 "affinity_delta": 0, "advance_act": False, "ending": None}
 
 
-def test_scout_mints_the_sought_character_for_real():
+def test_scout_mints_the_sought_character_for_real(map_writes_on):
     """找人合同（2026-07-08）：智能检索说「属于这个世界」→ 角色入册、地点造真、
     行踪钉住、同款确认片弹出 — 文与实不分家，绝不再空转。"""
     import copy
@@ -764,7 +764,7 @@ def test_place_gate_rejects_sentence_fragments():
     assert runtime.player_move_emergent(story, st, "去后山的旧灯塔看看吧", "do") in ("后山的旧灯塔", "旧灯塔")
 
 
-def test_prose_arrival_backstop():
+def test_prose_arrival_backstop(map_writes_on):
     """文与实不许分家 (实弹: 细辉嘴上带路+旁白全程走完, 位置账本钉在天台):
     moved_to 没申报但旁白落地在唯一已知地点 → 回合末确定性收账, 带路者一起挪。"""
     content = {"story": {"locations": [

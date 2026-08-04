@@ -168,7 +168,7 @@ def test_near_location_reroutes_instead_of_generating():
     assert runtime.resolve_location(content, "城寨外") is None         # 严格解析器保持严格
 
 
-def test_mention_mints_location_without_travel():
+def test_mention_mints_location_without_travel(map_writes_on):
     """📍 提及即立档 (Yi: 玩家不去也该先生成): 说起新去处 → 地点当场进世界与地图,
     确认条变普通去处 (minted 标); 玩家原地不动。"""
     content = {"story": {

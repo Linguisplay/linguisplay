@@ -97,7 +97,7 @@ class EnMintLLM:
         return out
 
 
-def test_moved_to_en_multiword_mints_and_moves():
+def test_moved_to_en_multiword_mints_and_moves(map_writes_on):
     content = copy.deepcopy(GH)
     st = runtime.default_state()
     st["location_id"] = "camp"
@@ -128,7 +128,7 @@ class SpyLLM:
         return {}                                             # 逼出兜底名
 
 
-def test_ensure_start_location_speaks_the_story_language():
+def test_ensure_start_location_speaks_the_story_language(map_writes_on):
     en = {"story": {"id": "e", "language": "en", "world_facts": "seaside",
                     "characters": [], "acts": [{"index": 1, "title": "One"}]}, "secrets": []}
     spy = SpyLLM()

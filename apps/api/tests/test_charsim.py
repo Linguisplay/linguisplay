@@ -55,7 +55,7 @@ def test_nobody_is_everywhere_anymore():
     assert runtime.scene_characters(mapless, runtime.default_state())
 
 
-def test_model_moves_are_validated_and_booked():
+def test_model_moves_are_validated_and_booked(map_writes_on):
     st = runtime.default_state()
     st["location_id"] = "hall"
     out = runtime.run_turn(STORY, st, {"name": "我"}, "你先去后巷等我", channel="say",

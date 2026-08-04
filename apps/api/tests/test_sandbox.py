@@ -152,7 +152,7 @@ def test_sandbox_cast_is_conjured_with_a_fallback():
     assert content2["story"]["characters"][0]["is_lead"]
 
 
-def test_start_locations_are_unique_per_run():
+def test_start_locations_are_unique_per_run(map_writes_on):
     # each mapless run gets its OWN start place id, so its AI background never
     # collides with another world's
     class PlaceLLM:

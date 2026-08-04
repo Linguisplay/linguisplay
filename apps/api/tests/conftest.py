@@ -29,3 +29,16 @@ def _fictional_clock_default(monkeypatch):
     monkeypatch.setitem(runtime.DEFAULT_TUNING, "real_clock", 0)
     # 剧组戏眼同理: 生产全舰开, 测试世界默认关 (spy LLM 的 prompts[0] 执法点生态), 剧组测试显式开旗
     monkeypatch.setitem(runtime.DEFAULT_TUNING, "troupe", 0)
+
+
+@pytest.fixture
+def map_writes_on(monkeypatch):
+    """🔒 解开「对话改地图」的锁 (runtime.LLM_MAP_WRITES, Yi 2026-08-04 定默认关)。
+
+    产品行为是关的 —— 对话不许铸新场景、不许把人挪到场景。但那套代码还在, 留着可逆,
+    所以测它【本身】的用例显式开旗跑: 它们是这套休眠代码的回归网, 哪天翻回 True 才不
+    会一片废墟。
+
+    ⚠️ 新写的用例别顺手挂这个。默认关才是玩家看到的行为, 挂上就测不到真实产品了。
+    """
+    monkeypatch.setattr(runtime, "LLM_MAP_WRITES", True)

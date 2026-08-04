@@ -54,7 +54,7 @@ def _st(pins=None):
 
 # ── 1+2. moved_to 生成路 = 真实换场: 拔旧钉 + 带路人一起走 (审查 P0) ────────────
 
-def test_moved_to_generation_releases_pins_and_carries_the_guide():
+def test_moved_to_generation_releases_pins_and_carries_the_guide(map_writes_on):
     content = copy.deepcopy(SBOX)
     st = _st(pins={"b": "l1"})            # 乙被访客/约见钉按在旧巷
     out = runtime.run_turn(content, st, {"name": "我"}, "走吧", channel="say",
@@ -86,7 +86,7 @@ def test_mint_shortcut_respects_the_lock_gate():
 
 # ── 4. fate 生成分支同窄口 ─────────────────────────────────────────────────────
 
-def test_fate_move_generation_path_releases_pins(monkeypatch):
+def test_fate_move_generation_path_releases_pins(map_writes_on, monkeypatch):
     content = copy.deepcopy(SBOX)
     st = _st(pins={"b": "l1"})
     st["pending_choice"] = {"key": "fate1", "kind": "fate",
@@ -114,7 +114,7 @@ def test_mint_sought_character_leaves_position_and_pins_alone():
 
 # ── 6. 明确落账的 npc 离场压过陈钉 (审查: 审计记✓人不动) ───────────────────────
 
-def test_booked_npc_move_beats_a_stale_pin():
+def test_booked_npc_move_beats_a_stale_pin(map_writes_on):
     content = copy.deepcopy(SBOX)
     st = _st(pins={"b": "l1"})            # 场钉把乙按在现场
     moved = runtime.apply_char_move(content, st, "乙", "码头")
