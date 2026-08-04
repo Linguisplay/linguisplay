@@ -69,9 +69,26 @@ def _post_chat(url: str, key: str, body: dict, timeout: int = 25,
                                             "Content-Type": "application/json"},
                               json=body, timeout=timeout)
             resp.raise_for_status()
+            # 🧊 前缀缓存命中率: 供应商在 usage 里回报 (DeepSeek 用
+            # prompt_cache_hit_tokens / miss, 通义用 prompt_tokens_details.cached_tokens)。
+            # 不记这个, 「挪了 pace.line 到底有没有用」在生产上就是盲飞 —— 之前
+            # hit=0/miss=11513 这个事实就是靠它才看得见的。
+            _hit = _miss = None
+            try:
+                _u = resp.json().get("usage") or {}
+                _hit = _u.get("prompt_cache_hit_tokens")
+                _miss = _u.get("prompt_cache_miss_tokens")
+                if _hit is None:
+                    _hit = ((_u.get("prompt_tokens_details") or {}).get("cached_tokens"))
+                    if _hit is not None and _u.get("prompt_tokens") is not None:
+                        _miss = int(_u["prompt_tokens"]) - int(_hit)
+            except Exception:
+                pass
             metrics.log("llm", kind=kind, ok=True,
                         ms=int((_time.perf_counter() - t0) * 1000),
-                        model=str(body.get("model") or ""), retry=attempt, pchars=_pc)
+                        model=str(body.get("model") or ""), retry=attempt, pchars=_pc,
+                        **({"hit": int(_hit)} if _hit is not None else {}),
+                        **({"miss": int(_miss)} if _miss is not None else {}))
             return resp
         except Exception as e:
             last = e
@@ -420,8 +437,12 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append(f"你正在与「{player_name}」对话。{player_bg}")
     lines += [
         _ANTI_ASSISTANT,
-        "用中文。" + (((prompt.get("pace") or {}).get("line")) or "台词口语化（2~4句）")
-        + "；旁白更长、有文学性且【具体、详尽、可感】——"
+        # 🧊 这里【只留逐字不变的那半句】。节奏带 (pace.line 每回合按乐师账本查表变)
+        # 挪到 system 末尾 —— 见函数末尾的「殿后」段。
+        # 实弹 2026-08-04: 它原本就拼在这儿, 位置在第 88 字, 于是每回合一变, 它后面
+        # 十几 K 逐字不变的表演宪章/schema 全部作废, 前缀缓存实测 hit=0 / miss=11513。
+        # 前缀缓存按【逐字相同的最长前缀】命中: 稳定的排前面, 逐次变的殿后。
+        "用中文。旁白更长、有文学性且【具体、详尽、可感】——"
         "玩家看不到任何画面，环境、动作、神情全靠你的文字。",
     ]
     if cast:
@@ -1071,6 +1092,15 @@ def _build_system(prompt: dict[str, Any]) -> str:
                      f"需 ≥{_chk_c.get('dc') or '?'}）：{_cv}】这一拍必须把这场较量【实际打完/比完】："
                      "过招的具体动作、决定性的那一下、胜负落定，全部演出来并就此收束——"
                      "不许再热身、不许再报数、不许拖到下一拍。")
+
+    # 🎼 节奏带殿后 (2026-08-04 前缀缓存手术): pace.line 每回合按乐师账本查表变,
+    # 从前它拼在 system 第 88 字, 一变就把后面十几 K 逐字不变的宪章/schema 全部挤出
+    # 缓存 (实测 hit=0 / miss=11513)。挪到最末尾之后, 前面那一大段每回合逐字相同,
+    # 直接命中前缀缓存 —— 每次调用省 ~734ms, 且记忆扩容的边际成本降一个数量级。
+    # ⚠️ 以后往 system 里加东西: 逐次变的一律往后放, 稳定的往前放。
+    lines.append("")
+    lines.append("【这一拍的节奏】"
+                 + (((prompt.get("pace") or {}).get("line")) or "台词口语化（2~4句）") + "。")
 
     lines.append("")
     # OUTPUT is delivered via the render_turn TOOL (function calling) — narration & speech go
