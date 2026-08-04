@@ -79,11 +79,15 @@ class Me(BaseModel):
     display_name: Optional[str] = None
     avatar_url: AssetUrl = None
     subscription_tier: str = "free"
+    # ⏰ 玩家时区的 IANA 名。客户端每次进站拿浏览器探到的值来对表, 不一致就 PATCH —
+    # 这样跨时区旅行会自愈。空 = 退回服务器时区。
+    tz: str = ""
 
 
 class MePatch(BaseModel):
     display_name: Optional[str] = None
     avatar_url: AssetUrl = None
+    tz: Optional[str] = None
 
 
 class Settings(BaseModel):

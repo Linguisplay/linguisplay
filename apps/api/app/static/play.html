@@ -1672,6 +1672,16 @@ async function login() {
 async function afterAuth() {
   const me = await j("/me");
   who.textContent = me.email;
+  // ⏰ 时区对表 (Yi 2026-08-04:「要对齐时区」): 每次进站拿浏览器探到的 IANA 名跟
+  // 账号上存的比一比, 不一致就更新 —— 跨时区旅行会自己愈合, 不用玩家去设置里找。
+  // 上报的是【名字】不是偏移: getTimezoneOffset() 符号是反的, 而冻结的偏移一遇
+  // 夏令时就错半年。失败静默 (时区不是玩游戏的前提)。
+  try {
+    const tz = (Intl.DateTimeFormat().resolvedOptions().timeZone || "").trim();
+    if (tz && tz !== (me.tz || "")) {
+      await j("/me", { method: "PATCH", body: JSON.stringify({ tz }) });
+    }
+  } catch (e) {}
   hide("auth"); show("logoutBtn");
   let masks = await j("/personas");
   if (!masks.length) masks = [await j("/personas", { method:"POST", body: JSON.stringify({ name: B("我", "Me"), pronouns:"they" }) })];

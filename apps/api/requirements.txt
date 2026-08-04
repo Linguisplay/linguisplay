@@ -14,4 +14,7 @@ pillow
 rembg[cpu]
 pywebpush>=2.0
 dashscope>=1.20   # 🎙 CosyVoice TTS (语气音精灵离线生成 + 台词播放键)
-tzdata; sys_platform == "win32"
+# ⏰ 无条件装 (原来只在 win32): Linux 靠系统 zoneinfo, 年份取决于镜像, 而
+# PATCH /me 对解析不了的时区是【报 400】的 —— 系统库老一年, 某个改过名的时区
+# (Europe/Kyiv、America/Ciudad_Juarez 这类) 的玩家就会被挡在门外。500KB 买断。
+tzdata

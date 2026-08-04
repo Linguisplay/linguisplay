@@ -52,6 +52,12 @@ class User(Base):
     subscription_tier: Mapped[str] = mapped_column(String(32), default="free")
     taste: Mapped[dict] = mapped_column(JSON, default=dict)   # 🧭 账号级口味 (跨档风格沉淀)
 
+    # ⏰ 玩家所在时区的 IANA 名 (如 "America/New_York")。账号级: 心跳跑在没有请求
+    # 上下文的定时器里, 只能从这里读。建档时镜像进 run.state["tz"]。
+    # 空 = 退回服务器时区 (+8), 与这个字段存在之前逐位相同。
+    # ⚠️ 存名字不存偏移 —— 冻结的偏移遇夏令时会错半年。
+    tz: Mapped[str] = mapped_column(String(64), default="")
+
     # settings
     content_level: Mapped[str] = mapped_column(String(16), default="mild")
     tropes: Mapped[list] = mapped_column(JSON, default=list)

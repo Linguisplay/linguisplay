@@ -614,6 +614,11 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
                     if ln.strip()][:4]
         state["powers"] = declared or [str(p).strip()[:40]
                                        for p in (sb_cfg.get("default_powers") or []) if str(p).strip()][:4]
+    # ⏰ 玩家的时区随档走 (Yi 2026-08-04:「要对齐时区」)。真相源是账号级 User.tz
+    # (心跳跑在没有请求上下文的定时器里, 只能从账号读), 这里镜像一份进存档。
+    # 空 = 退回服务器时区, 与这个字段存在之前逐位相同。
+    if (getattr(user, "tz", "") or "").strip():
+        state["tz"] = user.tz.strip()[:64]
     # ⏰ 现实同步 runs open at the player's real hour
     if runtime.real_time_on(content):
         runtime.sync_real_clock(content, state)
@@ -742,6 +747,14 @@ def get_run(run_id: str, user: User = Depends(current_user), db: Session = Depen
             _st0 = dict(r.state or {})
             _slot0 = (_st0.get("clock") or {}).get("slot")
             _day0 = (_st0.get("clock") or {}).get("day")
+            # ⏰ 老档惰性回填时区: 这个字段是后加的, 存量档建档时还没有它。不回填的话
+            # 「对齐时区」对已经在玩的人覆盖率是零。只补 tz, 绝不重写 real_epoch ——
+            # 那会让"第几天"当场跳变。
+            _tz_now = (getattr(user, "tz", "") or "").strip()[:64]
+            if _tz_now and _st0.get("tz") != _tz_now:
+                _st0["tz"] = _tz_now
+                r.state = _st0
+                flag_modified(r, "state")
             runtime.sync_real_clock(_c0, _st0)
             _c1 = _st0.get("clock") or {}
             if _c1.get("slot") != _slot0 or _c1.get("day") != _day0:

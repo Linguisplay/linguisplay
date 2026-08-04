@@ -630,7 +630,9 @@ def clock_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]
     view: dict[str, Any] = {"day": day, "slot": slot,
                             "label": f"Day {day} · {slot_disp}" if en else f"第{day}天·{slot}"}
     if real_time_on(content):
-        now = _now()
+        # ⏰ 与 sync_real_clock 同一口径。只改这里不改那里 = 顶栏时间牌和喂给 AI 的
+        # 【现实时刻】差几个钟头, 玩家抓到过一次 (runs.py 的「挂着错牌」注释)。
+        now = _now_for(state)
         view["real"] = True
         view["hhmm"] = f"{now.hour:02d}:{now.minute:02d}"
         view["label"] = (f"Day {day} · {slot_disp} {view['hhmm']}" if en
@@ -1170,9 +1172,40 @@ def reincarnate(content: dict[str, Any], state: dict[str, Any]) -> list[dict[str
 
 
 def _now():
-    """Wall clock (北京时间), injectable for tests."""
+    """Wall clock (北京时间), injectable for tests.
+
+    ⚠️ 保持【零参】: tests/test_sandbox.py 与 tests/test_economy.py 把它 monkeypatch
+    成零参 lambda。要换时区请用 _now_for(state), 别给这个函数加参数。"""
     from datetime import datetime, timedelta, timezone
     return datetime.now(timezone(timedelta(hours=8)))
+
+
+def _now_for(state: dict[str, Any] | None = None):
+    """⏰ 墙钟, 换算到【这个存档的玩家】所在的时区 (Yi 2026-08-04:「要对齐时区」)。
+
+    只用于【日历口径】—— 今天几号、星期几、落在哪个时段。任何测量【时长】的地方
+    (living.due 的心跳到期、away_hours 的离开多久) 继续用 UTC: 时长与时区无关,
+    顺手换过去会让心跳周期随玩家时区漂移。
+
+    state["tz"] 是 IANA 名 (如 "America/New_York"), 由客户端上报账号级 User.tz、
+    建档时镜像进来。缺失或解析不了 → 原样退回 _now() (服务器 +8), 老档逐位不变。
+    ⚠️ 绝不退回"冻结的分钟偏移": 那种做法一遇夏令时就错整整半年, 而且 JS 的
+    getTimezoneOffset() 符号是反的, 迟早有人写反 —— 协议里根本不存在偏移数字。
+    """
+    from datetime import timedelta, timezone
+    now = _now()
+    if now.tzinfo is None:      # monkeypatch 可能给的是 naive datetime
+        now = now.replace(tzinfo=timezone(timedelta(hours=8)))
+    name = str((state or {}).get("tz") or "").strip()
+    if not name:
+        return now
+    try:
+        from zoneinfo import ZoneInfo
+        return now.astimezone(ZoneInfo(name))
+    except Exception:
+        if isinstance(state, dict):
+            state["tz_bad"] = name[:64]   # 留痕: 静默漂移比报错更难查
+        return now
 
 
 def sync_real_clock(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
@@ -1181,13 +1214,20 @@ def sync_real_clock(content: dict[str, Any], state: dict[str, Any]) -> dict[str,
     downstream (作息, promises, moods, phone labels) reads the synced clock unchanged, so
     a promise for 明晚 literally means: come back tomorrow evening."""
     from datetime import date
-    now = _now()
+    now = _now_for(state)      # ⏰ 玩家的日历, 不是服务器的 (缺 tz 时与从前逐位相同)
     try:
         d0 = date.fromisoformat(state.get("real_epoch") or "")
     except (TypeError, ValueError):
         d0 = now.date()
         state["real_epoch"] = d0.isoformat()
     day = max(1, (now.date() - d0).days + 1)
+    # ⏱ 单调护栏: 玩家改了时区、或跨时区旅行, day 有可能算出比上一次小。
+    # 账本不许倒流 —— _time_index = day*3+slot 是全船约定/心事/court 的时间轴,
+    # 一倒退, 已经到期的约定会在 open↔missed 之间来回翻面, 纪念日会二次触发。
+    # 最坏只是"停一天", 比倒流便宜得多。
+    _prev = int((state.get("clock") or {}).get("day", 0) or 0)
+    if _prev and day < _prev:
+        day = _prev
     slot = 0 if 5 <= now.hour < 12 else (1 if 12 <= now.hour < 18 else 2)
     if lang_of(content) == "en":
         # 🌐 en 剧本时间四件在源头就写英文 (GH 清剿: state 里不留中文, 免下游各自转换)

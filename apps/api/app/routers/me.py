@@ -19,6 +19,7 @@ def _to_me(u: User) -> Me:
         display_name=u.display_name,
         avatar_url=u.avatar_url,
         subscription_tier=u.subscription_tier,
+        tz=getattr(u, "tz", "") or "",
     )
 
 
@@ -41,6 +42,19 @@ def patch_me(body: MePatch, user: User = Depends(current_user), db: Session = De
         user.display_name = body.display_name
     if body.avatar_url is not None:
         user.avatar_url = body.avatar_url
+    if body.tz is not None:
+        # ⏰ 只收 IANA 名, 而且必须是【这台服务器解析得了】的 —— 收进一个解析不了的
+        # 名字, 每回合都会静默退回服务器时区, 玩家只看到"时区没生效"却无处可查。
+        tz = body.tz.strip()[:64]
+        if not tz:
+            user.tz = ""
+        else:
+            try:
+                from zoneinfo import ZoneInfo
+                ZoneInfo(tz)
+                user.tz = tz
+            except Exception:
+                raise HTTPException(400, f"认不出这个时区：{tz}")
     db.commit()
     return _to_me(user)
 
