@@ -25,6 +25,28 @@ from app.engine import runtime  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
+def _schema_is_always_there():
+    """🧱 每个用例开跑前把缺的表补回来。
+
+    全套件共用一个 SQLite 文件 (test_e2e.db), 而十来个测试文件为了拿干净数据会
+    `Base.metadata.drop_all()` —— 于是【跑在它们后面】的用例可能撞上 no such table。
+    pytest-randomly 每次换种子, 受害者就跟着轮换: 同一份代码这一跑 917 绿, 下一跑
+    17 红, 而红的那些跟改动毫无关系 (实弹 2026-08-04: 先是 test_shared_library,
+    换个种子变成 test_shelf_tidy)。
+
+    这正是「测试基线不是零」最难查的那一层: 它伪装成随机故障, 让人以为是自己改坏了。
+    create_all 带 checkfirst, 表都在时是纯 no-op, 代价可以忽略。
+    """
+    from sqlalchemy import inspect
+
+    from app.db import Base, engine
+    # 先把 inspector 缓存清掉再建表: drop_all 之后缓存里可能还记着「表在」,
+    # create_all(checkfirst=True) 一查缓存就跳过创建, 于是表真的没回来。
+    inspect(engine).clear_cache()
+    Base.metadata.create_all(bind=engine)
+
+
+@pytest.fixture(autouse=True)
 def _fictional_clock_default(monkeypatch):
     monkeypatch.setitem(runtime.DEFAULT_TUNING, "real_clock", 0)
     # 剧组戏眼同理: 生产全舰开, 测试世界默认关 (spy LLM 的 prompts[0] 执法点生态), 剧组测试显式开旗

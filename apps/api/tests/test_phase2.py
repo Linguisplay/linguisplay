@@ -94,7 +94,11 @@ class FixedRng:
 
 # ── ① 你不在的时候 ────────────────────────────────────────────────────────────────
 
-def test_offline_pulse_warmest_absent_hearts_text_first():
+def test_offline_pulse_warmest_absent_hearts_text_first(monkeypatch):
+    # 🎲 摁住骰子: _P_BY_RANK 是 0.75/0.55, 不播种时「两人都发」只有 41% 概率,
+    # 这条恒 flaky (实弹: 6 连跑 1 过 5 挂)。本例测的是【谁先发、封顶几个】的选人逻辑,
+    # 骰子本身由 test_offline_pulse_needs_returning_and_a_reason 那一族守。
+    monkeypatch.setattr(runtime._rng, "random", lambda: 0.0)
     st = _met(runtime.default_state(), "b", "c")
     st["location_id"] = "hall"
     st["rel"] = {"b": {"closeness": 60, "romance": 70},   # lover — reaches out first

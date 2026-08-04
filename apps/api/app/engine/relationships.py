@@ -448,10 +448,10 @@ def derive_mode(char: dict[str, Any], scores: dict[str, int], tuning: dict | Non
     return base
 
 
-# a character only travels WITH the player once there's real rapport — not a stranger you
-# just met, and never an enemy. Below FRIEND_T but well above the start (5): you've warmed
-# them up over several good exchanges.
-FOLLOW_MIN_CLOSENESS = 25
+# 🚶 邀人同行从一开始就开 (Yi 2026-08-04): 0 = 只有敌对才拒绝。
+# 曾经是 25「熬出来的同行」, 而中位一局只有 4 拍 —— 那条线绝大多数玩家一辈子到不了,
+# 于是这个玩法从来没被玩过。慢热/悬疑本可在 story.tuning.follow_min_closeness 调回去。
+FOLLOW_MIN_CLOSENESS = 0
 
 # 📱 把自己手机递给你看, 比同行亲密得多 — 暧昧/恋人自然可以, 其余要处到这个数。
 # (好感解锁看TA手机, Yi 定 2026-07-31; 深处的日记与搜索仍要冒险偷看, 这里只是
@@ -472,14 +472,16 @@ def can_view_phone(char: dict[str, Any], scores: dict[str, int],
 
 
 def can_follow(char: dict[str, Any], scores: dict[str, int], tuning: dict | None = None) -> bool:
-    """Will this character agree to travel with the player? Needs warmth (closeness ≥ floor,
-    or already friend/暧昧/恋人); an enemy always refuses."""
-    mode = derive_mode(char, scores, tuning)
-    if mode == "enemy":
+    """Will this character agree to travel with the player? Only an ENEMY refuses.
+
+    门槛曾经是 closeness ≥ 25 (熬出来的同行)。Yi 2026-08-04 拆掉: 中位一局只有 4 拍,
+    25 这条线绝大多数玩家一辈子到不了 —— 于是「邀人同行」这个玩法从来没被玩过。
+    拒绝该来自立场 (敌对), 不该来自玩家没熬够时间。慢热本可把 follow_min_closeness
+    调回去。"""
+    if derive_mode(char, scores, tuning) == "enemy":
         return False
-    if mode in ("friend", "flirt", "lover"):
-        return True
-    return int(scores.get("closeness", START_CLOSENESS)) >= _tv(tuning, "follow_min_closeness", FOLLOW_MIN_CLOSENESS)
+    return int(scores.get("closeness", START_CLOSENESS)) >= _tv(
+        tuning, "follow_min_closeness", FOLLOW_MIN_CLOSENESS)
 
 
 def next_tier(char: dict[str, Any], scores: dict[str, int], tuning: dict | None = None,

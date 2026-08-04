@@ -54,20 +54,28 @@ def test_gate_blocks_then_reveals_through_http():
             assert r.status_code == 200, r.text
             return r.text
 
-        # turns 1 & 2: probing raises asks + affinity, but not enough → no leak
-        t1 = play("tell me about the ledger")
-        assert SECRET_BODY not in t1
-        t2 = play("come on, the ledger numbers, please")
-        assert SECRET_BODY not in t2
+        # 好感是事件记账制 (Yi 2026-07-25: 不许每句话打分), 「交心」带 8 回合冷却 ——
+        # affinity_min=6 要等第二次入账才够。实测: 第 1 拍好感 0→4, 第 2~8 拍冻在 4,
+        # 第 9 拍 4→8, 第 10 拍门开。所以这里打到开门为止, 而不是钉死第 3 拍
+        # (钉死的写法在事件记账制上线那天就假红了, 却被当成环境噪声挂了一周)。
+        probes = ["tell me about the ledger",
+                  "come on, the ledger numbers, please",
+                  "the ledger, i need to know"]
+        opened_at = 0
+        for turn in range(1, 13):
+            body = play(probes[(turn - 1) % len(probes)])
+            state = c.get(f"/api/v1/runs/{rid}").json()["state"]
+            if state["unlocked_fragment_ids"]:
+                assert SECRET_BODY in body, "解锁的那一拍就该让角色说出来"
+                opened_at = turn
+                break
+            # 门没开的每一拍都必须滴水不漏
+            assert SECRET_BODY not in body, f"第 {turn} 拍门还锁着, 正文不许出现秘密正身"
 
-        # turn 3: asks>=2 and affinity>=3 now met → fragment reveals
-        t3 = play("the ledger, i need to know")
-        assert SECRET_BODY in t3, "fragment should have unlocked and surfaced"
-
-        # run state reflects the unlock
+        assert opened_at, "12 拍之内该开的门没开 — 门控或好感经济回归了"
         state = c.get(f"/api/v1/runs/{rid}").json()["state"]
         assert len(state["unlocked_fragment_ids"]) == 1
-        assert state["affinity"] >= 3
+        assert state["affinity"] >= 6
 
         # replay returns persisted beats including the player's turns
         beats = c.get(f"/api/v1/runs/{rid}/play").json()

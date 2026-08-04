@@ -10,6 +10,8 @@ __pycache__/
 .pytest_cache/
 .venv/
 *.db
+*.db-wal
+*.db-shm
 *.sqlite*
 **/data/
 
@@ -21,6 +23,7 @@ dist/
 # runtime artifacts
 apps/api/app/static/scene/avatar/
 apps/api/metrics.jsonl
+apps/api/smoke_client_run.log
 
 # os / editor
 .DS_Store

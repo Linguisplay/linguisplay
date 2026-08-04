@@ -4,7 +4,13 @@ from app.engine import qwen, runtime
 
 
 def _story():
+    # 这个文件测的是【申报→落账】那条合同 (文与实不许分家), 所以要把另外两条会
+    # 独立给号的路关掉, 让申报路径单独受检:
+    #   contact_on_meet=0 — 2026-08-04 上线的「照面即交换」
+    #   contact_ask_t=99  — 「开口要就给」(同日从 10 降到 0; 本测试原本正是靠
+    #                       交情 5 < 10 让这条路失败, 才验得出「没申报就不记账」)
     return {"story": {"id": "s", "characters": [{"id": "c1", "name": "蓝信一", "is_lead": True}],
+                      "tuning": {"contact_on_meet": 0, "contact_ask_t": 99},
                       "acts": [{"index": 1, "title": "一"}],
                       "locations": [{"id": "l1", "name": "暗巷", "exits": []}]}, "secrets": []}
 

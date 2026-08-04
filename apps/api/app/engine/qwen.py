@@ -1228,8 +1228,14 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
     if not is_member and not is_think:
         props["mood"] = {"type": "string", "description":
                          "本拍场面情绪，从：日常/温馨/浪漫/悲伤/孤独/悬疑/诡异/紧张/战斗 里选一个；没有明显变化就填空字符串"}
+        # 🪝 收窄 (2026-08-04 实弹): 原描述是「有话没说完/一件反常的小事」, 太宽 ——
+        # 生产 8 条悬着的钩子里 3 条根本不是承诺 (如「白栖的账本里云疏那条还没抹干净」),
+        # 逼角色去兑现这种世界观内情只会演成硬解释。钩子只收【TA 亲口对玩家许下的】。
         props["setup_plant"] = {"type": "string", "description":
-                                "默认空字符串。这一拍若埋下钩子（有话没说完/一件反常的小事）就写它（≤20字），引擎记账两天内须兑现"}
+                                "默认空字符串。仅当你这一拍【亲口对玩家许下或明确暗示了下次要给的东西】"
+                                "（要带TA去某处/要给TA看某物/要告诉TA某件事）才写它（≤20字，写成"
+                                "「下次带你去后山」这种可兑现的具体事）；世界观内情、别人的旧账、"
+                                "只是没说完的话，都不是钩子，一律留空"}
         props["setup_pay"] = {"type": "string", "description":
                               "默认空字符串。这一拍若兑现了【未收的伏笔】里某条，照抄那条原文"}
         props["agenda_step"] = {"type": "object", "description":
@@ -3437,17 +3443,37 @@ class QwenLLM:
             return {}
         return {"line": line.splitlines()[0][:60]} if line else {}
 
+    def _social_material(self, items: list[dict[str, Any]]) -> str:
+        """把每个角色的素材摊成一段: 人设 / 近况 / 位置 / 【今天和玩家之间的事】/ TA眼里的你。
+
+        📍 at = 此刻人在哪 (引擎位置真源给的, 不是编的): 允许入帖, 因为玩家真能走过去印证。
+        🧠 memory = 这个角色【自己那本】私有备忘录 —— 场上和短信读的是同一本, 朋友圈
+           从前读不到, 于是角色能在刚吵完架的当天发没事人的动态 (实弹 2026-08-04)。"""
+        out = []
+        for i in items:
+            s = (f"- {i.get('name')}（{i.get('persona','')}；表达方式：{i.get('eq_style','')}）"
+                 f"近况素材：{'；'.join(i.get('hooks') or [])}")
+            if i.get("at"):
+                s += f"；此刻人在：{i['at']}"
+            if i.get("memory"):
+                s += f"\n  ·你们之间最近发生的（你记得，但发动态时不许直说）：{i['memory']}"
+            if i.get("player_read"):
+                s += f"\n  ·你眼里的TA：{i['player_read']}"
+            out.append(s)
+        return "\n".join(out)
+
     def _social_posts(self, prompt: dict[str, Any]) -> dict[str, Any]:
-        """📸 角色的朋友圈动态: 从账本素材 (演变/在办的事/约定) 写 1~2 条 in-voice 短帖。"""
+        """📸 角色的朋友圈动态: 从账本素材 (演变/在办的事/约定/近事) 写 1~2 条 in-voice 短帖。"""
         items = prompt.get("items") or []
-        # 📍 at = 此刻人在哪 (引擎位置真源给的, 不是编的): 允许入帖, 因为玩家真能走过去印证
-        mat = "\n".join(f"- {i.get('name')}（{i.get('persona','')}；表达方式：{i.get('eq_style','')}）"
-                        f"近况素材：{'；'.join(i.get('hooks') or [])}"
-                        + (f"；此刻人在：{i['at']}" if i.get("at") else "") for i in items)
+        mat = self._social_material(items)
         sys = ("你在写游戏内社交动态（朋友圈式短帖）。下面每个角色给出了近况素材，"
                "各写一条TA会发的动态：≤40字，口语，有TA的性格，可含语气词/省略号；"
                "不解释背景、不@人、不写标签。【铁律】只基于给出的素材，绝不发明新的人名地名事件；"
                "素材含蓄就写得含蓄（没头没尾正是朋友圈的味道）。不用破折号。\n"
+               "【今天的事怎么写】朋友圈不是日记也不是对着TA说话：心里装着刚发生的事，"
+               "但只留一个影子——写你此刻在干嘛、看见什么、心里那点没说完的劲儿。"
+               "绝不复述对白、绝不点名对方、绝不解释来龙去脉。"
+               "让看到的人心里一动「这是在说我吗」，才算写对了。\n"
                "输出每行一条：「名字：内容」。\n" + mat + _lang_rule(prompt))
         try:
             resp = _post_chat(self._url, self._key,

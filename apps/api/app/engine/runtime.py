@@ -191,7 +191,16 @@ STUCK_SPELL = 4
 # constants above stay the single source for them. See docs/tuning.md for the knob table.
 DEFAULT_TUNING = {
     "peek_drop_chance": 18,     # 📱🔍 TA离场时遗落设备的概率% (0=关闭偷看玩法)
-    "pursue_threshold": 15,     # 💘 心动过此线角色开始主动追玩家 (0=关闭)
+    # 💘 心动过此线角色开始主动追玩家 (0=关闭)。4 = 玩家明确撩过一次 (「心动」事件 +4)。
+    # 曾经是 15 —— 而生产 162 局实测心动天花板只有 6~8 (只「心动」「和好」两种事件产
+    # romance, 且心动带 8 回合冷却), 那条线【物理上到不了】, 追求系统等于焊死。
+    # Yi 2026-08-04 定: 玩家没那么多时间堆好感, 直接把最好的陪伴给他; 稀缺性靠【单追求者锁】
+    # 守 (同时只有一位), 不靠让玩家熬。
+    "pursue_threshold": 4,
+    # 💘 两拍主动之间至少隔几个回合 (与「一游戏日一拍」谁先到算谁)。
+    # 只按游戏日排的话, real_clock 默认开 = 一个现实日一拍 = 六阶要走六个现实日,
+    # 而中位一局只有 4 拍 —— 玩家的时间货币是【一次长坐】不是【一个现实日】。慢热本调大。
+    "pursue_gap_turns": 4,
     "affinity_clamp_min": -3,   # per-turn floor on summed 好感 delta
     "affinity_clamp_max": 8,    # per-turn ceiling on summed 好感 delta
     "act_backstop_div": 12,     # soft acts: act floor = 1 + affinity // this
@@ -200,7 +209,10 @@ DEFAULT_TUNING = {
     "stuck_spell": STUCK_SPELL,
     # relationship thresholds (see engine/relationships.py)
     "friend_t": 40, "enemy_t": -15, "flirt_t": 25, "lover_t": 60, "lover_close_min": 35,
-    "follow_min_closeness": 25,
+    "follow_min_closeness": 0,   # 🚶 邀人同行: 0 = 一开始就能邀, 只有敌对拒绝
+    # 📇 联系方式 (Yi 2026-08-04: 陪伴链的第一环不该是道熬出来的门)
+    "contact_on_meet": 1,        # 照面即入通讯录 (0 = 关, 悬疑/恐怖本要的封闭感)
+    "contact_ask_t": 0,          # 开口要号需要的交情 (0 = 一律肯给)
     "close_step_min": -6, "close_step_max": 8, "rom_step_min": -4, "rom_step_max": 6,
     # hours away after which the next turn counts as a RETURN (角色接起上次的话头)
     "return_gap_hours": 6,
@@ -3001,6 +3013,9 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
                                 if _court else
                                 [f"答应下来：{task}", "婉拒，想先自己四处转转"]), content)
         _audit(state, "opening.hook", True, task[:24])
+    # 📇 开场就把在场的人写进通讯录 —— 玩家开局第一件事往往是点开手机, 那时还没走过
+    # 任何一个回合, 不在这儿给就会看到一本空通讯录 (而屏幕上写着「在场 2 人」)。
+    grant_contact_on_meet(content, state)
     return [dedash_beat(b) for b in beats]
 
 
@@ -3891,9 +3906,19 @@ def apply_choice(content: dict[str, Any], state: dict[str, Any], option_id: str)
         raise ValueError("no pending choice")
     if pending.get("kind") == "fate":
         return _apply_fate(content, state, option_id)
+    if pending.get("kind") == "court":
+        return _apply_court_choice(content, state, option_id)
     a = current_act(content, int(pending.get("act") or state.get("act", 1) or 1)) or {}
     picked = next((o for o in _choice_options(a) if o["id"] == option_id), None)
     if picked is None:
+        # 🧹 自带选项的卡 (fate/court 这类) 走到这儿 = 引擎不认识它的 kind。
+        # 不收走的话它会永远挂在 pending_choice 上, /choose 每次 400 —— 玩家既点不动
+        # 也关不掉, 存档被一张死卡钉死。所以: 认不出就收卡, 再报错。
+        # (幕内选项找不到 option_id 只是点错了, 卡要留着让玩家重点。)
+        if pending.get("options"):
+            state.pop("pending_choice", None)
+            _audit(state, "choice.orphan", False, str(pending.get("kind") or "?")[:12],
+                   "引擎不认识这张卡, 已收走")
         raise ValueError("unknown option")
     tun = tuning_for(content)
     if picked.get("flag"):
@@ -4065,8 +4090,16 @@ def pick_callback_material(content: dict[str, Any], state: dict[str, Any],
     cb = state.setdefault("callback", {"last": 0, "blanks": 0, "used": []})
     used = set(cb.get("used") or [])
     cands: list[str] = []
+    # 🎴 时刻卡优先 (2026-08-04): 引擎判定的高光 + 模型精写好的文本, 是全仓最好的
+    # 回忆素材, 此前只进玩家的回忆册、一个字不进提示词。认知边界: 只取属于 TA 的卡。
+    cands += [f"「{a.get('title', '')}」{a.get('text', '')}".strip("「」")
+              for a in (state.get("album") or [])
+              if a.get("char_id") == cid and (a.get("title") or a.get("text"))]
     entries = (state.get("rel_log") or {}).get(cid) or []
-    cands += [e.get("text", "") for e in entries[:-1]]        # 旧事优先 (掐掉最新一条)
+    # 🚫 「初次见面」是寒暄不是回忆 (实弹: 生产素材池 278 条里 193 条是 meet, 而取料
+    # 取 fresh[0] = 最老那条 → 角色开口回忆必然是「我们第一次见面」)。降级成兜底。
+    _old = entries[:-1]                                       # 旧事优先 (掐掉最新一条)
+    cands += [e.get("text", "") for e in _old if e.get("kind") != "meet"]
     cands += [f"你们约过：{p.get('what', '')}（后来{'兑现了' if p.get('status') == 'kept' else '还悬着'}）"
               for p in (state.get("promises") or [])
               if p.get("char_id") == cid and p.get("what")]
@@ -4076,11 +4109,33 @@ def pick_callback_material(content: dict[str, Any], state: dict[str, Any],
     mem = ((state.get("memory_by_char") or {}).get(cid) or "")[:80]
     if mem:
         cands.append(f"你记得：{mem}")
+    cands += [e.get("text", "") for e in _old if e.get("kind") == "meet"]   # 只剩初见才用
     fresh = [c for c in cands if c and c.strip() and c not in used]
     if not fresh:
         cb["used"] = []
         fresh = [c for c in cands if c and c.strip()]
     return fresh[0][:80] if fresh else ""
+
+
+def _callback_landed(material: str, reported: str, turn_text: str) -> bool:
+    """回扣验真: 这一轮的正文里真的有那件旧事吗。
+
+    旧口径是「模型自报摘录的前 12 字原样出现」, 太脆 —— 模型换个说法就判失败
+    (生产实测 166 次注入只过 3~5 次, blanks 单局最高连续 14 次)。改成两条通路:
+      ① 快路: 自报摘录的前 8 字原样命中 (老口径放宽);
+      ② 慢路: 正文与【引擎给的素材】共享一段 ≥4 字的连续片段 —— 素材是我们发的,
+         模型把它的核心织进正文就算落地, 不要求逐字复述。
+    空口报审 (正文里既没有摘录也没有素材痕迹) 仍然判失败, 否则计时器被白白重置。"""
+    t = (turn_text or "").strip()
+    if not t:
+        return False
+    r = (reported or "").strip().strip("「」\"'")
+    if r and r not in ("无", "None") and len(r) >= 2 and r[:8] in t:
+        return True
+    m = (material or "").strip()
+    if len(m) < 4:
+        return False
+    return any(m[i:i + 4] in t for i in range(len(m) - 3))
 
 
 # 📔 回忆标签面 (Yi: 开心的/甜甜的/搞笑的… 互动总结打标签)
@@ -4693,8 +4748,47 @@ def phone_enabled(content: dict[str, Any]) -> bool:
 _CONTACT_RE = re.compile(
     r"联系方式|联络方式|(呼机|传呼|电话|手机)号|号码留|留个号|怎么联系你|怎么找你"
     r"|留个联系|加个联系|把号(给|留)")
-CONTACT_ASK_T = 10     # 玩家开口要: 好感 ≥ 这个数就给
-CONTACT_OFFER_T = 20   # 好感涨到这, TA 自己就把号塞过来了
+# 📇 联系方式不再是熬出来的 (Yi 2026-08-04: 直接把最好的陪伴体验给玩家)。
+# 原本 ASK=10 / OFFER=20 外加一道随缘骰 —— 而中位一局只有 4 拍, 绝大多数玩家一辈子
+# 拿不到任何人的号, 于是短信、朋友圈、主动联系这整条陪伴链从来没被打开过。
+# 现在: 见面即入通讯录 (grant_contact_on_meet), 这两个阈值只作为剧本级可调的兜底保留。
+CONTACT_ASK_T = 0      # 玩家开口要: 好感 ≥ 这个数就给 (0 = 从不拒绝)
+# TA 自己把号塞过来的【戏】保留在高位: 能力早就由 grant_contact_on_meet 静默给了,
+# 这条路只负责「有戏剧动机时演一句」。压到 0 会让开场每个在场角色都播一句进通讯录, 很吵。
+CONTACT_OFFER_T = 20
+
+
+def contact_will_give(content: dict[str, Any], state: dict[str, Any],
+                      cid: str | None) -> bool:
+    """玩家开口要号, TA 肯给吗。门槛走 tuning.contact_ask_t (默认 0 = 一律肯给)。"""
+    if not cid:
+        return False
+    thr = int(tuning_for(content).get("contact_ask_t", CONTACT_ASK_T) or 0)
+    clo = int(((state.get("rel") or {}).get(cid) or {}).get("closeness", 0) or 0)
+    return clo >= thr
+
+
+def grant_contact_on_meet(content: dict[str, Any], state: dict[str, Any]) -> None:
+    """初次见面即交换联系方式 —— 陪伴链的第一环不该是道门。
+
+    只给【已照面且活着】的人, 不给玩家自己。幂等。剧本可用 tuning.contact_on_meet=0
+    关掉 (悬疑/恐怖本可能就是要「拿不到号」的封闭感)。"""
+    if not int(tuning_for(content).get("contact_on_meet", 1) or 0):
+        return
+    dead = _dead_ids(state)
+    # met_ids 只在 run_turn_stream 里写, 而开场不走那条路 —— 只认它的话, 玩家开局第一件
+    # 事点开手机会看到「通讯录空空如也」, 而屏幕上明明写着「在场 2 人」(实弹截图 08-04)。
+    # 所以并上此刻在场的人: 站在你面前的就是见过的。
+    known = set(state.get("met_ids") or []) | {
+        c.get("id") for c in scene_characters(content, state) if c.get("id")}
+    for c in _characters(content):
+        cid = c.get("id")
+        if not cid or cid not in known or cid in dead or cid == state.get("player_character_id"):
+            continue
+        if not has_contact(state, cid):
+            ids = state.setdefault("contact_ids", [])
+            ids.append(cid)
+            _audit(state, "contact.grant", True, f"{c.get('name', '')}·照面即交换"[:30])
 
 
 def has_contact(state: dict[str, Any], cid: str | None) -> bool:
@@ -4959,7 +5053,7 @@ def _court_of(state: dict[str, Any], cid: str) -> dict[str, Any]:
 def court_tick(content: dict[str, Any], state: dict[str, Any]) -> None:
     """回合末: 心动过线的角色开一本追求台账 (单追求者锁: 同时只有一位)。"""
     tun = tuning_for(content)
-    thr = int(tun.get("pursue_threshold", 15) or 0)
+    thr = int(tun.get("pursue_threshold", DEFAULT_TUNING["pursue_threshold"]) or 0)
     if thr <= 0:
         return
     active = [cid for cid, si in (state.get("char_sim") or {}).items()
@@ -4994,7 +5088,12 @@ def court_tick(content: dict[str, Any], state: dict[str, Any]) -> None:
 
 def court_directive_for(content: dict[str, Any], state: dict[str, Any],
                         cid: str) -> str | None:
-    """这一拍该 TA 主动了吗: 一游戏日至多一拍; 返回节拍指令 (注入TA的提示词)。"""
+    """这一拍该 TA 主动了吗 —— 【只读】: 一游戏日至多一拍, 返回注入TA提示词的节拍指令。
+
+    ⚠️ 这里绝不许写账。落账走 court_beat_book(), 由结算期在戏【真的演出来】之后再记。
+    实弹排雷 2026-08-04: 原本取数即消费 (就地写 last_day/beats/_court_confess), 而
+    调用处 (runtime:10322 `court_dir = ...`) 赋了值从来没人读 —— 一旦有人接上
+    court_tick, 生成失败或守卫重写的那一拍就会「名额已花、表白已武装、玩家一个字没看到」。"""
     c = _char_by_id(content, cid)
     if not c:
         return None
@@ -5002,18 +5101,41 @@ def court_directive_for(content: dict[str, Any], state: dict[str, Any],
     if not court.get("stage") or court.get("dead") or court.get("done"):
         return None
     day = _time_index(state) // 3
-    if court.get("last_day") == day or day < int(court.get("skip_until") or 0):
+    if day < int(court.get("skip_until") or 0):
         return None
-    court["last_day"] = day
+    # ⏱ 两把计时器谁先到算谁: 换了游戏日 或 距上一拍主动够了 pursue_gap_turns 个回合。
+    # 只留游戏日那把的话, real_clock 开着时一次长坐只会被追一下 (实测 12 拍演 1 次)。
+    _tun = tuning_for(content)
+    _gap = int(_tun.get("pursue_gap_turns", DEFAULT_TUNING["pursue_gap_turns"]) or 0)
+    _turn = int((state.get("growth") or {}).get("turn", 0) or 0)
+    # ⚠️ 别写成 `court.get("last_turn") or -999` —— 第 0 回合落的账 last_turn 就是 0,
+    # 而 0 是假值, 会被 or 吞掉当成「从没演过」, 间隔判定直接失效 (测试先抓到的)。
+    _lt = court.get("last_turn")
+    _since = (_turn - int(_lt)) if _lt is not None else 10 ** 9
+    if court.get("last_day") == day and not (_gap > 0 and _since >= _gap):
+        return None
+    stage = int(court["stage"])
+    style = _COURT_STYLE.get((c.get("love_style") or "").strip(), "")
+    return (f"【追求节拍·这一轮你要主动】你对对方的心意到了该行动的一步。"
+            f"本拍任务——{COURT_STAGES.get(stage, COURT_STAGES[1])}。{style}"
+            "把它演成贴你人设的具体言行，融进当下的场面，绝不突兀跳戏。")
+
+
+def court_beat_book(content: dict[str, Any], state: dict[str, Any], cid: str) -> None:
+    """追求节拍落账: 消费当日名额、推进拍数、到点武装表白。
+
+    只在这一拍的戏真的产出之后调 —— 与 court_directive_for 成对使用, 一个取数一个记账。"""
+    c = _char_by_id(content, cid)
+    court = ((state.get("char_sim") or {}).get(cid) or {}).get("court") or {}
+    if not c or not court.get("stage") or court.get("dead") or court.get("done"):
+        return
+    court["last_day"] = _time_index(state) // 3
+    court["last_turn"] = int((state.get("growth") or {}).get("turn", 0) or 0)
     court["beats"] = int(court.get("beats") or 0) + 1
     stage = int(court["stage"])
     if stage >= 6:
         state["_court_confess"] = cid   # 表白拍: 台词由模型演, 抉择卡由引擎在回合末立
-    style = _COURT_STYLE.get((c.get("love_style") or "").strip(), "")
     _audit(state, "court.beat", True, f"{c.get('name', '')}·第{stage}步")
-    return (f"【追求节拍·这一轮你要主动】你对对方的心意到了该行动的一步。"
-            f"本拍任务——{COURT_STAGES.get(stage, COURT_STAGES[1])}。{style}"
-            "把它演成贴你人设的具体言行，融进当下的场面，绝不突兀跳戏。")
 
 
 def court_apply_response(content: dict[str, Any], state: dict[str, Any],
@@ -5566,7 +5688,15 @@ def social_feed(content: dict[str, Any], state: dict[str, Any],
                               "persona": (c.get("persona_text") or "")[:80],
                               "eq_style": (c.get("eq_style") or "")[:60],
                               # at 单开一档, 不跟近况素材抢 hooks[:2] 的名额
-                              "at": _at, "hooks": hooks[:2]})
+                              "at": _at, "hooks": hooks[:2],
+                              # 🧠 接上记忆断头路 (2026-08-04): 此前朋友圈素材里
+                              # 一个玩家字段都没有 —— 角色在物理上不可能提到你们刚
+                              # 发生过的事, 于是能在刚吵完架的当天发没事人的动态。
+                              # 场上↔短信早就共用 memory_by_char, 这里是最后一段。
+                              # 认知边界照旧: 只给【这个角色自己的】那本, 绝不给全局
+                              # 摘要 (信息不开天眼), 也绝不给未解锁秘密。
+                              "memory": ((state.get("memory_by_char") or {}).get(cid) or "")[:160],
+                              "player_read": profile_mod.impression_of(state, cid)})
         posted = {p.get("cid") for p in (so.get("posts") or [])[-3:]}
         items = [i for i in items if i["cid"] not in posted][:2]
         if items:
@@ -10209,9 +10339,7 @@ def run_turn_stream(
         if has_contact(state, primary.get("id")):
             _contact_note = "TA其实已经有你的联系方式了，自然地提醒一句就好。"
         else:
-            _clo0 = int(((state.get("rel") or {}).get(primary.get("id")) or {})
-                        .get("closeness", 0) or 0)
-            _contact_will = _clo0 >= CONTACT_ASK_T
+            _contact_will = contact_will_give(content, state, primary.get("id"))
             _contact_note = ("玩家在向你要联系方式。以你们现在的交情你愿意给："
                              "自然地把号报给TA或写给TA，并申报 contact_given。" if _contact_will else
                              "玩家在向你要联系方式，但你们还没熟到那份上：按你的性格自然地"
@@ -10348,8 +10476,12 @@ def run_turn_stream(
         rel_playbook = relationships.playbook_block(
             relationships.derive_mode(sp, rel_scores, tun), mature=bool(state.get("mature")),
             char=sp) if rel_active else ""
-        # 💘 追求节拍: 引擎排拍, 这一轮该TA主动就把节拍指令贴进TA的提示词
+        # 💘 追求节拍: 引擎排拍, 这一轮该TA主动就把节拍指令贴进TA的提示词。
+        # 取数只读, 落账等戏产出之后 (见下方 court_beat_book) —— 生成失败/守卫重写时
+        # 那一天的名额不该白花。
         court_dir = court_directive_for(content, state, sp_id) if rel_active else None
+        if court_dir:
+            rel_playbook = (rel_playbook + "\n" + court_dir) if rel_playbook else court_dir
         # 💘 防御风格: the style's voice always rides along; after a warm spike (rel-up /
         # golden moment) the ENGINE schedules ONE pullback at the next meeting — the
         # "昨天那么好，今天怎么冷了" hook is a rule, not model whim.
@@ -10357,7 +10489,12 @@ def run_turn_stream(
         if style_id:
             retreat_now = False
             wp = _sim(state, sp_id).get("warm_peak")
-            if isinstance(wp, dict) and not wp.get("served"):
+            # 🚫 追求拍硬性压掉当拍回落: 「这一轮你要主动」和「昨天那么好今天冷一下」
+            # 同帧就是两条互斥指令, 模型二选一 = 花掉的那一天有一半概率被回落吃掉。
+            # 不消费 warm_peak, 让它改天再演。
+            if isinstance(wp, dict) and not wp.get("served") and court_dir:
+                pass
+            elif isinstance(wp, dict) and not wp.get("served"):
                 dt = _time_index(state) - int(wp.get("t") or 0)
                 if 0 < dt <= 6:          # the next meeting within ~two days
                     retreat_now, wp["served"] = True, True
@@ -10713,15 +10850,19 @@ def run_turn_stream(
                 if b.get("type") == "dialogue":
                     b["act"] = _act
                     break
+        # 💘 追求节拍落账: 戏真的产出了才消费当天的名额 (取数见上方 court_directive_for)
+        if court_dir and any((b.get("text") or "").strip() for b in d_beats):
+            court_beat_book(content, state, sp_id)
         # 🪃 回调收卷 (Spec E): 报审+验真 — 报的摘录必须真出现在这一轮的拍里
         if is_primary and _cb_mode:
             _cbq = str(directed.get("callback_done") or "").strip().strip("「」\"'")
             _cb = state.setdefault("callback", {"last": 0, "blanks": 0, "used": []})
             _turn_text = " ".join((b.get("text") or "") for b in d_beats)
-            if _cbq and _cbq not in ("无", "None") and _cbq[:12] in _turn_text:
+            _mat_now = pick_callback_material(content, state, sp_id)
+            if _callback_landed(_mat_now, _cbq, _turn_text):
                 _cb["last"] = int((state.get("growth") or {}).get("turn", 0) or 0)
                 _cb["blanks"] = 0
-                _mat = pick_callback_material(content, state, sp_id)
+                _mat = _mat_now
                 _cb.setdefault("used", []).append(_mat)
                 _cb["used"] = _cb["used"][-12:]
                 _audit(state, "callback", True, f"{sp_name}·{_cbq[:16]}")
@@ -11157,6 +11298,15 @@ def run_turn_stream(
                 moments.append({"kind": "deadline", "text": dl_s["text"]})
         for b in build_act_transition(content, state, old_act, new_act, persona, llm):
             yield emit(b)
+
+    # 💘 追求台账开卷 (2026-08-04 点火): 挂在这里而不是回合开头的 peek_tick 旁边 ——
+    # 本回合的关系分 (结算 + 金色瞬间) 到这一步才全部落进 state["rel"], 早一步读到的是
+    # 上一回合的旧分, 会晚整整一回合才开卷。开卷本身是无声的 (账本过线不弹窗)。
+    if not observer:
+        # 📇 照面即交换联系方式: 挂在这里 (met_ids 本回合已经收全) —— 陪伴链的第一环
+        # 不该是道熬出来的门。
+        grant_contact_on_meet(content, state)
+        court_tick(content, state)
 
     # ━━━━━━━━━━ 管线 P9 · 世界翻页（新去处/时段/进出场/手机/结局/final） ━━━━━━━━━━
     # 5b. announce any places that JUST became reachable this turn (so a new exit never just

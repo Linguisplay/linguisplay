@@ -2,8 +2,6 @@
 """⏰ 现实对齐 (Yi 2026-07-26: 时间要和现实世界对齐, 角色也得知道才行):
 生产默认 real_clock=1 — 故事时钟每回合校准到真实时刻, 四件套 (钟点/星期/日期/季节)
 进 state.clock, 【现实时刻】行进角色提示词; 剧本级可关; 沙盒老合同不变。"""
-from datetime import datetime
-
 from app.engine import runtime
 
 BASE = {"story": {"id": "s", "tuning": {"turns_per_slot": 6, "real_clock": 1},
@@ -33,7 +31,9 @@ def test_clock_syncs_to_real_world_and_carries_facts():
     st = runtime.run_turn(BASE, runtime.default_state(), {"name": "我"}, "你好",
                           channel="say", llm=llm)["state"]
     c = st.get("clock") or {}
-    now = datetime.now()
+    # 时钟是北京时间 (runtime._now), 不是跑测试这台机器的本地时间 —— 用同一个钟对表,
+    # 否则开发机在别的时区时这条恒红 (实弹: 美东 23:48 / 北京 11:48, 差一整个 slot)。
+    now = runtime._now()
     assert c.get("real") and c.get("wd", "").startswith("星期") and c.get("date"), \
         "真实四件套要进时钟账本"
     want_slot = 0 if 5 <= now.hour < 12 else (1 if 12 <= now.hour < 18 else 2)

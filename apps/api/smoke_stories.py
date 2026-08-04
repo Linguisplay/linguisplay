@@ -85,8 +85,6 @@ def smoke_one(title: str, content: dict) -> list[str]:
         ("do", pose, "pose twin"),
     ]
     dest = second_location(content, state)
-    if dest and zh:
-        script.append(("do", f"去{dest['name']}", "hard move twin"))
 
     for channel, text, label in script:
         try:
@@ -109,9 +107,17 @@ def smoke_one(title: str, content: dict) -> list[str]:
         pp = state.get("player_pos")
         if not (isinstance(pp, dict) and (pp.get("text") or "").strip()):
             fails.append("pose twin: player_pos not booked")
-    # invariant: the hard move actually relocated
-    if dest and zh and state.get("location_id") != dest["id"]:
-        fails.append(f"hard move: expected {dest['id']}, at {state.get('location_id')}")
+    # invariant: 换场真的把人挪过去了。
+    # 🗺 走地图面板那条路 (runtime.apply_move —— /runs/{id}/move 端点调的同一个),
+    # 不再用「在输入框打『去某地』」: TYPED_MOVE 2026-08-04 关掉之后那是被取消的功能,
+    # 拿它当断言等于让冒烟门守一个产品已经不做的行为 (实弹: 5/5 掉到 3/5, 而代码是对的)。
+    if dest and zh:
+        try:
+            runtime.apply_move(content, state, dest["id"])
+        except Exception as e:
+            fails.append(f"map move crashed: {e!r}")
+        if state.get("location_id") != dest["id"]:
+            fails.append(f"map move: expected {dest['id']}, at {state.get('location_id')}")
     # invariant: goal resolves
     if not isinstance(runtime.goal_for(content, state), str):
         fails.append("goal_for: not a string")

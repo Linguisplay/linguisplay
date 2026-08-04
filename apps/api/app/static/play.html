@@ -263,14 +263,33 @@
   .smeta .perk input { margin-right: 4px; }
   /* 📱 小手机 */
   #phoneBtn { position: relative; }
-  .pbadge { position: absolute; top: -4px; right: -5px; background: #c96a5e; color: #fff; border-radius: 9px; font-size: 10px; line-height: 1; padding: 2px 5px; font-weight: 700; }
+  /* 🔴 系统级角标 (照 iOS springboard badge 的规矩): 正圆起步、数字居中、白描边把它
+     从图标上「抬」起来、超过 99 收成 99+。安卓的 notification dot 是同一套的简化版。*/
+  .pbadge { position: absolute; top: -5px; right: -6px; min-width: 18px; height: 18px;
+    box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center;
+    background: #ff3b30; color: #fff; border: 2px solid #14100b; border-radius: 999px;
+    font-size: 11px; line-height: 1; padding: 0 5px; font-weight: 700;
+    font-variant-numeric: tabular-nums; box-shadow: 0 1px 3px rgba(0,0,0,.5); }
   /* 📱 小手机悬浮键 (Yi: 要在更明显的地方) — 右上角独立圆钮, 顶栏下方不与其争地 */
   #phoneFab { position: fixed; top: 96px; right: 10px; z-index: 30;
     width: 44px; height: 44px; border-radius: 50%; font-size: 20px; cursor: pointer;
     background: rgba(20,20,36,.92); border: 1px solid #6a6356; color: #e7eaf3;
     box-shadow: 0 4px 14px rgba(0,0,0,.45); }
   #phoneFab.hidden { display: none; }
-  #phoneFab .pbadge { top: -2px; right: -2px; }
+  #phoneFab .pbadge { top: -3px; right: -3px; border-color: rgba(20,20,36,.92); }
+  /* 📳 有未读时的召唤: 照系统通知的做法 —— 一次轻微的「震一下」而不是永动循环。
+     震完留一圈静止光晕, 告诉玩家「这里有东西」但不抢戏。prefers-reduced-motion 关掉。*/
+  #phoneFab.ring { animation: fabBuzz .62s cubic-bezier(.36,.07,.19,.97) 1;
+    box-shadow: 0 0 0 3px rgba(255,59,48,.18), 0 4px 16px rgba(0,0,0,.5); }
+  @keyframes fabBuzz {
+    0%,100% { transform: translateX(0) }
+    12% { transform: translateX(-3px) rotate(-6deg) }
+    28% { transform: translateX(3px) rotate(5deg) }
+    44% { transform: translateX(-2px) rotate(-3deg) }
+    62% { transform: translateX(2px) rotate(2deg) }
+    80% { transform: translateX(-1px) }
+  }
+  @media (prefers-reduced-motion: reduce) { #phoneFab.ring { animation: none; } }
   /* 📱🔍 TA的设备 (查手机 P1 壳): 偷来的屏幕 — 比自己的手机更暗, 边框冷色 */
   #peekov { position: fixed; inset: 0; z-index: 76; background: rgba(0,0,0,.62); display: grid; place-items: center; }
   #peekov .pkcard { width: min(380px, 92vw); max-height: 80vh; overflow-y: auto; background: #13110f;
@@ -294,7 +313,75 @@
   .papp { position: relative; display: flex; flex-direction: column; align-items: center; gap: 5px; font-size: 30px; cursor: pointer; background: #171410; border: 1px solid #292217; border-radius: 14px; padding: 13px 4px 9px; }
   .papp:hover { background: #322e28; }
   .papp small { font-size: 12.5px; color: #b3aa97; }
-  .appdot { position: absolute; top: 5px; right: 8px; background: #c96a5e; color: #fff; border-radius: 8px; font-size: 10px; padding: 1px 5px; font-weight: 700; }
+  /* 🎨 图标收进同一个色温: 原生 emoji 一个白气泡一个粉传呼一个紫通讯录, 在这套暗金
+     港片调子里各说各话。降饱和 + 压亮度让它们像同一台设备上的图标, 而不是贴纸集。*/
+  .papp { filter: saturate(.42) brightness(.92) contrast(1.06);
+          transition: filter .18s, transform .12s ease; }
+  .papp:hover { filter: saturate(.95) brightness(1.06); }
+  .papp:active { transform: scale(.93); }                  /* iOS 图标按压 */
+  .papp small { filter: saturate(2.4) brightness(1.1); }   /* 文字不跟着灰掉 */
+  /* 角标是系统色, 绝不许被图标的降饱和吃掉 —— 通知红必须是红的 */
+  .papp .appdot, .papp .pbadge { filter: saturate(2.6) brightness(1.12); }
+  /* 📶 状态条: 让它像一台设备 */
+  .pstatus { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+             font-size: 11px; color: #8b8271; letter-spacing: .3px; padding: 2px 4px 0; }
+  .pstatus b { color: #d8b57a; }
+  .pstatus-mid { flex: 1; text-align: center; color: #6f695e; }
+  /* 📮 最近: 把主屏下半截的死空白变成「TA 找过你」的橱窗 */
+  .precent { margin-top: 6px; border-top: 1px solid #201c15; padding-top: 10px; }
+  .prec-h { font-size: 11px; color: #8b8271; letter-spacing: 1px; padding: 0 4px 6px; }
+  .prec-empty { color: #6f695e; font-size: 12.5px; line-height: 1.75; padding: 6px 4px 2px; }
+  /* 🔔 通知卡: iOS 通知中心的层次 (毛玻璃卡 + 应用名行 + 正文), 安卓的未读竖线 */
+  .pnotif { position: relative; margin: 0 2px 8px; padding: 9px 11px 10px; cursor: pointer;
+    background: rgba(255,255,255,.045); border: 1px solid #241f18; border-radius: 14px;
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    transition: transform .12s ease, background .16s; }
+  .pnotif:active { transform: scale(.975); }          /* iOS 按压反馈 */
+  .pnotif:hover { background: rgba(255,255,255,.075); }
+  .pnotif.unread { background: rgba(216,181,122,.09); border-color: #3a3226; }
+  .pnotif.unread::before { content: ""; position: absolute; left: 0; top: 12px; bottom: 12px;
+    width: 3px; border-radius: 0 3px 3px 0; background: #d8b57a; }
+  .pn-head { display: flex; justify-content: space-between; font-size: 10.5px;
+    color: #8b8271; letter-spacing: .3px; padding-bottom: 6px; }
+  .pn-at { color: #6f695e; }
+  .pn-body { display: flex; align-items: center; gap: 9px; }
+  .pn-txt { flex: 1; min-width: 0; }
+  .pn-name { display: flex; align-items: center; gap: 6px; font-size: 13.5px; color: #ece5d6; font-weight: 600; }
+  .pn-badge { position: static; margin-left: 2px; }
+  .pn-last { font-size: 12px; color: #9a927f; margin-top: 2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* 📤 系统分享面板 (iOS action sheet): 底部上滑、抓手、分组、取消单独一组 */
+  #actsheet { position: fixed; inset: 0; z-index: 90; background: rgba(0,0,0,.45);
+    display: flex; align-items: flex-end; justify-content: center;
+    -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
+  #actsheet.out .as-card { animation: asOut .18s ease forwards; }
+  .as-card { width: min(400px, 96vw); margin: 0 0 8px; padding: 0 6px 6px;
+    animation: asIn .24s cubic-bezier(.25,.9,.3,1); }
+  @keyframes asIn  { from { transform: translateY(22px); opacity: 0 } to { transform: none; opacity: 1 } }
+  @keyframes asOut { to { transform: translateY(22px); opacity: 0 } }
+  @media (prefers-reduced-motion: reduce) { .as-card, #actsheet.out .as-card { animation: none } }
+  .as-grip { width: 38px; height: 4px; border-radius: 4px; background: #4a4338; margin: 0 auto 8px; }
+  .as-title { text-align: center; font-size: 12px; color: #8b8271; padding: 8px 12px 10px;
+    background: rgba(28,24,18,.96); border-radius: 14px 14px 0 0; border-bottom: 1px solid #2b2519; }
+  .as-group { background: rgba(28,24,18,.96); border-radius: 14px; overflow: hidden;
+    -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); }
+  .as-title + .as-group { border-radius: 0 0 14px 14px; }
+  .as-cancel { margin-top: 8px; background: rgba(38,33,25,.98); }
+  .as-cancel .as-row { font-weight: 700; color: #e7e0cf; }
+  .as-row { display: flex; align-items: center; gap: 12px; width: 100%; border: 0;
+    background: transparent; color: #ece5d6; font-size: 15px; padding: 15px 18px;
+    cursor: pointer; text-align: left; font-family: inherit; }
+  .as-row + .as-row { border-top: 1px solid #241f18; }
+  .as-row:active { background: rgba(255,255,255,.07); }
+  .as-row.danger { color: #ff6259; }
+  .as-ic { width: 20px; text-align: center; filter: saturate(.6); }
+  .mshare { cursor: pointer; }
+  /* 应用格角标: 与悬浮键同一套系统规矩 (正圆、白描边、通知红) */
+  .appdot { position: absolute; top: 3px; right: 5px; min-width: 18px; height: 18px;
+    box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center;
+    background: #ff3b30; color: #fff; border: 2px solid #171410; border-radius: 999px;
+    font-size: 11px; line-height: 1; padding: 0 5px; font-weight: 700;
+    font-variant-numeric: tabular-nums; box-shadow: 0 1px 3px rgba(0,0,0,.5); }
   .pthread { display: flex; align-items: center; gap: 10px; padding: 9px 6px; border-bottom: 1px solid #282622; cursor: pointer; }
   .pthread:hover { background: #22201c; }
   .pav { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex: 0 0 40px; }
@@ -2502,14 +2589,60 @@ async function openJournal() {
 // ── 📱 小手机: messages / calendar / contacts / notes in one shell ──────────────
 let phoneUnread = 0, phoneDevice = "手机", phoneOn = true;
 function setPhoneBadge(n) {
+  const prev = phoneUnread;
   phoneUnread = Math.max(0, n | 0);
   for (const id of ["phoneBadge", "phoneFabBadge"]) {   // 顶栏角标 + 悬浮键角标同步
     const b = document.getElementById(id);
     if (!b) continue;
-    if (phoneUnread > 0) { b.textContent = phoneUnread > 9 ? "9+" : phoneUnread; b.classList.remove("hidden"); }
+    if (phoneUnread > 0) { b.textContent = phoneUnread > 99 ? "99+" : phoneUnread; b.classList.remove("hidden"); }
     else b.classList.add("hidden");
   }
+  // 📳 未读【新增】时震一下悬浮键 (从 0→N 或 N→更多)。只在增加时响, 读完清零不响 ——
+  // 系统通知的规矩: 提醒是给新事件的, 不是给状态的。
+  const fab = document.getElementById("phoneFab");
+  if (fab && phoneUnread > prev) {
+    fab.classList.remove("ring");
+    void fab.offsetWidth;               // 重排一次, 让同名动画能再次触发
+    fab.classList.add("ring");
+  } else if (fab && phoneUnread === 0) {
+    fab.classList.remove("ring");
+  }
 }
+// 🖼 手机壁纸: 主屏铺一张玩家自己选的时刻卡底图 —— 一台设备之所以像「自己的」,
+// 靠的就是这个。存本地 (per run), 不占带宽也不进存档。
+function phoneWallKey() { return "lp_phonewall_" + runId; }
+function phoneWall() { return localStorage.getItem(phoneWallKey()) || ""; }
+function setPhoneWall(stem) {
+  if (!stem || phoneWall() === stem) localStorage.removeItem(phoneWallKey());
+  else localStorage.setItem(phoneWallKey(), stem);
+  pushToast(phoneWall() ? B("🖼 已设为手机壁纸", "🖼 Set as phone wallpaper")
+                        : B("🖼 已恢复默认壁纸", "🖼 Wallpaper cleared"), "", 2200);
+}
+
+// 📤 系统分享面板 (照 iOS UIAlertController.actionSheet): 底部上滑、顶部圆角、
+// 一条抓手、分组行、取消键单独一组。点遮罩或取消都关。
+function actionSheet(title, actions) {
+  document.getElementById("actsheet")?.remove();
+  const ov = document.createElement("div");
+  ov.id = "actsheet";
+  ov.innerHTML = `<div class="as-card" onclick="event.stopPropagation()">
+    <div class="as-grip"></div>
+    ${title ? `<div class="as-title">${escapeHtml(title)}</div>` : ""}
+    <div class="as-group">${actions.map((a, i) =>
+      `<button class="as-row${a.danger ? " danger" : ""}" data-i="${i}">
+         <span class="as-ic">${a.icon || ""}</span><span>${escapeHtml(a.label)}</span></button>`).join("")}</div>
+    <div class="as-group as-cancel"><button class="as-row" data-cancel>${B("取消", "Cancel")}</button></div>
+  </div>`;
+  const close = () => { ov.classList.add("out"); setTimeout(() => ov.remove(), 180); };
+  ov.onclick = (e) => { if (e.target === ov) close(); };
+  ov.querySelector("[data-cancel]").onclick = close;
+  ov.querySelectorAll(".as-row[data-i]").forEach(b => {
+    b.onclick = () => { close(); try { actions[+b.dataset.i].run(); } catch (e) {} };
+  });
+  document.body.appendChild(ov);
+  return ov;
+}
+
 function phoneShell(inner, title, backTo) {
   let ov = document.getElementById("phoneov");
   if (!ov) {
@@ -2521,7 +2654,9 @@ function phoneShell(inner, title, backTo) {
   // 死键 — 不带括号的一律当回主屏
   const go = !backTo ? "" : /\)\s*;?\s*$/.test(backTo) ? backTo : "openPhone()";
   const back = go ? `<a class="pback" onclick="${go}">‹ 返回</a>` : "";
-  ov.innerHTML = `<div class="pcard" onclick="event.stopPropagation()">
+  const _w = phoneWall();
+  const _wall = _w ? ` style="background-image:linear-gradient(rgba(12,10,7,.82),rgba(12,10,7,.93)),url('/scene/bg/${encodeURIComponent(_w)}.jpg');background-size:cover;background-position:center"` : "";
+  ov.innerHTML = `<div class="pcard"${_wall} onclick="event.stopPropagation()">
     <div class="pbar">${back}<b>${escapeHtml(title)}</b>
       <button class="ghost" onclick="document.getElementById('phoneov').remove()">合上</button></div>
     <div class="pbody">${inner}</div></div>`;
@@ -2635,6 +2770,35 @@ function renderPeek(v) {
     ${nick}${mine}${ths}${hint}</div>`;
   document.body.appendChild(ov);
 }
+// 📮 主屏下半截的「最近」: 应用格只占屏幕上三分之一, 剩下三分之二原本是死空白 ——
+// 而那正是「TA 主动找过你」最该被看见的地方。有消息就摊开最近三条, 没消息就说清楚
+// 这台设备会自己响 (第一次拿到联系人时尤其重要: 玩家得知道这里以后会有东西)。
+function phoneRecent(inbox) {
+  const th = (inbox.threads || []).slice(0, 3);
+  if (!th.length) {
+    return `<div class="precent"><div class="prec-h">${B("最近", "Recent")}</div>
+      <div class="prec-empty">${B("还没有人给你捎过话。<br>号码都存好了 —— TA们想起你的时候，会自己找过来。",
+        "No one has reached out yet.<br>Their numbers are saved — when they think of you, they will.")}</div></div>`;
+  }
+  // 照 iOS 通知中心 / 安卓通知栏的卡片规矩: 顶一行「应用名 · 时间」, 下面是头像 +
+  // 发信人 + 预览。未读的卡整张提亮并在左侧压一条竖线 (安卓 unread indicator 的做法)。
+  const rows = th.map(t => {
+    const av = t.avatar_url
+      ? `<img class="pav" src="${escapeHtml(t.avatar_url)}" onerror="this.style.display='none'">`
+      : `<span class="pav plet" style="background:${avatarColor(t.name)}">${escapeHtml((t.name || "?")[0])}</span>`;
+    const n = t.unread || 0;
+    return `<div class="pnotif${n ? " unread" : ""}" onclick="openThread('${escapeHtml(t.char_id)}')">
+      <div class="pn-head"><span>💬 ${B("信息", "Messages")}</span>
+        <span class="pn-at">${escapeHtml(t.at || "")}</span></div>
+      <div class="pn-body">${av}<div class="pn-txt">
+        <div class="pn-name">${t.dead ? "🕯 " : ""}${escapeHtml(t.name)}${
+          n ? `<span class="pbadge pn-badge">${n > 99 ? "99+" : n}</span>` : ""}</div>
+        <div class="pn-last">${escapeHtml(t.last || "")}</div>
+      </div></div></div>`;
+  }).join("");
+  return `<div class="precent"><div class="prec-h">${B("最近", "Recent")}</div>${rows}</div>`;
+}
+
 async function openPhone() {
   UIS.flip();
   if (!runId) return;
@@ -2657,17 +2821,26 @@ async function openPhone() {
        <div class="papp poff" onclick="noSignal()">📮<small>信箱</small></div>
        <div class="papp poff" onclick="noSignal()">👥<small>通讯录</small></div>`;
   const apps = inbox.apps || [];
-  const inner = `${phoneOn ? "" : `<div class="mhint">📵 ${B("没有信号", "No signal")}</div>`}<div class="papps">
-    ${comm}
-    ${apps.includes("bestiary") ? `<div class="papp" onclick="openBestiary()">📖<small>${B("图鉴","Bestiary")}</small></div>` : ""}
-    ${apps.includes("bank") && phoneOn ? `<div class="papp" onclick="openBank()">🏦<small>${B("银行","Bank")}</small></div>` : ""}
-    ${apps.includes("social") && phoneOn ? `<div class="papp" onclick="openSocial()">📸<small>${B("动态","Feed")}</small></div>` : ""}
-    ${curMoney != null ? `<div class="papp" onclick="openMarket()">🛒<small>集市</small></div>` : ""}
-    <div class="papp" onclick="document.getElementById('phoneov').remove(); openRelWeb()">🕸<small>关系网</small></div>
-    <div class="papp" onclick="openBag()">🎒<small>背包</small></div>
-    <div class="papp" onclick="openPlanner()">🗓<small>${B("手账","Planner")}</small></div>
-    <div class="papp" onclick="document.getElementById('phoneov').remove(); openJournal()">📔<small>${B("档案","Dossier")}</small></div>
+  // 📶 设备状态条: 让这张卡真的像一台设备, 而不是一个应用抽屉。
+  const _clockTxt = (curClock && curClock.label) ? curClock.label : "";
+  const _unreadAll = (inbox.unread || 0) + (mailbox.unread || 0);
+  const statusBar = `<div class="pstatus">
+    <span>${phoneOn ? "📶" : "📵"} ${escapeHtml(phoneDevice)}</span>
+    <span class="pstatus-mid">${escapeHtml(_clockTxt)}</span>
+    <span>${_unreadAll ? `<b>${_unreadAll}</b> ${B("条未读", "unread")}` : B("没有新消息", "No new messages")}</span>
   </div>`;
+  const inner = `${statusBar}${phoneOn ? "" : `<div class="mhint">📵 ${B("没有信号", "No signal")}</div>`}<div class="papps">
+    ${comm}
+    ${apps.includes("social") && phoneOn ? `<div class="papp" onclick="openSocial()">📸<small>${B("动态","Feed")}</small></div>` : ""}
+    <div class="papp" onclick="openAlbum()">🎞<small>${B("回忆册","Memories")}</small></div>
+    <div class="papp" onclick="document.getElementById('phoneov').remove(); openRelWeb()">🕸<small>${B("关系网","Web")}</small></div>
+    <div class="papp" onclick="openPlanner()">🗓<small>${B("手账","Planner")}</small></div>
+    <div class="papp" onclick="openBag()">🎒<small>${B("背包","Bag")}</small></div>
+    ${curMoney != null ? `<div class="papp" onclick="openMarket()">🛒<small>${B("集市","Market")}</small></div>` : ""}
+    ${apps.includes("bank") && phoneOn ? `<div class="papp" onclick="openBank()">🏦<small>${B("银行","Bank")}</small></div>` : ""}
+    ${apps.includes("bestiary") ? `<div class="papp" onclick="openBestiary()">📖<small>${B("图鉴","Bestiary")}</small></div>` : ""}
+    <div class="papp" onclick="document.getElementById('phoneov').remove(); openJournal()">📔<small>${B("档案","Dossier")}</small></div>
+  </div>${phoneRecent(inbox)}`;
   // 📱 设备名判定曾只认中文字面量「手机」— 英文本子 phone.device="phone" 落到
   // 信箱分支, 标题成了「📮 phone」(2026-08-02 体检截图实锤)。现代设备一律走小手机,
   // 只有真·非手机设备 (信鸽/传讯符/电台) 才用信箱皮
@@ -2732,7 +2905,7 @@ async function openAlbum() {
         <div class="btitle">${ALBUM_ICON[a.kind] || "💫"} ${escapeHtml(a.title || "")}${a.name ? ` · ${escapeHtml(a.name)}` : ""}</div>
         <div class="btext">${escapeHtml(a.text || "")}</div>
         <div class="bmeta">${"★".repeat(r)} · ${B(`第${a.act||1}幕`, `Act ${a.act||1}`)}${a.at ? " · " + escapeHtml(a.at) : ""}</div>
-        ${a.bg ? `<button data-bg="${escapeHtml(a.bg)}">${isPin ? B("✓ 聊天背景 · 点击恢复", "✓ Chat backdrop · tap to unpin") : B("设为聊天背景", "Set as chat backdrop")}</button>` : ""}
+        <button data-i="${idx}" class="mshare">⤴ ${B("分享", "Share")}${isPin ? B(" · 已是聊天背景", " · chat backdrop") : ""}</button>
       </div></div></div>`;
   }).join("");
   // empty slots keep the shelf hungry — the moments not yet lived
@@ -2743,9 +2916,32 @@ async function openAlbum() {
     : `<div class="jempty">还没有值得裱起来的瞬间。<br>它们会在你意想不到的时候降临。</div>`;
   const ov = phoneShell(`${head}<div class="mgrid">${cards}${slots}</div>`, B("📸 回忆册", "📸 Memories"), "openPhone()");
   ov.querySelectorAll(".mcard").forEach(el => { el.onclick = () => el.classList.toggle("flipped"); });
-  ov.querySelectorAll(".mback button").forEach(b => {
-    b.onclick = (e) => { e.stopPropagation(); setChatBg(b.dataset.bg); };
+  ov.querySelectorAll(".mshare").forEach(b => {
+    b.onclick = (e) => { e.stopPropagation(); shareMoment(album[+b.dataset.i]); };
   });
+}
+
+// ⤴ 时刻卡的系统分享面板。有底图的才谈得上壁纸/背景; 文字始终可复制、可分享。
+function shareMoment(a) {
+  if (!a) return;
+  const txt = `「${a.title || ""}」${a.text || ""}`.trim();
+  const acts = [];
+  if (a.bg) {
+    const isWall = phoneWall() === a.bg;
+    const isChat = (localStorage.getItem(chatBgKey()) || "") === a.bg;
+    acts.push({ icon: "🖼", label: isWall ? B("取消手机壁纸", "Remove wallpaper") : B("设为手机壁纸", "Set as wallpaper"),
+                run: () => { setPhoneWall(a.bg); openAlbum(); } });
+    acts.push({ icon: "💬", label: isChat ? B("取消聊天背景", "Remove chat backdrop") : B("设为聊天背景", "Set as chat backdrop"),
+                run: () => setChatBg(a.bg) });
+  }
+  acts.push({ icon: "📋", label: B("拷贝这段话", "Copy text"), run: async () => {
+    try { await navigator.clipboard.writeText(txt); pushToast(B("已拷贝", "Copied"), "", 1800); }
+    catch (e) { pushToast(B("拷贝失败，长按选中吧", "Copy failed — select it by hand"), "", 2200); } } });
+  if (navigator.share) {
+    acts.push({ icon: "⤴", label: B("分享给朋友", "Share…"),
+                run: () => navigator.share({ text: txt }).catch(() => {}) });
+  }
+  actionSheet(`${ALBUM_ICON[a.kind] || "💫"} ${a.title || ""}`, acts);
 }
 async function openInbox() {
   let inbox;
