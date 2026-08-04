@@ -322,42 +322,82 @@
   #phoneov .pclose:hover { background: rgba(255,255,255,.1); color: #ece5d6; }
   #phoneov .pclose:active { transform: scale(.95); }
   #phoneov .pbody { flex: 1; overflow-y: auto; padding-top: 10px; display: flex; flex-direction: column; }
-  /* 应用格: 图标住圆角底托、标签在下 (iOS/安卓主屏形制)。格子本身不再画框 ——
-     一堆描边小方块会把主屏切碎; 底托承担「这是个可点的东西」, 标签负责说明。*/
-  .papps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px 8px; padding: 16px 2px 14px; }
+  /* 🏠 桌面: 壁纸铺到卡片边缘 (padding 归零), Dock 靠 margin-top:auto 沉底 */
+  #phoneov .pcard.phome { padding: 10px 10px 8px; background-color: #0d0b08; }
+  #phoneov .pcard.phome .pbody { padding-top: 0; }
+  /* 🏠 iOS 桌面形制。四列, 图标是【实心彩色圆角方块 + 白色字形】, 标签在图标正下方。
+     iOS 的图标边长 60、间距靠列宽自然分, 标签 11px 白字带投影 (要压在壁纸上还看得清)。*/
+  .papps { display: grid; grid-template-columns: repeat(4, 1fr);
+           gap: 20px 0; padding: 14px 8px 6px; justify-items: center; }
+  /* ⚠️ 全局 button 有金色渐变底 + inset box-shadow —— 只写 background:none 盖不掉阴影,
+     于是每个应用外面糊着一圈方框 (改 div→button 时带进来的)。这里三样一起清。 */
   .papp { position: relative; display: flex; flex-direction: column; align-items: center;
-    gap: 7px; cursor: pointer; background: none; border: 0; padding: 0;
-    min-height: 44px;                                   /* 触控最小高度 */
-    transition: transform .12s ease; }
-  .pico { position: relative; display: grid; place-items: center; width: 52px; height: 52px;
-    border-radius: 15px;                                /* iOS 圆角比例 ≈ 0.29 × 边长 */
-    background: linear-gradient(160deg, #221d16, #17130e);
-    border: 1px solid #322a1d; color: #d8b57a;
-    box-shadow: 0 1px 0 rgba(255,255,255,.04) inset, 0 2px 6px rgba(0,0,0,.35);
-    transition: background .16s, color .16s, border-color .16s; }
-  .papp:hover .pico { background: linear-gradient(160deg, #2c261c, #1e1913);
-                      border-color: #4a3f2c; color: #f0d9a8; }
-  .papp small { font-size: 11.5px; line-height: 1.25; color: #a89f8c; letter-spacing: .2px; }
+    gap: 7px; width: 100%; cursor: pointer; background: none; border: 0; padding: 0;
+    box-shadow: none; border-radius: 0; font-weight: 400;
+    font-family: inherit; transition: transform .12s ease; -webkit-tap-highlight-color: transparent; }
+  .papp:active { transform: scale(.9); }
+  .pico { position: relative; display: grid; place-items: center;
+    width: 58px; height: 58px; border-radius: 14px;      /* iOS 「squircle」的近似 */
+    color: #fff;
+    box-shadow: 0 1px 1px rgba(255,255,255,.22) inset, 0 3px 10px rgba(0,0,0,.5); }
+  .pico .ic { stroke-width: 1.9; }
+  .papp small { font-size: 11px; line-height: 1.2; color: #fff; letter-spacing: .2px;
+    text-shadow: 0 1px 3px rgba(0,0,0,.85); max-width: 100%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .papp.poff .pico { filter: grayscale(1) brightness(.55); }
+  /* 每个应用一个色 —— 桌面「一眼认出」全靠它。取的是游戏这套暗金/港片调子里站得住的浓色 */
+  .t-msg   { background: linear-gradient(165deg,#4ec26a,#1f9c46) }
+  .t-mail  { background: linear-gradient(165deg,#5aa9f0,#2b6fd0) }
+  .t-users { background: linear-gradient(165deg,#c9a26b,#8d6435) }
+  .t-feed  { background: linear-gradient(165deg,#f0806a,#c94f7c) }
+  .t-film  { background: linear-gradient(165deg,#b47ae0,#7343b8) }
+  .t-web   { background: linear-gradient(165deg,#4fc4c0,#1d8a8f) }
+  .t-cal   { background: linear-gradient(165deg,#f2f0eb,#cfc9bd); color: #b3403a }
+  .t-bag   { background: linear-gradient(165deg,#d8a15c,#a06a26) }
+  .t-cart  { background: linear-gradient(165deg,#f4a94e,#cf7415) }
+  .t-bank  { background: linear-gradient(165deg,#57a877,#2c6d47) }
+  .t-beast { background: linear-gradient(165deg,#7c86e0,#4147a8) }
+  .t-archive { background: linear-gradient(165deg,#8c93a3,#535a6b) }
+  /* ⚓ Dock: 底部毛玻璃托盘, 放最常用的通讯三件 —— iOS 桌面的固定底栏 */
+  /* Dock 用等分 flex 而不是写死 4 列 —— 应用数随剧本变(有的本子没有银行/图鉴),
+     写死列数就会在右边空出一格, 整排看着往左偏。 */
+  .pdock { display: flex; margin-top: auto; padding: 12px 10px;
+    background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.13);
+    border-radius: 26px; -webkit-backdrop-filter: blur(22px); backdrop-filter: blur(22px); }
+  .pdock .papp { flex: 1; }                    /* 等分, 几个都居中 */
+  .pdock .papp small { display: none; }        /* Dock 里 iOS 不显示标签 */
+  /* 🏠 Home 指示条: iOS 底部那根横杠, 这里兼作「合上」 */
+  .phomebar { width: 128px; height: 5px; border-radius: 99px; margin: 10px auto 2px;
+    background: rgba(255,255,255,.5); cursor: pointer; flex: none;
+    transition: background .16s; }
+  .phomebar:hover { background: rgba(255,255,255,.8); }
   /* 🎨 图标收进同一个色温: 原生 emoji 一个白气泡一个粉传呼一个紫通讯录, 在这套暗金
      港片调子里各说各话。降饱和 + 压亮度让它们像同一台设备上的图标, 而不是贴纸集。*/
   .papp:active { transform: scale(.93); }                  /* iOS 图标按压 */
   /* 换成线性 SVG 之后, 从前那一串给 emoji 擦脂抹粉的 filter 全部作废 —— 图标本来就
      统一了, 不需要事后降饱和把它们摁成一个色。少一层 hack。*/
-  /* 📶 状态条: 让它像一台设备 */
-  .pstatus { display: flex; align-items: center; justify-content: space-between; gap: 8px;
-             font-size: 11px; color: #8b8271; letter-spacing: .3px; padding: 2px 4px 0; }
-  .pstatus b { color: #d8b57a; }
-  .pstatus-l { display: inline-flex; align-items: center; gap: 6px; }
-  .pstatus-mid { flex: 1; text-align: center; color: #6f695e; }
-  /* 📶 信号格: 三根递增柱子, 照系统状态栏。无信号时全部压灰 */
-  .psig { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 9px; }
-  .psig i { width: 2.5px; background: #d8b57a; border-radius: 1px; }
-  .psig i:nth-child(1) { height: 4px } .psig i:nth-child(2) { height: 6.5px } .psig i:nth-child(3) { height: 9px }
-  .psig.off i { background: #4a4338; }
+  /* 📶 状态栏: 左时间 / 右信号+电量, 中间留空(真机那儿是刘海)。字要压在壁纸上还看得清 */
+  .pstatus { display: flex; align-items: center; justify-content: space-between;
+    font-size: 12px; font-weight: 600; color: #fff; letter-spacing: .3px;
+    text-shadow: 0 1px 3px rgba(0,0,0,.8); padding: 2px 6px 6px; flex: none; }
+  .pstatus-r { display: inline-flex; align-items: center; gap: 5px; }
+  .psig { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 10px; }
+  .psig i { width: 3px; background: #fff; border-radius: 1px; }
+  .psig i:nth-child(1) { height: 4px } .psig i:nth-child(2) { height: 7px } .psig i:nth-child(3) { height: 10px }
+  .psig.off i { background: rgba(255,255,255,.32); }
+  .pbat { display: inline-block; position: relative; width: 22px; height: 11px;
+    border: 1.3px solid rgba(255,255,255,.75); border-radius: 3.5px; }
+  .pbat::after { content: ""; position: absolute; right: -3.4px; top: 3px; width: 2px; height: 5px;
+    border-radius: 0 2px 2px 0; background: rgba(255,255,255,.55); }
+  .pbat i { position: absolute; inset: 1.4px; width: 68%; border-radius: 2px; background: #fff; }
   /* 📮 最近: 把主屏下半截的死空白变成「TA 找过你」的橱窗 */
-  .precent { margin-top: 6px; border-top: 1px solid #201c15; padding-top: 10px; }
-  .prec-h { font-size: 11px; color: #8b8271; letter-spacing: 1px; padding: 0 4px 6px; }
-  .prec-empty { color: #6f695e; font-size: 12.5px; line-height: 1.75; padding: 6px 4px 2px; }
+  /* 📮 桌面上的「最近」= iOS 小组件: 毛玻璃圆角卡, 不是一条分割线下面的列表 */
+  .precent { margin: 12px 2px 0; padding: 12px 12px 6px; border-radius: 20px;
+    background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.12);
+    -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); }
+  .prec-h { font-size: 11px; font-weight: 600; color: rgba(255,255,255,.62);
+    letter-spacing: .8px; padding: 0 2px 8px; }
+  .prec-empty { color: rgba(255,255,255,.55); font-size: 12.5px; line-height: 1.7; padding: 2px 2px 8px; }
   /* 🔔 通知卡: iOS 通知中心的层次 (毛玻璃卡 + 应用名行 + 正文), 安卓的未读竖线 */
   .pnotif { position: relative; margin: 0 2px 8px; padding: 9px 11px 10px; cursor: pointer;
     background: rgba(255,255,255,.045); border: 1px solid #241f18; border-radius: 14px;
@@ -2684,6 +2724,7 @@ function actionSheet(title, actions) {
   return ov;
 }
 
+const HOME = " home";   // 桌面模式的哨兵标题 (不会与任何真标题撞名)
 function phoneShell(inner, title, backTo, titleIcon) {
   let ov = document.getElementById("phoneov");
   if (!ov) {
@@ -2696,16 +2737,19 @@ function phoneShell(inner, title, backTo, titleIcon) {
   const go = !backTo ? "" : /\)\s*;?\s*$/.test(backTo) ? backTo : "openPhone()";
   const back = go ? `<a class="pback" onclick="${go}">‹ 返回</a>` : "";
   const _w = phoneWall();
-  const _wall = _w ? ` style="background-image:linear-gradient(rgba(12,10,7,.82),rgba(12,10,7,.93)),url('/scene/bg/${encodeURIComponent(_w)}.jpg');background-size:cover;background-position:center"` : "";
-  // 顶栏三栏栅格 (照 iOS navigation bar): 左槽/标题/右槽。
-  // 原来是 flex + 标题 flex:1 —— 主屏没有返回键时左槽是空的, 标题就在【剩余空间】里
-  // 居中, 被右边的合上键顶得偏左。三栏栅格的两侧等宽, 标题永远落在卡片正中。
-  ov.innerHTML = `<div class="pcard"${_wall} onclick="event.stopPropagation()">
-    <div class="pbar"><div class="pbar-l">${back}</div>
+  const home = title === HOME;                 // 🏠 桌面: 壁纸铺满、无导航栏
+  // 桌面上壁纸是主角(只压一层薄暗保证图标可读); 二级页面要读长文, 压重一点
+  const _dim = home ? "rgba(10,9,7,.34),rgba(10,9,7,.52)" : "rgba(12,10,7,.82),rgba(12,10,7,.93)";
+  const _wall = _w ? ` style="background-image:linear-gradient(${_dim}),url('/scene/bg/${encodeURIComponent(_w)}.jpg');background-size:cover;background-position:center"` : "";
+  // 二级页的顶栏走三栏栅格 (照 iOS navigation bar): 左槽/标题/右槽。
+  // 原来是 flex + 标题 flex:1 —— 左槽空着时标题在【剩余空间】里居中, 被右边的合上键
+  // 顶得偏左。三栏栅格两侧等宽, 标题永远落在卡片正中。
+  const bar = home ? "" : `<div class="pbar"><div class="pbar-l">${back}</div>
       <b>${titleIcon ? IC(titleIcon, 15) : ""}${escapeHtml(title)}</b>
       <div class="pbar-r"><button class="pclose"
-        onclick="document.getElementById('phoneov').remove()">${B("合上", "Close")}</button></div></div>
-    <div class="pbody">${inner}</div></div>`;
+        onclick="document.getElementById('phoneov').remove()">${B("合上", "Close")}</button></div></div>`;
+  ov.innerHTML = `<div class="pcard${home ? " phome" : ""}"${_wall} onclick="event.stopPropagation()">
+    ${bar}<div class="pbody">${inner}</div></div>`;
   translateNode(ov);
   return ov;
 }
@@ -2861,9 +2905,12 @@ async function openPhone() {
   // 📵 a no-signal story keeps its comm apps visible but DEAD — the silence is diegetic
   // 应用格统一走 SVG 图标 (与顶栏同一套): 图标住一个圆角底托里, 标签在下 —— iOS/安卓
   // 主屏的通用形制。emoji 不是图标, 它们彼此的笔触与配色毫无关系。
-  const app = (icon, label, onclick, badge, off) =>
-    `<div class="papp${off ? " poff" : ""}" onclick="${onclick}">
-       <span class="pico">${IC(icon, 23)}${badge || ""}</span><small>${label}</small></div>`;
+  // 一个应用 = 实心彩色圆角方块 + 白色字形 + 下方标签。tint 决定图标底色 (iOS 每个
+  // 应用一个色, 这是桌面「一眼认出」的关键; 全部同色的空心方块只会糊成一片)。
+  const app = (icon, label, onclick, badge, off, tint) =>
+    `<button class="papp${off ? " poff" : ""}" onclick="${onclick}">
+       <span class="pico t-${tint || icon}">${IC(icon, 26)}${badge || ""}</span>
+       <small>${label}</small></button>`;
   const comm = phoneOn
     ? app("msg", B("信息", "Messages"), "openInbox()", msgBadge)
       + app("mail", B("信箱", "Mail"), "openMailbox()", mailBadge)
@@ -2876,30 +2923,38 @@ async function openPhone() {
   const _clockTxt = (curClock && curClock.label) ? curClock.label : "";
   const _unreadAll = (inbox.unread || 0) + (mailbox.unread || 0);
   // 信号格照系统状态栏画: 三根柱子, 无信号时全灰。emoji 的 📶 在这一屏线性图标里是异物。
+  // 📶 状态栏照真机排: 左边时间, 右边信号格 + 电量。中间留空 (真机那里是刘海)。
   const _bars = `<span class="psig${phoneOn ? "" : " off"}"><i></i><i></i><i></i></span>`;
   const statusBar = `<div class="pstatus">
-    <span class="pstatus-l">${_bars}${escapeHtml(phoneDevice)}</span>
-    <span class="pstatus-mid">${escapeHtml(_clockTxt)}</span>
-    <span class="pstatus-r">${_unreadAll ? `<b>${_unreadAll}</b> ${B("条未读", "unread")}` : B("没有新消息", "No new messages")}</span>
+    <span class="pstatus-l">${escapeHtml(_clockTxt || phoneDevice)}</span>
+    <span class="pstatus-r">${_bars}<span class="pbat"><i></i></span></span>
   </div>`;
-  const inner = `${statusBar}${phoneOn ? "" : `<div class="mhint">📵 ${B("没有信号", "No signal")}</div>`}<div class="papps">
-    ${comm}
-    ${apps.includes("social") && phoneOn ? app("feed", B("动态", "Feed"), "openSocial()") : ""}
-    ${app("film", B("回忆册", "Memories"), "openAlbum()")}
-    ${app("web", B("关系网", "Web"), "document.getElementById('phoneov').remove(); openRelWeb()")}
-    ${app("cal", B("手账", "Planner"), "openPlanner()")}
-    ${app("bag", B("背包", "Bag"), "openBag()")}
-    ${curMoney != null ? app("cart", B("集市", "Market"), "openMarket()") : ""}
-    ${apps.includes("bank") && phoneOn ? app("bank", B("银行", "Bank"), "openBank()") : ""}
-    ${apps.includes("bestiary") ? app("beast", B("图鉴", "Bestiary"), "openBestiary()") : ""}
-    ${app("archive", B("档案", "Dossier"), "document.getElementById('phoneov').remove(); openJournal()")}
-  </div>${phoneRecent(inbox)}`;
+  // 🏠 桌面 = 壁纸铺满 + 状态栏贴顶 + 实心彩色图标 + 底部 Dock, 没有导航栏。
+  // (旧版是「深色卡片 + 空心线图标住小方框 + 顶栏合上键」—— 那是设置菜单不是桌面。)
+  const grid = [
+    apps.includes("social") && phoneOn ? app("feed", B("动态", "Feed"), "openSocial()", "", false, "feed") : "",
+    app("film", B("回忆册", "Memories"), "openAlbum()", "", false, "film"),
+    app("web", B("关系网", "Web"), "document.getElementById('phoneov').remove(); openRelWeb()", "", false, "web"),
+    app("cal", B("手账", "Planner"), "openPlanner()", "", false, "cal"),
+    app("bag", B("背包", "Bag"), "openBag()", "", false, "bag"),
+    curMoney != null ? app("cart", B("集市", "Market"), "openMarket()", "", false, "cart") : "",
+    apps.includes("bank") && phoneOn ? app("bank", B("银行", "Bank"), "openBank()", "", false, "bank") : "",
+    apps.includes("bestiary") ? app("beast", B("图鉴", "Bestiary"), "openBestiary()", "", false, "beast") : "",
+    app("archive", B("档案", "Dossier"), "document.getElementById('phoneov').remove(); openJournal()", "", false, "archive"),
+  ].filter(Boolean).join("");
+  const inner = `${statusBar}
+    ${phoneOn ? "" : `<div class="mhint">${B("没有信号", "No signal")}</div>`}
+    <div class="papps">${grid}</div>
+    ${phoneRecent(inbox)}
+    <div class="pdock">${comm}</div>
+    <div class="phomebar" title="${B("合上", "Close")}"
+         onclick="document.getElementById('phoneov').remove()"></div>`;
   // 📱 设备名判定曾只认中文字面量「手机」— 英文本子 phone.device="phone" 落到
   // 信箱分支, 标题成了「📮 phone」(2026-08-02 体检截图实锤)。现代设备一律走小手机,
   // 只有真·非手机设备 (信鸽/传讯符/电台) 才用信箱皮
   const _modern = ["手机", "phone", "mobile", "cell", "cellphone", "smartphone"]
     .includes((phoneDevice || "").toLowerCase().trim());
-  phoneShell(inner, _modern ? B("小手机", "Phone") : phoneDevice, "", "phone");
+  phoneShell(inner, HOME);
 }
 // 📮 信箱: the letters characters have written — a love letter reads different from a text
 async function openMailbox() {
