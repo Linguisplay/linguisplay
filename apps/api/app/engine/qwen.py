@@ -1244,11 +1244,20 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                                                "step": {"type": "string", "description": "≤20字这一步"},
                                                "stage": {"type": "string", "description": "≤16字新阶段(没变省略)"}}}
         # 🎬 场账本申报 (docs/scene-ledger.md): 治「汽水递三次/问过又答过还再问」
+        # ⚠️ 这一条【必填】, 与上下那几条可选申报不同 (Yi 2026-08-04 实弹: 狗笼一场戏
+        # 开了 16 个回合, spent 全程是空的 —— 因为原描述三处都在说「默认空/没有就省略」,
+        # 模型夹在九个可选字段里当然每个都省。于是 prompt 里那句「【本场已经演过】」从来
+        # 没出现过, 模型压根不知道自己刚演过什么, 一根烟叼了十二拍)。
+        # 只要这一拍写了动作就一定有一个最标志的, 它本就不该是可选的。
         props["spent"] = {"type": "string", "description":
-                          ("Default empty. The signature gesture spent this beat (≤4 English "
-                           "words, e.g. handing the soda) — never to be replayed; omit if none"
+                          ("REQUIRED. The single most distinctive physical business in this "
+                           "beat's narration (≤4 English words, e.g. handing the soda, tilting "
+                           "his head). It is now SPENT: never replay it this scene. Only truly "
+                           "empty narration may leave this blank."
                            if en else
-                           "默认空字符串。这一拍花掉的标志性动作（≤8字，如「递汽水」），此后不得重演；没有就省略")}
+                           "【必填】这一拍旁白里最标志性的那一个动作或画面（≤8字，如「递汽水」"
+                           "「歪头看她」「转手里的烟」）。填了就等于花掉了：本场之内不得再演。"
+                           "只有这一拍完全没有动作描写时才留空。")}
         props["asked"] = {"type": "string", "description":
                           ("Default empty. The question thrown at the player this beat (≤6 "
                            "English words); omit if none" if en else

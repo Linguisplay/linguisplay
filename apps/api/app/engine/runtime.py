@@ -1519,14 +1519,32 @@ def char_items(content: dict[str, Any], state: dict[str, Any], cid: str) -> list
     return sim["items"]
 
 
+def _scene_tag(state: dict[str, Any]) -> str:
+    """当前这场戏的指纹 (没开场就是空)。用来分辨「上一场」与「这一场」。"""
+    sl = state.get("scene_ledger")
+    if not isinstance(sl, dict) or not sl.get("open"):
+        return ""
+    o = sl.get("opened") or {}
+    return f"{sl.get('loc') or ''}|{o.get('day')}|{o.get('slot')}"
+
+
 def _carried_mood(state: dict[str, Any], cid: str | None) -> str:
-    """🎭 the emotional state the last scene left this character in — carried into the
-    next one unless a full day has passed (time cools most things)."""
+    """🎭 the emotional state the LAST scene left this character in — carried into the
+    next one unless a full day has passed (time cools most things).
+
+    ⚠️ 只在【换场】时给 (Yi 2026-08-04 实弹: 📟 连着四个回合一模一样)。收下这条的
+    提示词写的是「上一场戏散场时，你心里是X——这股情绪还没散」; 同一场戏里每一拍都
+    这么说一遍, 模型就把 X 原样报回来, 再被存回去 —— 一个自己喂自己的环。
+    同场之内本来也不需要: 这一场发生了什么, 模型的上下文里就摆着。
+    """
     m = ((state.get("char_sim") or {}).get(cid) or {}).get("mood") or {}
     if not m.get("text"):
         return ""
     if _time_index(state) - int(m.get("at", 0)) > len(SLOTS):
         return ""  # a day later, the edge has dulled
+    cur = _scene_tag(state)
+    if cur and m.get("scene") == cur:
+        return ""  # 这股情绪就是【本场】刚生出来的, 别再讲给它自己听
     return m["text"]
 
 
@@ -10904,7 +10922,9 @@ def run_turn_stream(
         mood = (directed.get("self_state") or "").strip()[:40 if lang_of(content) == "en" else 12]
         # 🎭 …and PERSISTS: how this scene left them is how the next one finds them
         if mood and sp_id:
-            _sim(state, sp_id)["mood"] = {"text": mood, "at": _time_index(state)}
+            # scene = 这股情绪生在哪一场; 同场之内不再回喂 (见 _carried_mood)
+            _sim(state, sp_id)["mood"] = {"text": mood, "at": _time_index(state),
+                                          "scene": _scene_tag(state)}
         if mood and tun["mind_reader"]:
             for b in reversed(d_beats):
                 if b.get("type") == "dialogue":
