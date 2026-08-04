@@ -868,6 +868,71 @@ def _own_rank_line(content: dict[str, Any], state: dict[str, Any], char: dict[st
     return "".join(bits)
 
 
+def as_str_list(v: Any) -> list[str]:
+    """把模型返回的「本该是 list[str]」的字段收成真正的 list[str]。
+
+    ⚠️ 这是一族 bug 的收口 (Yi 报障 2026-08-04)。模型偶尔把 list 字段写成一个字符串,
+    而 `for x in v` 对字符串是【逐字符】迭代 —— 于是建议 chips 变成了:
+
+        directed["suggestions"] = '["我当是夸奖好了。", "我笑着摇头"]'
+        [str(x).strip()[:48] for x in directed["suggestions"]]
+        → ['[', '"', '我', '当', ...]      前两项就是玩家看到的那两个 chip
+
+    Yi 报的是「【】"" 的截断有问题」—— 看着像截断切断了成对符号, 其实那两个符号是
+    字符串的头两个字符。`(v or [])` 挡不住: 非空字符串是真值, 照样迭代。
+
+    规矩: 字符串当【一条】, 不是一串字符。看着像 JSON 数组的先试着解开 (模型最常见的
+    违约形态就是把数组序列化成了字符串); 解不开就整条留着 —— 宁可给一条怪句子, 也不
+    给一串标点。
+    """
+    if v is None:
+        return []
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return []
+        if s.startswith("[") and s.endswith("]"):
+            try:
+                import json as _json
+                parsed = _json.loads(s)
+                if isinstance(parsed, list):
+                    return [str(x).strip() for x in parsed if str(x).strip()]
+            except Exception:
+                pass    # 解不开 = 它本来就是一句带方括号的话, 别拆
+        return [s]
+    if isinstance(v, (list, tuple, set)):
+        return [str(x).strip() for x in v if str(x).strip()]
+    s = str(v).strip()
+    return [s] if s else []
+
+
+# 成对的包裹符号: 掐长之后常留下没闭合的半边 (那才是真的「截断把符号切断了」)
+_WRAP_PAIRS = {"【": "】", "「": "」", "『": "』", "“": "”", "‘": "’",
+               "《": "》", "(": ")", "（": "）", "[": "]", "\"": "\"", "'": "'"}
+
+
+def unwrap_pairs(s: str) -> str:
+    """脱掉最外层的包裹符号, 并抹掉截断留下的半边。
+
+    只动【最外层】—— 句子中间的符号是内容 (「我说【别急】然后坐下」不许被动)。
+    """
+    t = (s or "").strip()
+    for _ in range(3):          # 允许套娃 (「“…”」), 但别无限转
+        if len(t) >= 2 and _WRAP_PAIRS.get(t[0]) == t[-1]:
+            t = t[1:-1].strip()
+            continue
+        break
+    # 半边: 开头一个没闭合的左符 / 结尾一个没配对的左符 或 多余的右符
+    if t[:1] in _WRAP_PAIRS and _WRAP_PAIRS[t[:1]] not in t[1:]:
+        t = t[1:].strip()
+    if t[-1:] in _WRAP_PAIRS and t[-1:] not in ("”", "’"):   # 结尾是【左】符 = 被切了
+        t = t[:-1].strip()
+    if t[-1:] in _WRAP_PAIRS.values() and not any(
+            k for k, v in _WRAP_PAIRS.items() if v == t[-1:] and k in t[:-1]):
+        t = t[:-1].strip()
+    return t
+
+
 def clip_sentence(s: str, n: int) -> str:
     """Cut at the last COMPLETE sentence within n chars — a bio must end like a sentence,
     never trail off mid-word or with an ellipsis (Yi: 简介以…结束)."""
@@ -2584,8 +2649,11 @@ def set_suggestions(state: dict[str, Any], items: list[str],
     """建议的单一落账口 (治「七个产地各写各的规矩」): 所有产地必须走这里 —
     去破折号、去重、掐长、限两条 (Yi 定: 选项两个, 少即是多)。措辞规矩改这里 = 改所有产地。"""
     out: list[str] = []
-    for s in items or []:
-        t = dedash(str(s or "").strip())
+    # 🧩 模型可能把 suggestions 写成字符串 —— 直接迭代会逐字符炸开, chips 变成
+    #    '[' 和 '"' (Yi 实弹 2026-08-04)。所有产地都从这道口进, 收在这里最省。
+    for s in as_str_list(items):
+        # 🔖 脱掉【】「」“” 这类包裹, 并抹掉掐长留下的半边 (Yi 点名的那个症状)
+        t = unwrap_pairs(dedash(str(s or "").strip()))
         # 🎭 视角守卫 (Yi 实弹 2026-08-02 二犯): 建议是【玩家】的下一步, 「你…」开头
         # 的是角色在劝玩家 — 视角串了, 整条丢, 缺口由 ensure_three_suggestions 垫底。
         # (玩家第一人称的合法开头是 我…/动词…, 不会以「你/You」起手。)
@@ -5348,7 +5416,7 @@ def _peek_cache(content: dict[str, Any], state: dict[str, Any],
                         "device": phone_device(content)}
             try:
                 out = llm.generate({"peek_threads": True, **material}) or {}
-                msgs = [dedash(str(m).strip()[:60]) for m in (out.get("msgs") or []) if str(m).strip()][:4]
+                msgs = [dedash(m[:60]) for m in as_str_list(out.get("msgs"))][:4]
             except Exception:
                 msgs = []
             threads[other_id] = {"with": other.get("name"), "msgs": msgs or ["……"],
@@ -5363,7 +5431,7 @@ def _peek_cache(content: dict[str, Any], state: dict[str, Any],
                                         "label": e.get("label") or "",
                                         "last": (th.get("msgs") or [""])[-1],
                                         "device": phone_device(content)}) or {}
-                    tw = [dedash(str(m).strip()[:60]) for m in (out.get("msgs") or []) if str(m).strip()][:2]
+                    tw = [dedash(m[:60]) for m in as_str_list(out.get("msgs"))][:2]
                 except Exception:
                     tw = []
                 th["msgs"] = ((th.get("msgs") or []) + (tw or ["……以后别用这个号找我。"]))[-8:]
@@ -5871,7 +5939,7 @@ def compose_message(content: dict[str, Any], state: dict[str, Any], char: dict[s
                                 relationships.derive_mode(char, scores, tun)),
                             "reason": reason, "hint": hint,
                             "thread_tail": _thread_tail(state, char.get("id"))}) or {}
-        msgs = [dedash(str(m).strip()[:120]) for m in (out.get("msgs") or []) if str(m).strip()][:2]
+        msgs = [dedash(m[:120]) for m in as_str_list(out.get("msgs"))][:2]
     except Exception:
         msgs = []
     return msgs or [fallback]
@@ -6236,7 +6304,7 @@ def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str
     newly, cracked = _phone_probe(content, state, char_id, text)
     out = _phone_exchange(content, state, persona, c, text, llm, newly, same_room=here,
                           beat_log=beat_log)
-    msgs = [dedash(str(m).strip()[:120]) for m in (out.get("msgs") or []) if str(m).strip()][:5]
+    msgs = [dedash(m[:120]) for m in as_str_list(out.get("msgs"))][:5]
     # 📱 形状④【已读：原因】晾着 (Spec C): 记账可追问, 「稍后：」补偿走延迟投递 (Spec D)
     _shape = "normal"
     if msgs and msgs[0].startswith("【已读"):
@@ -6354,7 +6422,7 @@ def phone_call(content: dict[str, Any], state: dict[str, Any], persona: dict[str
     newly, cracked = _phone_probe(content, state, char_id, text)
     out = _phone_exchange(content, state, persona, c, text, llm, newly, call=True,
                           beat_log=beat_log)
-    msgs = [dedash(str(m).strip()[:120]) for m in (out.get("msgs") or []) if str(m).strip()][:3]
+    msgs = [dedash(m[:120]) for m in as_str_list(out.get("msgs"))][:3]
     ambient = dedash((out.get("ambient") or "").strip())[:60]
     if ambient:
         th["msgs"].append({"from": "sys", "text": f"（{ambient}）", "at": now_label, "call": True})
@@ -7274,7 +7342,7 @@ def ensure_progression(content: dict[str, Any], llm=None) -> bool:
         {"gen_progression": True, "world": world[:800],
          "title": story.get("title") or ""}) or {})
     name = str(out.get("name") or "").strip()[:8]
-    ranks = [str(r).strip()[:8] for r in (out.get("ranks") or []) if str(r).strip()]
+    ranks = [r[:8] for r in as_str_list(out.get("ranks"))]
     if not name or not (4 <= len(ranks) <= 12):
         return False
     sb = story.get("sandbox")
@@ -7434,7 +7502,7 @@ def _track_apply(state: dict[str, Any], out: dict[str, Any], ctx: dict[str, Any]
         booked += 1
     if booked:
         _audit(state, "track.update", True, f"{booked}帧")
-    cons = [str(c).strip()[:40] for c in (out.get("contradictions") or []) if str(c).strip()][:2]
+    cons = [c[:40] for c in as_str_list(out.get("contradictions"))][:2]
     if cons:
         state["track_note"] = cons[0]
         _audit(state, "track.conflict", False, cons[0])
@@ -8896,7 +8964,8 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
         if is_primary:
             flags["dir_ran"] = True   # 主拍在场证明: world_seed 结算凭它区分「真填无」与「没问过」
         if is_primary and directed.get("suggestions"):
-            _sg_items = [str(x).strip()[:48] for x in directed["suggestions"] if str(x).strip()]
+            # 🧩 走 as_str_list: 模型把它写成字符串时, 裸迭代会逐字符炸开 (Yi 实弹)
+            _sg_items = [s[:48] for s in as_str_list(directed["suggestions"])]
             if lang_of(content) == "en":
                 # 🌐 合同护栏 (GH 实弹 2026-08-01: 英文本子建议 chips 冒中文): _lang_rule
                 # 白纸黑字管着 suggestions, 模型随机违约 → 含中文的建议整条丢弃走兜底,

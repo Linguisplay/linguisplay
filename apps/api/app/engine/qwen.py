@@ -1939,8 +1939,11 @@ def _parse_tool_args(args_json: str | None, speaker: str, channel: str = "say",
     if "creature_hit" in d:
         out["creature_hit"] = str(d.get("creature_hit") or "").strip()
     if "suggestions" in d:
-        out["suggestions"] = [str(x).strip()[:48] for x in (d.get("suggestions") or [])
-                              if str(x).strip()][:2]   # 48: 英文一句话的身位 (中文建议本就≤16字)
+        # 🧩 走 as_str_list: 模型偶尔把这个数组写成一整个字符串, 裸迭代会逐字符炸开
+        # —— 建议 chips 就成了 '[' 和 '"' (Yi 实弹 2026-08-04)。这里是解析层, 收得最上游。
+        from .runtime import as_str_list
+        out["suggestions"] = [s[:48] for s in as_str_list(d.get("suggestions"))][:2]
+        # 48: 英文一句话的身位 (中文建议本就≤16字)
     if "identity_change" in d:
         out["identity"] = str(d.get("identity_change") or "").strip()
     for k_in, k_out in (("item_gained", "gained"), ("item_lost", "lost"),
@@ -4520,8 +4523,8 @@ class QwenLLM:
                     plan = _parse_tool_args(args, speaker, channel, group_mode)
                     try:
                         raw = json.loads(args or "{}")
-                        outline = [str(x).strip() for x in (raw.get("outline") or [])
-                                   if str(x).strip()][:3]
+                        from .runtime import as_str_list
+                        outline = as_str_list(raw.get("outline"))[:3]
                     except Exception:
                         outline = []
             except Exception:

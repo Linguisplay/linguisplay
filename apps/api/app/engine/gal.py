@@ -791,8 +791,8 @@ def outline_story(llm, idea: str, n: int = 4) -> dict[str, Any]:
     out = llm.generate({"gal_outline": True, "idea": (idea or "")[:2000],
                         "n": max(2, min(6, n))}) or {}
     title = str(out.get("title") or "").strip()[:24]
-    ol = [str(x).strip()[:200] for x in (out.get("outline") or [])[:6]
-          if str(x).strip()]
+    from .runtime import as_str_list
+    ol = [x[:200] for x in as_str_list(out.get("outline"))[:6]]
     if len(ol) < 2:
         raise ValueError("大纲生成失败：换个更具体的想法试试")
     return {"title": title, "outline": ol}

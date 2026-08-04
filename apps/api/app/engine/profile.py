@@ -52,7 +52,8 @@ def _merge(state: dict[str, Any], out: Any,
     if not isinstance(out, dict):
         return False
     p = _prof(state)
-    facts = [str(f).strip()[:40] for f in (out.get("facts") or []) if str(f).strip()]
+    from .runtime import as_str_list
+    facts = [f[:40] for f in as_str_list(out.get("facts"))]
     if facts:
         p["facts"] = facts[:FACTS_CAP]
     allowed = {w.get("id") for w in witnesses}
