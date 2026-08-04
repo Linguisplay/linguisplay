@@ -42,3 +42,13 @@ def map_writes_on(monkeypatch):
     ⚠️ 新写的用例别顺手挂这个。默认关才是玩家看到的行为, 挂上就测不到真实产品了。
     """
     monkeypatch.setattr(runtime, "LLM_MAP_WRITES", True)
+
+
+@pytest.fixture
+def typed_move_on(monkeypatch):
+    """开回打字移动 (runtime.TYPED_MOVE, Yi 2026-08-04 定默认关)。
+
+    产品行为: 换场只走地图面板, 输入框里写「我去码头」不算数。测【打字移动本身】
+    的用例显式开旗跑 —— 与 map_writes_on 同理, 是休眠代码的回归网。
+    """
+    monkeypatch.setattr(runtime, "TYPED_MOVE", True)

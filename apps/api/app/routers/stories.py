@@ -1080,6 +1080,14 @@ def gen_avatar(story_id: str, cid: str,
     return {"queued": True, "url": f"/scene/avatar/{cid}.jpg"}
 
 
+def _studio_bg_seed(content: dict) -> int:
+    """工坊画背景用的种 —— 直接借运行时那一颗, 不许自己再算一版。
+    作者在工坊看到的图必须就是玩家在游戏里看到的图 (两条管线两颗种 = 作者调好的
+    图一进游戏就换了样, 正是 char_seed 当年踩过的坑)。"""
+    from .runs import _bg_seed
+    return _bg_seed(content)
+
+
 @router.post("/{story_id}/gen_bg/{loc_id}")
 def gen_bg(story_id: str, loc_id: str,
            user: User = Depends(current_user), db: Session = Depends(get_db)):
@@ -1097,10 +1105,15 @@ def gen_bg(story_id: str, loc_id: str,
     from .runs import _BG_DIR, _bg_negative, _bg_prompt, _enqueue_image
     content = {"story": _to_story(s).model_dump()}
     path = _BG_DIR / f"{loc_id}.jpg"
-    if path.exists():
+    # 🎲 头一次画用这本剧本的种 (与游戏里自动补的那张一模一样 —— 作者看到什么,
+    # 玩家就看到什么); 再点一次是"我不满意, 换一张", 在同族里位移一格。
+    redraw = path.exists()
+    if redraw:
         path.unlink()   # 作者主动重画 — 旧图让位
+    import time as _time
+    seed = _studio_bg_seed(content) + (int(_time.time()) % 991 + 1 if redraw else 0)
     _enqueue_image(_bg_prompt(content, loc), path, "1280*720",
-                   negative=_bg_negative(content))
+                   negative=_bg_negative(content), seed=seed)
     return {"queued": True, "url": f"/scene/bg/{loc_id}.jpg"}
 
 

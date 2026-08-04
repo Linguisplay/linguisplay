@@ -297,6 +297,16 @@ AWAY = "__away__"  # a scheduled character whose no entry covers this hour: off 
 #   · 🦇 猎手押送等不经对话的系统机制
 LLM_MAP_WRITES = False
 
+# 🗺 地图是独立于 LLM 的功能 (Yi 2026-08-04 第二刀): 换场只走地图面板 —— 玩家点节点,
+# 客户端发 POST /runs/{id}/move。输入框里写「我去码头」不再算数。
+#
+# 为什么它跟 LLM_MAP_WRITES 分开: 打字移动是正则嗅探, 根本不经模型 —— 但它同样让
+# 「说一句话」等于「改了位置」, 正是 Yi 要拆开的那层耦合。两把锁管两件事:
+#   LLM_MAP_WRITES —— 模型/旁白不许改地图
+#   TYPED_MOVE     —— 散文里的移动意图不许改地图
+# 都关上之后, 地图这个功能只剩两个输入: 作者写的地点/作息, 和玩家在图上点的那一下。
+TYPED_MOVE = False
+
 _SLOT_NARR = {
     "晨": "（长夜过去，第{day}天的晨光透了进来，街面上有了新的动静。）",
     "午": "（不知不觉，日头已经爬到头顶。）",
@@ -9370,7 +9380,8 @@ def run_turn_stream(
 
     # 1b. 🚶 说走就走 FIRST: a clear "I go to X" moves the player NOW, so every twin below
     #     and the whole prompt (place anchor, roster, responders) already lives at X.
-    moved = None if (state.get("mode") or "character") == "god" else \
+    # 🗺 TYPED_MOVE 关掉后这条整条不走: 换场只认地图面板点的那一下 (Yi 2026-08-04)。
+    moved = None if (not TYPED_MOVE or (state.get("mode") or "character") == "god") else \
         player_move(content, state, player_input, channel)
     if moved:
         _audit(state, "move", True, moved.get("name", ""))
@@ -9380,7 +9391,8 @@ def run_turn_stream(
     arrival_discoveries = discover_on_arrival(content, state) if moved else []
     # 🏖 the player named an OFF-MAP destination in a sandbox (「去后台」, no 后台 yet):
     # surface a generate-and-go confirm chip at final — 想去哪就去哪, even somewhere new
-    emergent_dest = None if moved else \
+    # 🗺 同上: 打字点名图外地点的「造一个并过去」确认条也一并取消 (要新场景请作者手加)。
+    emergent_dest = None if (moved or not TYPED_MOVE) else \
         player_move_emergent(content, state, player_input, channel)
     # 🧍 姿位孪生: a plain first-person posture statement books itself (坐下就是坐下)
     if (state.get("mode") or "character") != "god":

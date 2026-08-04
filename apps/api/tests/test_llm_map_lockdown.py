@@ -242,3 +242,51 @@ def test_authored_map_story_still_gets_its_opening_place():
     loc = runtime.ensure_start_location(c, st, llm=MintLLM())
     assert loc and loc.get("id") == "l1"
     assert st["location_id"] == "l1"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 🗺 地图是独立于 LLM 的功能 (Yi 2026-08-04 第二刀)
+#
+# 第一刀关的是「对话/模型改地图」。这一刀关的是【打字移动】: 玩家在输入框里写
+# 「我去码头」, 引擎从散文里嗅出移动意图就把人挪走。Yi 的裁定是地图要独立 ——
+# 换场只走地图面板 (点节点 → POST /runs/{id}/move), 输入框里说什么都不算数。
+#
+# 为什么它不归 LLM_MAP_WRITES 管: 打字移动是正则嗅探, 不经模型 —— 但它同样让
+# 「说一句话」等于「改了位置」, 正是 Yi 要拆开的那层耦合。所以单独一个常量。
+# ══════════════════════════════════════════════════════════════════════════
+def test_typing_i_go_to_the_dock_does_not_move_you():
+    c, st = _c(), _st()
+    out = runtime.run_turn(c, st, {"name": "我"}, "我去老码头",
+                           channel="do", llm=MintLLM())
+    assert out["state"].get("location_id") == "l1", \
+        "打字说一句就换了场 — 地图还没独立出来"
+
+
+def test_red_sample_typed_move_really_used_to_work(typed_move_on):
+    c, st = _c(), _st()
+    out = runtime.run_turn(c, st, {"name": "我"}, "我去老码头",
+                           channel="do", llm=MintLLM())
+    assert out["state"].get("location_id") == "dock", \
+        "开回来也挪不动 — 夹具没搭对, 上面那条是空转"
+
+
+def test_typing_an_offmap_place_offers_no_generate_chip():
+    """沙盒里打字点名图外地点, 原本会给一张「造一个并过去」的确认条。"""
+    c, st = _c(), _st()
+    out = runtime.run_turn(c, st, {"name": "我"}, "我去后山那片竹林",
+                           channel="do", llm=MintLLM())
+    assert not out.get("move_request"), f"还在发确认条: {out.get('move_request')}"
+    assert _n_locs(c) == 2, "打字还是把新地点铸出来了"
+
+
+def test_the_map_panel_is_the_way_to_move():
+    """唯一的换场通路: 地图面板点节点 → apply_move。这条必须活着, 否则玩家被焊死。"""
+    c, st = _c(), _st()
+    runtime.apply_move(c, st, "老码头")
+    assert st["location_id"] == "dock"
+
+
+def test_both_locks_are_module_constants():
+    assert runtime.TYPED_MOVE is False, "打字移动默认必须是关的"
+    assert "typed_move" not in runtime.DEFAULT_TUNING, \
+        "同理别做成 tuning 键 — 地图独立是全舰法条, 不是剧本口味"

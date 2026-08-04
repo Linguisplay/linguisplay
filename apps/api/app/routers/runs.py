@@ -157,6 +157,13 @@ def _story_art(content: dict) -> tuple[str, str]:
     return art, neg
 
 
+def _bg_seed(content: dict) -> int:
+    """🎨 这本剧本的背景种 (一本一颗, 见 gal.bg_seed)。三条背景生成路 —— 运行时补图、
+    玩家重画、工坊里作者手点 —— 必须都用它, 否则作者调好的图一进游戏就变了样。"""
+    from ..engine.gal import bg_seed
+    return bg_seed(str(((content.get("story") or {}).get("id")) or ""))
+
+
 def _char_seed(content: dict, cid: str) -> int:
     """同一个角色每次重画都长同一张脸 — 直接用 gal.char_seed
     (审查实锤: 自己再写一个 crc32 版 = 同角色两条管线两张脸)."""
@@ -232,7 +239,7 @@ def _spawn_location_bg(content: dict, loc: dict | None) -> None:
     if path.exists():
         return
     _enqueue_image(_bg_prompt(content, loc), path, "1280*720",
-                   negative=_bg_negative(content))
+                   negative=_bg_negative(content), seed=_bg_seed(content))
 
 
 def _queue_snap(payload: dict | None) -> None:
@@ -1400,8 +1407,15 @@ def regen_bg(run_id: str, user: User = Depends(current_user), db: Session = Depe
         path.unlink(missing_ok=True)
     except OSError:
         pass
+    # 🎲 重画要换一张, 但别跳出这本的画风家族: 在剧本种上加一个递增的位移 —
+    # 直接复用剧本种会原样再出同一张图 (定种的代价), 完全随机又回到"每张各抽各的"。
+    _n = int(st.get("bg_redraw_n") or 0) + 1
+    st["bg_redraw_n"] = _n
+    r.state = st
+    flag_modified(r, "state")
+    db.commit()
     _enqueue_image(_bg_prompt(content, loc), path, "1280*720",
-                   negative=_bg_negative(content))
+                   negative=_bg_negative(content), seed=_bg_seed(content) + _n)
     return {"queued": True, "location_id": lid, "url": f"/scene/bg/{lid}.jpg"}
 
 

@@ -591,6 +591,22 @@ def char_seed(work_id: str, cid: str) -> int:
     return int.from_bytes(h[:4], "big") % (2 ** 31 - 1)
 
 
+def bg_seed(work_id: str) -> int:
+    """🎨 一本剧本一颗背景种 (Yi 2026-08-04:「新场景生成的背景画风要统一」)。
+
+    背景原本是唯一没定种的美术类别 —— 每张都重新抽噪声, 于是同一个地点点两次
+    「重画」出两张毫不相干的图, 同一本剧本各地点的落地风格也会漂。
+
+    收成【一本一颗】而不是【一处一颗】: 一处一颗只能让重画幂等, 治不了各地点之间
+    的漂; 共用同一次风格骰才让一本里的背景看着像同一个世界 —— 而地名与描述的差异
+    照旧让每处场景各不相同。
+
+    走 char_seed 同一套哈希 (别再自己写一版 crc32 —— 那是"同角色两条管线两张脸"
+    的老坑)。用 __bg__ 作 cid 位, 与任何真实角色 id 不可能相撞。
+    """
+    return char_seed(work_id, "__bg__")
+
+
 def cg_prompt(gal: dict[str, Any], beat: dict, art: str) -> str:
     """CG 全屏插画 (blueprint §11🔴: the reward currency is the CG, not the
     sprite). 单人/空镜 doctrine: multi-person consistency is poor, so the CG
