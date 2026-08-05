@@ -30,10 +30,21 @@ def enabled() -> bool:
     return bool(_webpush and s.vapid_private_key and s.vapid_public_key)
 
 
-def quiet_now(now: datetime | None = None) -> bool:
-    """深夜敲窗是差评之源. Wall-clock hours in Asia/Shanghai, wrap-around aware."""
+def quiet_now(now: datetime | None = None, tz: str = "") -> bool:
+    """深夜敲窗是差评之源。按【玩家本地】的钟点判, 跨零点也算得对。
+
+    tz 是 IANA 名 (来自 run.state["tz"])。空/认不出 → 退回服务器时区 (+8),
+    与这个参数存在之前逐位相同 —— 从前全船都按北京的夜算, 纽约的玩家在他自己的
+    下午被判成"深夜"。"""
     s = get_settings()
-    h = (now or datetime.now(_TZ)).hour
+    _tz = _TZ
+    if tz:
+        try:
+            from zoneinfo import ZoneInfo
+            _tz = ZoneInfo(tz)
+        except Exception:
+            pass
+    h = (now or datetime.now(_tz)).hour
     start, end = int(s.push_quiet_start), int(s.push_quiet_end)
     if start == end:
         return False

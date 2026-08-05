@@ -18,7 +18,7 @@ living_news 的 pend 字段; 玩家亲手点开的下一回合由 settle_pending
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from . import profile as profile_mod
@@ -54,6 +54,37 @@ def set_living(state: dict[str, Any], on: bool, hours: int | None = None) -> dic
     else:
         state["living"] = {"on": False}
     return state["living"]
+
+
+def defer_to_friendly_hour(state: dict[str, Any], tz: str = "", hour: int = 19) -> bool:
+    """🔕 静默时段撞上心跳时, 把 last 重锚, 让【下一次】落在玩家本地的傍晚。
+
+    不这么做的话推送会【永久】归零, 而不是"这次先不敲":
+    心跳是 600 秒轮询 + 纯 UTC 差值判到期 (见 due), 所以它每天都落在几乎同一个
+    钟点 (每天前漂 ≤10 分钟, 要 54 天才漂出一个 9 小时的静默窗)。一个存档的间隔
+    一旦落进静默时段, 那个玩家就再也不会被叫回来 —— 消息照进小手机, 但没人知道。
+
+    只动 living.last 一个字段, 不新增状态; 用玩家本地时间算目标点, 所以夏令时自愈。
+    返回是否真的重锚了。"""
+    c = cfg(state)
+    if not c.get("on"):
+        return False
+    hours = max(1, int(c.get("hours") or DEFAULT_HOURS))
+    now = datetime.now(timezone.utc)
+    local = now
+    if tz:
+        try:
+            from zoneinfo import ZoneInfo
+            local = now.astimezone(ZoneInfo(tz))
+        except Exception:
+            local = now
+    target = local.replace(hour=int(hour), minute=0, second=0, microsecond=0)
+    if target <= local:
+        target += timedelta(days=1)
+    c["last"] = (target.astimezone(timezone.utc)
+                 - timedelta(hours=hours)).isoformat(timespec="seconds")
+    state["living"] = c
+    return True
 
 
 def due(state: dict[str, Any], now: datetime | None = None) -> bool:
@@ -226,9 +257,14 @@ def world_tick(content: dict[str, Any], state: dict[str, Any],
     state["anniv_met"] = annil
     out["anniv"] = None
     dead = runtime._dead_ids(state)
+    # 🎂 判【跨越】不判精确等值 (2026-08-04 修): 原来是 `span % 30`, 一旦某次心跳
+    # 覆盖了不止一天 (补算/长时间没来/时区抖动), 天数直接从 29 跳到 31, 那个满月就
+    # 【永远】错过了。拨格前的 day 就在 clk 里, 拿它比一次商, 不用新增任何状态。
+    _prev_day = int(clk.get("day", 1) or 1)
     for cid, d0 in sorted(annil.items()):
         span = day - int(d0 or day)
-        if span <= 0 or span % 30:
+        prev_span = max(0, _prev_day - int(d0 or day))
+        if span <= 0 or span // 30 <= prev_span // 30:
             continue
         char = runtime._char_by_id(content, cid)
         if not char or cid in dead or _warmth(state, cid) < 35:

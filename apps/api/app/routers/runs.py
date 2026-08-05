@@ -2337,7 +2337,19 @@ def _push_heartbeat_news(db, run, tick_out: dict) -> None:
                             or tick_out.get("absent")):
         return   # 心跳空转不碰推送层也不查库 (审查实锤: 全架扫描 × 每 run 一查)
     from .. import webpush
-    if webpush.quiet_now():
+    # 🔕 静默时段按【玩家本地】判 (从前全船按北京的夜算 —— 纽约的玩家在他自己的
+    # 下午被判成深夜)。而且撞上静默【不是丢弃, 是改期】: 心跳每天落在几乎同一个
+    # 钟点, 丢弃一次等于这个存档的推送永久归零, 玩家再也不会被叫回来。
+    _tz = ((run.state or {}).get("tz") or "").strip()
+    if webpush.quiet_now(tz=_tz):
+        try:
+            _st = dict(run.state or {})
+            if living.defer_to_friendly_hour(_st, _tz):
+                run.state = _st
+                flag_modified(run, "state")
+                db.commit()
+        except Exception:
+            db.rollback()
         return
     tag = f"lp-{run.id[:8]}"
     an = tick_out.get("anniv")
