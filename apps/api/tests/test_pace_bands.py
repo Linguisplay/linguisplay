@@ -103,8 +103,12 @@ def test_phone_read_ignored_books_and_delivers_later():
     assert th["msgs"][-1].get("kind") == "read"
     assert th["pending"] and "我不对" in th["pending"][0]["text"]
     assert view.get("replied") in (False, None) or not view.get("replied")
-    # 时间推进跨过 deliver_at → 投递 + 未读 + 债清
-    st["clock"] = {"day": 1, "slot": 2, "ticks": 0}
+    # 时间推进跨过到期时刻 → 投递 + 未读 + 债清
+    # ⏱ 2026-08-05: 待发从【时段轴】换成了【墙钟轴】—— 时段轴在 real_clock 下等于
+    #    1 分钟到 11 小时的不可控随机, 在虚构钟的本里干脆冻住不动 (死信箱)。
+    #    所以这里推进的是墙钟, 不再是 clock.slot。
+    for _p in th["pending"]:
+        _p["due_ts"] = runtime._wall_ts() - 1
     moved = runtime.deliver_due_phone(STORY, st)
     assert moved == 1
     assert th["msgs"][-1]["text"] == "昨天是我不对。"

@@ -4902,6 +4902,17 @@ def make_promise(content: dict[str, Any], state: dict[str, Any], char: dict[str,
 # remember each other. Period stories rename the device (城寨 → 口信/字条).
 PHONE_MAX_PER_TURN = 2   # incoming deliveries per turn, tops (no notification spam)
 
+# 📱 回复的【时机】与【形状】—— 引擎判定, 模型只写词 (Yi 2026-08-05)。
+#
+# 生产实况 (176 个存档全扫): 四种形状里【已读晾着 0 次、刷屏 0 次】, 所有消息都在
+# 第 1 天、时间戳挤在同一分钟里。查下来是三层原因, 不是一个:
+#   ① 刷屏是死码 —— 解析器把回复硬截成 3 条, 而判 burst 要 >=4;
+#   ② 已读的短写法被解析器静默吞掉;
+#   ③ 长写法能通, 但四种形状并列交给模型自选 —— 它永远选中庸那一档。
+# ③ 才是根: 判断权本就不该在模型手里。导演、乐师、骰子都是引擎判定的, 唯独这里交了出去。
+PHONE_TIERS = ("now", "soon", "later", "next_slot", "morning", "never")
+PHONE_SHAPES = ("normal", "word", "long", "burst", "read")
+
 
 def phone_cfg(content: dict[str, Any]) -> dict[str, Any]:
     return (content.get("story") or {}).get("phone") or {}
@@ -4995,6 +5006,12 @@ def _thread_cap(th: dict[str, Any]) -> None:
         dropped = len(msgs) - 60
         th["msgs"] = msgs[-60:]
         th["digested_upto"] = max(0, int(th.get("digested_upto") or 0) - dropped)
+    # ⏳ 待发也要封顶。放在这里而不是写入处 —— 写入有好几条路 (延迟回复/已读的补偿句/
+    # 老档), 而每条消息落账都会过 _thread_cap, 这是唯一必经的收口。存档的 state 是一个
+    # JSON 列, 让它无界增长迟早撑爆。
+    pend = th.get("pending")
+    if pend and len(pend) > PHONE_PENDING_CAP:
+        th["pending"] = pend[-PHONE_PENDING_CAP:]
 
 
 def _thread_tail(state: dict[str, Any], cid: str, n: int = 4) -> list[dict[str, Any]]:
@@ -6307,9 +6324,17 @@ def phone_thread(content: dict[str, Any], state: dict[str, Any], char_id: str,
     th = _thread(state, char_id)
     if mark_read:
         th["unread"] = 0
-    return {"char_id": char_id, "name": c.get("name") or "", "avatar_url": c.get("avatar_url"),
+    pend = th.get("pending") or []
+    view = {"char_id": char_id, "name": c.get("name") or "", "avatar_url": c.get("avatar_url"),
             "dead": char_id in _dead_ids(state), "device": phone_device(content),
             "msgs": list(th.get("msgs") or [])}
+    if pend:
+        # ⏳ 有话在路上 —— 只报【几条 / 还有多久】, 绝不带正文 (给了就是剧透)。
+        # 客户端据此显示"已送达, TA还没回"而不是一片空白 (不然玩家以为卡住了)。
+        soonest = min((int(p.get("due_ts") or 0) for p in pend), default=0)
+        view["pending"] = {"n": len(pend),
+                           "in_s": max(0, soonest - _wall_ts()) if soonest else None}
+    return view
 
 
 def _phone_unreachable(content: dict[str, Any], state: dict[str, Any],
@@ -6343,6 +6368,175 @@ def _phone_target(content: dict[str, Any], state: dict[str, Any], char_id: str,
     if state.get("player_hp") == "dead":
         raise ValueError("你已经死了，发不出任何消息")
     return c
+
+
+PHONE_PENDING_CAP = 12   # 一条线程最多攒多少条待发 (存档的 JSON 列不是无底洞)
+PHONE_FLUSH_MAX = 3      # 一次投递最多送几条 —— 攒了一堆同时到期不许变成意外刷屏
+
+
+def _wall_ts() -> int:
+    """墙钟秒 (UTC epoch)。
+
+    ⚠️ 测【时长】一律 UTC, 绝不用 _now_for —— 那是日历口径 (今天几号/星期几/落在哪个
+    时段), 换个时区就让到期时间跟着漂。living.due 的心跳到期也是这个规矩。
+    """
+    from datetime import datetime, timezone
+    return int(datetime.now(timezone.utc).timestamp())
+
+
+def _phone_due(content: dict[str, Any], state: dict[str, Any], tier: str) -> dict[str, Any]:
+    """按档位算这条待发什么时候送到。
+
+    为什么要另起一条墙钟轴: 老的 deliver_at 走 _time_index, 粒度是【时段】—— 而全舰
+    默认 real_clock=1 让时段跟真实钟点走 (5-11/12-17/18-4), `now+1` 实际等待 1 分钟到
+    11 小时不等, 表达不了「隔一阵」; turns_per_slot=0 的本 _time_index 干脆冻住不动,
+    pending 永不到期, 是个死信箱 (生产 0 个线程用过它, 这是根因之一)。
+    """
+    now = _wall_ts()
+    if tier == "soon":
+        secs = _rng.randint(75, 400)              # 一两分钟到几分钟: 刚下工/手上正忙
+    elif tier == "later":
+        secs = _rng.randint(1200, 3600)           # 二十分钟到一小时: 在别处办事
+    elif tier == "next_slot":
+        secs = 120                                # 墙钟只做兜底, 真正的门是时段
+    else:                                         # morning: 真的等到下一个早上六点
+        h = _story_hour(content, state)
+        h = 3 if h is None else h
+        # 至少三小时 —— 否则凌晨五点发的会在 later(最多一小时) 之前到, 档位就乱了序
+        secs = max(3 * 3600, ((6 - h) % 24 or 24) * 3600)
+    out: dict[str, Any] = {"due_ts": now + secs, "tier": tier}
+    # 🚧 时段门只在【时钟真的在走】的本子上挂; 冻住的钟会把它变成死信箱
+    if tier == "next_slot" and int(tuning_for(content).get("turns_per_slot") or 0) > 0:
+        out["due_idx"] = _time_index(state) + 1
+    return out
+
+
+def _story_hour(content: dict[str, Any], state: dict[str, Any]) -> int | None:
+    """这个故事此刻的钟点 (0~23), 虚构钟的本子返回 None。
+
+    先读存档自己的 clock["real"] —— 那正是【玩家在屏幕上看到的】那个时间, 每回合由
+    现实对齐同步写入; 缺了才退回墙钟 _now_for。
+    ⚠️ 别直接用 _now_for: 它读的是真实系统时间, 与存档显示的时刻可能不是一回事,
+    而且测试里没法构造 (实弹: 深夜那两条为此白红了一轮)。
+    """
+    if not real_time_on(content):
+        return None
+    raw = str((state.get("clock") or {}).get("real") or "").strip()
+    if raw and ":" in raw:
+        try:
+            return int(raw.split(":", 1)[0]) % 24
+        except ValueError:
+            pass
+    try:
+        return _now_for(state).hour
+    except Exception:
+        return None
+
+
+def _phone_beat(content: dict[str, Any], state: dict[str, Any], c: dict[str, Any],
+                text: str, here: bool, th: dict[str, Any]) -> tuple[str, str]:
+    """📱 这一次回复的【时机】与【形状】—— 一次判完, 一起进提示词。
+
+    为什么合成一个函数 (四路探查后的合稿裁定): 时机与形状读的是【同一批信号】, 分成
+    两条阶梯就会各判各的 —— 实测冲突: 上次晾过 (last_read) 时, 时机那条说"再延一次",
+    形状那条说"必须当场还债"。同一份线程状态两个相反结论, 谁先跑谁说了算。
+
+    硬互斥表 (不许绕):
+      · shape == "read"  ⇒ tier 强制 now  —— read 本身就是"不回", 不许再叠一层延迟,
+        否则玩家一次发送会看到两条已读灰条
+      · tier  != "now"   ⇒ shape 不许 read
+      · 线程上还欠着债 (last_read 或 pending 非空) ⇒ 强制 now 且不许 read
+        —— 一条线程任何时刻最多欠一笔债。连着两次不回, 玩家读到的是「坏了」,
+        不是「TA在气我」。
+
+    ⚠️ 硬信号一律【不掷骰】, 默认档确定性命中 (now, normal)。判定里一掷骰,
+    tests/test_phone.py 那条逐字全等的回复断言就会变成 flaky —— 间歇红比确定红难查
+    十倍 (判官在合稿里点名的坑)。
+
+    返回 (tier, shape)。
+    """
+    cid = c.get("id")
+    sim = (state.get("char_sim") or {}).get(cid) or {}
+    tun = tuning_for(content)
+    scores = (state.get("rel") or {}).get(cid) or relationships.new_scores()
+    mode = relationships.derive_mode(c, scores, tun)
+    owes = bool(th.get("last_read")) or bool(th.get("pending"))
+
+    # ── 时机 ────────────────────────────────────────────────────────────
+    def _tier() -> str:
+        if sim.get("hp") in ("dead", "dying") or cid in _dead_ids(state):
+            return "never"                      # 死人不回短信 (投递侧还有第二道闸)
+        if here or cid in (state.get("following") or []):
+            return "now"                        # 人就在眼前 / 一路同行
+        if owes:
+            return "now"                        # 💳 欠着债就得还, 不许再拖
+        if cid in (state.get("taken") or {}):
+            return "morning"                    # 🚪 被掳走的人, 天亮才有下文
+        if _phone_unreachable(content, state, c):
+            return "next_slot"                  # 作者班表说的, 不许软化; 下个时段自然恢复
+        h = _story_hour(content, state)
+        if h is not None and 0 <= h < 6:
+            # 🌙 睡不着的人只为一个人爬起来
+            return "soon" if mode in ("flirt", "lover") else "morning"
+        if _promise_loc_now(state, cid):
+            return "later"                      # 此刻正赴另一个约
+        if (sim.get("intent") or "").strip():
+            return "later"                      # 应承了具体差事, 手上有活
+        if char_position(content, state, c) == AWAY:
+            return "later"                      # 钉子 AWAY: 只是慢, 不是关机
+        return "now"
+
+    tier = _tier()
+
+    # ── 形状 ────────────────────────────────────────────────────────────
+    def _shape() -> str:
+        if tier != "now":
+            # 延迟里不许 read; 长短由玩家这句话的分量定
+            return "long" if len(text) >= 30 else "normal"
+        if owes:
+            return "normal"                     # 还债这一拍老老实实说话
+        # 🧊 冷关系 + 玩家一直说 = 已读晾着 (每天一次为限, 多了就是被无视)
+        if mode in ("stranger", "enemy") and _phone_quota(state, cid, "read", 1):
+            unanswered = 0
+            for m in reversed(th.get("msgs") or []):
+                if m.get("from") != "me":
+                    break
+                unanswered += 1
+            if unanswered >= 2 or int(scores.get("closeness", 0)) < 0:
+                return "read"
+        # 🔥 亲近 + 玩家抛了个钩子 = 连环刷屏 (每天两次为限)
+        if mode in ("flirt", "lover") and any(ch in text for ch in "？?！!") \
+                and _phone_quota(state, cid, "burst", 2):
+            return "burst"
+        if len(text) >= 30:
+            return "long"                       # 你写了一长段, TA 也认真回
+        return "normal"
+
+    shape = _shape()
+    if shape == "read":
+        tier = "now"                            # 互斥表: read 永不叠延迟
+    if tier != "now" and shape == "read":
+        shape = "normal"                        # 兜底 (上面已保证不会走到)
+    return tier, shape
+
+
+def _phone_quota(state: dict[str, Any], cid: str, kind: str, cap: int) -> bool:
+    """极端形状的每日配额 —— 「别把一种用成习惯」得有个真闸, 不能只写在提示词里。
+    只【查】不扣; 真扣在 _phone_beat 定案之后 (查而不用不该烧配额)。"""
+    day = int((state.get("clock") or {}).get("day", 1) or 1)
+    book = (state.get("phone_shape_day") or {})
+    if book.get("_day") != day:
+        return True
+    return int((book.get(kind) or {}).get(cid, 0) or 0) < cap
+
+
+def _phone_quota_spend(state: dict[str, Any], cid: str, kind: str) -> None:
+    day = int((state.get("clock") or {}).get("day", 1) or 1)
+    book = state.setdefault("phone_shape_day", {})
+    if book.get("_day") != day:
+        book.clear()
+        book["_day"] = day
+    book.setdefault(kind, {})[cid] = int((book.get(kind) or {}).get(cid, 0) or 0) + 1
 
 
 def _phone_probe(content: dict[str, Any], state: dict[str, Any], char_id: str,
@@ -6385,7 +6579,8 @@ def _phone_probe(content: dict[str, Any], state: dict[str, Any], char_id: str,
 def _phone_exchange(content: dict[str, Any], state: dict[str, Any], persona: dict[str, Any],
                     c: dict[str, Any], text: str, llm: LLM, newly: list[str],
                     call: bool = False, same_room: bool = False,
-                    beat_log: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+                    beat_log: list[dict[str, Any]] | None = None,
+                    tier: str = "now", shape: str = "normal") -> dict[str, Any]:
     """One gated text/call exchange with a character: build their view, ask the model,
     apply relationship movement. Returns the raw LLM output dict."""
     char_id = c.get("id")
@@ -6401,6 +6596,11 @@ def _phone_exchange(content: dict[str, Any], state: dict[str, Any], persona: dic
     pc = _char_by_id(content, pcid) if pcid else None
     _th_lr = (_thread(state, char_id).get("last_read") or {}).get("reason") or ""
     out = llm.generate({"phone_reply": True, "call": bool(call), "same_room": bool(same_room),
+                        # 📱 引擎点名的时机与形状 —— 模型不再自选 (它永远选中庸那一档)
+                        "shape": shape,
+                        "reply_when": {"tier": tier,
+                                       "hour": _story_hour(content, state),
+                                       "busy": (_sim(state, char_id).get("intent") or "")[:40]},
                         "last_ignored": _th_lr,   # 📱 上次晾过要认账 (Spec C)
                         "device": phone_device(content),
                         "char": {"name": c.get("name"), "role": c.get("role") or "",
@@ -6488,25 +6688,54 @@ def _digest_phone_overflow(state: dict[str, Any], cid: str, llm: LLM) -> None:
 
 
 def deliver_due_phone(content: dict[str, Any], state: dict[str, Any]) -> int:
-    """📬 延迟消息投递扫描 (Spec D): pending 里 deliver_at 到点的搬进正式消息并计未读。
-    单点扫描 — 回合起点与玩家打开线程时各扫一次, 幂等。"""
-    now = _time_index(state)
+    """📬 延迟消息投递扫描: pending 里到点的搬进正式消息并计未读。幂等。
+
+    ⚠️ 这里只搬字, 一个字都不新写 —— 那些话是玩家点发送那一刻模型就写好的。所以这个
+    函数放进世界心跳也不违反「无点击不推进」(它不产生任何新内容)。
+
+    三道闸 (都是评审实弹点名的坑, 原版一条没有):
+      ⚰️ 死人不投递, 而且【清空】待发 —— 玩家中午发消息判了延迟、角色下午死了,
+         晚上不许弹出一条死人发来的消息 (本仓最忌的文与实分家)。留着不清, 转生/
+         复活时会集体喷发。
+      🚿 一次最多送 PHONE_FLUSH_MAX 条 —— 攒了一堆同时到期, 不许变成引擎没点过的刷屏。
+      🕰 老档宽恕 —— 老条目写的是 {deliver_at}(时段轴)。虚构钟的本里那条轴冻住不动,
+         它们永远送不出去; 读侧一律当已到期, 一次性了结。
+    """
+    now_ts = _wall_ts()
+    now_idx = _time_index(state)
     label = (clock_view(content, state) or {}).get("label", "")
+    dead = _dead_ids(state)
     moved = 0
+
+    def _ready(p: dict[str, Any]) -> bool:
+        if not p.get("due_ts") and not p.get("due_idx"):
+            return True                      # 🕰 老档条目 (只有 deliver_at 或什么都没有)
+        if int(p.get("due_ts") or 0) > now_ts:
+            return False
+        idx = p.get("due_idx")
+        return idx is None or int(idx) <= now_idx
+
     for cid, th in ((state.get("phone") or {}).get("threads") or {}).items():
-        pend = th.get("pending") or []
-        due = [p for p in pend if int(p.get("deliver_at", 0) or 0) <= now]
-        if not due:
+        pend = list(th.get("pending") or [])
+        if not pend:
             continue
-        for p in due:
+        if cid in dead or ((state.get("char_sim") or {}).get(cid) or {}).get("hp") == "dead":
+            th["pending"] = []               # ⚰️ 连同还没到期的一起作废
+            continue
+        ready = [i for i, p in enumerate(pend) if _ready(p)]
+        if not ready:
+            continue
+        take = set(ready[:PHONE_FLUSH_MAX])  # 🚿 其余顺延, 不是丢掉
+        for i in sorted(take):
             th.setdefault("msgs", []).append({"from": "them",
-                                              "text": str(p.get("text") or "")[:120],
+                                              "text": str(pend[i].get("text") or "")[:120],
                                               "at": label})
-        th["pending"] = [p for p in pend if p not in due]
-        th["unread"] = int(th.get("unread", 0) or 0) + len(due)
+        # 按【下标】剔除, 不按值 —— 两条文本完全相同的待发会被 `p not in due` 一起删掉
+        th["pending"] = [p for i, p in enumerate(pend) if i not in take]
+        th["unread"] = int(th.get("unread", 0) or 0) + len(take)
         th.pop("last_read", None)   # 补偿送达 = 晾着的债清了
         _thread_cap(th)
-        moved += len(due)
+        moved += len(take)
     return moved
 
 
@@ -6530,9 +6759,34 @@ def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str
     th["msgs"].append({"from": "me", "text": text[:200], "at": now_label})
     _thread_cap(th)
     newly, cracked = _phone_probe(content, state, char_id, text)
+    # 📱 时机与形状一次判完 (引擎判定, 模型写词) —— 判据见 _phone_beat
+    tier, shape = _phone_beat(content, state, c, text, here, th)
     out = _phone_exchange(content, state, persona, c, text, llm, newly, same_room=here,
-                          beat_log=beat_log)
+                          beat_log=beat_log, tier=tier, shape=shape)
     msgs = [dedash(m[:120]) for m in as_str_list(out.get("msgs"))][:5]
+    if shape in ("read", "burst"):
+        _phone_quota_spend(state, char_id, shape)
+    # ⏳ 判了延迟: 词现在就写好, 但【送达】押后。延迟的是送达不是生成 —— 投递侧因此
+    #    零 LLM, 世界心跳搬运它也不违反「无点击不推进」。
+    if tier != "now" and msgs:
+        due = _phone_due(content, state, tier)
+        pend = list(th.get("pending") or [])
+        for m in msgs:
+            pend.append({"text": m, **due})
+        th["pending"] = pend[-PHONE_PENDING_CAP:]   # 🧾 不许无界增长
+        _audit(state, "phone.delay", True, f"{c.get('name', '')}·{tier}", f"{len(msgs)}条")
+        try:
+            from .. import metrics as _phm
+            _phm.log("phone_shape", asked=shape, tier=tier, got=len(msgs))
+        except Exception:
+            pass
+        th["unread"] = 0
+        view = phone_thread(content, state, char_id)
+        view["replied"] = False
+        view["unlocked"] = cracked
+        if out.get("rel_view"):
+            view["rel"] = out["rel_view"]
+        return view
     # 📱 形状④【已读：原因】晾着 (Spec C): 记账可追问, 「稍后：」补偿走延迟投递 (Spec D)
     _shape = "normal"
     if msgs and msgs[0].startswith("【已读"):
@@ -6545,7 +6799,11 @@ def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str
                 _mk = m.split("：", 1)[-1].split(":", 1)[-1].strip()[:120]
                 if _mk:
                     th.setdefault("pending", []).append(
-                        {"text": _mk, "deliver_at": _time_index(state) + 1})
+                        # 📮 待发只有一个写法 (判官定的): 走 _phone_due 的墙钟轴。
+                        # 老的 deliver_at 时段轴在虚构钟的本里冻住不动 = 死信箱, 而
+                        # 读侧对"没有 due_ts"的条目一律当已到期 —— 再写老格式会让
+                        # 「稍后」当场就送到, 已读晾着那口气一秒都撑不住。
+                        {"text": _mk, **_phone_due(content, state, "later")})
         _audit(state, "phone.shape", True, f"{c.get('name')}·已读晾着", _reason)
         msgs = []
         _shape = "read"

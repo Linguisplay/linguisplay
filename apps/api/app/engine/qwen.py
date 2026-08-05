@@ -237,6 +237,74 @@ def _gal_mature_rider(prompt: dict[str, Any]) -> str:
         "强迫与胁迫不得被写成浪漫。")
 
 
+# 📱 四种回复形状的写法。引擎点名哪一种 (runtime._phone_beat), 这里只负责把它讲清楚。
+# 每一种都写死"几条/多长", 不给模型回避的余地 —— 并列摆着让它挑的那一版, 生产实测
+# 是【已读晾着 0 次、连环刷屏 0 次】。
+_SHAPE_ZH = {
+    "normal": "输出格式：写 1~3 条短消息，每条一行。像真人发微信那样，别写成一段作文。",
+    "word": "输出格式：只写【一条】，而且极短——一个字或一个词就够"
+            "（「滚」「好耶」「？」「嗯」）。这一下的分量全在短里，不许解释、不许补话。",
+    "long": "输出格式：只写【一条】，但认真写长——四五十字，把一件事说清楚、说到底。"
+            "这是你难得肯好好说话的一次。",
+    "burst": "输出格式：写【四到五条】短的，连着发。你此刻憋不住——兴奋、急了、"
+             "或者话赶话——所以一句接一句往外冒，每条都很短，别凑字数。",
+    "read": "输出格式：你看了，但现在不想回。第一行只输出「【已读：原因】」"
+            "（原因≤12字，如 在气你昨天的事）；第二行输出「稍后：」加上你过阵子会补发的"
+            "那一句（它会晚些才送到对方手机上）。只有这两行，别的什么都不要写。",
+}
+_SHAPE_EN = {
+    "normal": "OUTPUT: 1~3 short messages, one per line. Text like a person, not an essay.",
+    "word": "OUTPUT: exactly ONE message, and make it tiny — a single word or two "
+            "(\"no\", \"lol\", \"?\"). All the weight is in how little you said. No explaining.",
+    "long": "OUTPUT: exactly ONE message, but a real one — forty or fifty words that "
+            "actually say the whole thing. This is the rare time you talk properly.",
+    "burst": "OUTPUT: FOUR or FIVE short messages, back to back. You can't hold it in — "
+             "excited, rattled, or just talking over yourself. Keep each one short.",
+    "read": "OUTPUT: you read it and you're not answering. First line: exactly "
+            "\"【已读：<reason, <=12 chars>】\". Second line: \"稍后：\" plus the one thing "
+            "you'll send later. Those two lines only.",
+}
+
+
+def _shape_rule(prompt: dict[str, Any]) -> str:
+    """📱 这一条短信【写成什么形状】—— 引擎点名, 不再让模型四选一。
+
+    改制前是把四种形状并列摆着让模型自己挑, 生产 176 个存档实测的结果是: 它永远挑
+    中庸的那一档 ——【已读晾着 0 次、连环刷屏 0 次】。判断权本就不该在这儿:
+    导演、乐师、骰子全是引擎判定的 (判据见 runtime._phone_beat)。
+
+    tier != "now" 时整块换成「你现在不回, 写你过阵子才会补发的话」—— 这时候形状只在
+    长短之间取, 绝不许是"已读"(那会跟延迟叠成两层不回, 玩家一次发送看到两条已读)。
+    """
+    # 🌐 本仓的语言判据一律是 prompt["language"] (由 runtime.lang_llm 盖章), 不是 "lang"。
+    # ⚠️ 英文本里【已读：…】/「稍后：」这两个中文前缀必须原样保留 —— 解析器按前缀认它们,
+    #    _lang_rule 的合同里也白纸黑字写着 marker line 保留中文前缀, 只有后面的自由文本换英文。
+    en = (prompt.get("language") or "zh") == "en"
+    shape = str(prompt.get("shape") or "normal")
+    when = prompt.get("reply_when") or {}
+    tier = str(when.get("tier") or "now")
+    if tier != "now":
+        why = []
+        h = when.get("hour")
+        if isinstance(h, int):
+            why.append(f"现在是{h}点" if not en else f"it is {h}:00")
+        if when.get("busy"):
+            why.append(f"你手上正忙着：{when['busy']}" if not en
+                       else f"you are busy: {when['busy']}")
+        because = ("（" + "；".join(why) + "）") if why else ""
+        if en:
+            return ("OUTPUT: You are NOT replying right this second"
+                    + (f" {because}" if because else "")
+                    + ". Write the 1~3 short messages you WILL send a while later, "
+                      "one per line — written now, delivered later. "
+                      "Don't apologize for the delay in every line; let the gap speak.")
+        return ("输出格式：你【现在不回】" + because +
+                "。写下你【过一阵子】才会补发的那 1~3 条，每条一行——"
+                "这些话现在就写好，晚些才送到对方手机上。"
+                "别每句都为迟回道歉，那段空白本身就是话。")
+    return _SHAPE_EN[shape] if en else _SHAPE_ZH[shape]
+
+
 def _seek_directive(name: str, sandbox: bool, en: bool, denied: bool = False) -> str:
     """🔎 玩家提到一个册子上没有的名字 —— 交给【导演】判断该不该有这号人。
 
@@ -3784,15 +3852,7 @@ class QwenLLM:
             ("输出格式：写1~3行你说出口的话（口语，短句）。另起一行写：背景：你那头此刻传过去的"
              "声响或动静，10~20字（环境音、你的动作声，不含你的台词）。如果你不想接这个话，"
              "可以只说一两个字，或输出【沉默】表示你握着听筒没出声。"
-             if call else
-             "输出格式：写0~5条短消息，每条一行。【形状随心情】——回复的形状由你此刻的"
-             "心情和你们的关系决定，四种都是你的武器，别把一种用成习惯："
-             "①一个字/一个词回（「滚」「好耶」「？」）；"
-             "②认真的长回（一条几十字，把一件事说清楚）；"
-             "③连环刷屏（四五条短的连着发——兴奋、急了、憋不住才这样）；"
-             "④【已读】晾着——你看了但现在不想回：第一行只输出「【已读：原因】」"
-             "（原因≤12字，如 在气你昨天的事），第二行输出「稍后：」加你过阵子会补发的那句话"
-             "（它会晚些才送到对方手机上）。"),
+             if call else _shape_rule(prompt)),
             f"你与{pl}的关系：{prompt.get('relation','')}。{prompt.get('relationship_playbook','')}",
             (f"你相处下来对{pl}的印象：{prompt.get('player_read','')}"
              if prompt.get("player_read") else ""),
@@ -3892,7 +3952,10 @@ class QwenLLM:
                 s = _re.sub(r"[（(][^）)]*[）)]", "", s).strip()
                 if s:
                     msgs.append(s.strip("「」\"'")[:120])
-        out: dict[str, Any] = {"msgs": msgs[:3], "closeness": dc, "romance": dr,
+        # 📱 5 而不是 3: 判 burst 的条件是 len(msgs) >= 4, 截成 3 条就让「连环刷屏」
+        # 成了物理上不可能触发的死码 —— 提示词教了模型写四五条, 解析器却送不出去
+        # (生产 176 个存档零 burst 的确定性根因, Yi 2026-08-05 查出)。
+        out: dict[str, Any] = {"msgs": msgs[:5], "closeness": dc, "romance": dr,
                                "coming": coming, "task": task, "promise": promise}
         if call:
             out["ambient"] = ambient
