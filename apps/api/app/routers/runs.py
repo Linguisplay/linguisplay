@@ -576,6 +576,16 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
     if runtime.sandbox_on(content):
         if (body.worldview or "").strip():
             wv = body.worldview.strip()[:2000]
+            # 🏛 年代 (Yi 2026-08-04): 只是【世界观文字】, 不进任何日期公式 ——
+            # 日历一律是玩家自己的真实日历 (state["tz"])。
+            # 准入: 只在玩家【亲手写了世界观】时收。留空时剧本自带的设定还在, 而那
+            # 些设定常常写死了年代 (「深夜加班后那对刺眼的车灯」), 硬加一句 1899 会
+            # 让同一份文本自相矛盾 —— 而开局班底与修为阶梯正是拿它去生成的, 生成完
+            # 改不回来。服务端也判一次: 前端置灰挡不住 curl 和缓存了旧页面的客户端。
+            era = runtime.dedash((body.era or "").strip())[:60]
+            if era:
+                wv = runtime._t(content, "【年代】{era}。", "[Era] {era}. ").format(era=era) + wv
+                content["story"].setdefault("sandbox", {})["era"] = era
             content["story"]["world_long"] = wv
             content["story"]["world_facts"] = wv[:400]
         runtime.seed_sandbox_cast(content, mature=mature_run)

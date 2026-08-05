@@ -30,6 +30,26 @@ _ANTI_ASSISTANT = (
 _STYLE_PUNCT = "【禁用破折号】行文一律不用「——」，改用句号、逗号或冒号断句（唯一例外：话被打断时可用在句尾）。"
 
 
+def _era_rule(prompt: dict[str, Any]) -> str:
+    """🏛 年代随行 (Yi 2026-08-04: 玩家开档时选的世界年代)。
+
+    与 _lang_rule 同款: 没设定就返回空串, 老档的提示词逐字不变。
+    年代【只管世界长什么样】, 不管日子 —— 日历一律走玩家自己的真实日历。
+
+    ⚠️ 手机豁免必须写在【同一句里】。另起一句会被前半句「越出这个年代就是穿帮」
+    压过, 于是模型在 1899 档收到短信就拒答「这是什么妖术」。Yi 明令小手机任何年代
+    全开 —— 图标亮着不算交付, 功能通了才算。
+    """
+    era = str(prompt.get("era") or "").strip()
+    if not era:
+        return ""
+    dev = str(prompt.get("device") or "").strip() or "随身通讯之物"
+    return (f"\n【年代】这个世界是：{era}。用词、物件、比喻与常识都只能属于这个年代，"
+            f"越出去就是穿帮；但绝不主动报年号，也不点评自己身处的时代。"
+            f"唯一例外·你手上的「{dev}」：它在这个世界里真实存在且好用，一切功能都成立，"
+            f"照这个年代的说法称呼它即可，绝不许因为年代而拒绝使用它、或说它不存在。")
+
+
 def _lang_rule(prompt: dict[str, Any]) -> str:
     """🌐 story-language directive (stamped onto prompts by runtime.lang_llm). Empty for
     zh so existing stories stay byte-identical. For "en": everything the player READS is
@@ -526,6 +546,20 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append("")
         lines.append("【世界观·这个世界的底色】时代、规矩、气味与常识都从这里来——"
                      "你的言行、称谓、提到的物件与常识绝不能越出这个世界：\n" + _wlong)
+    # 🏛 年代 (Yi 2026-08-04: 玩家开档时选的, 只是世界观补全, 绝不参与任何日期计算 ——
+    #    日历一律是玩家自己的真实日历, 见【现实时刻】那一段)。
+    #    ⚠️ 豁免子句必须写在【这一条里面】: 另起一块会被这条压过, 于是模型在 1899 档
+    #    收到短信就拒答「这是什么妖术」—— Yi 明令小手机任何年代全开, 图标亮着不算交付。
+    _era = (prompt.get("era") or "").strip()
+    if _era:
+        _dev = (prompt.get("device") or "").strip() or "随身通讯之物"
+        lines.append("")
+        lines.append(
+            f"【年代】这个世界的年代是：{_era}。你的见识、称谓、物件、比喻与常识都只能"
+            f"属于这个年代，越出去就是穿帮。但绝不主动报年号、也不点评自己身处的时代——"
+            f"活在里面的人不会这么说话。"
+            f"唯一例外·你手上的「{_dev}」：它在这个世界里真实存在且好用，一切功能都成立；"
+            f"你只需按这个年代的说法称呼它，绝不许因为年代而拒绝使用它、或说它不存在。")
     _ao = (prompt.get("auth_opening") or "").strip()
     if _ao:
         # 🎬 作者开场白 = 文风与事实之锚; 但它是底账不是台词库 (实弹: 复读开场白) — 禁抄
@@ -3523,7 +3557,7 @@ class QwenLLM:
                "但只留一个影子——写你此刻在干嘛、看见什么、心里那点没说完的劲儿。"
                "绝不复述对白、绝不点名对方、绝不解释来龙去脉。"
                "让看到的人心里一动「这是在说我吗」，才算写对了。\n"
-               "输出每行一条：「名字：内容」。\n" + mat + _lang_rule(prompt))
+               "输出每行一条：「名字：内容」。\n" + mat + _lang_rule(prompt) + _era_rule(prompt))
         try:
             resp = _post_chat(self._url, self._key,
                               {"model": self._model, "messages": [{"role": "system", "content": sys},
@@ -3548,7 +3582,7 @@ class QwenLLM:
                f"你发了条动态：「{prompt.get('post','')}」，对方评论：「{prompt.get('comment','')}」\n"
                "写你的回复：一句、≤25字、像真人回评论（可敷衍可走心，按你的性格和关系来）。"
                "另起一行写好感变化数字（0/1/2——评论让你多亲近了一点就给1，戳中心里给2，无感给0）。"
-               "不用破折号。" + _lang_rule(prompt))
+               "不用破折号。" + _lang_rule(prompt) + _era_rule(prompt))
         try:
             resp = _post_chat(self._url, self._key,
                               {"model": self._model, "messages": [{"role": "system", "content": sys},
@@ -3640,7 +3674,7 @@ class QwenLLM:
                f"你此刻不在对方身边，要通过{device}给TA捎话。情境：{prompt.get('hint','')}\n"
                "写1~2条【短消息】：每条一行、口语、短（20字内最好），必须一眼就是你的声音——"
                "你的口头禅、你的脾气、你的分寸。不要旁白、不要引号、不要署名，只输出消息本身。不用破折号。"
-               + _lang_rule(prompt))
+               + _lang_rule(prompt) + _era_rule(prompt))
         u = f"你们之前捎过的话：\n{tail}\n\n现在写你要发的消息（1~2行）："
         try:
             resp = _post_chat(self._url, self._key,
@@ -3819,7 +3853,7 @@ class QwenLLM:
                "写一封【信】：第一行是信的标题（≤12字，像你会写的，不要「无题」）；"
                "空一行后是正文，120~250字，第二人称写给TA。要具体，写到你们之间真实发生过的事、"
                "你当时没说出口的心思；落款是你的名字。忌空泛抒情、忌套话。不用破折号。"
-               + _lang_rule(prompt))
+               + _lang_rule(prompt) + _era_rule(prompt))
         try:
             resp = _post_chat(self._url, self._key,
                               {"model": self._model, "messages": [{"role": "system", "content": sys},
@@ -3897,7 +3931,7 @@ class QwenLLM:
                    "② 再写此刻在场的每个人【正在做什么】——具体的动作、姿态、注意力所在，一人一笔。\n"
                    "这是一位看不见的观众在换机位：场景里【没有任何人到来】，绝不能有人抬头、察觉、"
                    "感到被注视或对空气说话。不要剧透，不要总结抒情。只输出旁白本身。"
-                   + _STYLE_PUNCT + _lang_rule(prompt))
+                   + _STYLE_PUNCT + _lang_rule(prompt) + _era_rule(prompt))
             u = (f"地点：{prompt.get('place','')}（{prompt.get('detail','')}）\n"
                  f"时间：{prompt.get('slot','') or '不明'}\n"
                  f"此刻在场：\n{plist}")
@@ -3908,7 +3942,7 @@ class QwenLLM:
                    "一人一笔，谁都不能只是'站在那里'；\n"
                    "③ 最后写谁最先注意到玩家进来、那一瞬的反应（一个眼神/动作即可，不写对话）。\n"
                    "不要替玩家做动作或说话，不要剧透，不要总结抒情。只输出旁白本身。"
-                   + _STYLE_PUNCT + _lang_rule(prompt))
+                   + _STYLE_PUNCT + _lang_rule(prompt) + _era_rule(prompt))
             u = (f"地点：{prompt.get('place','')}（{prompt.get('detail','')}）\n"
                  f"时间：{prompt.get('slot','') or '不明'}\n"
                  f"走进来的人：{prompt.get('player_name') or '玩家'}\n"
@@ -4447,6 +4481,8 @@ class QwenLLM:
             + ("本局为成人向沙盒，抉择可以大胆、狠辣。" if prompt.get("mature") else "")
             + ("Write all player-facing text (prompt/label/mandate) in English."
                if en else "")
+            # 🏛 年代: 不接这一条, 1899 的档里会冒出「打电话报警」这种选项
+            + _era_rule(prompt)
         )
         u = (f"当前地点：{place}\n可去通路：{exits}\n在场角色：{cast}\n"
              f"玩家当前目标：{goal or '（无）'}\n刚刚正在发生（抉择必须直接从这里长出来，禁止无关事件）：{recent}")

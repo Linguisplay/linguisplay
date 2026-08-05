@@ -1294,6 +1294,13 @@ body.dread #dread { opacity:1; }
       <p class="muted" style="margin:6px 0 4px">🏖 这是一个无尽沙盒：世界观由你定义，时间和现实一致，剧情永不落幕。你也可能死，死了就只剩下看。</p>
       <textarea id="wvInput" rows="4" style="width:100%; background:#14100b; border:1px solid #201c15; border-radius:8px; color:#e7e9f0; padding:8px; font:inherit; resize:vertical" placeholder="写下你想要的世界观：什么时代、什么地方、住着什么样的人、正在酝酿什么。留空则由世界自己决定。"></textarea>
       <textarea id="wvPowers" rows="2" style="width:100%; margin-top:8px; background:#14100b; border:1px solid #201c15; border-radius:8px; color:#e7e9f0; padding:8px; font:inherit; resize:vertical" placeholder="✨ 金手指（可选，一行一个，最多4个）：写下你要的超能力，这个世界会承认它们真实有效。例：状态之眼：看穿他人状态与好感 / 每日一次的抽卡"></textarea>
+      <!-- 🏛 年代 (Yi 2026-08-04)。日子还是你的日子：星期、月日、时刻全按你的时区走，
+           这一栏只决定这个世界【长什么样】。留空世界观时置灰 —— 剧本自带的设定里常常
+           写死了年代，硬加一句 1899 会让同一份设定自相矛盾。 -->
+      <input id="wvEra" maxlength="60" disabled style="width:100%; margin-top:8px; background:#14100b; border:1px solid #201c15; border-radius:8px; color:#e7e9f0; padding:8px; font:inherit"
+             placeholder="🏛 故事的年代（可选）：1899年清末 / 三千年后的星港 / 盛唐">
+      <p class="muted" id="wvEraHint" style="margin:4px 0 0; font-size:12px">
+        先写上面的世界观，年代才作数。日子仍然是你的日子：星期、月日、时刻都按你所在的时区走。</p>
     </div>
     <!-- 🔞 every story can run mature — the toggle lives OUTSIDE the sandbox-only block -->
     <label style="display:flex;align-items:center;gap:8px;margin:8px 0 4px;cursor:pointer;color:#c8c3ba;font-size:13px">
@@ -1848,6 +1855,25 @@ async function chooseRole(storyId, posterUrl) {
   }
   const sandbox = !!(story.sandbox && story.sandbox.enabled);
   document.getElementById("wvWrap").classList.toggle("hidden", !sandbox);
+  // 🏛 年代跟着世界观开合: 没写世界观时置灰。剧本自带的设定里常常写死了年代
+  // (「深夜加班后那对刺眼的车灯」), 硬加一句 1899 会让同一份设定自相矛盾 ——
+  // 而开局班底和修为阶梯正是拿这份文本去生成的, 生成完改不回来。
+  const _wvIn = document.getElementById("wvInput"), _era = document.getElementById("wvEra");
+  if (_wvIn && _era && !_wvIn.dataset.eraBound) {
+    _wvIn.dataset.eraBound = "1";
+    const syncEra = () => {
+      const on = !!_wvIn.value.trim();
+      _era.disabled = !on;
+      _era.style.opacity = on ? "" : ".45";
+      if (!on) _era.value = "";
+      const hint = document.getElementById("wvEraHint");
+      if (hint) hint.textContent = on
+        ? "日子仍然是你的日子：星期、月日、时刻都按你所在的时区走。年代只决定这个世界长什么样。"
+        : "先写上面的世界观，年代才作数。日子仍然是你的日子：星期、月日、时刻都按你所在的时区走。";
+    };
+    _wvIn.addEventListener("input", syncEra);
+    syncEra();
+  }
   const all = (story.characters || []).filter(c => (c.presence || "present") !== "offstage");
   // only author-designated playable roles; if the story flags none, fall back to all (legacy)
   const flagged = all.filter(c => c.playable);
@@ -1969,6 +1995,8 @@ async function startRun(storyId, mode="character", playerCharacterId=null, playe
       perk: chosenPerk, carry_card_id: chosenCarry,
       worldview: ((document.getElementById("wvInput") || {}).value || "").trim(),
       powers: ((document.getElementById("wvPowers") || {}).value || "").trim(),
+      // 🏛 年代跟着世界观走 (服务端也判一次 — 置灰挡不住 curl 和缓存了旧页面的客户端)
+      era: ((document.getElementById("wvEra") || {}).value || "").trim(),
       mature: !!(document.getElementById("wvMature") || {}).checked }) });
     if ((document.getElementById("wvMature") || {}).checked) pushToast(B("🔞 本局已开启成人模式", "🔞 Mature mode is on for this run"), "t-act", 400);
     if (chosenPerk) pushToast(B(`🌱 二周目优势生效：${chosenPerk === "veteran" ? "故人" : "直觉"}`, `🌱 NG+ perk active: ${chosenPerk === "veteran" ? "Old Friend" : "Instinct"}`), "t-act", 400);

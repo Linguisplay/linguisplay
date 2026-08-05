@@ -656,6 +656,14 @@ class RunCreate(BaseModel):
     # ✨ sandbox only: the player's declared 金手指 (one per line, ≤4) — abilities THIS
     # world acknowledges as real; empty = the story's default powers (if authored)
     powers: str = ""
+    # 🏛 sandbox only: 这个故事的【年代】(「1899年，清末」「三千年后」)。
+    # ⚠️ 它【绝不参与任何日期计算】—— 日历一律是玩家自己的真实日历 (见 state["tz"])。
+    # 这只是一段喂给模型的世界观文字: 让角色知道自己活在什么年代、世界观按那个年代
+    # 补全、背景图按那个年代画。
+    # ⚠️ 只在玩家【亲手写了 worldview】时生效, 否则静默丢弃 —— 剧本自带的设定里
+    # 常常写死了年代 (「深夜加班后那对刺眼的车灯」「新区的玻璃楼」), 硬加一句 1899
+    # 会让同一份设定自相矛盾, 而开局班底和修为阶梯就是拿这份文本去生成的。
+    era: str = ""
 
 
 class Beat(BaseModel):

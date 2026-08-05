@@ -648,6 +648,21 @@ def clock_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]
     return view
 
 
+def era_of(content: dict[str, Any]) -> str:
+    """🏛 这个故事的年代 (「1899年，清末」「三千年后」), 没设定就是空。
+
+    ⚠️ 这是【世界观文字】, 不是时间。它绝不参与任何日期计算 —— 日历一律走玩家自己
+    的真实日历 (见 _now_for / state["tz"])。它的活儿只有一件: 让角色、世界观补全、
+    生图知道自己身处哪个年代。
+    只在玩家开档时亲手写了世界观才会被写进来 (见 routers/runs.py 的准入)。
+    """
+    story = (content or {}).get("story")
+    sb = story.get("sandbox") if isinstance(story, dict) else None
+    # 手填/老档里 sandbox 什么形状都可能 (实弹: 是个字符串) —— 不是字典就当没设定,
+    # 绝不炸回合。一个读取口不该有能力让整局挂掉。
+    return str(sb.get("era") or "").strip() if isinstance(sb, dict) else ""
+
+
 def sandbox_on(content: dict[str, Any]) -> bool:
     """🏖 无尽沙盒: the player defines the WORLD at run start, the plot generates
     forever (no endings), and the player's own body can break — the dead lose 说/做."""
@@ -3693,7 +3708,7 @@ def arrival_narration(content: dict[str, Any], state: dict[str, Any], persona: d
                        "look": _first_sentence(c.get("persona_text") or "", 60),
                        "relation": relationships.name_of(mode)})
     try:
-        out = llm.generate({"arrive": True,
+        out = llm.generate({"arrive": True, "era": era_of(content),
                             "place": loc.get("name") or "", "detail": (loc.get("detail") or "")[:160],
                             "slot": (clock_view(content, state) or {}).get("label", ""),
                             "people": people,
@@ -3876,7 +3891,7 @@ def fate_generate(content: dict[str, Any], state: dict[str, Any], llm,
     _pc = _char_by_id(content, state.get("player_character_id"))
     _pcn = (_pc or {}).get("name") or ""
     out = llm.generate({
-        "fate_choice": True,
+        "fate_choice": True, "era": era_of(content),
         "observer": observer,   # 👁 god mode → options phrased as decrees of fate
         "player_name": _pcn,    # 🎭 whose first-person voice the options speak in
         "cast": [c.get("name") for c in here if c.get("name")],
@@ -5844,7 +5859,7 @@ def social_feed(content: dict[str, Any], state: dict[str, Any],
         items = [i for i in items if i["cid"] not in posted][:2]
         if items:
             try:
-                out = llm.generate({"social_posts": True, "items": items}) or {}
+                out = llm.generate({"social_posts": True, "items": items, "era": era_of(content), "device": phone_device(content)}) or {}
                 new_posts = out.get("posts") or []
             except Exception:
                 new_posts = []
@@ -5904,7 +5919,7 @@ def social_comment(content: dict[str, Any], state: dict[str, Any], persona: dict
     tun = tuning_for(content)
     scores = (state.get("rel") or {}).get(post.get("cid")) or relationships.new_scores()
     try:
-        out = llm.generate({"social_reply": True, "post": post.get("text"),
+        out = llm.generate({"social_reply": True, "post": post.get("text"), "era": era_of(content), "device": phone_device(content),
                             "comment": text,
                             "char": {"name": c.get("name"), "eq_style": (c.get("eq_style") or "")[:80],
                                      "persona_text": (c.get("persona_text") or "")[:100]},
@@ -6004,7 +6019,7 @@ def compose_message(content: dict[str, Any], state: dict[str, Any], char: dict[s
     tun = tuning_for(content)
     scores = (state.get("rel") or {}).get(char.get("id")) or relationships.new_scores()
     try:
-        out = llm.generate({"compose_msg": True, "device": phone_device(content),
+        out = llm.generate({"compose_msg": True, "device": phone_device(content), "era": era_of(content),
                             "char": {"name": char.get("name"), "role": char.get("role") or "",
                                      "persona_text": (char.get("persona_text") or "")[:160],
                                      "eq_style": (char.get("eq_style") or "")[:120],
@@ -6550,7 +6565,7 @@ def compose_letter(content: dict[str, Any], state: dict[str, Any], char: dict[st
     tun = tuning_for(content)
     scores = (state.get("rel") or {}).get(char.get("id")) or relationships.new_scores()
     try:
-        out = llm.generate({"compose_letter": True, "device": phone_device(content),
+        out = llm.generate({"compose_letter": True, "device": phone_device(content), "era": era_of(content),
                             "char": {"name": char.get("name"), "role": char.get("role") or "",
                                      "persona_text": (char.get("persona_text") or "")[:200],
                                      "eq_style": (char.get("eq_style") or "")[:120],
@@ -8551,6 +8566,9 @@ def _confront_gen(content, state, persona, secret, frag, next_locked, target, ll
         "memory": (state.get("memory_by_char", {}) or {}).get(char_id) or "",
         "world_facts": (content.get("story") or {}).get("world_facts") or "",
         "world": ((content.get("story") or {}).get("world_long") or "")[:600],
+        # 🏛 年代随行 (只管世界长什么样, 不管日子 — 日历走玩家自己的时区)。
+        # device 同行是因为年代块自带手机豁免: 不带设备名就豁免不了。
+        "era": era_of(content), "device": phone_device(content),
         # 🎯 玩家亲手定的目标 (沙盒): 世界要向它倾斜
         "player_goal": next((g.get("text") for g in reversed(goals_of(state))
                              if g.get("status") == "open" and g.get("kind") == "player"), ""),
@@ -10742,6 +10760,9 @@ def run_turn_stream(
             "world_facts": (content.get("story") or {}).get("world_facts") or "",
             # 🌍 世界书 (Yi: 角色不尊重世界观 — world_long 从前只到开场旁白为止)
             "world": ((content.get("story") or {}).get("world_long") or "")[:600],
+        # 🏛 年代随行 (只管世界长什么样, 不管日子 — 日历走玩家自己的时区)。
+        # device 同行是因为年代块自带手机豁免: 不带设备名就豁免不了。
+        "era": era_of(content), "device": phone_device(content),
             # 🎯 玩家亲手定的目标 (沙盒): 世界要向它倾斜
             "player_goal": next((g.get("text") for g in reversed(goals_of(state))
                                  if g.get("status") == "open" and g.get("kind") == "player"), ""),
