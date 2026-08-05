@@ -102,7 +102,11 @@ def _card_art(s: StoryModel) -> str | None:
     for l in (s.locations or []):
         lid = (l or {}).get("id")
         if lid and (bg / f"{lid}.jpg").exists():
-            return f"/scene/bg/{lid}.jpg"
+            # 🖼 走缩略图 (2026-08-05): 卡片槽位只有 430×237, 而这些是 1600×900~
+            # 1024×1536 的原图 —— 线上实测大厅一次冷开要下 1,727,144 字节, 按出口
+            # 110KB/s 是 16.6 秒。压不出来时 thumb_url 原样返回, 卡面不会空。
+            from ..engine.thumbs import thumb_url
+            return thumb_url(f"/scene/bg/{lid}.jpg")
     return None
 
 
