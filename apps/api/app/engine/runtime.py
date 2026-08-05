@@ -3370,6 +3370,82 @@ def _norm_line(s: str) -> str:
     return re.sub(r"[\s，。、！？…—\-,.!?\"'「」（）()]+", "", s or "")
 
 
+NARR_LEDGER = 8      # 近拍旁白留档数 (查意象复读用; 喂守卫的仍只取最近 2 拍)
+_MOTIF_MIN_RUNS = 2  # 跨几拍出现过才算「意象」—— 只出现一次的是新东西, 不该被禁
+
+
+def narration_motifs(state: dict[str, Any], cap: int = 6) -> list[str]:
+    """本场旁白里已经【反复】出现的意象 —— 动笔之前摊给模型, 让它换一个。
+
+    生产实测 (2174 条旁白): 狗笼 59 条里「桃花眼」8 次、「喉结上下滚动」6 次、
+    「低头看你」6 次; 斗罗 178 条里「目光从你」16 次, 几乎成了旁白的开场公式。
+    此前这些只喂给【事后】的复读守卫 —— 而守卫一响就是一次整包重生, 又慢又贵,
+    且模型压根不知道自己刚写过什么。写之前告诉它, 比写完了罚它便宜得多。
+
+    判据故意做成【自校准】: 跨拍重复出现的才算意象, 不认任何硬编码词表 ——
+    引擎不许知道某个剧本里有「桃花眼」这种东西 (engine-agnostic 家规)。
+    """
+    texts = [str(t) for t in (state.get("_recent_narr") or []) if str(t or "").strip()]
+    if len(texts) < _MOTIF_MIN_RUNS:
+        return []
+    # 每一拍先各自去重, 再数「出现在几拍里」—— 同一拍里重复不算 tic, 跨拍才算
+    seen_in: dict[str, int] = {}
+    for t in texts:
+        zh = re.sub(r"[^一-龥]", "", t)
+        # 三字也要数: 中文里最烦人的那些意象常常只有三个字 (实弹「桃花眼」在 59 条
+        # 旁白里出现 8 次, 而只开四字窗口会整个漏掉它)。碎片由下面的合并收拾。
+        grams = {zh[i:i + 3] for i in range(len(zh) - 2)}
+        grams |= {zh[i:i + 4] for i in range(len(zh) - 3)}
+        # 英文本按词组
+        en = re.findall(r"[A-Za-z']+", t.lower())
+        grams |= {" ".join(en[i:i + 3]) for i in range(len(en) - 2)}
+        for g in grams:
+            seen_in[g] = seen_in.get(g, 0) + 1
+    hits = [g for g, n in seen_in.items() if n >= _MOTIF_MIN_RUNS]
+    if not hits:
+        return []
+    # 先把滑窗切出来的碎片长回去: 「他低头看」「低头看你」是同一个动作的两刀,
+    # 「锁骨上的」「骨上的薄」「上的薄汗」是同一处细节的三刀。不合并的话, 名额会被
+    # 同一个概念的碎片占满, 而真正最烦人的那个反倒挤不进去 (实弹: 五个名额里三个是
+    # 「低头看」和「锁骨薄汗」的碎片, 「桃花眼」没进去)。
+    hits.sort(key=lambda g: (-seen_in[g], -len(g), g))
+    merged: list[str] = []
+    for g in hits:
+        joined = False
+        for i, m in enumerate(merged):
+            if g in m:                      # 已被更长的那条包住
+                joined = True
+                break
+            if m in g:                      # 自己更长, 顶替它
+                merged[i] = g
+                joined = True
+                break
+            # 首尾相接就拼起来 (滑窗相邻的两刀)
+            for k in range(min(len(g), len(m)) - 1, 1, -1):
+                if m.endswith(g[:k]):
+                    merged[i] = m + g[k:]
+                    joined = True
+                    break
+                if g.endswith(m[:k]):
+                    merged[i] = g + m[k:]
+                    joined = True
+                    break
+            if joined:
+                break
+        if not joined:
+            merged.append(g)
+    # 合并会让长条互相包含, 再收一次
+    merged.sort(key=len, reverse=True)
+    out: list[str] = []
+    for m in merged:
+        if any(m in kept for kept in out):
+            continue
+        out.append(m)
+        if len(out) >= cap:
+            break
+    return out
+
+
 def _too_similar(text: str, said: list[dict[str, str]]) -> bool:
     """True if `text` is near-verbatim of something already said this turn (long shared
     prefix or near-equal length+overlap) — catches echoes that aren't byte-identical."""
@@ -11324,6 +11400,10 @@ def run_turn_stream(
                if idx == 0 else {}),
             # 🌱 生长预算到期: 主拍必填 world_seed (软邀请/硬指令两档)
             **({"world_seed": _ws_mode} if idx == 0 and _ws_mode else {}),
+            # 🎬 本场已经写过的意象 (2026-08-05): 只给写旁白的那位 (主答者)。
+            # 生产实测 59 条旁白里「桃花眼」8 次、「喉结上下滚动」6 次 —— 从前这些
+            # 只喂给事后的复读守卫, 而守卫一响就是一次整包重生, 又慢又贵。
+            **({"narr_motifs": narration_motifs(state)} if idx == 0 else {}),
             # 🎼 节奏带 (Spec A): 引擎按乐师账本查表, 全体发言者同一拍点
             "pace": _pace,
             # 🎭 基调事实 (贴生成点): 治「字面狠词压过语境基调」— 只在软基调且已稳住时发
@@ -11869,6 +11949,8 @@ def run_turn_stream(
             # 🔁 近拍旁白档 (原本只喂审稿): 独角戏最容易打转 —— 场账本在这条路上开不了
             # (它要「有台词拍」且「有别人在场」), 所以「本场已经演过」永远到不了这里。
             "recent_narr": [t for t in (state.get("_recent_narr") or []) if t][:2],
+            # 🎬 写之前就把复读过的意象摊出来 (事后守卫太贵: 一响就是整包重生)
+            "narr_motifs": narration_motifs(state),
             # 🏛 年代也走这条路 (Step 5 漏了 observe: 独自一人时到达/打量全归它写)
             "era": era_of(content), "device": phone_device(content),
             "player_dead": ghost,
@@ -12648,7 +12730,9 @@ def run_turn_stream(
     _narr_now = " ".join((b.get("text") or "") for b in all_beats
                          if b.get("type") == "description")[:1200]
     if _narr_now.strip():
-        state["_recent_narr"] = ([_narr_now] + list(state.get("_recent_narr") or []))[:3]
+        # 留档从 3 拍扩到 8 拍: 守卫仍只看最近 2 拍, 但【意象复读】要跨更多拍才数得出来
+        # (「桃花眼」是隔三拍出现一次慢慢磨死人的, 不是连着三拍蹦出来)。
+        state["_recent_narr"] = ([_narr_now] + list(state.get("_recent_narr") or []))[:NARR_LEDGER]
 
     # 建议随档持久化: 重开 App 恢复存档时, 上一轮的下一步 chips 原样还在 (竖屏 App 常驻件)
     # 🧭 口味罗盘 (Yi: 了解玩家喜好非常重要): 引擎已知的硬信号记账, 零调用;
