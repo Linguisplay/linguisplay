@@ -1719,6 +1719,19 @@ def _build_observe_system(prompt: dict[str, Any]) -> str:
                    "线索、痕迹与环境来回应——绝不允许凭空召来一个人替你作答。")
     if scene_line:
         lines.append(scene_line)
+    # 🔁 刚写过的旁白 (Yi 2026-08-05 玩家报障:「到了新场景独自一人的时候旁白会循环」)。
+    # 独角戏是全引擎最容易打转的地方: 没有对话对象推着走, 模型只能反复描述同一个房间。
+    # 而治复读的场账本【在这里根本开不了】——它的开场条件要「有台词拍」且「有别人在场」,
+    # 独自一人时两条都不成立, 于是那句「本场已经演过」永远进不了这条路的提示词。
+    # 用已经在存的 _recent_narr (审稿用的近拍档) 补上, 零新状态零新调用。
+    _rn = [str(t).strip()[:200] for t in (prompt.get("recent_narr") or []) if str(t).strip()]
+    if _rn:
+        lines.append("【你刚写过这些·不许重来】" + " ‖ ".join(_rn[:2])
+                     + "\n上面这些景象、动作与感受【已经写过了】，换个措辞再写一遍也不行。"
+                       "这一拍必须往前走：要么让环境里出现一件【新的、之前没提过的】东西，"
+                       "要么让玩家的动作真的改变了什么，要么让时间、光线、声音发生可察觉的变化。"
+                       "写不出新东西时宁可短——两句真的新的，胜过五句换了词的旧的。")
+    lines.append(_era_rule(prompt))
     memory = (prompt.get("memory") or "").strip()
     if memory:
         lines.append(f"【至此为止的剧情梗概】（保持前后一致用，不要复述）：\n{memory}")

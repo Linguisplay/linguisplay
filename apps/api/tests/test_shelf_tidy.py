@@ -24,7 +24,10 @@ FULL = {
     "visibility": "public", "synopsis": "一句梗概",
     "acts": [{"index": 1, "title": "一幕"}],
     "characters": [{"id": "c1", "name": "甲角", "is_lead": True, "playable": True}],
-    "locations": [{"id": "l1", "name": "门厅", "detail": "x", "exits": []}],
+    # ⚠️ 地点 id 必须够独特: 证据统计是拿 id 去 /scene/bg 里 stat 文件的, 用「l1」
+    # 这种通用名会撞上线上真剧本留下的图 (实弹: bg/l1.jpg 真的存在), 于是断言
+    # 「这本没排过图」当场红 —— 红的是测试不是产品。
+    "locations": [{"id": "loc_shelf_tidy_probe", "name": "门厅", "detail": "x", "exits": []}],
     "endings": [{"id": "e1", "kind": "true", "title": "真结局", "text": "答案"}],
 }
 

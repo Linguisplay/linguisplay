@@ -11349,6 +11349,11 @@ def run_turn_stream(
             "knowledge": (observe_target or {}).get("knowledge", "") if observe_target else "",
             "mature": bool(state.get("mature")),
             "sandbox": sandbox_on(content),
+            # 🔁 近拍旁白档 (原本只喂审稿): 独角戏最容易打转 —— 场账本在这条路上开不了
+            # (它要「有台词拍」且「有别人在场」), 所以「本场已经演过」永远到不了这里。
+            "recent_narr": [t for t in (state.get("_recent_narr") or []) if t][:2],
+            # 🏛 年代也走这条路 (Step 5 漏了 observe: 独自一人时到达/打量全归它写)
+            "era": era_of(content), "device": phone_device(content),
             "player_dead": ghost,
             # observe = the PLAYER looking around → the player's own full view (they witnessed
             # everything they did); their private digest.
