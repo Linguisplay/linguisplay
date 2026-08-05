@@ -2423,7 +2423,14 @@ def _turn_messages(prompt: dict[str, Any], system: str, speaker: str) -> list[di
                 else "（画外引导，场景里无人听见：{}）")
     messages = [{"role": "system", "content": system}]
     if not intro and not transition:
-        hist = history[-14:]  # recent turns for continuity (matches MEMORY_WINDOW)
+        # 🧊 块状滑窗 (2026-08-04 前缀缓存第二刀)。
+        # 原来是 history[-14:] —— 每回合往前滑一格 (第N回合 [3..16], 第N+1回合 [4..17]),
+        # 开头那条一掉, 整段消息序列的前缀就跟上一回合对不上, 缓存当场断。
+        # 改成边界【每 _B 个回合才挪一次】: 块内的连续回合逐字相同, 缓存吃得满。
+        # 代价是最多多带 _B 条历史 —— 上下文变多不变少, 方向安全 (绝不少于合同窗口)。
+        _W, _B = 14, 6                       # 窗口 = MEMORY_WINDOW; 块 = MEMORY_BATCH
+        _start = max(0, ((len(history) - _W) // _B) * _B) if len(history) > _W else 0
+        hist = history[_start:]
         if is_observer:
             # 👁 god mode: the viewer's lines are STAGE DIRECTIONS, never audible —
             # mark every one (current AND past) so no character ever "hears" them
