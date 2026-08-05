@@ -70,3 +70,44 @@ def test_window_never_shrinks_below_the_contract():
         h = [m for m in _msgs(n) if m.get("role") in ("user", "assistant")]
         assert len(h) >= runtime.MEMORY_WINDOW, \
             f"历史 {n} 条时只喂了 {len(h)} 条, 少于合同 {runtime.MEMORY_WINDOW}"
+
+
+# ── 窗口口径: 数【玩家回合】而不是数【消息条数】 (旁白进记忆之后的必修) ──────────
+
+def _turn_hist(n_turns):
+    """一个玩家回合 = 玩家拍 + 旁白 + 对白 三条消息 (旁白 2026-08-04 起也进记忆)。"""
+    h = []
+    for i in range(n_turns):
+        h += [{"role": "user", "content": f"玩家第{i}句"},
+              {"role": "assistant", "content": f"旁白第{i}段"},
+              {"role": "assistant", "content": f"阿珍：台词第{i}句"}]
+    return h
+
+
+def _win(n_turns):
+    p = {"speaker_name": "阿珍", "speaker_persona": "洗头妹", "channel": "say",
+         "persona": {"name": "蔡妍"}, "context": {}, "history": _turn_hist(n_turns),
+         "player_input": "你好"}
+    m = qwen._turn_messages(p, "SYS", "阿珍")
+    return [x for x in m if x.get("role") in ("user", "assistant")]
+
+
+def _turns_covered(win):
+    import re
+    return len({re.search(r"玩家第(\d+)句", x["content"]).group(1)
+                for x in win if x.get("role") == "user" and re.search(r"玩家第(\d+)句", x["content"])})
+
+
+def test_window_counts_player_turns_not_messages():
+    """旁白进记忆后, 按【条数】切窗会让覆盖的回合数掉一半 —— 改按玩家回合切。
+
+    实弹 2026-08-04: 40 个回合的局, 按 14 条消息切只覆盖 6 个玩家回合
+    (加旁白前是 7 个)。角色因此比以前更健忘, 这与「让它记得住」正好相反。"""
+    covered = _turns_covered(_win(40))
+    assert covered >= 12, f"窗口只覆盖 {covered} 个玩家回合 — 按条数切, 旁白把对白挤走了"
+
+
+def test_window_still_blocks_for_the_cache():
+    """按回合切之后, 块状滑窗那条不变量仍要成立 (缓存不许因此退化)。"""
+    a, b = _win(40), _win(41)
+    assert a[0] == b[0], "回合口径下窗口边界又开始逐回合挪了 — 缓存会断"

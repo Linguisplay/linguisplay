@@ -2462,8 +2462,16 @@ def _turn_messages(prompt: dict[str, Any], system: str, speaker: str) -> list[di
         # 开头那条一掉, 整段消息序列的前缀就跟上一回合对不上, 缓存当场断。
         # 改成边界【每 _B 个回合才挪一次】: 块内的连续回合逐字相同, 缓存吃得满。
         # 代价是最多多带 _B 条历史 —— 上下文变多不变少, 方向安全 (绝不少于合同窗口)。
+        # 口径是【玩家回合】不是【消息条数】: 2026-08-04 旁白也进记忆之后, 一个回合
+        # 从 2 条变成 3 条消息, 按条数切会让覆盖的回合数从 7 掉到 6 —— 本来是要让角色
+        # 更记得, 结果更健忘了。所以先按玩家拍(role=user)定块边界, 再从那儿取到末尾。
         _W, _B = 14, 6                       # 窗口 = MEMORY_WINDOW; 块 = MEMORY_BATCH
-        _start = max(0, ((len(history) - _W) // _B) * _B) if len(history) > _W else 0
+        _turns = [i for i, m in enumerate(history) if m.get("role") == "user"]
+        if len(_turns) > _W:
+            _edge = ((len(_turns) - _W) // _B) * _B      # 块状: 每 _B 个回合才挪一次
+            _start = _turns[_edge] if _edge < len(_turns) else 0
+        else:
+            _start = 0
         hist = history[_start:]
         if is_observer:
             # 👁 god mode: the viewer's lines are STAGE DIRECTIONS, never audible —

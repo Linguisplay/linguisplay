@@ -436,6 +436,15 @@ def history_for(beat_log: list[dict[str, Any]] | None, char_id: str | None) -> l
             # prefix the speaker so a character can tell who said what in a group scene
             sp = b.get("speaker_name")
             out.append({"role": "assistant", "content": (f"{sp}：" if sp else "") + b.get("text", "")})
+        elif b.get("type") == "description" and (b.get("text") or "").strip():
+            # 🎬 旁白也进记忆 (2026-08-04)。此前这一类整个丢弃, 而生产实测
+            # 252717/327791 = 77.1% 的正文是旁白 —— 玩家读到的四分之三内容在回合
+            # 结束的一刻就永久蒸发: 玩家记得你们一起淋了那场雨, 角色只记得当时说的
+            # 三句台词。这是「记不住」的头号根因, 而且补这一处等于修两层
+            # (逐字近史窗与滚动摘要共用这个入口)。
+            # 认知边界照旧走上面的 present_ids 闸 —— 我不在场的那场雨我不该记得。
+            # 不贴说话人前缀: 旁白不是谁说的话, 贴了模型会学着把旁白写成台词。
+            out.append({"role": "assistant", "content": (b.get("text") or "").strip()})
     return out
 
 
