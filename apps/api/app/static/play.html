@@ -3290,8 +3290,26 @@ async function sendPhoneMsg(cid, callMode) {
       box.appendChild(pmsgEl(m)); box.scrollTop = box.scrollHeight;
     }
     if (tip) { tip.remove(); tip = null; }
-    if (!th.replied && mine)
+    // 📱 replied=false 现在有【两种】含义, 表现必须分开 (2026-08-05 手机三刀之后):
+    //   · th.pending 在 → TA 这会儿忙/在睡, 话已经写好了但要过一阵才送到
+    //   · 否则       → 已读晾着, TA 看了就是不想回 (那本身也是一句话)
+    // 混成一句「已读 · 没有回」会让"稍后会回"看着像被无视, 玩家就再也不发第二条了。
+    if (mine && th.pending && th.pending.n) {
+      const s = th.pending.in_s;
+      const when = (s == null) ? "" :
+        (s < 90 ? B("马上", "in a moment")
+                : s < 3600 ? B(`约${Math.round(s / 60)}分钟后`, `in ~${Math.round(s / 60)} min`)
+                           : B("晚些时候", "later today"));
+      mine.querySelector("small").textContent =
+        B(`已送达 · TA${when ? when : "稍后"}回你`, `delivered · they'll reply ${when || "later"}`);
+      if (box) {
+        const d = document.createElement("div"); d.className = "pmsg sys";
+        d.innerHTML = `<span>${escapeHtml(B("TA 现在不方便，回头会回你", "They're tied up — they'll get back to you"))}</span>`;
+        box.appendChild(d); box.scrollTop = box.scrollHeight;
+      }
+    } else if (!th.replied && mine) {
       mine.querySelector("small").textContent = B("已读 · 没有回", "read · no reply");
+    }
     // 隔着屏幕也是经营: the bond moves over text too — show it right in the thread
     if (th.rel && box && (th.rel.closeness || th.rel.romance)) {
       const bits = [];

@@ -6418,6 +6418,39 @@ def knows_add(state: dict[str, Any], cid: str | None, facts: Any) -> list[str]:
     return book[cid]
 
 
+def rewind_phone(state_after: dict[str, Any], state_before: dict[str, Any]) -> dict[str, Any]:
+    """⏪ 回溯时手机怎么办 —— 回卷 state 的调用方在写回之前过一道这里。
+
+    本仓回溯的既有法条是「被抹掉的时间线要把它造的东西一起带走」(涌现的角色/地点就是
+    这么处理的)。手机上要分两半, 因为它们的性质相反:
+
+      · 【还没送到的待发】—— 那句话是在一个已经不存在的回合里写的, 必须跟着消失。
+        留着它, 玩家会在几十分钟后收到一条"上一条时间线"的回信。
+      · 【已经送达、玩家读过的消息】—— 不许凭空消失。整份 state 回卷本来就会把它们
+        一起卷走, 但"我明明看见过"那种崩坏比多留一条更伤。所以以回溯点的线程为底,
+        把回溯点【之后】才落地的正式消息也保留下来。
+
+    只动 phone 这一块; 返回要写回存档的那份 state (就地改 state_before 并返回它)。
+    """
+    if not isinstance(state_before, dict):
+        return state_before
+    th_a = ((state_after or {}).get("phone") or {}).get("threads") or {}
+    if not th_a:
+        return state_before
+    ph_b = state_before.setdefault("phone", {})
+    th_b = ph_b.setdefault("threads", {})
+    for cid, ta in th_a.items():
+        tb = th_b.setdefault(cid, {"msgs": [], "unread": 0})
+        msgs_b = tb.get("msgs") or []
+        msgs_a = ta.get("msgs") or []
+        if len(msgs_a) > len(msgs_b):
+            # 回溯点之后真的送到过的, 留着 —— 读过就是读过
+            tb["msgs"] = list(msgs_a)
+            tb["unread"] = int(ta.get("unread", 0) or 0)
+        tb.pop("pending", None)    # ⏳ 那条时间线写的话, 跟它一起作废
+    return state_before
+
+
 PHONE_PENDING_CAP = 12   # 一条线程最多攒多少条待发 (存档的 JSON 列不是无底洞)
 PHONE_FLUSH_MAX = 3      # 一次投递最多送几条 —— 攒了一堆同时到期不许变成意外刷屏
 
@@ -6831,7 +6864,7 @@ def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str
         _audit(state, "phone.delay", True, f"{c.get('name', '')}·{tier}", f"{len(msgs)}条")
         try:
             from .. import metrics as _phm
-            _phm.log("phone_shape", asked=shape, tier=tier, got=len(msgs))
+            _phm.log("phone_shape", shape=shape, asked=shape, tier=tier, got=len(msgs))
         except Exception:
             pass
         th["unread"] = 0
@@ -6871,7 +6904,9 @@ def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str
         th.pop("last_read", None)   # 正常回了 = 认过账翻篇
     try:
         from .. import metrics as _phm
-        _phm.log("phone_shape", shape=_shape)
+        # 📊 口径与延迟那条写点一致 —— 报表逐个写点核对字段 (改写侧忘读侧是老病)。
+        # asked=引擎点的名, got=模型真给了几条 ⇒ 两者一比才知道形状有没有兑现。
+        _phm.log("phone_shape", shape=_shape, asked=_shape, tier="now", got=len(msgs))
     except Exception:
         pass
     snap = None
@@ -10115,8 +10150,10 @@ def run_turn_stream(
             and _SELF_DISCLOSE_RE.search(player_input or ""):
         state["owe_disclosure"] = True
         _audit(state, "disclose.player", True, (player_input or "")[:16])
-    if (state.get("mode") or "character") != "god":
-        deliver_due_phone(content, state)   # 📬 到期的延迟消息随回合送达 (Spec D)
+    # 📬 到期的延迟消息随回合送达。⚠️ 不挂 mode != "god" 的闸: 投递是【纯搬运】
+    # (那些字是玩家点发送那一刻就写好的, 零 LLM), 挡住只会让观剧局无限攒待发,
+    # 谁也不投 —— 那是个黑洞, 不是保护。
+    deliver_due_phone(content, state)
     asks = dict(state.get("asks") or {})
     probed_secret_ids = _detect_asks(content, player_input)
     for sid in probed_secret_ids:

@@ -104,6 +104,9 @@ if growth_ev:
 # 🎼 节奏三数 (Spec 验收): 句长方差要散开、沉默率每十几轮一次量级、手机形状四档皆有
 pace_ev = []
 shape_ev = Counter()
+shape_ask = Counter()      # 引擎点了哪种形状
+shape_tier = Counter()     # 判成了哪个档位 (now/soon/later/next_slot/morning)
+shape_got = defaultdict(list)  # 点名 -> 模型真给了几条
 for _pl in path.open(encoding="utf-8"):
     try:
         _pd = json.loads(_pl)
@@ -115,6 +118,13 @@ for _pl in path.open(encoding="utf-8"):
         pace_ev.append(_pd)
     elif _pd.get("e") == "phone_shape":
         shape_ev[_pd.get("shape", "?")] += 1
+        # 📱 三刀之后要能回答两件事, 不然效果只能靠感觉 (Yi 2026-08-05):
+        #   ① 引擎点的名兑现了吗 —— asked 是引擎定的形状, got 是模型真给了几条
+        #   ② 延迟到底有没有在用 —— tier 分布 (从前 pending 是 0 个线程用过的死信箱)
+        shape_ask[_pd.get("asked", "?")] += 1
+        shape_tier[_pd.get("tier", "?")] += 1
+        if _pd.get("asked") and _pd.get("got") is not None:
+            shape_got[_pd["asked"]].append(int(_pd["got"]))
 if pace_ev:
     import statistics
     _alld = [d for r in pace_ev for d in (r.get("dlens") or [])]
@@ -126,9 +136,25 @@ if pace_ev:
               "（目标: 显著散开）")
     print(f"  沉默率 {_sil * 100 // max(1, len(pace_ev))}%（{_sil}/{len(pace_ev)}轮, 目标每十几轮一次）")
     print("  节奏带分布:", "  ".join(f"{k}×{v}" for k, v in _bands.most_common()))
-if shape_ev:
-    print("  手机形状:", "  ".join(f"{k}×{v}" for k, v in shape_ev.most_common()),
-          "（目标: 四档皆有）")
+if shape_ev or shape_ask:
+    print("── 📱 手机 ──")
+    if shape_ask:
+        print("  引擎点名:", "  ".join(f"{k}×{v}" for k, v in shape_ask.most_common()),
+              "（目标: 五种皆有, 尤其 read/burst 曾长期为 0）")
+    if shape_tier:
+        _dl = sum(v for k, v in shape_tier.items() if k not in ("now", "?"))
+        _all = sum(shape_tier.values())
+        print("  回复时机:", "  ".join(f"{k}×{v}" for k, v in shape_tier.most_common()),
+              f"→ 延迟占 {_dl * 100 // max(1, _all)}%（从前是 0%: pending 是死信箱）")
+    if shape_got:
+        # 兑现率: 点了 burst 真给四五条吗? 点了 word 真只给一条吗?
+        want = {"word": (1, 1), "long": (1, 1), "burst": (4, 5), "normal": (1, 3), "read": (0, 2)}
+        rows = []
+        for k, gs in sorted(shape_got.items()):
+            lo, hi = want.get(k, (0, 99))
+            ok = sum(1 for g in gs if lo <= g <= hi)
+            rows.append(f"{k} {ok}/{len(gs)}")
+        print("  形状兑现:", "  ".join(rows), "（点名 vs 模型真给的条数）")
 
 # 🔫 守卫开枪榜: how often each engine LAW had to fire against the model. High rates
 # name the law the model still breaks most — that's the next thing to strengthen.

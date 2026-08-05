@@ -889,7 +889,11 @@ def rewind_run(run_id: str, body: RewindIn,
          else q.order_by(BeatModel.seq.desc()).first())
     if not b:
         raise HTTPException(400, "没有可回溯的落点（这局更早的回合没有留存档快照）")
-    r.state = b.state_before
+    # 📱 手机单独过一道: 还没送到的待发跟着被抹掉的时间线一起作废 (那句话是在一个
+    # 已经不存在的回合里写的), 但已经送达、玩家读过的消息不许凭空消失 —— 详见
+    # runtime.rewind_phone。整份 state 回卷会把两者一起卷走, 后者是"我明明看见过"
+    # 那种崩坏。
+    r.state = runtime.rewind_phone(r.state or {}, dict(b.state_before or {}))
     # 内容也回卷 (Yi: 重说要清记忆): the FIRST content snapshot at/after the rewind point
     # is the story copy as it stood back then — everything the erased timeline minted
     # (characters, places, world facts) vanishes with the timeline that made it.
