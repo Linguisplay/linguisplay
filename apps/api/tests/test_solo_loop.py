@@ -22,23 +22,23 @@ def _obs(recent=None, **kw):
 
 def test_a_solo_beat_is_told_what_it_just_wrote():
     got = _obs(["窗外的雨敲在瓦上，一声一声。桌上的茶凉了。"])
-    assert "【你刚写过这些·不许重来】" in got
+    assert "【最后一条·最重要】" in got
     assert "窗外的雨敲在瓦上" in got
-    assert "换个措辞再写一遍也不行" in got, \
+    assert "换个措辞再写一遍同样算重来" in got, \
         "复读是【换措辞】演同一个画面, 不是逐字重复 — 这半句是关键"
 
 
 def test_it_also_says_what_to_do_instead():
     """只说「别重复」会逼出更空的句子。必须给出往前走的三条出路。"""
     got = _obs(["雨敲在瓦上。"])
-    assert "新的、之前没提过的" in got
+    assert "从没提过" in got
     assert "宁可短" in got, "写不出新东西时的出路 — 少了它模型会硬凑"
 
 
 def test_nothing_is_added_when_there_is_no_history():
     """新档第一拍没有近拍档 — 提示词必须与从前逐字相同。"""
     for empty in (None, [], ["", "   "]):
-        assert "【你刚写过这些" not in _obs(empty)
+        assert "【最后一条·最重要】" not in _obs(empty)
 
 
 def test_only_the_last_two_are_sent():
@@ -75,3 +75,14 @@ def test_the_empty_room_law_is_still_there():
     got = _obs(["雨敲在瓦上。"])
     assert "没有任何人（只有玩家自己）" in got
     assert "绝不允许凭空召来一个人替你作答" in got
+
+
+def test_the_ban_sits_in_front_of_the_task_instruction():
+    """⚠️ 位置就是效力。第一版把这块放在提示词中段, 后面还压着「请写3~5句」和
+    「直接输出旁白本身」两条任务指令 —— 实测第三拍与第二拍相似度 84%, 照抄不误。
+    模型最听最后一段, 所以它必须紧贴任务指令的正前方。措辞没变, 位置变了。"""
+    got = _obs(["雨敲在瓦上。"])
+    i_ban = got.index("【最后一条·最重要】")
+    i_task = got.index("请写 3~5 句")
+    i_out = got.index("直接输出这段旁白文字本身")
+    assert i_task < i_ban < i_out, "禁令又被埋回中段了 — 那样模型会照抄"
