@@ -6370,6 +6370,54 @@ def _phone_target(content: dict[str, Any], state: dict[str, Any], char_id: str,
     return c
 
 
+KNOWS_CAP = 12   # 每个角色记得多少件【具体的事】(进提示词, 肥了模型反而抓不住重点)
+
+
+def knows_of(state: dict[str, Any], cid: str | None) -> list[str]:
+    """🧠 这个角色亲耳听你说过的具体的事。
+
+    与已有那两本账的分工 (别再多造一本):
+      · profile.facts   跨角色的玩家习惯, 合同里明写【不进对白】—— 角色不开上帝视角
+      · profile.by_char 相处出来的印象, 60 字的"感觉"(「嘴硬心软」), 不是具体的事
+      · memory_by_char  滚动散文摘要 —— 每蒸馏一次就更概括一层, 细节必然褪色
+    这本账专治最后那条: 摘要可以越滚越概括, **具体的事不许被概括掉**, 三天后 TA 还能
+    原样搬出来 (「你不是说不吃香菜」)。
+    """
+    if not cid:
+        return []
+    return list(((state.get("knows") or {}).get(cid) or []))[:KNOWS_CAP]
+
+
+def _knows_key(s: str) -> str:
+    """去重用的归一形 —— 模型每次换个说法就存一条的话, 三天后这本账没法看。
+    只做最保守的归一 (去标点/去人称头), 不做语义合并: 宁可多一条, 不许合错。"""
+    t = re.sub(r"[，。！？、；：,.!?;:\s「」【】\"']", "", s or "")
+    for p in ("他", "她", "TA", "对方", "玩家", "你"):
+        if t.startswith(p):
+            t = t[len(p):]
+    return t
+
+
+def knows_add(state: dict[str, Any], cid: str | None, facts: Any) -> list[str]:
+    """把一批事实记到【这个角色】名下。去重 + 截长 + 封顶, 最新的留下。"""
+    if not cid:
+        return []
+    book = state.setdefault("knows", {})
+    cur = list(book.get(cid) or [])
+    seen = {_knows_key(x) for x in cur}
+    for f in as_str_list(facts):
+        t = f.strip()[:40]
+        if not t or t in ("无", "None", "-"):
+            continue
+        k = _knows_key(t)
+        if not k or k in seen:
+            continue
+        seen.add(k)
+        cur.append(t)
+    book[cid] = cur[-KNOWS_CAP:]
+    return book[cid]
+
+
 PHONE_PENDING_CAP = 12   # 一条线程最多攒多少条待发 (存档的 JSON 列不是无底洞)
 PHONE_FLUSH_MAX = 3      # 一次投递最多送几条 —— 攒了一堆同时到期不许变成意外刷屏
 
@@ -6618,6 +6666,8 @@ def _phone_exchange(content: dict[str, Any], state: dict[str, Any], persona: dic
                         # digest is the PLAYER's whole life and must never leak into a
                         # character who wasn't there for it
                         "memory": (state.get("memory_by_char", {}) or {}).get(char_id) or "",
+                        # 🧠 TA 记得的【具体的事】—— 只给这个角色自己那一本, 不许开天眼
+                        "knows": knows_of(state, char_id),
                         "recent_scene": recent_scene,
                         "thread_tail": _thread_tail(state, char_id, 12),
                         "real_now": real_now_line(content, state),
@@ -6678,10 +6728,14 @@ def _digest_phone_overflow(state: dict[str, Any], cid: str, llm: LLM) -> None:
     prior = (state.get("memory_by_char", {}) or {}).get(cid) or ""
     try:
         out = llm.generate({"summarize": True, "prior_memory": prior,
+                            # 🧠 顺手把【具体的事】抽出来 —— 搭在这一次调用上, 零新增成本。
+                            # 摘要越滚越概括是它的本分, 而具体细节要另存一本才不会被概括掉。
+                            "want_facts": True,
                             "new_lines": lines}) or {}
     except Exception:
         return
     mem = (out.get("memory") or "").strip()
+    knows_add(state, cid, out.get("facts"))   # 🧠 事实记在这个角色名下 (认知有边界)
     if mem:
         state.setdefault("memory_by_char", {})[cid] = mem
         th["digested_upto"] = len(msgs) - keep

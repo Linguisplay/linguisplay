@@ -3126,19 +3126,45 @@ class QwenLLM:
             for l in lines
         )
         user = f"== 已有备忘录 ==\n{prior or '（空，尚未建立）'}\n\n== 最近新发生的对话 ==\n{convo}"
+        # 🧠 顺手把【具体的事】抽出来 —— 搭在这一次调用上, 不另起一次 (成本敏感)。
+        # 摘要越滚越概括是它的本分; 具体细节要单独拎出来才不会被下一轮概括掉。
+        sysmsg = _build_summary_system() + _lang_rule(prompt)
+        if prompt.get("want_facts"):
+            sysmsg += ("\n\n最后另起一行，以「记住：」开头，用分号隔开列出这段对话里"
+                       "【对方主动透露的具体的事】——最多 5 条，每条不超过 20 字，"
+                       "只要能在几天后原样搬出来的硬事实（口味、忌讳、住处、家里人、"
+                       "怕什么、答应过什么），不要感受、不要评价、不要剧情概述。"
+                       "没有值得记的就写「记住：无」。")
         try:
             resp = _post_chat(self._url, self._key,
                               {
                     "model": self._summary_model,  # cheap model — background compression
-                    "messages": [{"role": "system", "content": _build_summary_system() + _lang_rule(prompt)},
+                    "messages": [{"role": "system", "content": sysmsg},
                                  {"role": "user", "content": user}],
                     "max_tokens": 600,
                     "temperature": 0.3,
                 },
                               timeout=30)
-            return {"memory": resp.json()["choices"][0]["message"]["content"].strip() or prior}
+            txt = resp.json()["choices"][0]["message"]["content"].strip()
+            facts: list[str] = []
+            if prompt.get("want_facts") and txt:
+                keep = []
+                for ln in txt.splitlines():
+                    t = ln.strip()
+                    if t.startswith(("记住：", "记住:")):
+                        body = t.split("：", 1)[-1].split(":", 1)[-1].strip()
+                        if body and body != "无":
+                            # ⚠️ 用模块级的 re, 不是 _re —— 那是别的方法里的局部导入,
+                            #    在这儿是 NameError, 而外面那个 except Exception 会把它
+                            #    静静吞掉, 表现成"事实永远抽不出来"(实弹白查一轮)。
+                            facts = [x.strip()[:40] for x in re.split(r"[；;、]", body)
+                                     if x.strip() and x.strip() != "无"][:5]
+                        continue     # 标记行不留在散文摘要里
+                    keep.append(ln)
+                txt = "\n".join(keep).strip()
+            return {"memory": txt or prior, "facts": facts}
         except Exception:
-            return {"memory": prior}
+            return {"memory": prior, "facts": []}
 
     def _gal_outline(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """✍️ B档: 梗概 → 章节大纲 (创作者确认后才拓写)."""
@@ -3857,6 +3883,12 @@ class QwenLLM:
             (f"你相处下来对{pl}的印象：{prompt.get('player_read','')}"
              if prompt.get("player_read") else ""),
             f"你们此前的经历（你的记忆）：{(prompt.get('memory') or '')[:400]}" if prompt.get("memory") else "",
+            # 🧠 具体的事单列一行, 不跟散文摘要混在一起 —— 摘要是"感觉", 这些是"证据"。
+            # 明说可以主动搬出来: 陪伴感最便宜的一招就是"你不是说不吃香菜"。
+            ("【你记得TA说过的具体的事】" + "；".join(prompt.get("knows") or [])
+             + "。这些是你亲耳听来的，说话时可以自然地用上——想起来就提一句，"
+               "比任何甜言蜜语都让人觉得你在听。别一次全倒出来。"
+             if prompt.get("knows") else ""),
             ("【你们最近当面发生的事（你亲历的，就在刚才/不久前）】\n"
              + "\n".join(prompt.get("recent_scene") or [])
              + f"\n{device}里要接得上这些——绝不当没发生过，也别逐句复述。"
