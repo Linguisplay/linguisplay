@@ -5785,12 +5785,21 @@ def _social_state(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _social_mark(content: dict[str, Any], state: dict[str, Any]) -> int:
+    """账本指纹: 变了才出新帖 (没新货不烧调用)。
+
+    ⚠️ 2026-08-05 补进「你们之间刚发生的事」—— 此前指纹只认角色【彼此】之间的关系
+    (npc_rel)、在办的事、约定、见过谁, 唯独不认玩家和角色之间发生了什么。于是你跟
+    某人刚经历完一场大事, 动态照旧是旧的那两条: 朋友圈跟不上剧情。
+    现在把每个角色的关系大事记(rel_log)和相册也计进来 —— 它们正是「你俩之间」的账。"""
     n = _time_index(state)
     for e in (state.get("npc_rel") or {}).values():
         n += 1 + len(e.get("log") or [])
     for si in (state.get("char_sim") or {}).values():
         n += 1 if si.get("intent") else 0
     n += len(state.get("promises") or []) + len(state.get("met_ids") or [])
+    for entries in (state.get("rel_log") or {}).values():
+        n += len(entries or [])
+    n += len(state.get("album") or [])
     return n
 
 
@@ -6035,6 +6044,111 @@ def phone_push(content: dict[str, Any], state: dict[str, Any], char: dict[str, A
             "avatar_url": char.get("avatar_url"), "msgs": msgs, "call": bool(call),
             "snap": snap,  # router: queue the render, then strip before the wire
             "device": phone_device(content)}
+
+
+# ── 📟 主动找你 (Yi 2026-08-05: 让玩家感觉总是有人在找他) ──────────────────────
+# 生产实况: 174 个存档里只有 5 个有过短信往来 —— 97% 的局角色一条消息没发过。
+# 根因不是管线缺 (compose_message + phone_push 早就通用), 是【由头只有一个】:
+# 唯一主动的产地 offline_pulse 只在「玩家离开又回来」那一拍开火, 而中位一局只有
+# 4 个玩家回合 —— 中位玩家从来没有「回来」过, 于是永远收不到任何消息。
+#
+# 所以这里加的不是新能力, 是新【由头】。铁律两条:
+#   · 名额: 一律过 PHONE_MAX_PER_TURN, 主动是免费的但玩家的注意力不是。
+#   · 边界: 只有在场见证过的人才来聊那件事 —— 不在场的人不该知道。
+
+def reachout_on_meet(content: dict[str, Any], state: dict[str, Any], llm: LLM,
+                     busy: set[str] | None = None) -> list[dict[str, Any]]:
+    """初次见面之后的自我介绍短信。
+
+    「照面即给联系方式」(08-04) 之后, 新玩家打开手机是一部空机: 通讯录里有人,
+    一条消息也没有。这条补上那个空 —— 也是这台设备对玩家说的第一句话。
+    每人一生一次 (intro_sent 记账)。"""
+    if not phone_enabled(content) or (state.get("mode") or "character") == "god":
+        return []
+    sent = state.setdefault("intro_sent", [])
+    dead = _dead_ids(state)
+    # 🤝 「见过」得是【真打过照面】, 不是账本上有名字。phone.seen 记的是上次面对面的
+    # 时刻, 只有它能证明你俩真的站到过一起 —— met_ids 会被开场、路过、旁白提及写进去。
+    # 实弹: 两条旧测试里的「乙」一直待在后巷从没露面, 却收到了一条「乙。」的自我介绍。
+    met = set(state.get("met_ids") or []) & set(((state.get("phone") or {}).get("seen") or {}).keys())
+    # 🚪 人还站在你面前时不发 —— 当面聊着天, 手机响一声「你好我是阿彩」很蠢。
+    # 自我介绍要等你们分开之后才到 (那才是真人存完号会做的事)。
+    here = {c.get("id") for c in scene_characters(content, state) if c.get("id")}
+    now_label = (clock_view(content, state) or {}).get("label", "")
+    out: list[dict[str, Any]] = []
+    for c in _characters(content):
+        cid = c.get("id")
+        if not cid or cid in sent or cid not in met or cid in dead \
+                or cid in here or cid == state.get("player_character_id"):
+            continue
+        if not has_contact(state, cid):        # 剧本关掉照面即给时, 这条自然也不发
+            continue
+        # 🥇 让位: 这个人本回合已经因为【有后果的事】发过话了 (约定到点/爽约/刚分别),
+        # 就不许再叠一条寒暄 —— 实弹 test_promise_reminder: 「别忘了夜里后巷见」后面
+        # 跟了一条「乙。」, 玩家的未读变成 2, 而第二条毫无信息量。
+        # 自我介绍不消耗 intro_sent, 下次他安静的时候再发。
+        if busy and (c.get("name") or "") in busy:
+            continue
+        if len(out) >= PHONE_MAX_PER_TURN:     # 一屋子人不许一口气弹一屏通知
+            break
+        sent.append(cid)
+        msgs = compose_message(
+            content, state, c,
+            "你们刚刚初次见面, 你把号存给了对方 —— 发一条自我介绍的短信",
+            "一两句, 贴你的性格: 报个名号/说句场面话/或者只丢一句冷淡的确认。"
+            "别热情得不像你, 也别写成客服话术。",
+            f"{c.get('name', '')}。", llm)
+        out.append(phone_push(content, state, c, msgs, now_label))
+        _audit(state, "reach.intro", True, str(c.get("name") or "")[:12])
+    return out
+
+
+def reachout_after_event(content: dict[str, Any], state: dict[str, Any], llm: LLM,
+                         moments: list[dict[str, Any]] | None,
+                         busy: set[str] | None = None) -> list[dict[str, Any]]:
+    """刚一起经历了点什么, 事后来一条总结性的短信。
+
+    「他还在想刚才那件事」是陪伴感里最便宜也最有效的一条。
+    两道门都要过:
+      · 见证 —— 只发给亲历这件事的人 (不在场的人来聊, 就是认知边界破了);
+      · 分开 —— 人还站在你面前时不发, 当面的事当面说完了, 短信是【离场之后】
+        那点没说完的余温。押成词债, 等他离场的那一拍再送。"""
+    if not phone_enabled(content) or (state.get("mode") or "character") == "god":
+        return []
+    here = {c.get("id") for c in scene_characters(content, state) if c.get("id")}
+    dead = _dead_ids(state)
+    # 📥 押账: 本回合的高光先记下 (只记亲历者), 等他离场那一拍再送。
+    owed = state.setdefault("reach_owed", {})
+    for m in (moments or []):
+        nm = (m.get("name") or "").strip()
+        what = str(m.get("title") or "").strip()
+        c0 = next((x for x in _characters(content) if (x.get("name") or "").strip() == nm), None)
+        cid0 = (c0 or {}).get("id")
+        if cid0 and what and cid0 in here and cid0 != state.get("player_character_id"):
+            owed[cid0] = what
+    now_label = (clock_view(content, state) or {}).get("label", "")
+    out: list[dict[str, Any]] = []
+    for cid in list(owed.keys()):
+        c = _char_by_id(content, cid)
+        # 还站在你面前 = 当面的事当面说, 这条继续押着
+        if not c or cid in here or cid in dead or not has_contact(state, cid):
+            continue
+        if busy and (c.get("name") or "") in busy:      # 同上: 有后果的消息优先
+            continue
+        if len(out) >= PHONE_MAX_PER_TURN:
+            break
+        what = str(owed.pop(cid, "") or "").strip()
+        if not what:
+            continue
+        msgs = compose_message(
+            content, state, c,
+            f"你们刚一起经历了「{what}」—— 分开之后你回味起来, 给对方发一条",
+            "别复述刚才的事, 那是你们俩都在场的; 写此刻心里剩下的那点东西, "
+            "一两句, 可以只说半句。",
+            "……", llm)
+        out.append(phone_push(content, state, c, msgs, now_label))
+        _audit(state, "reach.after", True, f"{c.get('name', '')}·{what[:10]}")
+    return out
 
 
 def compose_message(content: dict[str, Any], state: dict[str, Any], char: dict[str, Any],
@@ -11705,6 +11819,19 @@ def run_turn_stream(
     #     hour is next / just stood up / a lover just parted from) reach out. Capped.
     if not observer and not is_think:
         for ev in phone_deliveries(content, state, here_after, llm):
+            yield ("phone", ev)
+            moments.append({"kind": "phone", "name": ev["name"], "device": ev["device"]})
+
+        # 📟 主动找你 (Yi 2026-08-05: 让玩家感觉总是有人在找他)。挂在 phone_deliveries
+        # 【之后】—— 那里发的是有后果的消息 (约定到点、爽约、刚分别), 这里发的是寒暄
+        # 与余温。顺序即优先级: 实弹 test_promise_reminder —— 我原先插在它前面, 于是
+        # 「别忘了夜里后巷见」被一条自我介绍挤成第二条, 玩家一眼看到的成了打招呼。
+        # busy 把本回合已经发过话的人让出去, 一个人一回合只响一次。
+        _busy = {str(m.get("name") or "") for m in moments if m.get("kind") == "phone"}
+        _reach = list(reachout_after_event(content, state, llm, moments, _busy))
+        _busy |= {str(e.get("name") or "") for e in _reach}
+        _reach += list(reachout_on_meet(content, state, llm, _busy))
+        for ev in _reach:
             yield ("phone", ev)
             moments.append({"kind": "phone", "name": ev["name"], "device": ev["device"]})
 
