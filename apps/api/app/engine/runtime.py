@@ -323,6 +323,21 @@ LLM_MAP_WRITES = False
 # 都关上之后, 地图这个功能只剩两个输入: 作者写的地点/作息, 和玩家在图上点的那一下。
 TYPED_MOVE = False
 
+# 🔎 找人不再自动造真 (Yi 2026-08-05)。
+#
+# 原来: 玩家提到册子上没有的名字 → 引擎额外调一次 scout_char 判官问「这名字属不属于
+# 本世界观」→ 判官点头就【当场造真】(角色入册 + 铸地 + 钉行踪), 整个回合短路成一张
+# 「TA此刻在 X，去吗？」的确认片。
+#
+# 问题在判断权: 那个判官只看到名字和世界观梗概, 看不见这一场的戏、看不见玩家为什么
+# 提这个名字 —— 玩家随口一句就凭空多出一个人。而导演本来就握着 new_character 字段,
+# 它读得到整场上下文, 才是该拍板的那个。
+#
+# 关掉之后: 名字原样递给导演 (prompt.seek_unknown), 由它判断该不该有这号人 ——
+# 该有就 new_character 让 TA 真登场, 不该有就在世界观内如实否认并指条路。
+# 顺带省掉那一次判官调用。
+SEEK_AUTO_MINT = False
+
 _SLOT_NARR = {
     "晨": "（长夜过去，第{day}天的晨光透了进来，街面上有了新的动静。）",
     "午": "（不知不觉，日头已经爬到头顶。）",
@@ -9876,7 +9891,8 @@ def run_turn_stream(
     seek_unknown_tok = None
     if seek is None and not moved and (state.get("mode") or "character") != "god":
         seek_unknown_tok = seek_unknown(content, state, player_input, channel)
-    if seek_unknown_tok and sandbox_on(content):
+    # 🔎 SEEK_AUTO_MINT 关掉后整段不走: 名字交给导演判断, 不再由判官代拍 (Yi 2026-08-05)
+    if SEEK_AUTO_MINT and seek_unknown_tok and sandbox_on(content):
         story_s = content.get("story") or {}
         try:
             scout = llm.generate({"scout_char": seek_unknown_tok,

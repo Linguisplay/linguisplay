@@ -237,6 +237,50 @@ def _gal_mature_rider(prompt: dict[str, Any]) -> str:
         "强迫与胁迫不得被写成浪漫。")
 
 
+def _seek_directive(name: str, sandbox: bool, en: bool, denied: bool = False) -> str:
+    """🔎 玩家提到一个册子上没有的名字 —— 交给【导演】判断该不该有这号人。
+
+    Yi 2026-08-05 改制。原来这条指令是【命令交货】:「这一拍必须给出实在的下文，三选一」,
+    而"该不该有这个人"其实早在上游被一个只看名字和世界观梗概的判官 (scout_char) 拍板了 ——
+    它看不见这一场的戏, 于是玩家随口一句就凭空多出一个人。
+
+    现在判断权还给导演: 它读得到整场上下文。措辞相应从"必须落地"改成"你来判断":
+    该有就 new_character 让 TA 真登场; 不该有就在世界观内如实否认, 并指条真能帮上忙的路。
+    两条出路都要求【这一拍就把话说死】—— 不许含糊拖着, 那才是玩家空转十几个回合的老病。
+    """
+    name = (name or "").strip()
+    if not name:
+        return ""
+    if denied:      # 上游已经判过不属于本世界观 (SEEK_AUTO_MINT 开着时才会有)
+        return (f"[The player is asking after '{name}', who does not exist in this story. "
+                f"Say so honestly IN-WORLD this turn — nobody here knows that name; "
+                f"point at who or where might actually help.]" if en else
+                f"【打听要有着落】玩家在找「{name}」，但这个故事里并没有这号人物。"
+                f"这一拍就要把话在世界观内说明白：在场者如实表示不认识、没听说过，"
+                f"并点一句现在真正能帮上忙的人或去处，别让玩家再空等。")
+    # 沙盒本世界是长出来的, 门槛低; 授权本的班底是作者写死的, 默认不该多人
+    bar = ("这是玩家自己开的沙盒世界，世界本来就在长——只要合世界观、合此时此地，"
+           "就大方让TA存在。" if sandbox else
+           "这是作者写好的故事，班底是设计过的——除非剧情此刻真的需要，"
+           "否则默认【不该】凭空多出一个人。")
+    if en:
+        return (f"[JUDGE THIS: the player is hunting for '{name}', who is not in the cast. "
+                f"YOU decide whether such a person should exist in this world at all — "
+                f"{'a sandbox world grows, so be generous if they fit' if sandbox else 'this is an authored cast, so default to NO unless the scene truly needs them'}. "
+                f"If yes: bring them in for real via the new_character field, keeping the "
+                f"name '{name}', and stage the entrance in the narration. "
+                f"If no: have someone say plainly, in-world, that nobody here goes by that "
+                f"name, and point at who or where might actually help. "
+                f"Either way, settle it THIS turn — never vamp.]")
+    return (f"【这一句由你判断】玩家在找「{name}」，班底里没有这号人。"
+            f"该不该让这个人存在，你来定：{bar}\n"
+            f"· 判断【该有】：用 new_character 字段让TA真实登场（名字就叫「{name}」），"
+            f"并在 narration 里把进场写实（动作、外貌、第一眼的感觉）。\n"
+            f"· 判断【不该有】：让在场者在世界观内如实说不认识、没听说过，"
+            f"并点一句现在真正能帮上忙的人或去处。\n"
+            f"无论哪一边，这一拍都要把话说死，绝不含糊敷衍拖过这一轮。")
+
+
 def _knowledge_block(prompt: dict[str, Any]) -> str:
     """智能增强: a character's auto-generated background lore, offered as reference."""
     kn = (prompt.get("knowledge") or "").strip()
@@ -349,27 +393,10 @@ def _depth_anchor(prompt: dict[str, Any]) -> str:
                     "决定性的那一下、结果落定。不许热身、不许报数、不许把开打拖到下一拍。")
     _sk = (prompt.get("seek_unknown") or "").strip()
     if _sk:
-        if prompt.get("sandbox") and not prompt.get("seek_denied"):
-            bits.append((f"[The player seems to be hunting for '{_sk}' — no such person "
-                         f"or place exists yet. Make the search LAND this turn: someone "
-                         f"gives a real lead or introduction (a new person enters via the "
-                         f"new_character field, keeping the name '{_sk}'), '{_sk}' shows up "
-                         f"in person (same field), or someone states plainly nobody here "
-                         f"goes by that name and points at who might know. Never vamp.]")
-                        if en else
-                        (f"【打听要有着落】玩家像是在找「{_sk}」，可场面账本上还没有这号人物或去处。"
-                         f"这一拍必须给出实在的下文，三选一：①在场者给出确凿线索或引荐"
-                         f"（若因此引出新人物，用 new_character 字段让TA真实登场，名字就叫「{_sk}」）；"
-                         f"②「{_sk}」本人恰好现身（同样走 new_character）；"
-                         f"③明说这一带没这号人，并指出可以去问谁。绝不许含糊敷衍拖过这一轮。"))
-        else:
-            bits.append((f"[The player is asking after '{_sk}', who does not exist in this "
-                         f"story. Say so honestly IN-WORLD this turn — nobody here knows "
-                         f"that name; point at who or where might actually help.]")
-                        if en else
-                        (f"【打听要有着落】玩家在找「{_sk}」，但这个故事里并没有这号人物。"
-                         f"这一拍就要把话在世界观内说明白：在场者如实表示不认识、没听说过，"
-                         f"并点一句现在真正能帮上忙的人或去处，别让玩家再空等。"))
+        _d = _seek_directive(_sk, sandbox=bool(prompt.get("sandbox")), en=en,
+                             denied=bool(prompt.get("seek_denied")))
+        if _d:
+            bits.append(_d)
     md = (prompt.get("mandate") or "").strip()
     if md:
         # ⚖️ a fate pick is LAW for the coming turns — restated at depth-0 every turn

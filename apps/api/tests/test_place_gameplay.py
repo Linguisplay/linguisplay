@@ -294,7 +294,7 @@ class _ScoutBase:
                 "affinity_delta": 0, "advance_act": False, "ending": None}
 
 
-def test_scout_mints_the_sought_character_for_real(map_writes_on):
+def test_scout_mints_the_sought_character_for_real(seek_automint_on, map_writes_on):
     """找人合同（2026-07-08）：智能检索说「属于这个世界」→ 角色入册、地点造真、
     行踪钉住、同款确认片弹出 — 文与实不分家，绝不再空转。"""
     import copy
@@ -356,7 +356,7 @@ def test_opening_never_writes_absent_characters():
     assert "竹清" in txt
 
 
-def test_scout_denial_denies_honestly_and_mints_nothing():
+def test_scout_denial_denies_honestly_and_mints_nothing(seek_automint_on, ):
     import copy
 
     class DenyLLM(_ScoutBase):

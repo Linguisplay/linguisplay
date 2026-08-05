@@ -85,3 +85,14 @@ def golden_auto_on(monkeypatch):
     测【自动摇骰本身】的用例显式开旗跑, 与 map_writes_on / typed_move_on 同理。
     """
     monkeypatch.setitem(runtime.DEFAULT_TUNING, "golden_chance", 4)
+
+
+@pytest.fixture
+def seek_automint_on(monkeypatch):
+    """开回「找人自动造真」(runtime.SEEK_AUTO_MINT, Yi 2026-08-05 定缺省关)。
+
+    产品行为: 玩家提到册子上没有的名字, 不再由 scout_char 判官代拍板当场造人 ——
+    名字交给导演, 由它读着整场上下文判断该不该有这号人。测那套判官管线本身的用例
+    显式开旗跑, 与 map_writes_on / typed_move_on / golden_auto_on 同理。
+    """
+    monkeypatch.setattr(runtime, "SEEK_AUTO_MINT", True)
