@@ -52,13 +52,24 @@ def test_the_same_fact_twice_does_not_double_up():
     assert runtime.knows_of(st, "b") == ["不吃香菜"]
 
 
-def test_near_duplicates_do_not_pile_up():
-    """模型每次换个说法就存一条的话, 三天后这本账就没法看了。"""
+def test_only_punctuation_and_spacing_are_normalised_away():
+    """去重只做最保守的一层: 标点与空白。
+
+    ⚠️ 契约在 2026-08-05 的对抗验收后收紧过。头一版还抹掉人称头 (他/她/你/对方),
+    想把「他不吃香菜」和「不吃香菜」合成一条 —— 但那同时把【「他妹妹在城南」和
+    「你妹妹在城南」】也合了, 而那是两件事, 后来的一条被静默丢弃。
+    **合错比多存坏得多**: 多一条只是提示词肥一点, 合错是 TA 记错了人。
+    """
     st = _st()
-    runtime.knows_add(st, "b", ["他不吃香菜"])
+    runtime.knows_add(st, "b", ["不吃香菜。"])
     runtime.knows_add(st, "b", ["不吃香菜"])
-    assert len(runtime.knows_of(st, "b")) == 1, \
-        f"近似重复没合并: {runtime.knows_of(st, 'b')}"
+    assert len(runtime.knows_of(st, "b")) == 1, "只差标点也没合"
+
+    st2 = _st()
+    runtime.knows_add(st2, "b", ["他妹妹在城南读书"])
+    runtime.knows_add(st2, "b", ["你妹妹在城南读书"])
+    assert len(runtime.knows_of(st2, "b")) == 2, \
+        f"不同人的同一件事被合成了一条: {runtime.knows_of(st2, 'b')}"
 
 
 def test_the_ledger_is_capped_newest_wins():

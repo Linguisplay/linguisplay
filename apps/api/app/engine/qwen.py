@@ -3152,7 +3152,11 @@ class QwenLLM:
                 for ln in txt.splitlines():
                     t = ln.strip()
                     if t.startswith(("记住：", "记住:")):
-                        body = t.split("：", 1)[-1].split(":", 1)[-1].strip()
+                        # ⚠️ 只劈掉【开头那个】标记冒号, 不许再劈一次 —— 无条件二次
+                        # split 会把「约在18:30」截成「30」, 存进账本的是一条【错的】
+                        # 事实, 比没有更坏 (验收点名: 时间/门牌/比例全中招)。
+                        body = t[3:].strip() if t.startswith("记住：") else t[3:].strip()
+                        body = body.lstrip("：: ").strip()
                         if body and body != "无":
                             # ⚠️ 用模块级的 re, 不是 _re —— 那是别的方法里的局部导入,
                             #    在这儿是 NameError, 而外面那个 except Exception 会把它
@@ -3975,9 +3979,15 @@ class QwenLLM:
                                    "place": parts[3] if len(parts) > 3 else ""}
                     except (ValueError, IndexError):
                         promise = None
-            elif ("已读" in s or "沉默" in s) and len(s) <= 6:
-                msgs = []
-                break
+            elif s.strip("【】 ") in ("已读", "沉默") or s.startswith(("【已读", "已读：", "已读:")):
+                # 📱 从前这里是 `("已读" in s) and len(s)<=6` → msgs 清空 + break:
+                # 短写法「【已读】」会把第二行的「稍后：」一起吞掉, last_read 也不写,
+                # 而长写法「【已读：原因】」因为超过 6 字反而侥幸走通 —— 同一个意图两条
+                # 命运。现在按【前缀】认, 而且不 break: 后面那句「稍后：」要留给引擎。
+                # 短写法补一个默认原因, 否则引擎那边 split 出来是空的。
+                msgs.append(s if s.startswith("【已读：") or s.startswith("【已读:")
+                            else "【已读：现在不想说】")
+                continue
             else:
                 # 短信体强制: stage directions can't ride a text message — strip any
                 # （动作神态）chunks; a line that was ONLY narration disappears entirely

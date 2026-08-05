@@ -114,7 +114,18 @@ def test_someone_pinned_elsewhere_replies_later_not_never():
 def test_busy_with_an_errand_replies_later():
     st = _st()
     runtime._sim(st, "b")["intent"] = "去码头取一件东西"
+    # ⏳ 应承有保质期: 没盖 intent_at 的一律当过期。char_sim["intent"] 全仓原本没有
+    #    任何清除点, 于是说过一次差事的角色【此后每一条短信都判 later】, 永远慢半拍
+    #    (2026-08-05 对抗验收抓出)。老档从宽, 新写的都盖章。
+    runtime._sim(st, "b")["intent_at"] = runtime._time_index(st)
     assert _beat(st)[0] == "later"
+
+
+def test_a_stale_errand_stops_slowing_them_down():
+    st = _st()
+    runtime._sim(st, "b")["intent"] = "去码头取一件东西"
+    runtime._sim(st, "b")["intent_at"] = runtime._time_index(st) - 9
+    assert _beat(st)[0] == "now", "几天前应承的事还在拖慢每一条短信"
 
 
 # ── 🌙 深夜 ────────────────────────────────────────────────────────────────

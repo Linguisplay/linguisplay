@@ -67,6 +67,9 @@ def _busy(st):
     钉在 l2 是为了让 phone_send 算出 here=False; intent 才是被测的那条判据。"""
     st["char_pins"] = {"b": "l2"}
     runtime._sim(st, "b")["intent"] = "去码头取一件东西"
+    # ⏳ 应承有保质期 (INTENT_FRESH_SLOTS): 没盖时间戳的一律当过期 —— 老档里那些
+    #    没人清除的陈年 intent 会让角色永远慢半拍, 所以默认从宽。这里盖上"刚应承"。
+    runtime._sim(st, "b")["intent_at"] = runtime._time_index(st)
     return st
 
 

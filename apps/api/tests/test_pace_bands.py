@@ -96,6 +96,13 @@ def test_phone_read_ignored_books_and_delivers_later():
     st = runtime.default_state()
     st["met_ids"] = ["a"]
     st["clock"] = {"day": 1, "slot": 0, "ticks": 0}
+    # 📱 2026-08-05 契约收紧: 形状以【引擎点的名】为准, 模型自己写一句「【已读：…】」
+    #    不再算数 —— 从前那样等于判断权没收回来, 还能绕开每日配额 (对抗验收抓出)。
+    #    所以这里要把状态摆成引擎真的会点 read: 关系冷 + 玩家连着说了没人回。
+    st["rel"] = {"a": {"closeness": -5, "romance": 0}}
+    runtime._thread(st, "a")["msgs"] = [
+        {"from": "me", "text": "在吗", "at": ""},
+        {"from": "me", "text": "你倒是说话啊", "at": ""}]
     view = runtime.phone_send(STORY, st, {"name": "我"}, "a", "昨晚怎么不理我", llm=llm)
     th = st["phone"]["threads"]["a"]
     # 晾着: 已读灰条入账、补偿进 pending、正式消息里没有补偿文本
@@ -116,6 +123,11 @@ def test_phone_read_ignored_books_and_delivers_later():
     # 追问一致性: 晾着期间的下一条, prompt 带上次已读原因
     st2 = runtime.default_state()
     st2["met_ids"] = ["a"]
+    # 同上: 要引擎真的点 read, 才有 last_read 可供下一条追问时带进提示词
+    st2["rel"] = {"a": {"closeness": -5, "romance": 0}}
+    runtime._thread(st2, "a")["msgs"] = [
+        {"from": "me", "text": "在吗", "at": ""},
+        {"from": "me", "text": "你倒是说话啊", "at": ""}]
     llm2 = ReadLLM()
     runtime.phone_send(STORY, st2, {"name": "我"}, "a", "怎么不理我", llm=llm2)
     runtime.phone_send(STORY, st2, {"name": "我"}, "a", "你到底怎么了", llm=llm2)

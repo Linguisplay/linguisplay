@@ -6391,11 +6391,10 @@ def knows_of(state: dict[str, Any], cid: str | None) -> list[str]:
 def _knows_key(s: str) -> str:
     """去重用的归一形 —— 模型每次换个说法就存一条的话, 三天后这本账没法看。
     只做最保守的归一 (去标点/去人称头), 不做语义合并: 宁可多一条, 不许合错。"""
-    t = re.sub(r"[，。！？、；：,.!?;:\s「」【】\"']", "", s or "")
-    for p in ("他", "她", "TA", "对方", "玩家", "你"):
-        if t.startswith(p):
-            t = t[len(p):]
-    return t
+    # ⚠️ 绝不抹人称头。「他妹妹在城南」与「你妹妹在城南」是【两件事】, 抹掉主语就
+    # 归一成同一条, 后来的那条被静默丢弃 —— 合错比多存坏得多 (验收点名)。
+    # 只做最保守的一层: 去标点与空白。
+    return re.sub(r"[，。！？、；：,.!?;:\s「」【】\"']", "", s or "")
 
 
 def knows_add(state: dict[str, Any], cid: str | None, facts: Any) -> list[str]:
@@ -6447,7 +6446,13 @@ def rewind_phone(state_after: dict[str, Any], state_before: dict[str, Any]) -> d
             # 回溯点之后真的送到过的, 留着 —— 读过就是读过
             tb["msgs"] = list(msgs_a)
             tb["unread"] = int(ta.get("unread", 0) or 0)
-        tb.pop("pending", None)    # ⏳ 那条时间线写的话, 跟它一起作废
+        # ⏳ 只作废【回溯点之后】排的那些 —— 玩家在回溯点之前发的消息, 回信还在路上,
+        # 把它也弄没等于那条消息永远等不到回音, 而玩家根本不知道为什么 (验收点名)。
+        keep = list(tb.get("pending") or [])
+        if keep:
+            tb["pending"] = keep
+        else:
+            tb.pop("pending", None)
     return state_before
 
 
@@ -6474,6 +6479,10 @@ def _phone_due(content: dict[str, Any], state: dict[str, Any], tier: str) -> dic
     pending 永不到期, 是个死信箱 (生产 0 个线程用过它, 这是根因之一)。
     """
     now = _wall_ts()
+    if tier == "never":
+        # ☠️ 「这条不该有回音」不是"很久以后"。没有分支的话它会掉进下面那个注释写着
+        # morning 的 else, 于是一个重伤濒死的人 11 小时后给你发来一条短信 (验收实跑)。
+        return {"tier": "never"}
     if tier == "soon":
         secs = _rng.randint(75, 400)              # 一两分钟到几分钟: 刚下工/手上正忙
     elif tier == "later":
@@ -6490,6 +6499,25 @@ def _phone_due(content: dict[str, Any], state: dict[str, Any], tier: str) -> dic
     if tier == "next_slot" and int(tuning_for(content).get("turns_per_slot") or 0) > 0:
         out["due_idx"] = _time_index(state) + 1
     return out
+
+
+INTENT_FRESH_SLOTS = 3   # 应承的差事管几个时段 —— 过了就当办完了
+
+
+def _intent_stale(state: dict[str, Any], sim: dict[str, Any]) -> bool:
+    """这桩应承是不是早该办完了。
+
+    char_sim[cid]["intent"] 全仓【没有任何清除点】(验收查出)。所以说过一次
+    「我去码头取个东西」的角色, 此后每一条短信都判 later —— 永远慢半拍, 而玩家
+    完全不知道为什么。给它一个保质期: 没有落时间戳的老账一律当过期 (老档宽恕)。
+    """
+    at = sim.get("intent_at")
+    if at is None:
+        return True
+    try:
+        return _time_index(state) - int(at) >= INTENT_FRESH_SLOTS
+    except (TypeError, ValueError):
+        return True
 
 
 def _story_hour(content: dict[str, Any], state: dict[str, Any]) -> int | None:
@@ -6561,7 +6589,7 @@ def _phone_beat(content: dict[str, Any], state: dict[str, Any], c: dict[str, Any
             return "soon" if mode in ("flirt", "lover") else "morning"
         if _promise_loc_now(state, cid):
             return "later"                      # 此刻正赴另一个约
-        if (sim.get("intent") or "").strip():
+        if (sim.get("intent") or "").strip() and not _intent_stale(state, sim):
             return "later"                      # 应承了具体差事, 手上有活
         if char_position(content, state, c) == AWAY:
             return "later"                      # 钉子 AWAY: 只是慢, 不是关机
@@ -6806,8 +6834,15 @@ def deliver_due_phone(content: dict[str, Any], state: dict[str, Any]) -> int:
         pend = list(th.get("pending") or [])
         if not pend:
             continue
-        if cid in dead or ((state.get("char_sim") or {}).get(cid) or {}).get("hp") == "dead":
-            th["pending"] = []               # ⚰️ 连同还没到期的一起作废
+        _hp = ((state.get("char_sim") or {}).get(cid) or {}).get("hp")
+        if cid in dead or _hp == "dead":
+            th["pending"] = []               # ⚰️ 死了: 连同还没到期的一起作废
+            continue
+        if _hp == "dying":
+            # 🩸 判定侧 (_phone_beat) 判 never 认的是 (dead, dying), 读侧这道闸从前只
+            # 写了 "dead" —— 而 set_char_hp 全仓只写 hurt/dying/None, 那半句是死代码,
+            # 濒死一个都拦不住 (验收实跑: 濒死的人照样把话发了出去)。两侧同一本账。
+            # 濒死不清空: 救回来了自然接着送; 真死了上面那条会清。
             continue
         ready = [i for i, p in enumerate(pend) if _ready(p)]
         if not ready:
@@ -6848,11 +6883,21 @@ def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str
     newly, cracked = _phone_probe(content, state, char_id, text)
     # 📱 时机与形状一次判完 (引擎判定, 模型写词) —— 判据见 _phone_beat
     tier, shape = _phone_beat(content, state, c, text, here, th)
+    if tier == "never":
+        # ☠️ 判定层说了这条不该有回音 —— 不许再走延迟通道变成一个到期戳。
+        # 放在 _phone_exchange 之前: 顺手省掉那次模型调用, 也避免 _apply_phone_judgments
+        # 把一个濒死的人钉成「这就来」。
+        _audit(state, "phone.never", True, str(c.get("name") or "")[:12], "无回音")
+        th["unread"] = 0
+        view = phone_thread(content, state, char_id)
+        view["replied"] = False
+        view["unlocked"] = cracked
+        return view
     out = _phone_exchange(content, state, persona, c, text, llm, newly, same_room=here,
                           beat_log=beat_log, tier=tier, shape=shape)
     msgs = [dedash(m[:120]) for m in as_str_list(out.get("msgs"))][:5]
-    if shape in ("read", "burst"):
-        _phone_quota_spend(state, char_id, shape)
+    # 配额挪到【兑现之后】才扣 —— 引擎点了 read 而模型没照做, 不该白白吃掉当天
+    # 唯一的一次名额 (验收点名)。延迟支线里形状永远不是 read/burst, 不涉及。
     # ⏳ 判了延迟: 词现在就写好, 但【送达】押后。延迟的是送达不是生成 —— 投递侧因此
     #    零 LLM, 世界心跳搬运它也不违反「无点击不推进」。
     if tier != "now" and msgs:
@@ -6873,10 +6918,17 @@ def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str
         view["unlocked"] = cracked
         if out.get("rel_view"):
             view["rel"] = out["rel_view"]
+        # 🧾 延迟【不等于】没答应。TA 在这条还没送到的回信里说了"我这就过来"/"这事我
+        # 去办", 账上必须有 —— 否则正文说了、账上没有, 正是本仓最忌的文与实分家。
+        # (验收实跑抓到: 早退跳过了这一句, 短信里应下的赴约/差事/约定全部丢。)
+        _apply_phone_judgments(content, state, c, out, view, here)
         return view
     # 📱 形状④【已读：原因】晾着 (Spec C): 记账可追问, 「稍后：」补偿走延迟投递 (Spec D)
-    _shape = "normal"
-    if msgs and msgs[0].startswith("【已读"):
+    # 🔒 形状以【引擎点的名】为准。从前这里是按模型输出【事后重认】—— 模型只要自己
+    # 写一句「【已读：…】」或凑够四条, 就能绕开互斥表和每日配额, 判断权等于没收回来
+    # (验收实跑证实)。现在只在引擎真的点了 read 时才认那套记账。
+    _shape = shape
+    if shape == "read" and msgs and msgs[0].startswith("【已读"):
         _reason = msgs[0].split("：", 1)[-1].split(":", 1)[-1].strip("】 ")[:12]
         th["last_read"] = {"reason": _reason or _t(content, "现在不想说", "not now"),
                            "at": _time_index(state)}
@@ -6893,20 +6945,20 @@ def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str
                         {"text": _mk, **_phone_due(content, state, "later")})
         _audit(state, "phone.shape", True, f"{c.get('name')}·已读晾着", _reason)
         msgs = []
-        _shape = "read"
-    elif len(msgs) >= 4:
-        _shape = "burst"
-    elif len(msgs) == 1 and len(msgs[0]) <= 6:
-        _shape = "word"
-    elif len(msgs) == 1 and len(msgs[0]) >= 45:
-        _shape = "long"
+    elif shape == "read":
+        # 引擎点了 read, 模型却写了正文 —— 不兑现。那当天的配额不该白扣 (下面还回去)。
+        _audit(state, "phone.shape", False, f"{c.get('name')}·点了已读没兑现", "")
+    if _shape in ("read", "burst") and (_shape != "read" or th.get("last_read")):
+        _phone_quota_spend(state, char_id, _shape)   # 真兑现了才扣配额
     if _shape != "read":
         th.pop("last_read", None)   # 正常回了 = 认过账翻篇
     try:
         from .. import metrics as _phm
         # 📊 口径与延迟那条写点一致 —— 报表逐个写点核对字段 (改写侧忘读侧是老病)。
         # asked=引擎点的名, got=模型真给了几条 ⇒ 两者一比才知道形状有没有兑现。
-        _phm.log("phone_shape", shape=_shape, asked=_shape, tier="now", got=len(msgs))
+        # asked 必须是【引擎点的名】(shape), 不是事后按模型输出反推的 _shape ——
+        # 反推的话兑现率在结构上恒 100%, 这个为验收造的读口就测不出任何不服从。
+        _phm.log("phone_shape", shape=_shape, asked=shape, tier="now", got=len(msgs))
     except Exception:
         pass
     snap = None
@@ -6948,6 +7000,7 @@ def _apply_phone_judgments(content: dict[str, Any], state: dict[str, Any], c: di
     task = str(out.get("task") or "").strip()
     if task and task not in ("无", "none"):
         _sim(state, char_id)["intent"] = task[:40]
+        _sim(state, char_id)["intent_at"] = _time_index(state)   # ⏳ 应承有保质期
         _audit(state, "phone.task", True, f"{c.get('name', '')}:{task[:20]}")
         view["task"] = task[:40]
     # 🤝 短信里定下的约会走同一本约定账（到点没去，TA 记仇的那本）
@@ -11539,6 +11592,7 @@ def run_turn_stream(
         _intent = (directed.get("self_intent") or "").strip()[:80 if lang_of(content) == "en" else 40]
         if _intent and sp_id:
             _sim(state, sp_id)["intent"] = _intent
+            _sim(state, sp_id)["intent_at"] = _time_index(state)   # ⏳ 应承有保质期
         # 🧍 姿位账本: where this body is inside the room and how it's held. Entries
         # carry the location id, so moving scenes auto-stales them (no cleanup pass).
         _spos = (directed.get("self_position") or "").strip()[:16]
