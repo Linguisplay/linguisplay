@@ -211,6 +211,36 @@ async function api(method, p, body, cookie) {
   });
   ok(maker, "创作页引擎本模式露出演出语言");
 
+  // 🎨 外观调节台 (?ui=1)。测三件事: 开得出来、拧了【界面真的变】、关掉之后调过的样子留着。
+  // 中间那条最要紧 —— 面板最容易变成"拖了没反应"的摆设 (那正是 Yi 骂 UI 的起点)。
+  const p4 = await ctx.newPage();
+  p4.on("pageerror", (e) => jsErrors.push("ui: " + e.message));
+  await p4.goto(`${BASE}/play?ui=1`, { waitUntil: "domcontentloaded" });
+  await sleep(1500);
+  const ui = await p4.evaluate(() => {
+    const box = document.getElementById("uibox");
+    if (!box) return { open: false };
+    const R = document.documentElement;
+    const before = getComputedStyle(R).getPropertyValue("--ui-font").trim();
+    const rng = box.querySelector('input[type=range][data-k="--ui-font"]');
+    const col = box.querySelector('input[type=color][data-k="--gold"]');
+    rng.value = "21"; rng.dispatchEvent(new Event("input"));
+    col.value = "#ff0000"; col.dispatchEvent(new Event("input"));
+    const after = getComputedStyle(R).getPropertyValue("--ui-font").trim();
+    // 真的传导到那块字上了吗 (不是只改了变量)
+    const t = document.getElementById("vntext");
+    const px = t ? parseFloat(getComputedStyle(t).fontSize) : 0;
+    let stored = {};
+    try { stored = JSON.parse(localStorage.getItem("lp_theme") || "{}"); } catch (e) {}
+    return { open: true, before, after, px, gold: stored["--gold"],
+             tokens: box.querySelectorAll("input").length };
+  });
+  ok(ui.open, "🎨 外观调节台开得出来");
+  ok(ui.before !== ui.after && ui.after === "21px", `🎨 拧字号真的改了 token (${ui.before}→${ui.after})`);
+  ok(ui.px === 21, `🎨 而且传导到正文上 (#vntext = ${ui.px}px)`);
+  ok(ui.gold === "#ff0000", "🎨 改过的值存住了 (刷新不丢)");
+  ok(ui.tokens >= 25, `🎨 可调项 ${ui.tokens} 个`);
+
   ok(jsErrors.length === 0, "全程零 JS 报错" + (jsErrors.length ? "  →  " + jsErrors.slice(0, 4).join(" | ") : ""));
 
   await browser.close();
