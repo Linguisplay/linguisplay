@@ -6083,6 +6083,34 @@ def social_comment(content: dict[str, Any], state: dict[str, Any], persona: dict
 
 _SNAP_GAP = 5   # 📷 at least this many exchanges between two photos in one thread
 
+# 📷 生图频率交给玩家 (Yi 2026-08-06)。从前只有作者侧的 tuning.snap_chance + 引擎写死
+# 的冷却, 玩家一点话语权没有 —— 而这件事该他说了算, 两个理由都硬: 花的是真钱
+# (火山刚因余额见底停过一天生图), 而且口味差得远 (有人想多看几张, 有人嫌照片打断读文)。
+#   0 关 / 1 少 / 2 正常(缺省, 老档逐位不变) / 3 多
+# (系数, 冷却来回数)
+SNAP_PREFS = {0: (0.0, 999), 1: (0.5, 10), 2: (1.0, _SNAP_GAP), 3: (2.0, 3)}
+SNAP_PREF_DEFAULT = 2
+
+
+def snap_pref_of(state: dict[str, Any]) -> int:
+    """玩家这一档。脏值/缺省一律回落"正常" —— 老档逐位不变。"""
+    try:
+        v = int(state.get("snap_pref", SNAP_PREF_DEFAULT))
+    except (TypeError, ValueError):
+        return SNAP_PREF_DEFAULT
+    return v if v in SNAP_PREFS else SNAP_PREF_DEFAULT
+
+
+def set_snap_pref(state: dict[str, Any], level: Any) -> int:
+    try:
+        v = int(level)
+    except (TypeError, ValueError):
+        v = SNAP_PREF_DEFAULT
+    if v not in SNAP_PREFS:
+        v = SNAP_PREF_DEFAULT
+    state["snap_pref"] = v
+    return v
+
 
 def maybe_snap(content: dict[str, Any], state: dict[str, Any], char: dict[str, Any],
                gist: str) -> dict[str, Any] | None:
@@ -6096,12 +6124,18 @@ def maybe_snap(content: dict[str, Any], state: dict[str, Any], char: dict[str, A
                                            or (getattr(_cfg, "ark_api_key", "") or "").strip()):
         return None   # no image backend (or deterministic test mode) → never mint a URL
     chance = int(tuning_for(content).get("snap_chance", 0) or 0)
+    # 🎚 玩家那一档在作者设定【之上】再缩放一次: 作者定这个世界该有多少照片,
+    #    玩家定他自己想看多少。关掉是硬关, 不掷骰也不动冷却账。
+    _mul, _gap = SNAP_PREFS[snap_pref_of(state)]
+    if _mul <= 0:
+        return None
+    chance = min(60, int(round(chance * _mul)))
     if chance <= 0 or not char.get("id"):
         return None
     th = _thread(state, char["id"])
-    since = int(th.get("snap_since", _SNAP_GAP))
+    since = int(th.get("snap_since", _gap))
     th["snap_since"] = since + 1
-    if since < _SNAP_GAP or _rng.randint(1, 100) > chance:
+    if since < _gap or _rng.randint(1, 100) > chance:
         return None
     th["snap_since"] = 0
     import uuid as _uuid_s
@@ -6940,9 +6974,11 @@ def deliver_due_phone(content: dict[str, Any], state: dict[str, Any]) -> int:
             continue
         take = set(ready[:PHONE_FLUSH_MAX])  # 🚿 其余顺延, 不是丢掉
         for i in sorted(take):
-            th.setdefault("msgs", []).append({"from": "them",
-                                              "text": str(pend[i].get("text") or "")[:120],
-                                              "at": label})
+            _row = {"from": "them", "text": str(pend[i].get("text") or "")[:120],
+                    "at": label}
+            if pend[i].get("img"):
+                _row["img"] = pend[i]["img"]   # 📷 照片跟着它那条消息一起到
+            th.setdefault("msgs", []).append(_row)
         # 按【下标】剔除, 不按值 —— 两条文本完全相同的待发会被 `p not in due` 一起删掉
         th["pending"] = [p for i, p in enumerate(pend) if i not in take]
         th["unread"] = int(th.get("unread", 0) or 0) + len(take)
@@ -6993,9 +7029,16 @@ def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str
     #    零 LLM, 世界心跳搬运它也不违反「无点击不推进」。
     if tier != "now" and msgs:
         due = _phone_due(content, state, tier)
+        # 📷「TA 在外面办事」正是最该拍一张「我在这儿呢」的时候 —— 从前这条支线在
+        #    maybe_snap 之前就 return 了, 判了延迟的回复永远不带照片。照片挂在最后
+        #    一条上, 跟那条消息【一起】送到 (提前出现等于剧透 TA 在哪)。
+        snap_d = maybe_snap(content, state, c, msgs[-1])
         pend = list(th.get("pending") or [])
-        for m in msgs:
-            pend.append({"text": m, **due})
+        for i, m in enumerate(msgs):
+            row = {"text": m, **due}
+            if snap_d and i == len(msgs) - 1:
+                row["img"] = snap_d["url"]
+            pend.append(row)
         th["pending"] = pend[-PHONE_PENDING_CAP:]   # 🧾 不许无界增长
         _audit(state, "phone.delay", True, f"{c.get('name', '')}·{tier}", f"{len(msgs)}条")
         try:
@@ -7007,6 +7050,7 @@ def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str
         view = phone_thread(content, state, char_id)
         view["replied"] = False
         view["unlocked"] = cracked
+        view["snap"] = snap_d   # router: 现在就排渲染, 图和消息各走各的路
         if out.get("rel_view"):
             view["rel"] = out["rel_view"]
         # 🧾 延迟【不等于】没答应。TA 在这条还没送到的回信里说了"我这就过来"/"这事我

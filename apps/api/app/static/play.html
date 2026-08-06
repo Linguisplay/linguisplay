@@ -1247,6 +1247,8 @@ body.dread #dread { opacity:1; }
            自动那版只读本回合最后四句, 写出来的东西不认得你走过的路。 -->
       <button id="goldenBtn" class="iconbtn hidden" title="金色瞬间：让此刻沉淀成一段值得记住的戏（会读完最近的对话，要等几秒）" onclick="askGolden()">✨</button>
       <button id="spdBtn" class="iconbtn hidden" title="文字速度" onclick="cycleSpeed()">🐇</button>
+      <!-- 📷 照片频率归玩家 (Yi 2026-08-06): 生图花的是真钱, 口味也差得远 -->
+      <button id="snapBtn" class="iconbtn hidden" title="角色发照片的频率" onclick="cycleSnap()">📷</button>
       <button id="worldBtn" class="iconbtn hidden" title="活世界：你不在的时候，世界照样往前走" onclick="toggleLiving()">🌍</button>
       <button id="soundBtn" class="iconbtn hidden" title="音量（音乐 / 角色语音）" onclick="toggleAudioPanel()">🔊</button>
       <div id="audioPanel" class="hidden" onclick="event.stopPropagation()">
@@ -2126,7 +2128,7 @@ async function enterRun(run) {
   document.getElementById("driveBtn").classList.toggle("hidden", !isSandbox || playMode === "god");
   maybeShowHowto(st0, run, tutOpen);
   // 📱 小手机走右上角悬浮键 (Yi 定); 顶栏 phoneBtn 退役, 顺带给按钮串减负
-  hide("pick"); show("play"); show("backBtn"); show("soundBtn"); show("journalBtn"); show("mapBtn"); show("goldenBtn"); show("phoneFab"); show("spdBtn"); applySpeedIcon();
+  hide("pick"); show("play"); show("backBtn"); show("soundBtn"); show("journalBtn"); show("mapBtn"); show("goldenBtn"); show("snapBtn"); show("phoneFab"); show("spdBtn"); applySpeedIcon();
   // 🎙 语音滑杆只在有配音选角的本子里出现 (没有配音的本子给根哑滑杆是骗人)
   const _vr = document.getElementById("voxRow");
   if (_vr) _vr.style.display = Object.keys(voiceMap).length ? "" : "none";
@@ -2187,12 +2189,12 @@ function sendLeave() { if (runId) { try { navigator.sendBeacon(`${API}/runs/${ru
 window.addEventListener("pagehide", sendLeave);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") sendLeave(); });
 
-function backToPick() { sendLeave(); runId = null; stopBgm(); try { vox.pause(); } catch (e) {} vnShow(false); vnMode = false; hide("play"); hide("backBtn"); hide("soundBtn"); hide("audioPanel"); hide("journalBtn"); hide("mapBtn"); hide("goldenBtn"); hide("phoneBtn"); hide("phoneFab"); hide("worldBtn"); show("pick"); }
+function backToPick() { sendLeave(); runId = null; stopBgm(); try { vox.pause(); } catch (e) {} vnShow(false); vnMode = false; hide("play"); hide("backBtn"); hide("soundBtn"); hide("audioPanel"); hide("journalBtn"); hide("mapBtn"); hide("goldenBtn"); hide("snapBtn"); hide("phoneBtn"); hide("phoneFab"); hide("worldBtn"); show("pick"); }
 async function doLogout() {
   sendLeave();  // must fire while the session cookie is still valid
   try { await j("/auth/logout", { method:"POST" }); } catch(e){}
   runId = null; stopBgm();
-  hide("play"); hide("pick"); hide("role"); hide("backBtn"); hide("soundBtn"); hide("audioPanel"); hide("journalBtn"); hide("mapBtn"); hide("goldenBtn"); hide("phoneFab"); hide("logoutBtn");
+  hide("play"); hide("pick"); hide("role"); hide("backBtn"); hide("soundBtn"); hide("audioPanel"); hide("journalBtn"); hide("mapBtn"); hide("goldenBtn"); hide("snapBtn"); hide("phoneFab"); hide("logoutBtn");
   show("auth");
 }
 
@@ -2493,6 +2495,9 @@ function applyRunUpdate(run) {
   if (target && !cast.some(c => c.id === target)) target = null;
   renderCast(); updatePlaceholder();
   if (st.location !== undefined) renderPlace(st.location);
+  // 📷 照片频率是服务端 per-run 的 —— 进档/回卷都要读回来, 否则图标永远停在"正常",
+  //    玩家上次关掉的设置看着像没生效。
+  if (typeof st.snap_pref === "number") { snapPref = st.snap_pref; applySnapIcon(); }
   if (st.cultivation !== undefined) renderCult(st.cultivation);
   // 🎵 进档就有音乐: direct 以前只在回合流里发, 新开一档第一屏是静的 —— 开场曲就是这么没的
   if (run && run.direct && run.direct.bgm) applyDirect(run.direct);
@@ -2529,6 +2534,43 @@ async function moveTo(name) {
     vnPlayFlow([{ author: "engine", type: "description", text: who }],
                run.discoveries, run.suggestions);
   } catch(e) { renderBeat({ author:"engine", type:"description", text:`（${e.message}）` }); }
+}
+// 📷 角色发照片的频率, 玩家自己定 (Yi 2026-08-06)。
+// 为什么归玩家: 生图花的是真钱 (火山刚因余额见底停过一天), 而且口味差得远 ——
+// 有人就想多看几张, 有人嫌照片打断读文。作者的 snap_chance 定这个世界该有多少,
+// 这一档在它之上再缩放。
+const SNAP_LV = [
+  { icon: "🚫", zh: "不发照片", en: "no photos" },
+  { icon: "📷", zh: "偶尔发照片", en: "photos: rare" },
+  { icon: "📷", zh: "照片正常", en: "photos: normal" },
+  { icon: "📸", zh: "多发照片", en: "photos: often" },
+];
+let snapPref = 2;
+function applySnapIcon() {
+  const b = document.getElementById("snapBtn");
+  if (!b) return;
+  const lv = SNAP_LV[snapPref] || SNAP_LV[2];
+  b.textContent = lv.icon;
+  b.style.opacity = snapPref === 0 ? ".45" : "1";
+  b.title = B("角色发照片的频率：", "Photos from characters: ") + B(lv.zh, lv.en);
+}
+async function cycleSnap() {
+  if (!runId) return;
+  const want = (snapPref + 1) % SNAP_LV.length;
+  const before = snapPref;
+  snapPref = want; applySnapIcon();          // 先动图标, 手感不等网络
+  try {
+    const res = await j(`/runs/${runId}/snap`, { method: "POST",
+      body: JSON.stringify({ level: want }) });
+    snapPref = (res && typeof res.snap_pref === "number") ? res.snap_pref : want;
+  } catch (e) {
+    snapPref = before;                        // 没存上就退回去, 别骗玩家
+    pushToast(B("没改成，稍后再试", "Couldn't save — try again"), "", 1800);
+  }
+  applySnapIcon();
+  const lv = SNAP_LV[snapPref] || SNAP_LV[2];
+  pushToast(`${lv.icon} ${B(lv.zh, lv.en)}` +
+    (snapPref === 0 ? B("（也省下生图的开销）", " (saves image cost too)") : ""), "", 1600);
 }
 // ✨ 金色瞬间: 玩家自己挑时机点 (Yi 2026-08-04 改制)。
 // 原来是程序每回合摇 4% 的骰子自动出, 而它只读【本回合最后四句】—— 写出来的东西

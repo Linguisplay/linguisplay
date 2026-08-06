@@ -416,6 +416,7 @@ def _to_run(r: RunModel) -> Run:
             player_character_name=(runtime._char_name(r.pinned_content or {}, pcid) if pcid else None),
             pressure=int(st.get("pressure", 0) or 0),
             player_hp=st.get("player_hp", "healthy"),
+            snap_pref=runtime.snap_pref_of(st),   # 📷 玩家自己那一档 (0关/1少/2正常/3多)
             money=st.get("money"),
             currency=(runtime.currency_of(r.pinned_content or {})
                       if st.get("money") is not None else None),
@@ -2214,6 +2215,24 @@ def follow(run_id: str, body: FollowIn, user: User = Depends(current_user), db: 
 
 
 # ── 🌍 活世界 (living world): 开关 + 手动心跳 + 调度入口 ──────────────────────────
+@router.post("/{run_id}/snap")
+def snap_pref_switch(run_id: str, body: dict = Body(default={}),
+                     user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """📷 玩家自己定这局要多少照片 (0 关 / 1 少 / 2 正常 / 3 多)。
+
+    为什么归玩家而不是只归作者 (Yi 2026-08-06 定): 生图花的是真钱 —— 火山刚因为
+    余额见底停过一天; 而且口味差得远, 有人就想多看几张, 有人嫌照片打断读文。
+    作者的 tuning.snap_chance 定这个世界【该有多少】照片, 玩家这一档在它之上再缩放。
+    """
+    r = _own_run(run_id, user, db)
+    st = dict(r.state or {})
+    lv = runtime.set_snap_pref(st, body.get("level"))
+    r.state = st
+    flag_modified(r, "state")
+    db.commit()
+    return {"snap_pref": lv}
+
+
 @router.post("/{run_id}/living")
 def living_switch(run_id: str, body: dict = Body(default={}),
                   user: User = Depends(current_user), db: Session = Depends(get_db)):
