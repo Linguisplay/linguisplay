@@ -1525,6 +1525,20 @@ def char_position(content: dict[str, Any], state: dict[str, Any],
     if not locs:
         return None
     cid = c.get("id")
+    # 0️⃣ 玩家自己那具身体 —— 这九级里【最确定】的一件事, 所以排第一。
+    #
+    # 从前一级都没有: 附身模式下玩家自己的角色被作息表/sim/兜底算到别处, 而玩家的
+    # 真实位置一直老老实实记在 state["location_id"] 里。实弹 (2026-08-06 Yi 报障):
+    # 玩家人在【西九龙警署总部】, char_position 却说他在【九龙城区】→ scene_characters
+    # 返回空 → 到达旁白那一拍 present_ids=[] → 那一拍对任何人都不可见 → 模型永远不
+    # 知道他已经到了 → 下一回合把"赶去警署"整段重演一遍 (离开蓝信一、穿过两条街、
+    # 拐过菠萝冰摊、推开玻璃门 —— 而他三秒前刚推开那扇门)。
+    #
+    # 只在【附身模式】成立: 上帝视角下没人在操纵那具身体, 它就是个普通 NPC, 照常走
+    # 下面的级联 (与 map_view / scene_cast 排除 pcid 的条件同一口径)。
+    if cid and cid == state.get("player_character_id") \
+            and (state.get("mode") or "character") == "character":
+        return state.get("location_id") or (locs[0] or {}).get("id")
     if cid and cid in (state.get("following") or []):
         return state.get("location_id") or (locs[0] or {}).get("id")
     sim0 = (state.get("char_sim") or {}).get(cid) or {}
