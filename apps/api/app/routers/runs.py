@@ -2244,6 +2244,64 @@ def place_detail_write(run_id: str, body: dict = Body(...),
             "detail": loc.get("detail"), "by": loc.get("detail_by")}
 
 
+@router.post("/{run_id}/place/new")
+def place_add(run_id: str, body: dict = Body(...),
+              user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """➕ 玩家在局内自己加一个地方 (Yi 2026-08-06)。双向连到他此刻站的地方, 但不移动。"""
+    r = _own_run(run_id, user, db)
+    if (r.state or {}).get("ended"):
+        raise HTTPException(409, "这局已经结束了")
+    content, st = r.pinned_content or {}, dict(r.state or {})
+    loc = runtime.add_place(content, st, str(body.get("name") or ""),
+                            str(body.get("detail") or ""))
+    if loc is None:
+        raise HTTPException(400, "加不了：名字不合规、跟已有地点重名，或者你这局加得够多了")
+    r.pinned_content = content
+    flag_modified(r, "pinned_content")
+    r.state = st
+    flag_modified(r, "state")
+    db.commit()
+    _spawn_location_bg(content, loc)
+    return {"location_id": loc["id"], "name": loc["name"], "detail": loc.get("detail", "")}
+
+
+@router.patch("/{run_id}/place/{loc_id}")
+def place_edit(run_id: str, loc_id: str, body: dict = Body(...),
+               user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """✏️ 改这一局里生出来的地点。作者原本写的默认场景是只读的 —— 那是这本书的骨架,
+    别人正在同一本书里玩 (Yi:「除了一开始的默认场景」)。"""
+    r = _own_run(run_id, user, db)
+    if (r.state or {}).get("ended"):
+        raise HTTPException(409, "这局已经结束了")
+    content, st = r.pinned_content or {}, dict(r.state or {})
+    loc = runtime.edit_place(content, st, loc_id,
+                             name=body.get("name"), detail=body.get("detail"))
+    if loc is None:
+        raise HTTPException(400, "改不了：这是作者写好的场景，或者名字不合规／重名")
+    r.pinned_content = content
+    flag_modified(r, "pinned_content")
+    r.state = st
+    flag_modified(r, "state")
+    db.commit()
+    return {"location_id": loc["id"], "name": loc["name"], "detail": loc.get("detail", "")}
+
+
+@router.delete("/{run_id}/place/{loc_id}")
+def place_del(run_id: str, loc_id: str,
+              user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """🗑 删掉玩家自己加的地方。涌现出来的留着 —— 剧情里真发生过。"""
+    r = _own_run(run_id, user, db)
+    content, st = r.pinned_content or {}, dict(r.state or {})
+    if not runtime.remove_place(content, st, loc_id):
+        raise HTTPException(400, "删不了：只能删你自己加的地方，而且不能删你正站着的那个")
+    r.pinned_content = content
+    flag_modified(r, "pinned_content")
+    r.state = st
+    flag_modified(r, "state")
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/{run_id}/snap")
 def snap_pref_switch(run_id: str, body: dict = Body(default={}),
                      user: User = Depends(current_user), db: Session = Depends(get_db)):

@@ -3804,6 +3804,101 @@ def exit_beat(content: dict[str, Any], state: dict[str, Any], c: dict[str, Any])
 
 
 PLACE_DETAIL_CAP = 200   # 玩家写的地点描述上限 (它每次到达都进提示词, 别喂太肥)
+PLAYER_PLACE_CAP = 12    # 一局里玩家自己能加多少地方
+
+
+def _clean_place_text(s: Any, cap: int) -> str:
+    """玩家写的字直接进系统提示词 —— 换行是提示词的结构分隔, 留着就能伪造一段假指令。"""
+    return " ".join(str(s or "").split()).strip()[:cap]
+
+
+def place_editable(loc: dict[str, Any] | None) -> bool:
+    """这个地点这一局里能不能改 (Yi 2026-08-06:「除了一开始的默认场景」)。
+
+    作者原本写的是这本书的骨架 —— 别人正在同一本书里玩, 不许一个玩家改掉它。
+    这一局【长出来的】才归玩家: 引擎涌现的 (generated) 与玩家自己加的 (by=player)。
+    """
+    if not loc:
+        return False
+    return bool(loc.get("generated") or loc.get("by") == "player"
+                or loc.get("detail_by") == "player")
+
+
+def edit_place(content: dict[str, Any], state: dict[str, Any], lid: str,
+               name: str | None = None, detail: str | None = None) -> dict[str, Any] | None:
+    """改这一局里生出来的地点的名字/描述。作者原本那批返回 None。
+
+    ⚠️ 改名必须【带着出口一起改】: 出口是按地名字符串连的 (exits: ["庙街","果栏"]),
+    只改名字不动出口, 那条路当场就断 —— 地图上还画着线, 走过去说"去不了这个地方"。
+    工坊侧早有这条级联, 引擎侧从前没有。
+    """
+    loc = _location_by_id(content, lid)
+    if not place_editable(loc):
+        return None
+    locs = _locations(content)
+    if name is not None:
+        nm = _clean_place_text(name, 24)
+        if not nm or not place_name_ok(nm):
+            return None
+        if any(l is not loc and (l.get("name") or "").strip() == nm for l in locs):
+            return None          # 同名两处 = resolve_location 从此各凭运气
+        old = (loc.get("name") or "").strip()
+        loc["name"] = nm
+        if old and old != nm:
+            for l in locs:       # 🔗 级联: 谁的出口指着老名字, 一起改过来
+                l["exits"] = [nm if e == old else e for e in (l.get("exits") or [])]
+    if detail is not None:
+        d = _clean_place_text(detail, PLACE_DETAIL_CAP)
+        if len(d) < 2:
+            return None
+        loc["detail"] = d
+        loc["detail_by"] = "player"
+    _audit(state, "place.edit", True, (loc.get("name") or "")[:12], "")
+    return loc
+
+
+def add_place(content: dict[str, Any], state: dict[str, Any],
+              name: str, detail: str = "") -> dict[str, Any] | None:
+    """玩家在局内自己加一个地方, 双向连到他此刻站的地方。
+
+    单向连是个陷阱: 走得进去出不来。加完【不移动】—— 加一个地方不等于立刻传送过去。
+    """
+    nm = _clean_place_text(name, 24)
+    if not nm or not place_name_ok(nm):
+        return None
+    locs = _locations(content)
+    if any((l.get("name") or "").strip() == nm for l in locs):
+        return None
+    if sum(1 for l in locs if l.get("by") == "player") >= PLAYER_PLACE_CAP:
+        return None
+    import uuid as _u
+    cur = current_location(content, state) or {}
+    back = [cur.get("name")] if cur.get("name") else []
+    loc = {"id": "loc_my_" + _u.uuid4().hex[:8], "name": nm,
+           "detail": _clean_place_text(detail, PLACE_DETAIL_CAP),
+           "exits": back, "unlock": {}, "by": "player"}
+    if loc["detail"]:
+        loc["detail_by"] = "player"
+    (content.get("story") or {}).setdefault("locations", []).append(loc)
+    if cur and nm not in (cur.get("exits") or []):
+        cur.setdefault("exits", []).append(nm)
+    _audit(state, "place.add", True, nm, "")
+    return loc
+
+
+def remove_place(content: dict[str, Any], state: dict[str, Any], lid: str) -> bool:
+    """删掉玩家自己加的地方 (只有 by=player 的能删; 涌现的留着 —— 剧情里发生过)。
+    出口一起清, 免得留下指向不存在地点的死路。"""
+    loc = _location_by_id(content, lid)
+    if not loc or loc.get("by") != "player" or lid == state.get("location_id"):
+        return False
+    nm = (loc.get("name") or "").strip()
+    story = content.get("story") or {}
+    story["locations"] = [l for l in _locations(content) if l.get("id") != lid]
+    for l in story["locations"]:
+        l["exits"] = [e for e in (l.get("exits") or []) if e != nm and e != lid]
+    _audit(state, "place.remove", True, nm[:12], "")
+    return True
 
 
 def set_place_detail(content: dict[str, Any], state: dict[str, Any],
@@ -4547,7 +4642,10 @@ def map_view(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
                       # ✍️ 这地方还没人写过样子 —— 客户端据此给一个"写点什么"的入口。
                       # 空描述会让到达旁白现编 (实弹: 走到「油麻地」编出一家茶餐厅)。
                       "blank": not (l.get("detail") or "").strip(),
-                      "mine": l.get("detail_by") == "player",
+                      "mine": l.get("by") == "player",
+                      # ✏️ 这一局里生出来的才归玩家改; 作者原本写的是这本书的骨架
+                      # (别人正在同一本书里玩), 只读 —— 见 place_editable
+                      "editable": place_editable(l),
                       "heat": vn, "pinned": lid in pins, "tucked": lid in tucked,
                       # 零访问按账本诞生日 _since 起算 (审计实弹: 缺 loc_visits 的老档
                       # 开图即全员💤; 新档铸而不访满14天仍照常沉睡)
