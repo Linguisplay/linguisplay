@@ -2215,6 +2215,35 @@ def follow(run_id: str, body: FollowIn, user: User = Depends(current_user), db: 
 
 
 # ── 🌍 活世界 (living world): 开关 + 手动心跳 + 调度入口 ──────────────────────────
+@router.post("/{run_id}/place")
+def place_detail_write(run_id: str, body: dict = Body(...),
+                       user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """✍️ 玩家自己写一个地方长什么样 (Yi 2026-08-06:「直接让玩家自己加」)。
+
+    起因: 走到「油麻地」而它没有描述, 到达旁白现编出了一家茶餐厅。提示词那一刀是止血,
+    这一刀把笔交给玩家 —— 跟手账/笔记同路子, 玩家定义自己那个世界。
+    只填空白 (作者写过的不许覆盖), 落在这一局【私有】的剧本副本里, 不动作者的原本。
+    """
+    r = _own_run(run_id, user, db)
+    if (r.state or {}).get("ended"):
+        raise HTTPException(409, "这局已经结束了")
+    content = r.pinned_content or {}
+    st = dict(r.state or {})
+    loc = runtime.set_place_detail(content, st, str(body.get("location_id") or ""),
+                                   str(body.get("text") or ""))
+    if loc is None:
+        raise HTTPException(400, "写不进去：要么这个地方作者已经写过了，要么你写得太短")
+    r.pinned_content = content
+    flag_modified(r, "pinned_content")
+    r.state = st
+    flag_modified(r, "state")
+    db.commit()
+    # 🖼 有了描述才画得出像样的背景 —— 顺手补一张 (文件已在则跳过)
+    _spawn_location_bg(content, loc)
+    return {"location_id": loc.get("id"), "name": loc.get("name"),
+            "detail": loc.get("detail"), "by": loc.get("detail_by")}
+
+
 @router.post("/{run_id}/snap")
 def snap_pref_switch(run_id: str, body: dict = Body(default={}),
                      user: User = Depends(current_user), db: Session = Depends(get_db)):

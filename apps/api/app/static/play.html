@@ -2535,6 +2535,29 @@ async function moveTo(name) {
                run.discoveries, run.suggestions);
   } catch(e) { renderBeat({ author:"engine", type:"description", text:`（${e.message}）` }); }
 }
+// ✍️ 这地方长什么样, 由玩家自己写 (Yi 2026-08-06)。
+// 起因: 走到「油麻地」而它没有描述, 到达旁白只能现编 —— 编出了一家茶餐厅, 读起来
+// 像被传送了。提示词那一刀是止血; 这一刀把笔交给玩家 (跟手账/笔记同路子)。
+// 只填空白: 作者写过的地方不给这个入口, 服务端也会拒。
+async function describePlace(lid, name) {
+  if (!runId || !lid) return;
+  const cur = prompt(
+    B(`「${name}」是什么样子？一两句话就够——你写的会成为这里的样子。`,
+      `What does "${name}" look like? A sentence or two — this becomes the place.`), "");
+  if (cur === null) return;                    // 取消
+  const text = (cur || "").trim();
+  if (text.length < 2) { pushToast(B("写清楚一点：至少两个字", "A couple of words at least"), "", 1800); return; }
+  try {
+    await j(`/runs/${runId}/place`, { method: "POST",
+      body: JSON.stringify({ location_id: lid, text }) });
+    pushToast(B(`✍️ 「${name}」记下了——从现在起这儿就是这个样子`,
+                `✍️ "${name}" is set — that's what this place looks like now`), "t-unlock", 3000);
+    const ov = document.getElementById("mapov");
+    if (ov) { ov.remove(); openMap(); }        // 重开一次, 图上那个 ✍️ 变 📝
+  } catch (e) {
+    pushToast(B(`没记下：${e.message}`, `Couldn't save: ${e.message}`), "", 2600);
+  }
+}
 // 📷 角色发照片的频率, 玩家自己定 (Yi 2026-08-06)。
 // 为什么归玩家: 生图花的是真钱 (火山刚因余额见底停过一天), 而且口味差得远 ——
 // 有人就想多看几张, 有人嫌照片打断读文。作者的 snap_chance 定这个世界该有多少,
@@ -3725,10 +3748,15 @@ async function openMap() {
         <button class="ghost" data-mgo="${escapeHtml(n.name)}">${B("前往", "Go")}</button>
         <button class="ghost" data-mpin="${escapeHtml(n.id)}">📌</button>
         <button class="ghost" data-mtuck="${escapeHtml(n.id)}" data-tucked="${n.tucked ? 1 : 0}">${n.tucked ? "👁" : "🙈"}</button>
+        ${(n.blank || n.mine) ? `<button class="ghost" data-mdesc="${escapeHtml(n.id)}" data-mname="${escapeHtml(n.name)}" title="${n.blank ? B("这地方还没人写过样子", "Nobody has described this place yet") : B("你写的，可以改", "You wrote this — edit it")}">${n.blank ? "✍️" : "📝"}</button>` : ""}
       </span></div>`;
   }).join("");
   const drawerHtml = drawer.length
     ? `<details class="mdrawer"><summary>🗂 ${B(`更多去处（${drawer.length}）`, `More places (${drawer.length})`)}</summary>${drawerRows}</details>` : "";
+  // ✍️ 站在一个"还没人写过样子"的地方 —— 给一句提示 + 一个入口。空描述会让到达旁白
+  //    现编 (实弹: 走到「油麻地」编出一家茶餐厅), 玩家自己一句话就能定下来。
+  const writeCur = (curNode && curNode.blank)
+    ? `<button class="ghost" data-mdesc="${escapeHtml(curNode.id)}" data-mname="${escapeHtml(curNode.name)}" style="margin:8px 6px 0 0; font-size:12px; padding:3px 8px">✍️ ${B("这儿长什么样？由你来写", "Describe this place")}</button>` : "";
   const regen = curNode ? `<button class="ghost" data-regen="1" style="margin:8px 0 0; font-size:12px; padding:3px 8px">🖼 ${B("重画当前地点的背景", "Redraw this background")}</button>` : "";
   const hidden = mp.hidden > 0 ? `<div class="mhidden">${B(`还有 ${mp.hidden} 处地方，你尚未打听到…`, `${mp.hidden} more place(s) you haven't heard of yet…`)}</div>` : "";
   ov.innerHTML = `<div class="mcard" onclick="event.stopPropagation()">
@@ -3736,7 +3764,7 @@ async function openMap() {
       <button class="ghost" id="mzin">＋</button> <button class="ghost" id="mzout">－</button>
       <button class="ghost" onclick="document.getElementById('mapov').remove()">${B("关闭", "Close")}</button></span></div>
     ${nodes.length ? `<div class="mstage"><div id="mzwrap"><svg>${lines}</svg>${dots}</div></div>` : `<div class="jempty">${B("这个故事没有标注地图。", "This story has no map.")}</div>`}
-    ${drawerHtml}${regen}${hidden}
+    ${drawerHtml}${writeCur}${regen}${hidden}
   </div>`;
   ov.querySelectorAll("[data-go]").forEach(el => {
     el.onclick = async () => { ov.remove(); await moveTo(el.getAttribute("data-go")); };
@@ -3748,6 +3776,12 @@ async function openMap() {
     el.onclick = async () => {
       try { await j(`/runs/${runId}/map/mark`, { method: "POST", body: JSON.stringify({ location_id: el.getAttribute("data-mpin"), op: "pin" }) }); openMap(); }
       catch (e) { pushToast("⚠️ " + escapeHtml(e.message), "", 2200); }
+    };
+  });
+  ov.querySelectorAll("[data-mdesc]").forEach(el => {
+    el.onclick = async (e) => {
+      e.stopPropagation();
+      await describePlace(el.getAttribute("data-mdesc"), el.getAttribute("data-mname"));
     };
   });
   ov.querySelectorAll("[data-mtuck]").forEach(el => {
