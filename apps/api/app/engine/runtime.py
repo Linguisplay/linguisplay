@@ -5101,6 +5101,22 @@ def void_promises_of(state: dict[str, Any], cid: str) -> list[dict[str, Any]]:
     return voided
 
 
+def open_promise_of(state: dict[str, Any], cid: str | None) -> dict[str, Any] | None:
+    """🤝 这个角色手上还欠着的那个约定 (没有就 None)。
+
+    Yi 2026-08-06:「AI 角色不能无限和玩家有约定，之前线下约过了，手机上就不能再约。」
+    闸本来就在 make_promise 里 (每角色同时一个 open), 但【模型不知道】—— 于是它照样在
+    短信正文里开口约, 账本悄悄拒收, 玩家读到「明晚老地方见」而约定栏空空如也。
+    正文说了、账上没有, 正是本仓最忌的文与实分家。这个读口就是拿去喂提示词的。
+    """
+    if not cid:
+        return None
+    for p in state.get("promises") or []:
+        if p.get("status") == "open" and p.get("char_id") == cid:
+            return p
+    return None
+
+
 def make_promise(content: dict[str, Any], state: dict[str, Any], char: dict[str, Any],
                  pm: dict[str, Any], tun: dict[str, int]) -> dict[str, Any] | None:
     """Record a judged appointment. Refuses: clock off, empty/overlong intent, bad slot,
@@ -5117,9 +5133,13 @@ def make_promise(content: dict[str, Any], state: dict[str, Any], char: dict[str,
         return None
     prs = list(state.get("promises") or [])
     cid = char.get("id")
+    # 🧾 拒收要留痕: 被闸挡下的那一次, 正是「正文里说约好了、账上没有」的现场。
+    # 不留痕就永远量不出这件事发生过多少回 (Yi 2026-08-06)。
     if sum(1 for p in prs if p.get("status") == "open") >= MAX_OPEN_PROMISES:
+        _audit(state, "promise.refuse", False, char.get("name", ""), "约定已满")
         return None
     if any(p.get("status") == "open" and p.get("char_id") == cid for p in prs):
+        _audit(state, "promise.refuse", False, char.get("name", ""), "这个人已经有约在身")
         return None
     day = int((state.get("clock") or {}).get("day", 1) or 1) + off
     pr = {"char_id": cid, "char_name": char.get("name") or "", "what": what,
@@ -6997,6 +7017,11 @@ def _phone_exchange(content: dict[str, Any], state: dict[str, Any], persona: dic
                                        "hour": _story_hour(content, state),
                                        "busy": (_sim(state, char_id).get("intent") or "")[:40]},
                         "last_ignored": _th_lr,   # 📱 上次晾过要认账 (Spec C)
+                        # 🤝 已经约过了就别再约 (Yi 2026-08-06)。闸在 make_promise 里,
+                        # 但从前【模型不知道】—— 于是正文照约、账本悄悄拒收, 文与实分家。
+                        "open_promise": (lambda p: {"what": p.get("what", ""),
+                                                    "when": promise_when_label(content, p, state)}
+                                         if p else None)(open_promise_of(state, char_id)),
                         "device": phone_device(content),
                         "char": {"name": c.get("name"), "role": c.get("role") or "",
                                  "persona_text": (c.get("persona_text") or "")[:200],

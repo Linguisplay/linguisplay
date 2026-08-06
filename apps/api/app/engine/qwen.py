@@ -4036,6 +4036,15 @@ class QwenLLM:
              if call else
              f"TA不在你身边，是通过{device}给你捎话。你在忙你自己的事，回不回、回多少、什么语气，"
              "全凭你此刻的心情和你们的关系。"),
+            # 🤝 已经约过了就别再约 (Yi 2026-08-06:「AI 角色不能无限和玩家有约定」)。
+            # 闸本来就在 make_promise 里 (每角色同时一个 open), 但模型从来不知道 ——
+            # 于是它照样在正文里开口约, 账本悄悄拒收, 玩家读到「明晚老地方见」而约定栏
+            # 空空如也。正文说了、账上没有, 正是本仓最忌的文与实分家。
+            (f"【你和TA已经有约在身】{(prompt.get('open_promise') or {}).get('what','')}"
+             f"（{(prompt.get('open_promise') or {}).get('when','')}）。"
+             "这个约还没赴，所以【别再约下一个】——不要提新的时间、新的碰面。"
+             "想说这件事，就说这一个：确认、改期、催一句、或者故意不提。"
+             if prompt.get("open_promise") else ""),
             (f"【上次你已读没回】原因是：{prompt.get('last_ignored')}。对方若追问，认账，"
              "别装失忆；这口气顺没顺，由你此刻的心情决定。"
              if prompt.get("last_ignored") else ""),
