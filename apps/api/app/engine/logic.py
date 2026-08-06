@@ -253,6 +253,14 @@ def lint_story(content: dict[str, Any]) -> list[Issue]:
     for l in locs:
         lid = l.get("id")
         where = f"loc:{lid}"
+        # 🗺 有名字没描述 (Yi 报障 2026-08-06:「明明是油麻地但是传送到了餐厅」)。
+        # 到达旁白拿不到 detail 时只能靠模型现编, 而地名越大越容易被现编成一个具名
+        # 小场所 —— 玩家读到的就是"传送"。狗笼 27 个地点里 19 个空描述, 这道门从前
+        # 一声不吭地放它们上线了。提示词侧已经加了兜底口径, 但根子还是把描述写上。
+        if (l.get("name") or "").strip() and not (l.get("detail") or "").strip():
+            warn("blank_place_detail", where,
+                 f"「{l.get('name', '')}」只有名字没有描述 —— 到达旁白会现编一个"
+                 f"场景出来（实弹: 走到「油麻地」, 旁白写成推开茶餐厅的门）")
         for ex in l.get("exits") or []:
             if ex not in loc_ids and ex not in loc_names:
                 err("dangling_exit", where,
