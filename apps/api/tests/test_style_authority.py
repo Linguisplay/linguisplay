@@ -68,6 +68,85 @@ def test_hoist_does_not_grab_unrelated_caps():
     assert "3~5 句" in qwen._defer_style({"style": s}, "请写 3~5 句。")
 
 
+# ── 三个实测出来的洞 (2026-08-05 文风调研复核) ──────────────────────────────────
+
+def test_english_length_clause_is_understood():
+    """en 本子的作者闸从来没生效过。Golden Hour 的卡里明写着
+    「Scenery is capped at two sentences for the whole turn」, 而正则只认中文限量词,
+    实测抠出空串 —— 它一直在走引擎默认的 3~5 句。这是我建正则时留下的洞。"""
+    for s in ("Scenery is capped at two sentences for the whole turn.",
+              "Narration: at most three sentences per beat.",
+              "Keep description to no more than forty words."):
+        got = qwen._style_len_rule("Voice: dry, close third. " + s)
+        assert got, f"英文长度条款抠不出来: {s}"
+    out = qwen._defer_style({"style": "Voice: dry. Scenery is capped at two sentences."},
+                            "请写 3~5 句。")
+    assert "3~5" not in out
+
+
+def test_english_hoist_ignores_unrelated_english_caps():
+    s = "Voice: noir. At most three named characters per scene. Never use em dashes."
+    assert "3~5 句" in qwen._defer_style({"style": s}, "请写 3~5 句。")
+
+
+def test_more_than_two_clauses_survive():
+    """作者写三四条闸就丢第三条 —— out[:2] 是我写的, 当时只见过最多两条的卡。
+    新卡按四条设计 (旁白句数/台词字数/写景/身体反应各一条), 各管各的, 不是竞争的数字。"""
+    s = ("作者腔：白描。经济律：旁白每拍最多三句；单句台词不超过二十五字；"
+         "写景至多一句；身体反应至多一句。")
+    got = qwen._style_len_rule(s)
+    assert got.count("；") >= 2, f"三条以上的闸被截了: {got}"
+    assert "身体反应" in got or "写景" in got
+
+
+def test_units_beyond_sentence_and_char_are_accepted():
+    """过滤器只认「句/字」, 作者用「段/词」写的闸被静默吃掉。
+    但「个/次」不能收 —— 「最多出现三个人名」会被误捞, 见 test_hoist_does_not_grab_unrelated_caps。"""
+    assert qwen._style_len_rule("经济律：全回合旁白最多四段。")
+    assert qwen._style_len_rule("经济律：每拍不超过四十五词。")
+    assert not qwen._style_len_rule("同一场最多出现三个人名。")
+
+
+# ── 开场那一拍的文风卡被砍掉一半 ────────────────────────────────────────────────
+# runtime.py:3068 写着 style[:160]，而忌用清单按惯例写在卡尾。实测生产 15 张卡:
+# 7 张在开场那一拍【完全看不到自己的忌用清单】(斗罗/科瓦兹/不朽/猫铃堂/GH/寒山…),
+# 1 张连长度闸都丢了。留存最贵的第一拍, 管得最松。
+
+LONG_CARD = ("作者腔：清冷白描。情绪交给器物与节气，不交给形容词。" + "补白。" * 40 +
+             "经济律：写景全回合合计不超过两句。"
+             "忌用清单，一个都不许犯：绝美 / 俊美无俦 / 邪魅一笑 / 薄唇轻启")
+
+
+def test_truncated_style_keeps_its_length_gate():
+    head = qwen.style_head(LONG_CARD, 160)
+    assert qwen._style_len_rule(head), "截断之后长度闸没了"
+
+
+def test_truncated_style_keeps_its_ban_list():
+    head = qwen.style_head(LONG_CARD, 160)
+    assert "邪魅一笑" in head and "俊美无俦" in head, "截断之后忌用清单没了"
+
+
+def test_truncated_style_keeps_the_opening_voice():
+    """保尾巴不能把开头的作者腔丢掉 —— 那是这张卡的身份。"""
+    assert "清冷白描" in qwen.style_head(LONG_CARD, 160)
+
+
+def test_short_style_is_untouched():
+    s = "作者腔：白描。经济律：写景不超过两句。忌：绝美 / 邪魅一笑"
+    assert qwen.style_head(s, 160) == s
+
+
+def test_style_head_stays_bounded():
+    """保尾巴不等于放弃预算 —— 开场提示词还有别的东西要装。"""
+    assert len(qwen.style_head("废话。" * 500, 160)) <= 400
+
+
+def test_style_head_is_safe_on_junk():
+    assert qwen.style_head("", 160) == ""
+    assert qwen.style_head(None, 160) == ""
+
+
 def _sys(**kw):
     p = {"speaker_name": "裴无咎", "speaker_persona": "松雪宗执剑", "channel": "say",
          "persona": {"name": "我"}, "context": {}}

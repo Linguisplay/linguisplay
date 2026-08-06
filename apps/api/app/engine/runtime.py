@@ -65,6 +65,18 @@ def has_cjk(text: str) -> bool:
     return bool(_CJK_RE.search(text or ""))
 
 
+def _style_head_for_intro(style: "str | None", cap: int) -> str:
+    """✍️ 开场那一拍的文风卡要保头保尾地截 (作者腔在卡头, 经济律与忌用清单在卡尾)。
+
+    薄壳一层, 真活在 qwen.style_head; 走惰性导入跟本文件其余处一致。
+    """
+    try:
+        from . import qwen as _q
+        return _q.style_head(style, cap)
+    except Exception:               # 文风截断绝不该拦住开场
+        return (style or "")[:cap]
+
+
 def dedash(text: str) -> str:
     """Deterministically rewrite em-dash runs in GENERATED text: a run that ends the
     line or sits right before a closing quote is a dramatic interruption and survives;
@@ -3065,7 +3077,10 @@ def build_opening(content: dict[str, Any], state: dict[str, Any], llm: LLM | Non
             "player": {"name": (player_char or {}).get("name") or "你",
                        "role": (player_char or {}).get("role") or "刚来到这里的人"},
             "world": ((content.get("story") or {}).get("world_long") or "")[:300],
-            "style": ((content.get("story") or {}).get("style") or "")[:160],
+            # ✍️ 保头保尾地截, 别用 [:160] 从头切 —— 作者腔写在卡头, 经济律与忌用清单
+            # 写在卡尾。实测 15 张生产卡: 直切会让 7 张在【开场那一拍】完全看不到自己的
+            # 忌用清单。玩家读到的第一段字, 留存最贵, 原本管得最松。
+            "style": _style_head_for_intro((content.get("story") or {}).get("style"), 160),
             "goal": act1.get("goal", ""),
             "place": _physical_place(content, state),
             "chars": [{"name": c.get("name"), "role": c.get("role") or "",

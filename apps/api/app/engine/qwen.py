@@ -32,9 +32,22 @@ _STYLE_PUNCT = "【禁用破折号】行文一律不用「——」，改用句�
 
 # 作者写的长度条款长这样 (生产 15 张文风卡里 9 张有, 形状高度一致):
 #   「环境与外貌描写全轮合计不超过两句」「写景全回合合计不超过两句」「一句话最多两个短句」
-# 必须同时命中【限量词】与【句/字】才算, 否则会把「同一场最多出现三个人名」也捞进来。
+# 英文本子写成 "Scenery is capped at two sentences for the whole turn"。
+# 必须同时命中【限量词】与【单位词】才算, 否则会把「同一场最多出现三个人名」也捞进来。
 _LEN_RULE = re.compile(
-    r"[^。；;，、\n]{0,26}(?:不超过|最多|至多|不多于|不得超过|以内|≤)[^。；;，、\n]{0,18}")
+    r"[^。；;，、\n]{0,26}(?:不超过|最多|至多|不多于|不得超过|以内|≤)[^。；;，、\n]{0,18}"
+    r"|[^.;,\n]{0,44}?(?:capped at|at most|no more than|never more than|not exceed)"
+    r"[^.;,\n]{0,26}")
+
+# 单位词白名单。收「段/词」是因为作者真的这么写 (「全回合旁白最多四段」「不超过四十五词」),
+# 当时只认「句/字」, 这类闸被静默吃掉。
+# 【不许收「个/次/条」】: 「同一场最多出现三个人名」会被误捞成长度闸。作者要限明喻,
+# 请写「明喻至多一句」而不是「最多一个」。
+_LEN_UNIT = re.compile(r"句|字|段|词|sentence|word", re.I)
+
+# 一张卡最多喂几条闸。原本是 2 —— 当时见过的卡最多只写两条。新设计的卡按四条走
+# (旁白句数 / 台词字数 / 写景 / 身体反应)，它们各管各的，不是互相竞争的数字。
+_LEN_MAX = 4
 
 
 def _style_len_rule(style: str) -> str:
@@ -42,9 +55,42 @@ def _style_len_rule(style: str) -> str:
     out = []
     for m in _LEN_RULE.finditer(style or ""):
         t = m.group(0).strip()
-        if ("句" in t or "字" in t) and t not in out:
+        if _LEN_UNIT.search(t) and t not in out:
             out.append(t)
-    return "；".join(out[:2])
+    return "；".join(out[:_LEN_MAX])
+
+
+# 忌用清单按惯例写在卡尾, 所以【从头截断】会把它整段切掉。
+# 实测生产 15 张卡的真实写法: 绝大多数是【光杆的句首「忌」】(「忌文艺腔，忌破折号。」),
+# 既没有「忌用清单」这个标题, 也没有冒号。只认标题词的话 15 张里 12 张漏掉。
+# 所以认「句读之后的忌」+ 显式标题词, 实测 15/15 命中且切口都正落在清单起头。
+_BAN_HEAD = re.compile(
+    r"(?:(?<=[。；;\n）)：:])|^)\s*忌|忌用清单|BANNED|Never use|禁用", re.I)
+
+
+def style_head(style: "str | None", cap: int) -> str:
+    """✍️ 截断文风卡时, 长度条款与忌用清单必须活下来。
+
+    实弹 2026-08-05: 开场那一拍走 runtime.py 的 `style[:160]`, 而作者腔写在卡头、
+    经济律与忌用清单写在卡尾。实测生产 15 张卡: 7 张在开场那一拍【完全看不到自己的
+    忌用清单】(卡尾起点最远的在第 602 字), 1 张连长度闸都丢了。玩家读到的第一段字,
+    是全局唯一一拍没有作者长度闸、没有忌用清单的旁白 —— 留存最贵的一拍管得最松。
+
+    保头 (作者腔是这张卡的身份) + 保尾 (闸与忌清单是它的牙齿), 中间的展开可以丢。
+    """
+    s = (style or "").strip()
+    if len(s) <= cap:
+        return s
+    tail = []
+    rule = _style_len_rule(s)
+    if rule:
+        tail.append(rule + "。")
+    m = _BAN_HEAD.search(s)
+    if m:
+        tail.append(s[m.start():][:120])
+    if not tail:
+        return s[:cap]
+    return s[:cap] + "…" + "".join(tail)
 
 
 def _defer_style(prompt: "dict[str, Any] | None", default: str) -> str:
