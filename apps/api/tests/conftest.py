@@ -77,6 +77,18 @@ def typed_move_on(monkeypatch):
 
 
 @pytest.fixture
+def invite_move_on(monkeypatch):
+    """开回「台词里的邀约 → 能走人的确认条」(runtime.INVITE_MOVE, Yi 2026-08-06 定默认关)。
+
+    产品行为: 移动只剩点界面 —— 地图面板点节点, 或顶栏「可去：X」点一下。角色照样能
+    嘴上说「跟我去果栏」, 但要走得玩家自己点。这是 2026-08-04 那两把锁的收尾: 那两把
+    关掉之后, 从文字里长出来的移动只剩这一条还活着。
+    测【确认条本身】的用例显式开旗跑, 与 map_writes_on / typed_move_on 同理。
+    """
+    monkeypatch.setattr(runtime, "INVITE_MOVE", True)
+
+
+@pytest.fixture
 def golden_auto_on(monkeypatch):
     """开回金色瞬间的【自动摇骰】(tuning.golden_chance, Yi 2026-08-04 定缺省 0)。
 

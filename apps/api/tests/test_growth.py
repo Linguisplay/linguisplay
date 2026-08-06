@@ -53,7 +53,7 @@ def test_hot_scene_suspends():
     assert growth.due(SANDBOX, st, []) == "soft"   # 场景一换立即放行
 
 
-def test_seed_place_mints_and_resets(map_writes_on):
+def test_seed_place_mints_and_resets(map_writes_on, invite_move_on):
     seen = {}
 
     class SeedLLM:
@@ -131,7 +131,7 @@ def test_seed_char_births_via_pipeline():
     assert out["state"]["growth"]["blanks"] == 0
 
 
-def test_explore_intent_hard_exit(map_writes_on):
+def test_explore_intent_hard_exit(map_writes_on, invite_move_on):
     import copy
 
     from app.engine.llm import MockLLM

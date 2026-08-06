@@ -335,6 +335,21 @@ LLM_MAP_WRITES = False
 # 都关上之后, 地图这个功能只剩两个输入: 作者写的地点/作息, 和玩家在图上点的那一下。
 TYPED_MOVE = False
 
+# 🎟 邀约确认条也取消 (Yi 2026-08-06 第三刀:「不通过文字控制！」)。
+#
+# 前两把锁关掉之后, 从文字里长出来的移动只剩最后一条【还活着】: 角色在台词里邀你去
+# 一个【已在册、已解锁、走得到】的地方 → 回合尾弹一张「跟 TA 去 / 留下」的确认条。
+# 玩家自己在输入框里提到一个已在册的地名, 同样弹。铸地那半边早被 LLM_MAP_WRITES
+# 堵死了 (generate_and_move 直接返回 None), 所以确认条现在只可能指向作者写好的地点。
+#
+# Yi 的裁定: 移动只剩【点界面】—— 地图面板点节点, 或顶栏「可去：X」点一下。
+# 角色照样可以嘴上说「跟我去果栏」, 但要走, 得玩家自己点。
+# 三把锁合起来: 说话不改地图, 打字不改地图, 台词里的邀约也不再变成一个能走人的按钮。
+#
+# 代价 (记在这里, 别装作没有): 邀约少了一个顺手的按钮, 玩家要多点一步; 而且确认条
+# 上那个「带上谁」的挑人器只挂在它身上 —— 地图那条路目前只带 following 里已有的人。
+INVITE_MOVE = False
+
 # 🔎 找人不再自动造真 (Yi 2026-08-05)。
 #
 # 原来: 玩家提到册子上没有的名字 → 引擎额外调一次 scout_char 判官问「这名字属不属于
@@ -7104,6 +7119,57 @@ def phone_recent_for_scene(content: dict[str, Any], state: dict[str, Any],
     return out[-PHONE_SCENE_RECENT:]
 
 
+def invite_chip(content: dict[str, Any], state: dict[str, Any], where: str,
+                by_id: str | None, by_name: str | None,
+                llm: LLM | None = None) -> dict[str, Any] | None:
+    """🎟 台词里的邀约 → 一张「跟 TA 去 / 留下」的确认条 (INVITE_MOVE 关着时永远 None)。
+
+    抽成具名函数是为了让那把锁只装一处: 从前这段逻辑内联在回合尾, 四个由头
+    (角色邀请 / 玩家提到的地名 / 生长种子 / 探索意图) 各写一遍, 锁一处漏三处。
+
+    Yi 2026-08-06:「不通过文字控制！」—— 移动只剩点界面。角色照样能嘴上邀你,
+    但要走得玩家自己点地图或点出口。见 INVITE_MOVE 那一段的原委与代价。
+    """
+    if not INVITE_MOVE:
+        return None
+    where = (where or "").strip()
+    if not where:
+        return None
+    cur = location_view(content, state) or {}
+    cur_id, exits = cur.get("id"), (cur.get("exits") or [])
+
+    def _ok(d):
+        return (d and d.get("id") and d.get("id") != cur_id
+                and location_available(content, state, d)
+                and (not exits or d.get("name") in exits or d.get("id") in exits))
+
+    dest = resolve_location(content, where)
+    if _ok(dest):
+        return {"to": dest["id"], "to_name": dest.get("name"),
+                "by_id": by_id, "by_name": by_name,
+                **({} if by_id else {"self_go": True})}
+    if dest:
+        return None                      # 在册但走不到: 不造垃圾确认条
+    near = near_location(content, where)
+    if _ok(near):
+        # 🧭 近似命中改道: 别造重复地点 — 确认条指真名, 不对玩家自然会拒绝
+        return {"to": near["id"], "to_name": near.get("name"),
+                "by_id": by_id, "by_name": by_name,
+                **({} if by_id else {"self_go": True})}
+    if near:
+        return None
+    # 铸地那半边早被 LLM_MAP_WRITES 堵死 (generate_and_move 在锁下返回 None)
+    try:
+        mint = generate_and_move(content, state, where, llm=llm, move=False)
+    except ValueError:
+        mint = None
+    if mint and mint.get("id"):
+        return {"to": mint["id"], "to_name": mint.get("name"),
+                "by_id": by_id, "by_name": by_name, "minted": True,
+                **({} if by_id else {"self_go": True})}
+    return None
+
+
 def deliver_due_phone(content: dict[str, Any], state: dict[str, Any]) -> int:
     """📬 延迟消息投递扫描: pending 里到点的搬进正式消息并计未读。幂等。
 
@@ -10772,8 +10838,11 @@ def run_turn_stream(
             "verdict": verdict_view(content, state),
             "pending_choice": state.get("pending_choice"), "rel_deltas": {},
             "location": location_view(content, state),
-            "move_request": {"seek": True, "to": l_s["id"], "to_name": l_s.get("name"),
-                             "by_id": c_s.get("id"), "by_name": c_s.get("name")},
+            # 🎟 打听到人在哪【照旧告诉你】(上面那一拍旁白), 但不再给一个能走人的按钮
+            # (INVITE_MOVE): 想去就自己点地图 —— 地图上本来就标着谁站在哪。
+            "move_request": ({"seek": True, "to": l_s["id"], "to_name": l_s.get("name"),
+                              "by_id": c_s.get("id"), "by_name": c_s.get("name")}
+                             if INVITE_MOVE else None),
             "relations": relations_summary(content, state),
         })
         return
@@ -12762,44 +12831,17 @@ def run_turn_stream(
     progress = act_progress(content, state, state["act"])  # clue checklist for the (new) act
     location = location_view(content, state)  # current place w/ exits filtered to unlocked ones
 
-    # a character asked to lead the player somewhere → surface a CONFIRM request (the player
-    # must accept before moving). Only honor a real, connected, UNLOCKED destination; ignore
-    # anything off-map, not reachable, or not yet discovered.
+    # 🎟 台词里的邀约 → 确认条。锁在 invite_chip 里 (INVITE_MOVE), 四个由头共用一口 ——
+    # 从前这段逻辑内联在这里各写一遍, 锁一处漏三处。Yi 2026-08-06:「不通过文字控制！」
     move_request = None
     if primary_invite and not observer:
-        dest = resolve_location(content, primary_invite)
-        cur_id = (location or {}).get("id")
-        exits = (location or {}).get("exits") or []
-        if dest and dest.get("id") and dest.get("id") != cur_id \
-                and location_available(content, state, dest) \
-                and (not exits or dest.get("name") in exits or dest.get("id") in exits):
-            move_request = {"to": dest["id"], "to_name": dest.get("name"),
-                            "by_id": primary_id, "by_name": primary_name_for_invite}
-        elif not dest and primary_invite.strip():
-            near = near_location(content, primary_invite)
-            if near and near.get("id") != cur_id \
-                    and location_available(content, state, near) \
-                    and (not exits or near.get("name") in exits or near.get("id") in exits):
-                # 🧭 近似命中改道: 别造重复地点 — 确认条指真名, 不对玩家自然会拒绝
-                move_request = {"to": near["id"], "to_name": near.get("name"),
-                                "by_id": primary_id, "by_name": primary_name_for_invite}
-            elif not near:
-                # 📍 提及即立档 (Yi: 玩家不去也该先生成): 地点当场铸进世界 (不落脚),
-                # 确认条变普通去处 — 拒绝了它也在地图上, 想去随时去
-                try:
-                    _mint = generate_and_move(content, state, primary_invite.strip(),
-                                              llm=llm, move=False)
-                except ValueError:
-                    _mint = None
-                if _mint and _mint.get("id"):
-                    flags["content_mutated"] = True
-                    content_mutated = True   # 局部快照在 9238 已定格, 这里要直写
-                    growth_mod.note_mint(state)   # 🌱 双通道共享额度
-                    _audit(state, "place.mint", True, _mint.get("name", ""), "听说的去处已立档")
-                    move_request = {"to": _mint["id"], "to_name": _mint.get("name"),
-                                    "by_id": primary_id, "by_name": primary_name_for_invite,
-                                    "minted": True}
-            # near exists but locked/unconnected → no chip: 不造垃圾, 也不带人去不可达处
+        move_request = invite_chip(content, state, primary_invite,
+                                   primary_id, primary_name_for_invite, llm=llm)
+        if move_request and move_request.get("minted"):
+            flags["content_mutated"] = True
+            content_mutated = True
+            growth_mod.note_mint(state)
+            _audit(state, "place.mint", True, move_request.get("to_name", ""), "听说的去处已立档")
     # 🌱 生长收卷第二步 (Yi 四条拍板): 地点种子过判官铸造; 填无入账升级档;
     # 铸造成功共享额度 (note_mint), 确认条与提及即立档同款 (只立档不落脚)
     if _ws_mode and not observer:
@@ -12821,7 +12863,8 @@ def run_turn_stream(
                 _audit(state, "growth.seed", True, _wsl.get("name", ""), "预算铸造·地点")
                 if _gm2:
                     _gm2.log("growth", ev="mint", ch="seed_place")
-                if move_request is None:
+                # 🎟 立档照旧, 但不再变成一个能走人的按钮 (INVITE_MOVE)
+                if move_request is None and INVITE_MOVE:
                     move_request = {"to": _wsl["id"], "to_name": _wsl.get("name"),
                                     "by_id": None, "by_name": None, "self_go": True,
                                     "minted": True}
@@ -12867,34 +12910,22 @@ def run_turn_stream(
                 _gm3.log("growth", ev="mint", ch="explore")
             except Exception:
                 pass
-            move_request = {"to": _expl["id"], "to_name": _expl.get("name"),
-                            "by_id": None, "by_name": None, "self_go": True,
-                            "minted": True}
+            # 🎟 立档照旧, 但不再变成一个能走人的按钮 (INVITE_MOVE)
+            if INVITE_MOVE:
+                move_request = {"to": _expl["id"], "to_name": _expl.get("name"),
+                                "by_id": None, "by_name": None, "self_go": True,
+                                "minted": True}
+    # 🎟 玩家自己说出口的去处: 同一口闸, 没有邀请人 (INVITE_MOVE 关着时只立档不给条)
     if move_request is None and emergent_dest and not observer \
             and not resolve_location(content, emergent_dest):
-        # the PLAYER named the off-map place themselves — same chip, no inviter.
-        # (If the director's moved_to already generated it this turn, we're there; skip.)
-        _near2 = near_location(content, emergent_dest)
-        _cur2 = (location or {}).get("id")
-        _exits2 = (location or {}).get("exits") or []
-        if _near2 and _near2.get("id") != _cur2 \
-                and location_available(content, state, _near2) \
-                and (not _exits2 or _near2.get("name") in _exits2 or _near2.get("id") in _exits2):
-            move_request = {"to": _near2["id"], "to_name": _near2.get("name"),
-                            "by_id": None, "by_name": None, "self_go": True}
-        elif not _near2:
-            try:
-                _mint2 = generate_and_move(content, state, emergent_dest, llm=llm, move=False)
-            except ValueError:
-                _mint2 = None
-            if _mint2 and _mint2.get("id"):
+        _chip = invite_chip(content, state, emergent_dest, None, None, llm=llm)
+        if _chip:
+            move_request = _chip
+            if _chip.get("minted"):
                 flags["content_mutated"] = True
                 content_mutated = True
                 growth_mod.note_mint(state)   # 🌱 双通道共享额度
-                _audit(state, "place.mint", True, _mint2.get("name", ""), "你说起的去处已立档")
-                move_request = {"to": _mint2["id"], "to_name": _mint2.get("name"),
-                                "by_id": None, "by_name": None, "self_go": True,
-                                "minted": True}
+                _audit(state, "place.mint", True, _chip.get("to_name", ""), "你说起的去处已立档")
 
     # 💡 建议单一来源 (Yi 2026-07-20 重做): 导演随主拍写的两条, 不够垫底句补齐。
     # 旧的独立小调用/门控模板层已删 — 少一层逻辑, 少一次调用, 一个声音。

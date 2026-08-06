@@ -48,7 +48,7 @@ def test_resolve_location_matches_name_or_id_else_none():
     assert runtime.resolve_location(MAP, "天台") is None                      # unknown → ignored
 
 
-def test_director_move_is_a_confirmable_request_not_a_teleport(map_writes_on):
+def test_director_move_is_a_confirmable_request_not_a_teleport(map_writes_on, invite_move_on):
     """The MODEL can only PROPOSE a move (move_invite) — the player stays put until they
     confirm (apply_move, the /move endpoint). An off-map destination becomes an emergent
     generate-on-accept offer, never a silent teleport. (The player's OWN first-person

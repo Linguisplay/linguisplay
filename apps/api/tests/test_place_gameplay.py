@@ -206,7 +206,7 @@ def test_char_pin_overrides_schedule_until_you_leave():
     assert runtime.char_position(MAP, st, c) == "study"   # released back to her schedule
 
 
-def test_seek_pops_a_confirm_and_pins_the_target():
+def test_seek_pops_a_confirm_and_pins_the_target(invite_move_on):
     st = {**runtime.default_state(), "location_id": "study", "act": 1}
     out = runtime.run_turn(MAP, st, {"name": "我"}, "去找Mara", channel="say")
     mr = out.get("move_request")
@@ -294,7 +294,7 @@ class _ScoutBase:
                 "affinity_delta": 0, "advance_act": False, "ending": None}
 
 
-def test_scout_mints_the_sought_character_for_real(seek_automint_on, map_writes_on):
+def test_scout_mints_the_sought_character_for_real(seek_automint_on, map_writes_on, invite_move_on):
     """找人合同（2026-07-08）：智能检索说「属于这个世界」→ 角色入册、地点造真、
     行踪钉住、同款确认片弹出 — 文与实不分家，绝不再空转。"""
     import copy
