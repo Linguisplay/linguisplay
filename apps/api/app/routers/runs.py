@@ -1326,7 +1326,12 @@ def move(run_id: str, body: MoveIn, user: User = Depends(current_user), db: Sess
     # 到达旁白: a vivid pan of the place just entered — the space, what each person here
     # is doing right now, who notices first. Rides ahead of the arrival discoveries.
     persona = db.get(PersonaModel, r.persona_id)
-    arrival = runtime.arrival_narration(content, st, _persona_dict(persona) if persona else {})
+    # 🎬 换地方不该把剧情清零: 把刚才那一场一起交给到达旁白 (同 phone_send 的成例)。
+    _cut = int(st.get("history_cut_seq") or 0)
+    _bl = [{"author": b.author, "type": b.type, "text": b.text, "speaker_name": b.speaker_name}
+           for b in r.beats if b.seq >= _cut][-8:]
+    arrival = runtime.arrival_narration(content, st, _persona_dict(persona) if persona else {},
+                                        beat_log=_bl)
     # 到达即发现: truths gated on BEING here reveal the moment the player arrives
     discoveries = runtime.discover_on_arrival(content, st)
     if arrival:

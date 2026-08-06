@@ -1319,6 +1319,18 @@ def _build_system(prompt: dict[str, Any]) -> str:
                      "过招的具体动作、决定性的那一下、胜负落定，全部演出来并就此收束——"
                      "不许再热身、不许再报数、不许拖到下一拍。")
 
+    # 📱↔🎭 你俩刚在手机上聊过的 (2026-08-06 Yi 报障「剧情被打断」)。
+    # 从前主拍只拿得到 phone_unread 这个红点数, 一条真实短信都没有 —— 玩家连发五条,
+    # 走到人家面前, 他不知道。折账那条路闸在 18 条, 而线程长度中位 13, 够不着。
+    _ph = [str(x).strip() for x in (prompt.get("phone_recent") or []) if str(x).strip()]
+    if _ph:
+        lines.append("")
+        lines.append("【你和 TA 刚在" + (prompt.get("device") or "手机")
+                     + "上聊过这些】（「你：」是对方发的，「我：」是你发的）：\n"
+                     + "\n".join(_ph)
+                     + "\n这些话【已经说过了】：别当没发生，也别原样再说一遍；"
+                       "当面接着这个由头往下走。")
+
     # 🎬 本场已经写过的意象 (2026-08-05): 引擎数出来的跨拍复现词, 动笔前摊给模型。
     # 从前这些只喂给【事后】的复读守卫 —— 而守卫一响就是一次整包重生, 又慢又贵,
     # 且模型压根不知道自己刚写过什么。写之前说一句, 比写完了罚它便宜得多。
@@ -4215,33 +4227,58 @@ class QwenLLM:
         _det = str(prompt.get("detail") or "").strip()
         _place = prompt.get("place", "")
         _where = f"地点：{_place}（{_det}）" if _det else f"地点：{_place}"
-        _space_rule = ("必须扣住给出的地点细节，不要泛泛" if _det else
-                       f"你只知道地名「{_place}」，没有更多描述——就按这个名字【本身的尺度】写："
-                       "是街区就写街面、招牌、人流、气味，是屋子就写屋里。"
-                       "绝不许把它替换成或改写成另一个具名场所"
-                       "（写「油麻地」就不能变成「某某茶餐厅」）")
+        # 🚫 防传送与尺度两条【无条件】(Yi 报障 2026-08-06 第二例)。原本它们只写在
+        # 「detail 为空」那一支; 而报障的九龙城区【有】80 字 detail, 写的是"横跨九龙城寨、
+        # 土瓜湾、红磡……"。大区的 detail 天生就是大尺度的, 于是模型拿到的是
+        # 「必须扣住给出的地点细节，不要泛泛」——「不要泛泛」主动把它往具名小场所推,
+        # 玩家看到的就是「来到九龙城区」下一句「推开糖水店的木门」。
+        # 所以尺度与防替换跟有没有 detail 无关, 有 detail 时只是【多】一条扣住细节。
+        _scale = (f"按「{_place}」这个地点【本身的尺度】写：是街区就写街面、招牌、人流、气味，"
+                  "是屋子就写屋里。绝不许把它替换成或改写成另一个具名场所"
+                  "（写「油麻地」就不能变成「某某茶餐厅」，写「九龙城区」就不能变成「糖水店」）")
+        _space_rule = (f"必须扣住给出的地点细节；{_scale}" if _det else
+                       f"你只知道地名「{_place}」，没有更多描述——{_scale}")
+        _len = _defer_style(prompt, "写2~4句。")
+        # 🎬 别重开机 (Yi 报障 2026-08-06): 这条路原本只收到 place/detail/slot/people,
+        # 没有历史、没有目标、没有刚才发生了什么 —— 它结构上就不可能接着演, 只能把在场
+        # 每个人从零再描述一遍, 读起来就是换个地方剧情被清零。照 phone_send 的成例接线。
+        _rec = [r for r in (prompt.get("recent") or []) if (r or {}).get("text")][-4:]
+        _rec_txt = "\n".join(
+            f"- {(r.get('speaker_name') or ('你' if r.get('author') == 'player' else '旁白'))}：{str(r.get('text'))[:70]}"
+            for r in _rec)
+        _cont = ("\n【接着刚才那一场演】上一场的事没有翻篇：人物心里还挂着刚才说的话、"
+                 "刚定下的事、刚起的疙瘩。到了新地方，谁先开口、什么姿态，都要接得上，"
+                 "别把在场的人当成第一次见面重新介绍一遍。" if _rec_txt else "")
+        _sty = (f"\n【文风·必须贴住】这个故事的叙事声音（优先级高于任何通用文风习惯）：\n"
+                + str(prompt.get("style") or "").strip()) if str(prompt.get("style") or "").strip() else ""
         if prompt.get("observer"):
-            sys = ("你在为互动剧情游戏写【无形旁观视角切到一个地方】的到达旁白。写2~4句，第三人称：\n"
+            sys = ("你在为互动剧情游戏写【无形旁观视角切到一个地方】的到达旁白。第三人称。"
+                   + _len + "\n"
                    f"① 先写一眼看到的空间——光线、声响、气味，{_space_rule}；\n"
                    "② 再写此刻在场的每个人【正在做什么】——具体的动作、姿态、注意力所在，一人一笔。\n"
                    "这是一位看不见的观众在换机位：场景里【没有任何人到来】，绝不能有人抬头、察觉、"
                    "感到被注视或对空气说话。不要剧透，不要总结抒情。只输出旁白本身。"
+                   + _cont + _sty
                    + _STYLE_PUNCT + _lang_rule(prompt) + _era_rule(prompt))
             u = (f"{_where}\n"
                  f"时间：{prompt.get('slot','') or '不明'}\n"
-                 f"此刻在场：\n{plist}")
+                 + (f"刚才那一场：\n{_rec_txt}\n" if _rec_txt else "")
+                 + f"此刻在场：\n{plist}")
         else:
-            sys = ("你在为互动剧情游戏写【玩家刚走进一个地方】的到达旁白。写2~4句，第三人称：\n"
+            sys = ("你在为互动剧情游戏写【玩家刚走进一个地方】的到达旁白。第三人称。"
+                   + _len + "\n"
                    f"① 先写一眼看到的空间——光线、声响、气味，{_space_rule}；\n"
                    "② 再写此刻在场的每个人【正在做什么】——具体的动作、姿态、注意力所在，贴合各自的身份和长相，"
                    "一人一笔，谁都不能只是'站在那里'；\n"
                    "③ 最后写谁最先注意到玩家进来、那一瞬的反应（一个眼神/动作即可，不写对话）。\n"
                    "不要替玩家做动作或说话，不要剧透，不要总结抒情。只输出旁白本身。"
+                   + _cont + _sty
                    + _STYLE_PUNCT + _lang_rule(prompt) + _era_rule(prompt))
             u = (f"{_where}\n"
                  f"时间：{prompt.get('slot','') or '不明'}\n"
                  f"走进来的人：{prompt.get('player_name') or '玩家'}\n"
-                 f"此刻在场：\n{plist}")
+                 + (f"刚才那一场：\n{_rec_txt}\n" if _rec_txt else "")
+                 + f"此刻在场：\n{plist}")
         # 🎬 原画: the pan ALSO returns one keyframe per person, so the ledger opens the
         # scene with every body's state on record (the cold-start fix for 说/看打架)
         sys += (

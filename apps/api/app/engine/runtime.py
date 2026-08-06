@@ -3935,7 +3935,8 @@ def set_place_detail(content: dict[str, Any], state: dict[str, Any],
 
 
 def arrival_narration(content: dict[str, Any], state: dict[str, Any], persona: dict[str, Any],
-                      llm: LLM | None = None) -> str:
+                      llm: LLM | None = None,
+                      beat_log: list[dict[str, Any]] | None = None) -> str:
     """The moment the player WALKS INTO a place: a vivid 2~4 sentence pan — the space
     itself, then what each person present is DOING right now (posture/activity/attention,
     true to who they are), and who notices the player first. LLM-written; degrades to a
@@ -3958,6 +3959,13 @@ def arrival_narration(content: dict[str, Any], state: dict[str, Any], persona: d
                             "place": loc.get("name") or "", "detail": (loc.get("detail") or "")[:160],
                             "slot": (clock_view(content, state) or {}).get("label", ""),
                             "people": people,
+                            # 🎬 到了新地方不等于重开机: 把刚才那一场喂进去, 人物心里还挂着
+                            # 上一场的事 (Yi 报障 2026-08-06「剧情也会被打断」)。
+                            # ✍️ 顺带补上文风卡 —— 这条路一直没有, 而它是每次换场玩家读到的
+                            # 第一段字。
+                            "recent": [b for b in (beat_log or [])
+                                       if (b or {}).get("text")][-4:],
+                            "style": (content.get("story") or {}).get("style") or "",
                             # 👁 god mode: an unseen viewpoint drifts in — nobody may notice
                             "observer": (state.get("mode") or "character") == "god",
                             "player_name": (persona or {}).get("name") or ""}) or {}
@@ -7063,6 +7071,37 @@ def _digest_phone_overflow(state: dict[str, Any], cid: str, llm: LLM) -> None:
     if mem:
         state.setdefault("memory_by_char", {})[cid] = mem
         th["digested_upto"] = len(msgs) - keep
+
+
+PHONE_SCENE_RECENT = 6
+
+
+def phone_recent_for_scene(content: dict[str, Any], state: dict[str, Any],
+                           cid: str) -> list[str]:
+    """📱↔🎭 面对面时, TA 记得你刚才发的短信 (Yi 的铁律: 记忆一定要共享)。
+
+    原本是单向镜: phone_send 收 beat_log —— 手机读得到剧情; 而主拍提示词里只有
+    phone_unread 这个红点数, 没有任何一条真实短信。你连发五条再走到人家面前, 他不知道。
+
+    并不是完全没接线: _digest_phone_overflow 会把溢出的旧消息折进 memory_by_char,
+    但闸在「线程超过 18 条」。生产实测 10 条线程, 长度中位 13, 只有 2 条并过账 ——
+    中位数天生够不着那个闸。折账那条路留着不动 (它管长线程的压缩), 这里补的是"刚聊过"。
+
+    只给【这个角色自己那条线程】: 认知有边界, 别人看不见你俩的短信。
+    已折账的部分不重复喂 (memory_by_char 里已经有了, 两处都喂是白花 token)。
+    """
+    th = ((state.get("phone") or {}).get("threads") or {}).get(cid) or {}
+    msgs = th.get("msgs") or []
+    if not msgs:
+        return []
+    start = max(int(th.get("digested_upto") or 0), len(msgs) - PHONE_SCENE_RECENT)
+    out = []
+    for m in msgs[start:]:
+        t = str((m or {}).get("text") or "").strip()
+        if not t or (m or {}).get("kind") == "read":
+            continue
+        out.append(("你：" if m.get("from") == "me" else "我：") + t[:60])
+    return out[-PHONE_SCENE_RECENT:]
 
 
 def deliver_due_phone(content: dict[str, Any], state: dict[str, Any]) -> int:
@@ -11566,6 +11605,9 @@ def run_turn_stream(
             "persona": persona_for_prompt,
             "player_input": player_input,
             "channel": channel,
+            # 📱↔🎭 面对面时 TA 记得你刚发的短信 (Yi: 记忆一定要共享, 线上线下不许对不上)。
+            # 折账那条路闸在 18 条, 生产线程中位 13 —— 够不着, 所以"刚聊过"要直接进主拍。
+            "phone_recent": phone_recent_for_scene(content, state, sp_id),
             # 💞 事件记账制旗 (Yi 定): 开着 = 契约只收 rel_event 申报, 不收每句打分
             "rel_events": bool(tun.get("rel_events")),
             "context": ctx,
