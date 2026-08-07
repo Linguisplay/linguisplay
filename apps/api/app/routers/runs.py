@@ -1360,7 +1360,11 @@ def move(run_id: str, body: MoveIn, user: User = Depends(current_user), db: Sess
     # the scene just changed under the player's feet — regenerate the next-step chips
     # for THIS place and THESE people (the old ones point at who's no longer here);
     # persisted so a resume shows these, not the pre-move set
-    sugg = runtime.arrival_suggestions(content, st)
+    # 🧵 换个地方, 聊到一半的线不许断 (Yi 报障 2026-08-06)。从前是整批覆盖 ——
+    #    刚才那人问你的话, 指着它的选项当场消失, 玩家再也找不回那条线。
+    #    carry_suggestions: 新地方的排前面, 还指着【仍在场的人】的旧选项留着,
+    #    指着已经走掉的人的丢掉 (留着玩家点了个空, 比断线更糟)。
+    sugg = runtime.carry_suggestions(content, st, runtime.arrival_suggestions(content, st))
     st["suggestions"] = sugg
     r.state = st
     if generated:

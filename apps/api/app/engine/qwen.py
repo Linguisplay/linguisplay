@@ -3349,6 +3349,29 @@ def generate_knowledge(name: str, profile: str, world: str = "") -> str:
     )[:2500]
 
 
+def _arrive_people_block(people: list) -> str:
+    """到达旁白的人物名单, 同行者【单列】。
+
+    🎬 Yi 报障 2026-08-06「在场的人像重新认识」: TA 跟着你一路走过来的, 到达旁白却
+    把长相身份从头写一遍 —— 读起来就是第一次见面。分两栏之后, 模型只需要给同行者一个
+    "此刻在做什么", 不必再介绍。
+    """
+    if not people:
+        return "（这里此刻没有别人）"
+    with_you = [p for p in people if p.get("with_you")]
+    here = [p for p in people if not p.get("with_you")]
+    out = []
+    if here:
+        out.append("【本来就在这儿的人】（可以介绍长相身份）")
+        out += [f"- {p.get('name','')}（{p.get('role','')}；与玩家的关系："
+                f"{p.get('relation','')}）：{p.get('look','')}" for p in here]
+    if with_you:
+        out.append("【跟你一起走过来的人】（一路同行；绝不许当成第一次见面重新介绍长相或"
+                   "身份，只写 TA 此刻在做什么、什么姿态）")
+        out += [f"- {p.get('name','')}" for p in with_you]
+    return chr(10).join(out)
+
+
 class QwenLLM:
     # endpoint / key / models — overridden by sibling providers (e.g. DeepSeekLLM). The
     # whole prompt-building + parsing pipeline above is provider-agnostic; only the chat
@@ -4407,9 +4430,7 @@ class QwenLLM:
         the space itself first, then what each person present is DOING right now, and who
         notices the player first. Degrades to {} so runtime assembles a deterministic one."""
         people = prompt.get("people") or []
-        plist = "\n".join(
-            f"- {p.get('name','')}（{p.get('role','')}；与玩家的关系：{p.get('relation','')}）：{p.get('look','')}"
-            for p in people) or "（这里此刻没有别人）"
+        plist = _arrive_people_block(people)
         # 🗺 地点没有描述时不能沿用那条严格规则 (Yi 报障 2026-08-06:「明明是油麻地但是
         # 传送到了餐厅」)。原本发出去的是「地点：油麻地（）」—— 一对空括号, 而规则写着
         # 「必须扣住给出的地点细节」。细节是空的、命令却做不到, 模型只能现编; 而「油麻地」
@@ -4429,7 +4450,15 @@ class QwenLLM:
                   "（写「油麻地」就不能变成「某某茶餐厅」，写「九龙城区」就不能变成「糖水店」）")
         _space_rule = (f"必须扣住给出的地点细节；{_scale}" if _det else
                        f"你只知道地名「{_place}」，没有更多描述——{_scale}")
-        _len = _defer_style(prompt, "写2~4句。")
+        # ✂️ 一屋子都是跟你一起来的人 = 没有"介绍"要做, 一句话交代换了地方就够。
+        #    整段运镜砸下来正是 Yi 说的「一大段景砸下来，像插播广告」。
+        _len = _defer_style(prompt, "只写1句，交代换了地方就停。" if prompt.get("brief")
+                            else "写2~4句。")
+        # 🎯 目标随行: 不带它, 这一段结构上只能另起一段, 读着像剧情被清零。
+        _goal = (chr(10) + "【手头这件事没完】玩家眼下要办的是："
+                 + str(prompt.get("goal")).strip()[:60]
+                 + "。换了地方不等于这件事翻篇，景与人的着笔都往它靠一点。"
+                 if str(prompt.get("goal") or "").strip() else "")
         # 🎬 别重开机 (Yi 报障 2026-08-06): 这条路原本只收到 place/detail/slot/people,
         # 没有历史、没有目标、没有刚才发生了什么 —— 它结构上就不可能接着演, 只能把在场
         # 每个人从零再描述一遍, 读起来就是换个地方剧情被清零。照 phone_send 的成例接线。
@@ -4449,7 +4478,7 @@ class QwenLLM:
                    "② 再写此刻在场的每个人【正在做什么】——具体的动作、姿态、注意力所在，一人一笔。\n"
                    "这是一位看不见的观众在换机位：场景里【没有任何人到来】，绝不能有人抬头、察觉、"
                    "感到被注视或对空气说话。不要剧透，不要总结抒情。只输出旁白本身。"
-                   + _cont + _sty
+                   + _cont + _goal + _sty
                    + _STYLE_PUNCT + _lang_rule(prompt) + _era_rule(prompt))
             u = (f"{_where}\n"
                  f"时间：{prompt.get('slot','') or '不明'}\n"
@@ -4463,7 +4492,7 @@ class QwenLLM:
                    "一人一笔，谁都不能只是'站在那里'；\n"
                    "③ 最后写谁最先注意到玩家进来、那一瞬的反应（一个眼神/动作即可，不写对话）。\n"
                    "不要替玩家做动作或说话，不要剧透，不要总结抒情。只输出旁白本身。"
-                   + _cont + _sty
+                   + _cont + _goal + _sty
                    + _STYLE_PUNCT + _lang_rule(prompt) + _era_rule(prompt))
             u = (f"{_where}\n"
                  f"时间：{prompt.get('slot','') or '不明'}\n"

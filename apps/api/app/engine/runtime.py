@@ -4025,6 +4025,42 @@ def set_place_detail(content: dict[str, Any], state: dict[str, Any],
     return loc
 
 
+def carry_suggestions(content: dict[str, Any], state: dict[str, Any],
+                      fresh: list[str], cap: int = 4) -> list[str]:
+    """🧵 换个地方, 聊到一半的线不许断 (Yi 报障 2026-08-06)。
+
+    从前是 `st["suggestions"] = arrival_suggestions(...)` —— 整批覆盖。于是刚才那人
+    问你的话、刚定下的事, 指着它的那几个选项当场消失, 玩家再也找不回那条线。
+
+    规矩两条, 缺一不可:
+      · 还指着【此刻仍在场】的人的旧选项, 留着 —— 那条线还活着。
+      · 指着已经不在场的人的, 必须丢 —— 留着玩家点了个空, 比断线更糟。
+    新地方的建议永远排在前面 (刚换了景, 先给此地的抓手)。
+    """
+    # ⚠️ 排除玩家自己, 而且只认 ≥2 字的名字。建议全是玩家的第一人称动作, 玩家的面具
+    #    十有八九就叫「我」—— 拿它去匹配, 每一条建议都会被判成"这条线还活着", 于是
+    #    过期的线一条都丢不掉 (实弹: 人都走了还留着「我追问蓝信一…」)。
+    pcid = state.get("player_character_id")
+    here = {(c.get("name") or "").strip()
+            for c in scene_characters(content, state)
+            if c.get("name") and c.get("id") != pcid and len((c.get("name") or "").strip()) >= 2}
+    kept = []
+    for s0 in (state.get("suggestions") or []):
+        t = str(s0 or "").strip()
+        if not t or t in fresh:
+            continue
+        named = [n for n in here if n and n in t]
+        if named:                      # 这条线上的人还在 → 线还活着
+            kept.append(t)
+    out = list(fresh) + kept
+    seen, dedup = set(), []
+    for t in out:
+        if t not in seen:
+            seen.add(t)
+            dedup.append(t)
+    return dedup[:cap]
+
+
 def arrival_narration(content: dict[str, Any], state: dict[str, Any], persona: dict[str, Any],
                       llm: LLM | None = None,
                       beat_log: list[dict[str, Any]] | None = None) -> str:
@@ -4042,9 +4078,12 @@ def arrival_narration(content: dict[str, Any], state: dict[str, Any], persona: d
         if c.get("id") == pcid or not c.get("name"):
             continue
         mode = relationships.derive_mode(c, rels.get(c.get("id")) or relationships.new_scores(), tun)
+        # 🎬 谁是【跟你一起走过来的】。同行的人到了新地方不该被从头介绍一遍长相身份 ——
+        # 那读起来就是第一次见面 (Yi 报障 2026-08-06 勾中的四条症状之一)。
         people.append({"name": c["name"], "role": (c.get("role") or "").strip(),
                        "look": _first_sentence(c.get("persona_text") or "", 60),
-                       "relation": relationships.name_of(mode)})
+                       "relation": relationships.name_of(mode),
+                       "with_you": c.get("id") in (state.get("following") or [])})
     try:
         out = llm.generate({"arrive": True, "era": era_of(content),
                             "place": loc.get("name") or "", "detail": (loc.get("detail") or "")[:160],
@@ -4057,6 +4096,11 @@ def arrival_narration(content: dict[str, Any], state: dict[str, Any], persona: d
                             "recent": [b for b in (beat_log or [])
                                        if (b or {}).get("text")][-4:],
                             "style": (content.get("story") or {}).get("style") or "",
+                            # 🎯 目标随行: 不带它, 这段结构上只能另起一段, 读着像剧情清零
+                            "goal": (state.get("goal") or "")[:60],
+                            # ✂️ 一屋子都是跟你一起来的人 = 没有"介绍"要做, 一句话交代换了
+                            #    地方就够。整段运镜砸下来正是玩家说的「插播广告」。
+                            "brief": bool(people) and all(p.get("with_you") for p in people),
                             # 👁 god mode: an unseen viewpoint drifts in — nobody may notice
                             "observer": (state.get("mode") or "character") == "god",
                             "player_name": (persona or {}).get("name") or ""}) or {}
