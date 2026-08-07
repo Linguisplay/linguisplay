@@ -4466,9 +4466,20 @@ class QwenLLM:
         _rec_txt = "\n".join(
             f"- {(r.get('speaker_name') or ('你' if r.get('author') == 'player' else '旁白'))}：{str(r.get('text'))[:70]}"
             for r in _rec)
+        # ⚠️ 喂了上一场, 就【必须同时说清谁不在】(玩家报障 2026-08-07)。
+        # 只加「接着刚才那一场演」而不加这半句, 模型会把上一场的人一起搬进新场景 ——
+        # 实况: 玩家独自走到警署 (scene_characters 只剩自己、following 空、char_pins 空),
+        # 旁白却写「蓝信一靠在走廊入口，手指转着打火机」。人不在场、不同行、地图上也没有,
+        # 却在正文里活灵活现, 正是本仓最忌的文与实分家。
+        _names = "、".join(str(p.get("name") or "") for p in people if p.get("name"))
         _cont = ("\n【接着刚才那一场演】上一场的事没有翻篇：人物心里还挂着刚才说的话、"
                  "刚定下的事、刚起的疙瘩。到了新地方，谁先开口、什么姿态，都要接得上，"
-                 "别把在场的人当成第一次见面重新介绍一遍。" if _rec_txt else "")
+                 "别把在场的人当成第一次见面重新介绍一遍。"
+                 "\n【但人不会自己跟过来】此刻在这儿的【只有】"
+                 + (f"「{_names}」。" if _names else "玩家一个人，没有别人。")
+                 + "刚才那一场里的其他人【不在这里】，绝不许让他们出现、说话、"
+                   "或者被写成在场的样子。想他们可以，写他们在场不行。"
+                 if _rec_txt else "")
         _sty = (f"\n【文风·必须贴住】这个故事的叙事声音（优先级高于任何通用文风习惯）：\n"
                 + str(prompt.get("style") or "").strip()) if str(prompt.get("style") or "").strip() else ""
         if prompt.get("observer"):

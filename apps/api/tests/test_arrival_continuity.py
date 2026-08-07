@@ -179,3 +179,32 @@ def test_runtime_arrival_survives_without_a_beat_log():
     st = runtime.default_state()
     st["location_id"] = "kc"
     assert runtime.arrival_narration(CONTENT, st, {"name": "蔡妍"}, llm=_Spy())
+
+
+# ── ⚠️ 2026-08-07 玩家报障: 到达旁白把上一场的人一起搬过来了 ──────────────────
+#
+# 实况: 玩家独自走到西九龙警署总部, scene_characters 只有玩家自己 (following 空、
+# char_pins 空), 而到达旁白写着「蓝信一靠在走廊入口那块指示牌下面，手指转着打火机」
+# —— 人不在场、不同行、地图上也没有, 却在正文里活灵活现。文与实分家。
+#
+# 根因是我昨天那一刀: 为治「换地方剧情被清零」, 我把最近几拍喂进了到达旁白, 还加了
+# 「接着刚才那一场演，别把在场的人当第一次见面重新介绍一遍」。但我【没告诉它谁不在】。
+# 上一场的人出现在 recent 里, 模型就顺理成章地把他们一起搬进新场景。
+# 接上下文是对的, 缺的是那半句: 只有名单上这些人在这儿。
+
+def test_the_arrival_never_carries_absent_people_over():
+    t = _both(_prompt_for(DISTRICT, recent=RECENT))
+    assert any(k in t for k in ("不在这里", "不在场", "只有", "名单上")), \
+        f"喂了上一场却没说谁不在 —— 模型会把人一起搬过来:\n{t[:500]}"
+
+
+def test_an_empty_room_says_so():
+    """一个人都没有时, 得明说这儿没别人 —— 否则模型最省事的写法就是补几个人进来。"""
+    box = _prompt_for(DISTRICT, recent=RECENT, people=[])
+    t = _both(box)
+    assert "没有别人" in t or "没有其他人" in t or "空" in t
+
+
+def test_the_present_list_is_still_the_authority():
+    """在场名单照旧要喂 —— 这一刀不许把它也一起掐了。"""
+    assert "蓝信一" in _both(_prompt_for(DISTRICT, recent=RECENT))
