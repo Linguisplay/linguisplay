@@ -64,13 +64,21 @@ def test_block_edge_does_move_eventually():
 
 
 def test_window_never_shrinks_below_the_contract():
-    """窗口不许比 MEMORY_WINDOW 还小: 少给历史等于让角色更健忘。"""
+    """窗口不许比 MEMORY_WINDOW 还小: 少给历史等于让角色更健忘。
+
+    ⚠️ 这条断言原本拿【消息条数】去比 MEMORY_WINDOW 这个【玩家回合数】—— 单位是错的,
+    从前 20 >= 14 纯属数值上碰巧成立。2026-08-06 窗口从 14 抬到 24 时当场露馅。
+    现在按回合数, 且只在历史真的够长时才要求填满。
+    """
     from app.engine import runtime
     for n in (20, 25, 31, 44):
         h = [m for m in _msgs(n) if m.get("role") in ("user", "assistant")]
-        assert len(h) >= runtime.MEMORY_WINDOW, \
-            f"历史 {n} 条时只喂了 {len(h)} 条, 少于合同 {runtime.MEMORY_WINDOW}"
-
+        turns = sum(1 for m in h if m.get("role") == "user")
+        # _hist(n) 里 n 是【消息条数】, 偶数位才是玩家 → 可用回合 = ceil(n/2)
+        avail = (n + 1) // 2
+        want = min(avail, runtime.MEMORY_WINDOW)
+        assert turns >= want, (
+            f"历史 {avail} 个回合时只喂了 {turns} 个, 少于应有的 {want}")
 
 # ── 窗口口径: 数【玩家回合】而不是数【消息条数】 (旁白进记忆之后的必修) ──────────
 

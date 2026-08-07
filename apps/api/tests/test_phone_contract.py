@@ -130,11 +130,15 @@ def test_long_thread_folds_into_the_characters_memory():
     assert "第0句" in (st["memory_by_char"]["b"])     # old talk survives in the digest
     assert th["digested_upto"] == 30 - 12
     # capping the thread never desyncs the pointer
-    for i in range(40):
+    # ⚠️ 造的量必须真的越过上限, 否则这条断言在空转 (2026-08-06 上限 60→200 时
+    #    这里原本写死 40 条, 加起来才 70, 一刀都掐不到)
+    _before = len(th["msgs"])
+    _over = runtime.THREAD_MSG_CAP + 10 - _before
+    for i in range(_over):
         th["msgs"].append({"from": "me", "text": f"新{i}", "at": ""})
     runtime._thread_cap(th)
-    assert len(th["msgs"]) == 60
-    assert th["digested_upto"] == max(0, (30 - 12) - (70 - 60))
+    assert len(th["msgs"]) == runtime.THREAD_MSG_CAP
+    assert th["digested_upto"] == max(0, (30 - 12) - 10)
 
 
 class MockLLMForDigest:

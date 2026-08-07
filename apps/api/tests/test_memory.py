@@ -52,7 +52,10 @@ def test_short_run_keeps_memory_empty():
 
 
 def test_long_run_accumulates_digest():
-    state, history = _drive(15)
+    # 「长」的定义跟着窗口走: 逐字窗口 = MEMORY_WINDOW 个回合, 再多 MEMORY_BATCH 个
+    # 才够折一次。2026-08-06 窗口 14→24 之后, 写死的 15 回合就再也折不出摘要了。
+    # 折得更晚不是退步 —— 那些回合现在【原样】在提示词里, 比摘要更全。
+    state, history = _drive(runtime.MEMORY_WINDOW + runtime.MEMORY_BATCH + 4)
     # the digest has fired and advanced past the window
     assert state["memory"], "expected a non-empty rolling digest on a long run"
     assert state["memory_covered"] > 0

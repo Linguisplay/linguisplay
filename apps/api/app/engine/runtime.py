@@ -188,7 +188,12 @@ def default_state() -> dict[str, Any]:
 _RANK = {"enemy": -1, "stranger": 0, "junior": 1, "elder": 1, "peer": 1,
          "friend": 2, "flirt": 3, "lover": 4}
 
-MEMORY_WINDOW = 14  # dialogue turns shown verbatim — MUST match qwen.py's history[-14:]
+# 🧠 逐字窗口 = 多少个【玩家回合】原样进提示词 (Yi 2026-08-06:「要存更多的聊天记录」)。
+# 14 太小: 生产 177 局里 24 局 (13%) 会被它切掉东西。抬到 24 之后只剩 ~8 局。
+# 敢抬是因为【窗口是上限不是下限】—— 玩家发言数中位只有 2, 短局拿到的东西
+# 一个字不变, 这一刀对 87% 的局零成本; 延迟只由超窗的那 13% 承担, 而那批
+# 恰恰是玩得最投入的人。真正的切分逻辑在 qwen.history_window (那边是唯一实现)。
+MEMORY_WINDOW = 24
 MEMORY_BATCH = 6    # summarize only once this many turns have slid out of the window
 
 # Stuck-hint escalation: consecutive locked-act turns with no new required clue. NUDGE =
@@ -5284,13 +5289,19 @@ def _thread(state: dict[str, Any], cid: str) -> dict[str, Any]:
     return ph.setdefault("threads", {}).setdefault(cid, {"msgs": [], "unread": 0})
 
 
+# 📱 一条线程留多少条消息。60 → 200 (Yi 2026-08-06:「要存更多的聊天记录」)。
+# 存储根本不是瓶颈: 生产 state JSON 中位 5KB、最大 48KB, 手机线程最大才 2KB,
+# 整个 DB 42MB。而主动引擎一上线, 角色开始频繁找玩家, 60 条很快就不够。
+THREAD_MSG_CAP = 200
+
+
 def _thread_cap(th: dict[str, Any]) -> None:
     """Cap a thread at 60 messages WITHOUT breaking the digest pointer (indices shift
     when the front is dropped — an uncorrected pointer silently loses undigested talk)."""
     msgs = th.get("msgs") or []
-    if len(msgs) > 60:
-        dropped = len(msgs) - 60
-        th["msgs"] = msgs[-60:]
+    if len(msgs) > THREAD_MSG_CAP:
+        dropped = len(msgs) - THREAD_MSG_CAP
+        th["msgs"] = msgs[-THREAD_MSG_CAP:]
         th["digested_upto"] = max(0, int(th.get("digested_upto") or 0) - dropped)
     # ⏳ 待发也要封顶。放在这里而不是写入处 —— 写入有好几条路 (延迟回复/已读的补偿句/
     # 老档), 而每条消息落账都会过 _thread_cap, 这是唯一必经的收口。存档的 state 是一个

@@ -93,6 +93,64 @@ def style_head(style: "str | None", cap: int) -> str:
     return s[:cap] + "…" + "".join(tail)
 
 
+# 🧠 逐字历史窗口 (Yi 2026-08-06:「要存更多的聊天记录」)。
+#
+# 单一来源: 从前 qwen 这边硬写 `_W, _B = 14, 6`, runtime 那边注释写着「MUST match
+# qwen.py's history[-14:]」—— 靠人记住两处对齐, 迟早会飘。现在从 runtime 读。
+#
+# 为什么敢从 14 抬上来: 【窗口是上限不是下限】。生产 177 局玩家发言数中位只有 2,
+# 一局 5 个回合时窗口 14 和 24 拿到的东西一模一样 —— 这一刀对 87% 的局零成本。
+# 代价只落在超过 14 轮的那 13% 身上 (实测: 提示词 14.5k→18.7k 字符, 控制住缓存
+# 命中率后中位耗时 5745→8545ms), 而那批恰恰是玩得最投入的人。
+#
+# 字符预算是兜底: 正文特别长的本子不许把提示词撑爆。生产中位一条正文 62 字,
+# 正常本子永远碰不到这条线。
+HISTORY_CHAR_BUDGET = 9000
+
+
+def _hist_consts() -> "tuple[int, int]":
+    from .runtime import MEMORY_BATCH, MEMORY_WINDOW
+    return MEMORY_WINDOW, MEMORY_BATCH
+
+
+HISTORY_WINDOW_TURNS, HISTORY_BLOCK_TURNS = _hist_consts()
+
+
+def history_window(history: "list[dict[str, Any]]",
+                   window: int | None = None, block: int | None = None,
+                   budget: int | None = None) -> "list[dict[str, Any]]":
+    """🧊 块状滑窗: 留最近 window 个【玩家回合】, 但边界每 block 个回合才挪一次。
+
+    每回合挪一格的话 (第N回合 [3..16], 第N+1回合 [4..17]), 开头那条一掉, 整段消息
+    序列的前缀就跟上一回合对不上, 前缀缓存当场断。块内的连续回合逐字相同, 缓存才
+    吃得满 (全站命中率 39%, 主拍靠的就是这个边界)。
+    代价是最多多带 block 个回合 —— 上下文变多不变少, 方向安全。
+
+    口径是【玩家回合】不是【消息条数】: 2026-08-04 旁白也进记忆之后, 一个回合从
+    2 条变成 3 条消息, 按条数切会让覆盖的回合数从 7 掉到 6 —— 本来是要让角色更记得,
+    结果更健忘了。
+
+    最后过一道字符预算, 从头往回砍整回合 (绝不砍出半个回合), 至少留 3 个回合。
+    """
+    W = HISTORY_WINDOW_TURNS if window is None else window
+    B = HISTORY_BLOCK_TURNS if block is None else block
+    CAP = HISTORY_CHAR_BUDGET if budget is None else budget
+    turns = [i for i, m in enumerate(history) if m.get("role") == "user"]
+    if len(turns) > W:
+        edge = ((len(turns) - W) // max(1, B)) * max(1, B)
+        start = turns[edge] if edge < len(turns) else 0
+    else:
+        start = 0
+    out = history[start:]
+    # 字符预算: 超了就从头丢整回合, 但不许把最近 3 个回合也丢掉 (那等于失忆)
+    while sum(len(m.get("content") or "") for m in out) > CAP:
+        heads = [i for i, m in enumerate(out) if m.get("role") == "user"]
+        if len(heads) <= 3:
+            break
+        out = out[heads[1]:]
+    return out
+
+
 def _defer_style(prompt: "dict[str, Any] | None", default: str) -> str:
     """✍️ 旁白的长短归作者, 但作者的话得放到【真能起作用的位置】(Yi: 文风问题调剧本)。
 
@@ -2731,14 +2789,7 @@ def _turn_messages(prompt: dict[str, Any], system: str, speaker: str) -> list[di
         # 口径是【玩家回合】不是【消息条数】: 2026-08-04 旁白也进记忆之后, 一个回合
         # 从 2 条变成 3 条消息, 按条数切会让覆盖的回合数从 7 掉到 6 —— 本来是要让角色
         # 更记得, 结果更健忘了。所以先按玩家拍(role=user)定块边界, 再从那儿取到末尾。
-        _W, _B = 14, 6                       # 窗口 = MEMORY_WINDOW; 块 = MEMORY_BATCH
-        _turns = [i for i, m in enumerate(history) if m.get("role") == "user"]
-        if len(_turns) > _W:
-            _edge = ((len(_turns) - _W) // _B) * _B      # 块状: 每 _B 个回合才挪一次
-            _start = _turns[_edge] if _edge < len(_turns) else 0
-        else:
-            _start = 0
-        hist = history[_start:]
+        hist = history_window(history)   # 🧠 单一来源, 见 history_window 的原委
         if is_observer:
             # 👁 god mode: the viewer's lines are STAGE DIRECTIONS, never audible —
             # mark every one (current AND past) so no character ever "hears" them
