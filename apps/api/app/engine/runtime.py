@@ -468,6 +468,29 @@ def _t(content: dict[str, Any], zh: str, en: str) -> str:
     return en if lang_of(content) == "en" else zh
 
 
+# 🗣 叙述者记号。必须跟 qwen._LineSegmenter 认的那个一致 —— 历史里的示范长什么样,
+# 模型就照着写什么样。见 history_for 里的原委 (2026-08-07 的「不能发言」就是它)。
+NARRATOR_TAG = "旁白："
+
+
+def speechless_turn(beats: list[dict[str, Any]] | None, channel: str = "say") -> bool:
+    """🔭 这一拍【被直接搭话却一句台词都没有】吗。
+
+    2026-08-07 的报障就是这个形状: 模型内容对、但行首前缀没了, 台词整坨落进旁白,
+    角色看起来彻底哑了。当时没有任何读口能看出来, 只能等玩家来骂 —— 而这次就是
+    等来的。所以补一个能数的口子, 别让同类问题再无声烂掉。
+
+    只在【玩家开口说话】那一路算数: 玩家做动作 (do) 时角色不吭声是合法的。
+    """
+    if channel != "say":
+        return False
+    for b in beats or []:
+        if b.get("type") == "dialogue" and b.get("author") != "player" \
+                and str(b.get("speaker_name") or "").strip():
+            return False
+    return True
+
+
 def history_for(beat_log: list[dict[str, Any]] | None, char_id: str | None) -> list[dict[str, str]]:
     """A character's PERSONAL view of the conversation: only the beats they witnessed (were
     present for). Legacy beats (present_ids None) are witnessed by everyone. This is what
@@ -490,8 +513,19 @@ def history_for(beat_log: list[dict[str, Any]] | None, char_id: str | None) -> l
             # 三句台词。这是「记不住」的头号根因, 而且补这一处等于修两层
             # (逐字近史窗与滚动摘要共用这个入口)。
             # 认知边界照旧走上面的 present_ids 闸 —— 我不在场的那场雨我不该记得。
-            # 不贴说话人前缀: 旁白不是谁说的话, 贴了模型会学着把旁白写成台词。
-            out.append({"role": "assistant", "content": (b.get("text") or "").strip()})
+            #
+            # 🗣 贴「旁白：」这个协议记号 (Yi 报障 2026-08-07:「角色现在不能发言了」)。
+            # 从前这里【不贴任何前缀】, 理由写的是「贴了模型会学着把旁白写成台词」——
+            # 那说的是贴【角色名】。而输出协议 (_LineSegmenter) 要求每一行都有身份前缀:
+            # 「旁白：」或「名字：」, 没前缀的行一律降级成旁白。
+            #
+            # 于是形成一个自我强化的污染回路: 某一拍模型忘了打前缀 → 整坨落成一条
+            # description → 那条【不带前缀】的东西进历史成了「我平时这么写」的示范 →
+            # 下一拍更不打前缀。生产实测 8/6 角色台词占比 52%, 8/7 掉到 13%。
+            # 2026-08-06 逐字窗口 14→24 把污染示范一次加了 70%, 回路当天跑飞。
+            # 窗口本身没错 —— 错的是历史里的示范跟要求的输出格式对不上。
+            out.append({"role": "assistant",
+                        "content": NARRATOR_TAG + (b.get("text") or "").strip()})
     return out
 
 
