@@ -158,6 +158,21 @@ def test_map_random_walk(title, content, seed):
                 trail.append(f"跟-{c.get('name')}")
             except ValueError:
                 pass
+        elif act < 0.94:                            # ⏭ 换幕 + 对时 (作息表跟着幕走)
+            nxt = max(1, min(9, int(state.get("act") or 1) + rnd.choice([-1, 1])))
+            state["act"] = nxt
+            runtime.align_clock_to_act(content, state, nxt)
+            trail.append(f"幕→{nxt}")
+        elif act < 0.97:                            # ➕ 玩家自己加一个地方 (局内编辑地图)
+            got = runtime.add_place(content, state, f"临时去处{rnd.randint(1, 999)}")
+            trail.append("加地点" + ("✓" if got else "✗"))
+        elif act < 0.99 and cast and ids:           # 🚶 带路人换场 (commit_move 的 lead_id)
+            c = rnd.choice(cast)
+            dest = next((l for l in content["story"]["locations"]
+                         if l.get("id") == rnd.choice(ids)), None)
+            if dest:
+                runtime.commit_move(content, state, dest, lead_id=c.get("id"))
+                trail.append(f"带{c.get('name')}→{dest.get('id')}")
         else:
             trail.append("原地")
         _check(content, state, trail, title)
@@ -182,3 +197,43 @@ def test_leaving_drops_the_pins_behind(title, content):
         pytest.skip("这本从起点走不到别处")
     left = (state.get("char_pins") or {}).get(cast[0]["id"])
     assert left != start, f"离开 {start} 之后, {cast[0].get('name')} 的钉还留在那儿"
+
+
+# ── 🧪 红样本自验: 这套不变量不许是空转的 ────────────────────────────────────────
+# 生产 22 本 × 7 种子 × 800 步 = 12.3 万步全绿。一个从来不红的 fuzz 最可疑的
+# 就是它压根没在测, 所以两条各配一个红样本, 打掉能力必须当场开枪。
+
+def test_red_sample_the_pin_check_really_fires(monkeypatch):
+    """打掉「离开即拔钉」→ ⑦ 必须红。"""
+    monkeypatch.setattr(runtime, "_drop_pins_on_leave", lambda *a, **k: None)
+    title, content = STORIES[0]
+    with pytest.raises(AssertionError):
+        test_leaving_drops_the_pins_behind(title, content)
+
+
+def test_red_sample_the_map_check_really_fires(monkeypatch):
+    """把地图上的人挪到别的节点 → ⑤ 必须红 (两个读口对不上正是最难自查的那类)。
+
+    ⚠️ 红样本本身也得跟数据形状无关: 第一版靠「找两个都有人的节点」来制造矛盾,
+    而本机夹具只有一个节点有人, 于是红样本静静空转 —— 一个不会红的红样本
+    比没有红样本更坏。改成硬塞一个必然错位的名字。
+    """
+    orig = runtime.map_view
+    title, content = STORIES[0]
+    who = next((c.get("name") for c in runtime._characters(content) if c.get("name")), None)
+    if not who:
+        pytest.skip("这本没有具名角色")
+
+    def bad(c, st):
+        mv = orig(c, st)
+        pos = runtime.char_position(c, st, runtime._char_by_id(c, next(
+            x["id"] for x in runtime._characters(c) if x.get("name") == who)))
+        for n in (mv.get("nodes") or []):
+            if n.get("id") != pos:                 # 挂到一个【肯定不是他】的节点上
+                n["chars"] = list(n.get("chars") or []) + [who]
+                break
+        return mv
+
+    monkeypatch.setattr(runtime, "map_view", bad)
+    with pytest.raises(AssertionError):
+        test_map_random_walk(title, content, 1)
