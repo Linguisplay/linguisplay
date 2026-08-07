@@ -158,6 +158,53 @@ def test_an_unmet_character_is_never_due():
     assert not runtime.relation_read_due(_st(), "a", 9)
 
 
+# ── ⚠️ 生产真走的那条路 (2026-08-07 查错抓到: 上面那些全绿, 它却是坏的) ──────────
+#
+# 上面每一条都显式传了 at=n, 于是量纲永远自洽。而生产里唯一的落账路径是
+# apply_pending_reads —— 它【不传 at】, 落的是 _time_index (日×3+时段);
+# 而 relation_read_due 拿 turn_seq (每拍 +1) 去减它。两把尺量纲不同, 两头都坏:
+#   · 钟点走得慢而回合走得快 → 差值永久 >= 6 → 每拍每人都开一次判官
+#   · 本子跳很多天 → 差值永远是负 → 判过一次之后再也不重判
+# 教训跟今早那条一样: 测试要测【调用方真走的那条路】, 不是测我方便传参的那条。
+
+def _land(st, cid, out):
+    """走生产的落账路径: 后台线程放成品 → 下一回合合账 (不传 at)。"""
+    runtime._REL_PENDING["tok"] = {cid: out}
+    st["reads_pending"] = "tok"
+    runtime.apply_pending_reads(st)
+
+
+def test_the_production_path_uses_the_same_ruler():
+    st = _st(met_ids=["a"], clock={"day": 2, "slot": 1}, turn_seq=5)
+    _land(st, "a", {"mode": "熟人", "feeling": "还行"})
+    at = st["rel_read"]["a"]["at"]
+    assert at == 5, f"落账写的不是 turn_seq 而是 {at} —— 跟判到期的尺不是同一把"
+
+
+def test_the_cadence_holds_on_the_production_path():
+    """30 拍应当开 ~5 次。查错实测: 修之前开了 18 次。"""
+    st = _st(met_ids=["a"], clock={"day": 2, "slot": 1})
+    fired = 0
+    for n in range(1, 31):
+        st["turn_seq"] = n
+        if runtime.relation_read_due(st, "a", n):
+            fired += 1
+            _land(st, "a", {"mode": "x", "feeling": "y"})
+    assert 3 <= fired <= 7, f"30 拍里开了 {fired} 次判官 (RELREAD_EVERY=6, 应该 ~5 次)"
+
+
+def test_a_story_that_skips_days_still_gets_rejudged():
+    """查错实测: 跳到第 20 天的档, 修之前 30 拍一次都不判 —— 功能直接死掉。"""
+    st = _st(met_ids=["a"], clock={"day": 20, "slot": 1})
+    fired = 0
+    for n in range(1, 31):
+        st["turn_seq"] = n
+        if runtime.relation_read_due(st, "a", n):
+            fired += 1
+            _land(st, "a", {"mode": "x", "feeling": "y"})
+    assert fired >= 3, f"跳天数的档 30 拍只判了 {fired} 次"
+
+
 # ── ④ 判出来的东西必须真进提示词, 否则关系只是个摆设 ──────────────────────────
 
 def _sys(**kw):

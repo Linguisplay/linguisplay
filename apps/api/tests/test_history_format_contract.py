@@ -38,9 +38,32 @@ def _h():
 
 def test_narration_carries_the_narrator_prefix():
     """不贴前缀的旁白就是污染示范 —— 模型照着它写, 台词也不打前缀了。"""
-    narr = [m for m in _h() if "抹掉嘴角" in m["content"]][0]
+    narr = [m for m in runtime.history_for(BEATS, "a", tag_narration=True)
+            if "抹掉嘴角" in m["content"]][0]
     assert narr["content"].startswith("旁白："), \
         f"旁白进历史时没贴协议记号: {narr['content'][:30]!r}"
+
+
+def test_the_tag_is_off_unless_the_story_uses_the_line_protocol():
+    """⚠️ 这一条是 2026-08-07 当天的教训: 无条件贴出了比原病更大的祸。
+
+    行首前缀是 _LineSegmenter 的协议, 而它只活在 plan_and_render 的拍2 (还是 zh-only)。
+    走 tool-call 的本子里 narration 与 speech 是两个独立 JSON 字段, 根本没有前缀这回事。
+    给它们看「旁白：」的示范, 模型会把这六个字【写进正文】原样印给玩家, 逐拍叠加成
+    「旁白：旁白：…」; 英文本还平白多两个汉字, 正好卡在 _lang_break 的 >=2 阈值上,
+    每拍白白推倒重生一次。
+    """
+    narr = [m for m in _h() if "抹掉嘴角" in m["content"]][0]
+    assert not narr["content"].startswith("旁白："), \
+        "默认还在贴 —— tool-call 的本子会把这六个字印给玩家"
+
+
+def test_a_tool_call_story_never_sees_the_tag():
+    """真正的判据: 贴不贴要跟着 plan_render_on 走, 不是跟着心情走。"""
+    import inspect
+    src = inspect.getsource(runtime)
+    assert "tag_narration=plan_render_on(content)" in src, \
+        "主拍那两处没有把开关接到 plan_render_on 上"
 
 
 def test_dialogue_still_carries_the_speaker():
@@ -49,12 +72,15 @@ def test_dialogue_still_carries_the_speaker():
     assert d["content"].startswith("蓝信一："), d["content"][:30]
 
 
-def test_every_assistant_line_is_parseable():
-    """真正的合同: 历史里每一条助手消息, 都要能被 _LineSegmenter 认出身份。
-    认不出的那条, 就是在教模型写出认不出的东西。"""
-    import re
+def test_every_assistant_line_is_parseable_on_the_line_protocol():
+    """真正的合同, 但【只在用行首前缀协议的那条路上成立】: 那条路上历史里每一条
+    助手消息都要能被 _LineSegmenter 认出身份, 认不出的就是在教模型写出认不出的东西。
+
+    走 tool-call 的本子不适用 —— 那边 narration 与 speech 本来就是两个独立字段,
+    历史贴前缀反而会把记号印进正文 (见 test_the_tag_is_off_unless_...)。
+    """
     pref = qwen._line_prefix_re()
-    for m in _h():
+    for m in runtime.history_for(BEATS, "a", tag_narration=True):
         if m["role"] != "assistant":
             continue
         assert pref.match(m["content"]), f"这条历史示范没有身份前缀: {m['content'][:36]!r}"
@@ -132,3 +158,22 @@ def test_the_story_gate_checks_that_someone_speaks():
     src = io.open("smoke_stories.py", encoding="utf-8").read()
     assert "speechless" in src or "没人说话" in src, \
         "剧本冒烟门还是只看有没有 beats, 不看角色开没开口"
+
+
+# ── 🏷 别给已经有身份的行再叠一层 (2026-08-07 查错; 这一条比今天老得多) ────────
+
+def test_the_judges_do_not_double_label():
+    """dialogue 进历史时一直带着「蓝信一：」, 而下游判官又一律前置「角色：」——
+    喂进去的是「角色：蓝信一：小伤。」, 判官读到的说话人是错的。
+    摘要与关系判断都建在这上面, 所以这条是双份的歪。"""
+    L = [{"role": "user", "content": "你还好吗"},
+         {"role": "assistant", "content": "蓝信一：小伤。"},
+         {"role": "assistant", "content": "旁白：雨下得很大。"}]
+    got = [qwen.QwenLLM._labelled(x, "角色：") for x in L]
+    assert got == ["玩家：你还好吗", "蓝信一：小伤。", "旁白：雨下得很大。"], got
+
+
+def test_a_bare_line_still_gets_labelled():
+    """没有前缀的行仍要标上 —— 别把这一刀改成「一律不标」。"""
+    assert qwen.QwenLLM._labelled({"role": "assistant", "content": "他抬起头。"},
+                                  "角色：") == "角色：他抬起头。"

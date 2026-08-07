@@ -496,7 +496,8 @@ def speechless_turn(beats: list[dict[str, Any]] | None, channel: str = "say",
     return True
 
 
-def history_for(beat_log: list[dict[str, Any]] | None, char_id: str | None) -> list[dict[str, str]]:
+def history_for(beat_log: list[dict[str, Any]] | None, char_id: str | None,
+                tag_narration: bool = False) -> list[dict[str, str]]:
     """A character's PERSONAL view of the conversation: only the beats they witnessed (were
     present for). Legacy beats (present_ids None) are witnessed by everyone. This is what
     stops info silently leaking between characters/scenes — each one only recalls what it saw."""
@@ -529,8 +530,16 @@ def history_for(beat_log: list[dict[str, Any]] | None, char_id: str | None) -> l
             # 下一拍更不打前缀。生产实测 8/6 角色台词占比 52%, 8/7 掉到 13%。
             # 2026-08-06 逐字窗口 14→24 把污染示范一次加了 70%, 回路当天跑飞。
             # 窗口本身没错 —— 错的是历史里的示范跟要求的输出格式对不上。
+            # ⚠️ 只在【真的用行首前缀协议】的那条路上贴 (2026-08-07 当天的教训:
+            # 无条件贴出了更大的祸)。行首前缀是 _LineSegmenter 的协议, 而它只活在
+            # plan_and_render 的拍2; 那条路还是 zh-only。走 tool-call 的本子里
+            # narration 与 speech 是两个独立 JSON 字段, 根本没有前缀这回事 ——
+            # 给它们看「旁白：」的示范, 模型会把这六个字【写进正文】原样印给玩家,
+            # 而且逐拍叠加成「旁白：旁白：…」。英文本更惨: 平白多两个汉字,
+            # 正好卡在 _lang_break 的 >=2 阈值上, 每拍白白推倒重生一次。
             out.append({"role": "assistant",
-                        "content": NARRATOR_TAG + (b.get("text") or "").strip()})
+                        "content": (NARRATOR_TAG if tag_narration else "")
+                        + (b.get("text") or "").strip()})
     return out
 
 
@@ -9572,7 +9581,9 @@ def _confront_gen(content, state, persona, secret, frag, next_locked, target, ll
         persona_for_prompt = {**persona_for_prompt, "name": player_char.get("name"),
                               "background": "　".join(b for b in _pc_bits if b)}
     pl_name = persona_for_prompt.get("name") or "对方"
-    sp_hist = history_for(beat_log, char_id) if beat_log is not None else []
+    # 🗣 只有真走行首前缀协议的本子才给旁白贴记号 (plan_render 的拍2 才用 _LineSegmenter)
+    sp_hist = (history_for(beat_log, char_id, tag_narration=plan_render_on(content))
+               if beat_log is not None else [])
     directed = llm.generate({
         "speaker_name": tname,
         "speaker_persona": target.get("persona_text", ""),
@@ -11765,7 +11776,8 @@ def run_turn_stream(
         is_primary = idx == 0
         # each character only recalls what THEY witnessed + their OWN private digest — no
         # silent cross-character/cross-scene info leak.
-        sp_hist = history_for(beat_log, sp_id) if beat_log is not None else (history or [])
+        sp_hist = (history_for(beat_log, sp_id, tag_narration=plan_render_on(content))
+                   if beat_log is not None else (history or []))
         responder_hist[sp_id] = sp_hist
         # 信息不开天眼: a character remembers THEIR digest only; the global digest is
         # the player's whole history and never feeds a character's head
@@ -11781,9 +11793,6 @@ def run_turn_stream(
             "persona": persona_for_prompt,
             "player_input": player_input,
             "channel": channel,
-            # 📱↔🎭 面对面时 TA 记得你刚发的短信 (Yi: 记忆一定要共享, 线上线下不许对不上)。
-            # 折账那条路闸在 18 条, 生产线程中位 13 —— 够不着, 所以"刚聊过"要直接进主拍。
-            "phone_recent": phone_recent_for_scene(content, state, sp_id),
             # 🫂 TA 此刻心里把玩家当什么 (定期由判官读着正文得出, 盖在算术之上)
             "relation_read": (state.get("rel_read") or {}).get(sp_id) or {},
             # 💞 事件记账制旗 (Yi 定): 开着 = 契约只收 rel_event 申报, 不收每句打分
@@ -13358,9 +13367,16 @@ def apply_relation_read(state: dict[str, Any], cid: str,
     feeling = str(out.get("feeling") or "").strip()[:40]
     if not mode and not feeling:
         return False
+    # ⚠️ 这里必须跟 relation_read_due 用【同一把尺】: turn_seq 每拍 +1。
+    # 2026-08-07 查错抓到: 原本默认写的是 _time_index (日×3+时段), 而判到期拿
+    # turn_seq 去减它 —— 量纲不同, 两头都坏: 钟点慢回合快的档差值永久 >=6, 变成
+    # 每拍每人都开一次判官 (实测 30 拍开了 18 次); 跳很多天的档差值永远是负,
+    # 判过一次就再也不重判 (实测 30 拍开 0 次)。
+    # 单测当时全绿, 因为每一条都显式传了 at —— 而生产唯一的落账路径
+    # apply_pending_reads 不传。教训: 要测【调用方真走的那条路】。
     row = {"mode": mode, "feeling": dedash(feeling),
            "why": dedash(str(out.get("why") or "").strip()[:24]),
-           "at": int(at if at is not None else _time_index(state))}
+           "at": int(at if at is not None else (state.get("turn_seq") or 0))}
     state.setdefault("rel_read", {})[cid] = row
     return True
 

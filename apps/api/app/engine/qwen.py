@@ -1419,18 +1419,13 @@ def _build_system(prompt: dict[str, Any]) -> str:
                      + "。这是你此刻真实的心境, 说话做事都从它出发; 不必说破, "
                        "但别演成另一个人。")
 
-    # 📱↔🎭 你俩刚在手机上聊过的 (2026-08-06 Yi 报障「剧情被打断」)。
-    # 从前主拍只拿得到 phone_unread 这个红点数, 一条真实短信都没有 —— 玩家连发五条,
-    # 走到人家面前, 他不知道。折账那条路闸在 18 条, 而线程长度中位 13, 够不着。
-    _ph = [str(x).strip() for x in (prompt.get("phone_recent") or []) if str(x).strip()]
-    if _ph:
-        lines.append("")
-        lines.append("【你和 TA 刚在" + (prompt.get("device") or "手机")
-                     + "上聊过这些】（「你：」是对方发的，「我：」是你发的）：\n"
-                     + "\n".join(_ph)
-                     + "\n这些话【已经说过了】：别当没发生，也别原样再说一遍；"
-                       "当面接着这个由头往下走。")
-
+    # 📱↔🎭 「你俩刚在手机上聊过的」这一块【删了】(2026-08-07 查错)。
+    # 我昨天的结论是错的: 我 grep run_turn_stream 只看到 phone_unread, 就断言
+    # 「主拍完全读不到手机内容」—— 漏了 sms_tail (2026-07-03 就在了, 见上面
+    # 【你们最近捎过的话】那一块, 同样是最近 6 条)。于是我造了个重复的轮子,
+    # 而且人称是【反的】: sms_tail 用「TA=玩家 / 你=角色本人」(跟整份提示词
+    # 「你是蓝信一」一致), 我那块却自己另立一套「你=对方 / 我=你」, 两块同时挂着,
+    # 同一条消息被标成相反的人。留一个就好, 留对的那个。
     # 🎬 本场已经写过的意象 (2026-08-05): 引擎数出来的跨拍复现词, 动笔前摊给模型。
     # 从前这些只喂给【事后】的复读守卫 —— 而守卫一响就是一次整包重生, 又慢又贵,
     # 且模型压根不知道自己刚写过什么。写之前说一句, 比写完了罚它便宜得多。
@@ -3368,6 +3363,20 @@ class QwenLLM:
         # 写正文的调用一律走 self._model — 判断快而便宜, 文笔不省
         self._aux_model = self._model
 
+    @staticmethod
+    def _labelled(line: dict[str, Any], fallback: str) -> str:
+        """🏷 history_for 的每一行【可能已经自带身份前缀】了 —— 别再叠一层。
+
+        2026-08-07 查错抓到: dialogue 进历史时一直带着说话人前缀 (这一条比今天老得多),
+        而下游 _summarize / _relation_read 又一律前置「角色：」, 于是喂给判官的是
+        「角色：某某：那句话」—— 判官读到的说话人是错的, 摘要与关系判断跟着歪。
+        旁白在 plan_render 的本子上也会带「旁白：」, 叠起来就更明显。
+        """
+        txt = str(line.get("content") or "")
+        if line.get("role") == "user":
+            return "玩家：" + txt
+        return txt if _line_prefix_re().match(txt) else fallback + txt
+
     def _relation_read(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """🫂 定时重判: 这个人跟玩家现在到底算什么关系, 心里对 TA 什么感觉。
 
@@ -3380,10 +3389,8 @@ class QwenLLM:
         """
         ch = prompt.get("char") or {}
         pl = prompt.get("player_name") or "对方"
-        convo = "\n".join(
-            ("玩家：" if l.get("role") == "user" else f"{ch.get('name','TA')}：")
-            + str(l.get("content") or "")[:120]
-            for l in (prompt.get("lines") or []))
+        convo = "\n".join(self._labelled(l, f"{ch.get('name','TA')}：")[:140]
+                          for l in (prompt.get("lines") or []))
         sysmsg = (
             f"你是关系判官。读下面这段「{ch.get('name','TA')}」和「{pl}」之间真实发生过的往来，"
             f"判断此刻 TA 心里把 {pl} 当什么、对 {pl} 是什么感觉。\n"
@@ -3420,10 +3427,7 @@ class QwenLLM:
         prior digest on any failure — memory just doesn't advance that turn, never 500s."""
         prior = prompt.get("prior_memory") or ""
         lines = prompt.get("new_lines") or []
-        convo = "\n".join(
-            ("玩家：" if l.get("role") == "user" else "角色：") + (l.get("content") or "")
-            for l in lines
-        )
+        convo = "\n".join(self._labelled(l, "角色：") for l in lines)
         user = f"== 已有备忘录 ==\n{prior or '（空，尚未建立）'}\n\n== 最近新发生的对话 ==\n{convo}"
         # 🧠 顺手把【具体的事】抽出来 —— 搭在这一次调用上, 不另起一次 (成本敏感)。
         # 摘要越滚越概括是它的本分; 具体细节要单独拎出来才不会被下一轮概括掉。
