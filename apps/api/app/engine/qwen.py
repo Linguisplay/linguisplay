@@ -1319,6 +1319,23 @@ def _build_system(prompt: dict[str, Any]) -> str:
                      "过招的具体动作、决定性的那一下、胜负落定，全部演出来并就此收束——"
                      "不许再热身、不许再报数、不许拖到下一拍。")
 
+    # 🫂 此刻你心里把 TA 当什么 (Yi 2026-08-06:「任何时候都有一个关系存在」)。
+    # 从前关系只有 derive_mode(亲近, 心动) 那一条算术路 —— 算得出「朋友」,
+    # 算不出「面和心不和」。这一段是定期由判官读着正文得出来的, 盖在算术之上。
+    _rr = prompt.get("relation_read") or {}
+    if _rr.get("feeling") or _rr.get("mode"):
+        _bits = []
+        if _rr.get("mode"):
+            _bits.append(f"你跟TA现在是【{_rr['mode']}】")
+        if _rr.get("feeling"):
+            _bits.append(f"你此刻对TA的感觉：{_rr['feeling']}")
+        if _rr.get("why"):
+            _bits.append(f"（因为{_rr['why']}）")
+        lines.append("")
+        lines.append("【你心里对TA的定位】" + "。".join(_bits)
+                     + "。这是你此刻真实的心境, 说话做事都从它出发; 不必说破, "
+                       "但别演成另一个人。")
+
     # 📱↔🎭 你俩刚在手机上聊过的 (2026-08-06 Yi 报障「剧情被打断」)。
     # 从前主拍只拿得到 phone_unread 这个红点数, 一条真实短信都没有 —— 玩家连发五条,
     # 走到人家面前, 他不知道。折账那条路闸在 18 条, 而线程长度中位 13, 够不着。
@@ -3246,6 +3263,53 @@ class QwenLLM:
         # 写正文的调用一律走 self._model — 判断快而便宜, 文笔不省
         self._aux_model = self._model
 
+    def _relation_read(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🫂 定时重判: 这个人跟玩家现在到底算什么关系, 心里对 TA 什么感觉。
+
+        Yi 2026-08-06:「人与人之间无论什么时候都有一个关系存在……这个关系就是要定时
+        结合上下文得出判断。」从前关系只有 derive_mode(亲近, 心动) 比阈值那一条路 ——
+        纯算术, 不看上下文, 也从来不重算。算术能算出「朋友」, 算不出「面和心不和」。
+
+        走便宜模型、在后台跑、判不出来静默返回 {} —— 关系没更新只是这一拍照旧,
+        绝不许拖垮回合 (0.4~0.8Mbps 的出口经不起再加一次同步调用)。
+        """
+        ch = prompt.get("char") or {}
+        pl = prompt.get("player_name") or "对方"
+        convo = "\n".join(
+            ("玩家：" if l.get("role") == "user" else f"{ch.get('name','TA')}：")
+            + str(l.get("content") or "")[:120]
+            for l in (prompt.get("lines") or []))
+        sysmsg = (
+            f"你是关系判官。读下面这段「{ch.get('name','TA')}」和「{pl}」之间真实发生过的往来，"
+            f"判断此刻 TA 心里把 {pl} 当什么、对 {pl} 是什么感觉。\n"
+            f"账面上现在记的是：{prompt.get('ledger_mode') or '无'}。"
+            "账面只看分数，你要看的是【这些话里透出来的东西】：谁欠谁、谁在忍、"
+            "谁嘴上一套心里一套。账面和你看到的不一致时，以你看到的为准。\n"
+            "只输出严格JSON："
+            '{"mode":"≤6字的关系判断（可以是「面和心不和」「有求于你」「刚缓过来」'
+            '这种账面算不出的）","feeling":"≤20字，此刻TA心里对TA的感觉，用TA的角度写",'
+            '"why":"≤16字，你凭正文里哪件具体的事这么判"}。\n'
+            "why 必须指向上面对话里真实出现过的事，编不出来就把三个字段都留空。"
+            "不要写成评语或心理分析，写成一句人话。"
+            + _STYLE_PUNCT + _lang_rule(prompt))
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._summary_model,
+                               "messages": [{"role": "system", "content": sysmsg},
+                                            {"role": "user", "content": convo or "（还没说过话）"}],
+                               "max_tokens": 200, "temperature": 0.4,
+                               "response_format": {"type": "json_object"}},
+                              timeout=20)
+            import json as _json
+            d = _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
+        except Exception:
+            return {}
+        # 破折号交给 runtime.apply_relation_read 落账时统一洗 (dedash 住在那边,
+        # qwen 不反向依赖 runtime)
+        return {"mode": str(d.get("mode") or "").strip()[:12],
+                "feeling": str(d.get("feeling") or "").strip()[:40],
+                "why": str(d.get("why") or "").strip()[:24]}
+
     def _summarize(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """Compress elapsed turns into the rolling digest (cheap model). Degrades to the
         prior digest on any failure — memory just doesn't advance that turn, never 500s."""
@@ -4036,6 +4100,15 @@ class QwenLLM:
              if call else
              f"TA不在你身边，是通过{device}给你捎话。你在忙你自己的事，回不回、回多少、什么语气，"
              "全凭你此刻的心情和你们的关系。"),
+            # 🫂 线上线下不许对不上: 当面记着账, 短信里就不该突然热络 (Yi 2026-08-06)。
+            ("【你心里对TA的定位】"
+             + (f"你跟TA现在是【{(prompt.get('relation_read') or {}).get('mode')}】。"
+                if (prompt.get("relation_read") or {}).get("mode") else "")
+             + (f"你此刻对TA的感觉：{(prompt.get('relation_read') or {}).get('feeling')}。"
+                if (prompt.get("relation_read") or {}).get("feeling") else "")
+             + "回消息的冷热、快慢、肯不肯多说，都从它出发。"
+             if ((prompt.get("relation_read") or {}).get("feeling")
+                 or (prompt.get("relation_read") or {}).get("mode")) else ""),
             # 🤝 已经约过了就别再约 (Yi 2026-08-06:「AI 角色不能无限和玩家有约定」)。
             # 闸本来就在 make_promise 里 (每角色同时一个 open), 但模型从来不知道 ——
             # 于是它照样在正文里开口约, 账本悄悄拒收, 玩家读到「明晚老地方见」而约定栏
@@ -5202,6 +5275,8 @@ class QwenLLM:
         return {"items": items[:6]} if items else {}
 
     def generate(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        if prompt.get("relation_read"):
+            return self._relation_read(prompt)
         if prompt.get("summarize"):
             return self._summarize(prompt)
         if prompt.get("scout_char"):

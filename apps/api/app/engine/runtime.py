@@ -7033,6 +7033,8 @@ def _phone_exchange(content: dict[str, Any], state: dict[str, Any], persona: dic
                         "last_ignored": _th_lr,   # 📱 上次晾过要认账 (Spec C)
                         # 🤝 已经约过了就别再约 (Yi 2026-08-06)。闸在 make_promise 里,
                         # 但从前【模型不知道】—— 于是正文照约、账本悄悄拒收, 文与实分家。
+                        # 🫂 线上线下一个心境: 当面记着账, 短信里就不该突然热络
+                        "relation_read": (state.get("rel_read") or {}).get(char_id) or {},
                         "open_promise": (lambda p: {"what": p.get("what", ""),
                                                     "when": promise_when_label(content, p, state)}
                                          if p else None)(open_promise_of(state, char_id)),
@@ -10548,6 +10550,7 @@ def run_turn_stream(
     # 入账; audit 在 P2 才重置, 这里不记账)
     apply_pending_folds(state)
     apply_pending_track(state)
+    apply_pending_reads(state)   # 🫂 后台判好的「TA 此刻怎么看你」也在这里合账
     # 💞 全局回合序号 (事件记账制的冷却时钟 — turns_in_act 换幕会清零, 不能用)
     state["turn_seq"] = int(state.get("turn_seq") or 0) + 1
     old_act = int(state.get("act", 1))
@@ -11716,6 +11719,8 @@ def run_turn_stream(
             # 📱↔🎭 面对面时 TA 记得你刚发的短信 (Yi: 记忆一定要共享, 线上线下不许对不上)。
             # 折账那条路闸在 18 条, 生产线程中位 13 —— 够不着, 所以"刚聊过"要直接进主拍。
             "phone_recent": phone_recent_for_scene(content, state, sp_id),
+            # 🫂 TA 此刻心里把玩家当什么 (定期由判官读着正文得出, 盖在算术之上)
+            "relation_read": (state.get("rel_read") or {}).get(sp_id) or {},
             # 💞 事件记账制旗 (Yi 定): 开着 = 契约只收 rel_event 申报, 不收每句打分
             "rel_events": bool(tun.get("rel_events")),
             "context": ctx,
@@ -12838,6 +12843,15 @@ def run_turn_stream(
         # ⚡ 4秒军令: 折叠彻底出关键路径 — 后台折, 下一回合合账 (曾 join 1.5~2s
         # 拖住建议/收尾/落库, 是整回合 p90 尖刺的元凶之一)
         _folds_async(state, list(responder_hist.items()), llm)
+        # 🫂 定时重判关系 (Yi 2026-08-06)。搭在这里是因为 responder_hist 已经把
+        # 每个角色【自己亲历的】那份 history 备好了 —— 判官看的必须是 TA 看得见的
+        # 那些话, 不是玩家的全部人生。节奏另算: 记忆折叠要等 history 到 20 条,
+        # 而生产中位一局 14 拍, 挂那个节奏等于大多数人永远等不到。
+        _n = int(state.get("turn_seq") or 0)
+        _due = [(cid, h) for cid, h in responder_hist.items()
+                if relation_read_due(state, cid, _n)]
+        if _due:
+            relation_reads_async(content, state, _due, llm)
     else:
         _update_memory(state, history, llm)  # legacy/global (tests, opening)
 
@@ -13209,6 +13223,135 @@ def scene_cast(content: dict[str, Any], state: dict[str, Any],
                     "hp": char_hp(state, c.get("id")),  # 🩸 graded life state for the bar
                     "can_follow": relationships.can_follow(c, scores, tun)})  # 好感够不够请动
     return out
+
+
+# 🫂 关系重判的节奏 (Yi 2026-08-06:「这个关系要定时结合上下文得出判断」)。
+#
+# 为什么不挂在记忆折叠上: 那条路要等 history 长到 MEMORY_WINDOW+MEMORY_BATCH=20 条
+# 才第一次开火, 而生产中位一局只有 14 拍 —— 挂上去等于大多数玩家永远等不到,
+# 跟 offline_pulse 同一个坑 (它只在「玩家离开又回来」那一拍开火, 而中位玩家
+# 从来没有「回来」过)。关系恰恰是头几拍定下来的, 所以第一次必须早。
+RELREAD_FIRST = 3      # 第 3 拍就判第一次 (中位局 14 拍, 这一刀要落在前面)
+RELREAD_EVERY = 6      # 之后每 6 拍重判 —— 不是每拍: 每拍判就是「每句话打分」的复辟
+
+
+def relation_of(content: dict[str, Any], state: dict[str, Any],
+                cid: str | None) -> dict[str, Any] | None:
+    """🫂 此刻 TA 跟玩家【是什么关系、心里对你什么感觉】。见过面就一定有, 不会是空的。
+
+    Yi 2026-08-06:「人与人之间无论什么时候都有一个关系存在，AI 角色和玩家也不例外。」
+
+    从前 relweb 里写的是 `sc = rel_all.get(cid); if not sc: continue` —— 见过面但还没
+    打过分的人, 关系网上跟玩家之间一条边都没有。生产实测 205 人次里 19 个 (9%) 无边,
+    3 局整局画不出一条玩家边。没打过分不等于没关系, 那也是一种关系 (初识/同僚/戒备)。
+
+    三层, 后面的盖前面的:
+      ① 作者写的 base_mode —— 没有任何互动时的底
+      ② rel 账本推的 derive_mode —— 有账就按账走 (rel_events 那本账不许被架空)
+      ③ 定期的上下文重判 —— 算术说「朋友」, 上下文可以说「面和心不和」
+    ledger_mode 永远保留②那一档: 引擎里靠它开门的地方 (同行/看手机/床戏) 不受①③影响。
+    """
+    if not cid or cid == state.get("player_character_id"):
+        return None
+    if cid not in set(state.get("met_ids") or []):
+        return None
+    c = _char_by_id(content, cid) or {}
+    tun = tuning_for(content)
+    sc = (state.get("rel") or {}).get(cid)
+    ledger = (relationships.derive_mode(c, sc, tun) if sc
+              else relationships.initial_mode(c))
+    out = {"mode": ledger, "ledger_mode": ledger, "feeling": "", "why": ""}
+    read = (state.get("rel_read") or {}).get(cid) or {}
+    if read.get("mode"):
+        out["mode"] = read["mode"]
+    if read.get("feeling"):
+        out["feeling"] = read["feeling"]
+    if read.get("why"):
+        out["why"] = read["why"]
+    return out
+
+
+def relation_read_due(state: dict[str, Any], cid: str | None, turn: int) -> bool:
+    """该给这个人重判一次关系了吗 (纯算, 零成本 —— 贵的那次调用由调用方决定要不要发)。"""
+    if not cid or cid not in set(state.get("met_ids") or []):
+        return False
+    last = ((state.get("rel_read") or {}).get(cid) or {}).get("at")
+    if last is None:
+        return int(turn) >= RELREAD_FIRST
+    return int(turn) - int(last) >= RELREAD_EVERY
+
+
+def apply_relation_read(state: dict[str, Any], cid: str,
+                        out: dict[str, Any] | None, at: int | None = None) -> bool:
+    """把一次重判落账。空话不收 —— 收了就再也分不清哪些是真判过的。"""
+    out = out or {}
+    mode = str(out.get("mode") or "").strip()[:12]
+    feeling = str(out.get("feeling") or "").strip()[:40]
+    if not mode and not feeling:
+        return False
+    row = {"mode": mode, "feeling": dedash(feeling),
+           "why": dedash(str(out.get("why") or "").strip()[:24]),
+           "at": int(at if at is not None else _time_index(state))}
+    state.setdefault("rel_read", {})[cid] = row
+    return True
+
+
+_REL_PENDING: dict = {}   # 一次性票据 → {cid: read} (后台判官的成品架)
+_REL_CAP = 30
+
+
+def relation_reads_async(content: dict[str, Any], state: dict[str, Any],
+                         jobs: list[tuple[str, list]], llm: LLM) -> None:
+    """🫂 关系重判走后台 (与记忆折叠 _folds_async 同一家法: 备料在主线程,
+    模型调用在后台线程, 成品下一回合 apply_pending_reads 合账, 线程绝不碰 state)。
+
+    出口 0.4~0.8Mbps、旁白逐拍流式, 再加一次【同步】调用会直接压在 TTFT 上。
+    票据丢失无害: 没合上账只是这一拍关系照旧, 下一拍到点了再判一次。
+    """
+    jobs = [(cid, lines) for cid, lines in jobs if cid and lines]
+    if not jobs:
+        return
+    import threading
+    import uuid
+    tok = uuid.uuid4().hex[:12]
+    state["reads_pending"] = tok
+    _pl = (state.get("persona_name") or "") or "对方"
+    snap = [(cid, _char_by_id(content, cid) or {},
+             (relation_of(content, state, cid) or {}).get("ledger_mode") or "",
+             list(lines)[-12:]) for cid, lines in jobs]
+
+    def _work():
+        got = {}
+        for cid, c, ledger, lines in snap:
+            try:
+                out = llm.generate({"relation_read": True,
+                                    "char": {"name": c.get("name") or ""},
+                                    "player_name": _pl, "ledger_mode": ledger,
+                                    "lines": lines}) or {}
+            except Exception:
+                out = {}
+            if out.get("mode") or out.get("feeling"):
+                got[cid] = out
+        while len(_REL_PENDING) >= _REL_CAP:
+            _REL_PENDING.pop(next(iter(_REL_PENDING)), None)
+        _REL_PENDING[tok] = got
+
+    threading.Thread(target=_work, daemon=True).start()
+
+
+def apply_pending_reads(state: dict[str, Any]) -> bool:
+    """回合开演前把后台判好的关系合进账。没折完就把票留着, 下回合再收。"""
+    tok = state.get("reads_pending")
+    if not tok:
+        return False
+    got = _REL_PENDING.pop(tok, None)
+    if got is None:
+        return False
+    state.pop("reads_pending", None)
+    landed = False
+    for cid, out in (got or {}).items():
+        landed = apply_relation_read(state, cid, out) or landed
+    return landed
 
 
 def relations_summary(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:

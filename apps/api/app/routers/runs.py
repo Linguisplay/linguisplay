@@ -2158,10 +2158,21 @@ def get_relweb(run_id: str, user: User = Depends(current_user), db: Session = De
     rel_all = st.get("rel") or {}
     player = []
     for c in chars:
-        sc = rel_all.get(c["id"])
-        if not sc:
-            continue
+        # 🫂 见了面就一定有一条边 (Yi 2026-08-06:「任何时候都有一个关系存在」)。
+        # 从前这里是 `if not sc: continue` —— 没打过分的人跟玩家之间一条边都没有。
+        # 生产实测 205 人次里 19 个 (9%) 无边, 3 局整局画不出一条玩家边。
+        # 没分数就吃作者写的 base_mode, 那也是一种关系 (初识/同僚/戒备)。
+        sc = rel_all.get(c["id"]) or rel_mod.new_scores()
         view = rel_mod.state_for(c, sc, tun, lang=runtime.lang_of(content)) or {}
+        # 🫂 上下文重判盖在算术之上: 算术说「朋友」, 上下文可以说「面和心不和」;
+        # 「TA 此刻对你什么感觉」也挂在这条边上, 不再是脱节的场面情绪。
+        _rr = runtime.relation_of(content, st, c["id"]) or {}
+        if _rr.get("feeling"):
+            view["feeling"] = _rr["feeling"]
+        if _rr.get("why"):
+            view["why"] = _rr["why"]
+        if _rr.get("mode") and _rr.get("mode") != _rr.get("ledger_mode"):
+            view["read_mode"] = _rr["mode"]
         # 🏷 经历性标签 (合伙人③): 从大事记确定性推导, 零 LLM
         _en = runtime.lang_of(content) == "en"
         _lg = list((st.get("rel_log") or {}).get(c["id"]) or [])
