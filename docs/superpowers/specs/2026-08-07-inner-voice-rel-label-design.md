@@ -91,6 +91,17 @@
 
 ## 3. 关系名牌（auto rel label）
 
+> ⚠️ **落地修正（写实施计划时发现）**：本节描述的能力大半**已存在**——rel_read
+> 关系重判系统（runtime `relation_of`/`relation_read_due`/`apply_relation_read`/
+> `relation_reads_async` + qwen `_relation_read` 判官，2026-08-06 上线）已经做到：
+> 便宜模型后台读该角色亲历的对话、产出开放词汇的关系判断（mode ≤6字，如
+> 「面和心不和」）+feeling+why、fire-and-collect 下一拍合账、盖过算术模式、
+> 已上 relweb（read_mode 字段）、已注入生成 prompt（「你跟TA现在是【X】"）。
+> 因此 3.1 判官、3.2 异步、风味注入**不再新建**，实施只做四个差量：
+> ①变迁史 log（rel_read 现状只留最新一条）；②离场回归（away_hours ≥ 0.5h）强制到期；
+> ③relweb 玩家边**主位**显示开放名牌（现状 read_mode 是次要字段）+变迁史渲染；
+> ④心声风味注入零工作量（系统 prompt 已带）。下述 3.1/3.2 保留为语义参考。
+
 ### 3.1 生成器（系统侧总结器，非角色自报）
 
 - 独立 aux 判官（小模型，同场记/判官家族），输入：近 40 拍内玩家↔该角色真实互动的拍
