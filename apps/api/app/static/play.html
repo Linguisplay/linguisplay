@@ -2179,8 +2179,8 @@ function fillTutorial() {
     '<b>三种行动</b>：底部下拉选<span class="k">说</span>开口说话；<span class="k">做</span>身体动作，想拿就「拿起某物」，引擎立刻执行；<span class="k">看/想</span>观察四周或内心活动，没人听得见。<b>换地方走顶栏的 🗺 地图</b>，点地名就到。',
     '<b>Three actions</b>: <span class="k">Say</span> to speak; <span class="k">Do</span> for physical acts — type "pick up X" and the engine executes instantly; <span class="k">Look/Think</span> to observe or think privately. <b>To travel, use the 🗺 map</b> in the top bar and tap a place.'));
   T(".tut-2", B(
-    '<b>点一下就走</b>：💡 两条建议是可直接点的下一步（第一条永远顺着你的意图）；⚡ 紫色卡是<b>命运抉择</b>，选了会真实改变世界（有人会死、地点会换），只等你 3 回合；🚪/🧭 绿色条是移动确认。',
-    '<b>Tap to act</b>: the two 💡 chips are ready next moves (chip 1 always follows YOUR intent); the purple ⚡ card is a <b>fate choice</b> — it really changes the world and waits only 3 turns; green 🚪/🧭 bars confirm travel.'));
+    '<b>点一下就走</b>：💡 两条建议是可直接点的下一步（第一条永远顺着你的意图）；⚡ 紫色卡是<b>命运抉择</b>，选了会真实改变世界（有人会死、剧情会转），只等你 3 回合。',
+    '<b>Tap to act</b>: the two 💡 chips are ready next moves (chip 1 always follows YOUR intent); the purple ⚡ card is a <b>fate choice</b> — it really changes the world and waits only 3 turns.'));
   T(".tut-3", B(
     '<b>状态条</b>：🎯 当前目标 · 📍 你所在的位置（换地方点顶栏 🗺 地图）· 🤝 约定 · 🔍 线索 · 角色气泡下的 📟 是TA此刻的真实心境。',
     '<b>Status bars</b>: 🎯 current goal · 📍 where you are (travel via the 🗺 map in the top bar) · 🤝 promises · 🔍 clues · 📟 under a bubble is that character’s true inner state.'));
@@ -2205,8 +2205,8 @@ function maybeShowHowto(st0, run, defer) {
     if (st0.sandbox && st0.sandbox.enabled) {
       const ladder = (((st0.sandbox.progression || {}).ranks) || []).join(" → ");
       T(".ht-t", B("🏖 这是一个无尽沙盒", "🏖 This is an endless sandbox"));
-      T(".ht-1", B("<b>没有固定主线，也没有结局</b>——这个世界跟着你长：想找谁、想去哪、想做什么，直接说出来，引擎会把它造成真的。",
-                   "<b>No fixed plot, no ending</b> — the world grows with you: name a person, a place, a deed, and the engine makes it real."));
+      T(".ht-1", B("<b>没有固定主线，也没有结局</b>——这个世界跟着你长：想做什么直接说出来，就会真的发生；新面孔会随剧情自然登场；想去哪，点顶栏 🗺 地图就到。",
+                   "<b>No fixed plot, no ending</b> — the world grows with you: say a deed and it really happens; new faces enter the story on their own; to go somewhere, tap the 🗺 map up top."));
       T(".ht-2", ladder
         ? B(`<b>你的成长阶梯</b>：${escapeHtml(ladder)}。顶栏 ⚡ 随时看进度；头像下能看到每段关系差多少升下一档。`,
             `<b>Your ladder</b>: ${escapeHtml(ladder)}. Watch ⚡ up top; each avatar shows how close the next bond tier is.`)

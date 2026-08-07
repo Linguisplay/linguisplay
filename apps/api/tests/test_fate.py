@@ -54,8 +54,10 @@ def test_generate_validates_and_types_options():
     assert fc["expires"] == 3
 
 
-def test_generate_move_unknown_place():
+def test_generate_move_unknown_place(map_writes_on):
     # authored story: off-map move downgrades to story; sandbox keeps the name
+    # (沙盒放行未在册地名靠 generate_and_move 兑现 —— 那是 LLM_MAP_WRITES 的能力,
+    #  所以本用例挂旗跑, 是休眠代码的回归网)
     llm = FateLLM({"prompt": "走不走？", "options": [
         {"label": "撤去后巷", "kind": "move", "target": "后巷", "mandate": "跑路"},
         {"label": "留下", "kind": "story", "target": "", "mandate": "硬扛"},
@@ -66,6 +68,20 @@ def test_generate_move_unknown_place():
     st2 = _st()
     runtime.fate_generate(SANDBOX, st2, llm)
     assert st2["fate_effects"]["f1"] == {"kind": "move", "target": "后巷", "mandate": "跑路"}
+
+
+def test_generate_move_unknown_place_locked_downgrades():
+    # 🔒 LLM_MAP_WRITES 关着 (产品默认): 沙盒也不放行未在册地名 —— 兑现时
+    # generate_and_move 必返 None, 紫卡点了只会静默没收 (对抗性审查 2026-08-06)。
+    # 已在册地点的 move 照常活着 (玩家点卡=玩家亲手选, 走 commit_move 合法口)。
+    llm = FateLLM({"prompt": "走不走？", "options": [
+        {"label": "撤去后巷", "kind": "move", "target": "后巷", "mandate": "跑路"},
+        {"label": "留下", "kind": "story", "target": "", "mandate": "硬扛"},
+    ]})
+    st = _st()
+    runtime.fate_generate(SANDBOX, st, llm)
+    assert st["fate_effects"]["f1"]["kind"] == "story", \
+        "锁下放行未在册地名 = 承诺一张兑不了现的命运卡"
 
 
 def test_generate_needs_two_valid_options():

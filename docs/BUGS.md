@@ -20,6 +20,8 @@ bug 与欠账不再散落在聊天里。规矩:报障当天入账,修完标 ✅ 
 | 10 | 08-01 | (TTS会话未提交稿) qwen.py 注释携带「蓝信一」— 引擎不许带具体剧本内容, agnostic 守卫红 | 🔴 提交前必修 | test_engine_agnostic |
 | 11 | 08-01 | (TTS会话未提交稿) runtime.py `_sl_open/_sl_close` 直接翻 char_pins — 位置真源守卫红 | 🔴 提交前必修 | 问路走 char_position(); test_position_single_source |
 | 12 | 08-01 | 无头玩测驱动器时灵时不灵 (resumeRun 偶发静默失败原因未钉死) — 只坑验证不坑玩家 | 🟡 | scratchpad/pw/playtest*.js |
+| 13 | 08-06 | `_settle_prose_exits` 离场正则只认中文 — en 本子角色「说走」不会被记走 (锁下 npc_moves 又摘了, en 离场只剩作息换班一条路) | 🔴 | runtime.py `_SELF_EXIT_RE/_EXIT_TAIL_RE` 补英文构式; 对抗性审查 08-06 发现 |
+| 14 | 08-06 | free_day 第三张建议片「一个人去X转转」在锁下点了不走 (无 seek 形状, 打字移动已取消) — 前两张是 seek 形状还活着 | 🔴 | runtime.py free_day_suggestions ~9059; 改成原地或 seek 形状 |
 
 ## 已修的 (本周实弹归因)
 

@@ -2525,12 +2525,18 @@ def _physical_place(content: dict[str, Any], state: dict[str, Any]) -> str:
             concrete += f" Items the player left here earlier: {', '.join(stash)}."
         if facts:
             concrete += f" Changes that already happened here and still hold: {'; '.join(facts)}."
+        # 🔒 锁下别再教模型叙写赶路 (半吊子锁收尾, 2026-08-06 实弹): 换场只发生在玩家
+        #    点地图之后, 散文写了"到达"引擎也不认, 只会文实分家
         instruction = (
             "Narrate only what actually exists in this place; never invent fixtures from "
             "elsewhere. Changes that already happened are permanent facts and can never be "
-            "written back to how they were (a smashed door does not mend itself). To move "
-            "elsewhere the player must use the listed exits, and the movement itself must "
-            "be narrated — no teleporting."
+            "written back to how they were (a smashed door does not mend itself). "
+            + ("To move elsewhere the player must use the listed exits, and the movement "
+               "itself must be narrated — no teleporting."
+               if LLM_MAP_WRITES else
+               "The scene changes only when the player picks a place on the map themselves — "
+               "never write the player setting off, travelling, or arriving elsewhere; the "
+               "scene stays here until the location actually changes.")
         )
     else:
         concrete = f"此刻玩家所在的地点是【{name}】。"
@@ -2547,7 +2553,10 @@ def _physical_place(content: dict[str, Any], state: dict[str, Any]) -> str:
         instruction = (
             "旁白只能描写这个地点里实际存在的东西，不要凭空添置别处的陈设；"
             "已经发生过的改变是既成事实，绝不能写回原样（砸开的门不会自己完好如初）；"
-            "玩家要移动到别处，必须经由上面列出的通路，且要把移动过程写出来，不能瞬移。"
+            + ("玩家要移动到别处，必须经由上面列出的通路，且要把移动过程写出来，不能瞬移。"
+               if LLM_MAP_WRITES else
+               "换场景只由玩家自己在地图上点选——旁白绝不要写玩家启程、赶路或已经到了别处，"
+               "地点没变之前，戏始终留在这里写。")
         )
     return concrete + "\n" + instruction
 
@@ -4214,7 +4223,9 @@ def fate_generate(content: dict[str, Any], state: dict[str, Any], llm,
             dest = resolve_location(content, target)
             if dest and dest.get("id"):
                 target = dest["id"]
-            elif not (sandbox_on(content) and not _bad_place_name(str(target))):
+            # 🔒 沙盒放行未在册地名靠兑现时 generate_and_move 铸造 —— 锁下必返 None,
+            #    紫卡点了只会静默没收, 所以放行也跟着 LLM_MAP_WRITES 走 (审查确认)
+            elif not (LLM_MAP_WRITES and sandbox_on(content) and not _bad_place_name(str(target))):
                 kind, target = "story", ""      # closed map / bad name → direction only
         elif kind == "identity":
             target = str(target)[:12]
@@ -11670,6 +11681,10 @@ def run_turn_stream(
              "primary_name_for_invite": None, "time_skip": time_skip,
              "pressure_blown": pressure_blown, "content_mutated": content_mutated,
              "gen_count": gen_count, "contact_given": False}
+    # 🔒 生长通道盘点 (对抗性审查 P1): 地点通道锁死 (LLM_MAP_WRITES) 且人物额度
+    #    用尽时, 没有任何通道能兑现 world_seed —— 这拍就不问 (问了必被驳回, 驳回
+    #    不销账, due 每拍重催), 结算侧按同一口径跳过, 不记幻影空账
+    ws_askable = bool(_ws_mode) and (LLM_MAP_WRITES or gen_count < tun["max_new_characters"])
     # ━━━━━━━━━━ 管线 P7 · 导演循环（逐人：门控提示词→生成→守卫→落账） ━━━━━━━━━━
     for idx, sp in enumerate(responders):
         sp_id = sp.get("id")
@@ -11761,8 +11776,8 @@ def run_turn_stream(
             # 🧭 口味罗盘: 只给主答者, 样本够了才有内容 (倾斜不转向)
             **({"taste_line": taste_mod.prompt_line(state, lang_of(content) != "en")}
                if idx == 0 else {}),
-            # 🌱 生长预算到期: 主拍必填 world_seed (软邀请/硬指令两档)
-            **({"world_seed": _ws_mode} if idx == 0 and _ws_mode else {}),
+            # 🌱 生长预算到期: 主拍必填 world_seed (软邀请/硬指令两档; 通道全死不问)
+            **({"world_seed": _ws_mode} if idx == 0 and ws_askable else {}),
             # 🎬 本场已经写过的意象 (2026-08-05): 只给写旁白的那位 (主答者)。
             # 生产实测 59 条旁白里「桃花眼」8 次、「喉结上下滚动」6 次 —— 从前这些
             # 只喂给事后的复读守卫, 而守卫一响就是一次整包重生, 又慢又贵。
@@ -12908,7 +12923,7 @@ def run_turn_stream(
             _audit(state, "place.mint", True, move_request.get("to_name", ""), "听说的去处已立档")
     # 🌱 生长收卷第二步 (Yi 四条拍板): 地点种子过判官铸造; 填无入账升级档;
     # 铸造成功共享额度 (note_mint), 确认条与提及即立档同款 (只立档不落脚)
-    if _ws_mode and not observer:
+    if _ws_mode and ws_askable and not observer:
         _wso = str(flags.get("world_seed_out") or "").strip()
         try:
             from .. import metrics as _gm2
@@ -12936,6 +12951,10 @@ def run_turn_stream(
                 _audit(state, "growth.seed", False, _wsn, "判官驳回")
                 if _gm2:
                     _gm2.log("growth", ev="reject", ch="seed_place")
+                if not LLM_MAP_WRITES:
+                    # 🔒 锁下地点种子无路可铸 (schema 已不教「地点：」, 这是模型不听话
+                    #    的兜底): 烧掉本期预算, 否则驳回不销账, due 每拍重催成永动循环
+                    growth_mod.note_mint(state)
         elif _wso.startswith(("人物：", "人物:")):
             # 出生已并入 new_char 管线; 出生成功与否看 emergent_ids
             if emergent_ids:

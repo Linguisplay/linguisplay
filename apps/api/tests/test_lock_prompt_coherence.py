@@ -1,0 +1,144 @@
+"""🔒 半吊子锁收尾: 锁关掉的能力, 提示词层不许再向模型征收。
+
+实弹 (Yi 2026-08-06, 浮生·蓝信一): schema 仍向模型征 moved_to/npc_moves/move_invite,
+模型好心叙事走位、申报到达, runtime 在散文已经流给玩家之后才静默丢弃 (move.narrated),
+下一拍空间锚按旧地点喂 + 守卫按旧名单强制重生成 + 作息把人拽回 home —— 玩家看到的
+就是「地图不断把角色往场景里拉 / 重演赶路」。
+
+家规: 拿掉约束前先确认接手的那个真会生效 —— 08-04 锁上引擎侧时, 提示词侧没人接手。
+修法: 按锁旗摘 schema 字段 + 锚文案不再教模型发起移动/叙写赶路。
+旗开着时旧字段旧文案原样回来 (休眠代码回归网, 同 conftest 各 *_on 夹具)。
+"""
+
+from app.engine import qwen, runtime
+
+MAP = {
+    "story": {
+        "id": "st",
+        "characters": [{"id": "c1", "name": "蓝信一", "is_lead": True, "persona_text": "头马"}],
+        "acts": [{"index": 1, "title": "一"}],
+        "locations": [
+            {"id": "hall", "name": "巷口", "detail": "旧石板路，一盏路灯", "exits": ["糖水店"]},
+            {"id": "shop", "name": "糖水店", "detail": "靠窗的卡座", "exits": ["巷口"]},
+        ],
+    },
+    "secrets": [],
+}
+
+MAP_EN = {
+    "story": {**MAP["story"], "language": "en",
+              "locations": [{"id": "hall", "name": "The Lane",
+                             "detail": "old flagstones", "exits": ["The Shop"]},
+                            {"id": "shop", "name": "The Shop",
+                             "detail": "a window booth", "exits": ["The Lane"]}]},
+    "secrets": [],
+}
+
+PROMPT = {"place": "此刻玩家所在的地点是【巷口】", "speaker_name": "蓝信一",
+          "speaker_persona": "城寨头马", "persona": {"name": "蔡妍"}}
+
+
+def _tool(prompt):
+    return str(qwen._render_tool(prompt, "蓝信一", False, None, "say", "x"))
+
+
+# ── schema: 关着的锁不许再征字段 ──────────────────────────────────────────────
+
+def test_schema_omits_moved_to_and_npc_moves_by_default():
+    s = _tool(PROMPT)
+    assert "moved_to" not in s, "LLM_MAP_WRITES 关着还在征 moved_to —— 引擎收到只会静默丢弃"
+    assert "npc_moves" not in s, ("LLM_MAP_WRITES 关着还在征 npc_moves (apply_char_move 锁下返 None)；"
+                                  "离场早有 _settle_prose_exits 架构层接管")
+
+
+def test_schema_omits_move_invite_by_default():
+    assert "move_invite" not in _tool(PROMPT), \
+        "INVITE_MOVE 关着, 确认条永远不弹, move_invite 是死信"
+
+
+def test_schema_returns_declare_fields_when_unlocked(map_writes_on):
+    s = _tool(PROMPT)
+    assert "moved_to" in s and "npc_moves" in s, "旗开回来时休眠字段必须原样回来"
+
+
+def test_schema_returns_invite_when_unlocked(invite_move_on):
+    assert "move_invite" in _tool(PROMPT), "旗开回来时 move_invite 必须原样回来"
+
+
+# ── qwen 空间锚: 不再教模型发起移动 ──────────────────────────────────────────
+
+def test_anchor_stops_teaching_move_invite():
+    sys = qwen._build_system(PROMPT)
+    assert "move_invite" not in sys, "锁关着, 锚文案还在教模型用 move_invite 申报带路"
+    assert "玩家自己在地图上点" in sys, "得告诉模型: 换场只由玩家点地图, 戏留在原地写"
+
+
+def test_anchor_teaches_invite_again_when_unlocked(invite_move_on):
+    assert "move_invite" in qwen._build_system(PROMPT)
+
+
+# ── runtime 地点锚: 不再要求「把移动过程写出来」 ─────────────────────────────
+
+def test_place_anchor_stops_demanding_travel_prose():
+    st = {**runtime.default_state(), "location_id": "hall"}
+    block = runtime._physical_place(MAP, st)
+    assert "把移动过程写出来" not in block and "不能瞬移" not in block, \
+        "锁关着, 地点锚还在教模型叙写赶路 —— 这正是实录里散文走位的教唆者"
+    assert "玩家自己在地图上点" in block
+    assert "糖水店" in block  # 通路数据照常给（台词相邀、描写方位都用得上）
+
+
+def test_place_anchor_stops_demanding_travel_prose_en():
+    st = {**runtime.default_state(), "location_id": "hall"}
+    block = runtime._physical_place(MAP_EN, st)
+    assert "must be narrated" not in block and "no teleporting" not in block
+    assert "on the map" in block
+
+
+def test_place_anchor_teaches_travel_again_when_unlocked(map_writes_on):
+    st = {**runtime.default_state(), "location_id": "hall"}
+    assert "把移动过程写出来" in runtime._physical_place(MAP, st)
+
+
+# ── 审查补刀 (对抗性审查 2026-08-06 六条确认): 其余还在教死流程的嘴 ──────────
+
+def test_world_seed_stops_soliciting_places():
+    # 🌱 P1: 地点种子锁下必被判官驳回且不销账, due 每拍重催 → 永动催生循环。
+    #    锁关着只教「人物：」, 地点通道整个不教。
+    s = _tool({**PROMPT, "world_seed": "soft"})
+    assert "地点：名字" not in s and "竹棚渡口" not in s, \
+        "LLM_MAP_WRITES 关着还在教模型往散文里织新去处 —— 铸造必被驳回, 预算永不销账"
+    assert "人物：名字" in s, "人物通道还活着, 不许一起摘"
+
+
+def test_world_seed_solicits_places_again_when_unlocked(map_writes_on):
+    assert "地点：名字" in _tool({**PROMPT, "world_seed": "soft"})
+
+
+def test_suggestions_stop_exemplifying_travel():
+    s = _tool(PROMPT)
+    assert "我…/问他…/去…" not in s, \
+        "TYPED_MOVE 关着, 「去X」建议点了是死路 (正则嗅探整条不走)"
+    assert "我…/问他…/找…" in s, "找人 (player_seek) 不归 TYPED_MOVE 管, 还活着"
+
+
+def test_suggestions_exemplify_travel_again_when_unlocked(typed_move_on):
+    assert "我…/问他…/去…" in _tool(PROMPT)
+
+
+def test_suggestions_en_forbid_travel_under_lock():
+    s = _tool({**PROMPT, "language": "en"})
+    assert "Never suggest going somewhere else" in s
+
+
+def test_suggestions_en_allow_travel_when_unlocked(typed_move_on):
+    assert "Never suggest going somewhere else" not in _tool({**PROMPT, "language": "en"})
+
+
+def test_anchor_under_map_writes_alone_teaches_declared_travel(map_writes_on):
+    # 🔒 可逆合同: 只翻回 LLM_MAP_WRITES 时, 锚必须教声明式移动 (moved_to),
+    #    不许一边征收 moved_to 一边喊「绝不要写玩家启程」自相矛盾
+    sys = qwen._build_system(PROMPT)
+    assert "move_invite" not in sys, "INVITE_MOVE 还关着, 不该教确认条"
+    assert "玩家自己在地图上点" not in sys, "原地文案与 moved_to 征收自相矛盾"
+    assert "moved_to" in sys, "声明式移动开着就要教申报, 文与实不许分家"

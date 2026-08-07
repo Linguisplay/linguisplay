@@ -653,6 +653,15 @@ def _depth_anchor(prompt: dict[str, Any]) -> str:
     return label + " ".join(bits)
 
 
+def _lock_on(flag: str) -> bool:
+    """🔒 半吊子锁收尾 (Yi 2026-08-06 实弹: 角色牵着玩家散文走位两拍): 锁在 runtime,
+    征收在这里 —— 关着的能力不再向模型要字段/教流程, 否则模型好心申报、引擎流完
+    散文才静默丢弃、下一拍旧地点锚往回拽。惰性 import 防循环; 每次现读属性不缓存,
+    conftest 的 map_writes_on / invite_move_on 夹具 monkeypatch 得到。"""
+    from . import runtime as _rt
+    return bool(getattr(_rt, flag))
+
+
 def _build_system(prompt: dict[str, Any]) -> str:
     speaker = prompt.get("speaker_name") or "角色"
     persona_text = prompt.get("speaker_persona") or ""
@@ -1025,12 +1034,28 @@ def _build_system(prompt: dict[str, Any]) -> str:
     place = (prompt.get("place") or "").strip()
     if place:
         lines.append("")
+        # 🔒 移动规则跟着锁旗走 (2026-08-06 实弹): 锁关着还教 move_invite, 模型就
+        # 好心带路, 引擎丢弃申报后散文已走人 → 下一拍旧地点锚往回拽。三分支保可逆
+        # 合同 (审查确认: 只翻回 LLM_MAP_WRITES 时若仍发原地文案, 会一边征收 moved_to
+        # 一边喊「绝不要写玩家启程」自相矛盾):
+        if _lock_on("INVITE_MOVE"):
+            _move_rule = (
+                "【移动规则】你可以主动提出带玩家去另一个【可去通路】里的地点（用 move_invite 字段申报），"
+                "但旁白只写到你起身、招手、相邀为止——绝不要替玩家写出他已经跟你到了那里；"
+                "系统会先征求玩家同意，玩家点头后才真正过去）：\n")
+        elif _lock_on("LLM_MAP_WRITES"):
+            _move_rule = (
+                "【移动规则】旁白把玩家实际带到了别处时，必须用 moved_to 字段如实申报到达"
+                "——文与实不许分家；移动要经由可去通路把过程写出来，不能瞬移）：\n")
+        else:
+            _move_rule = (
+                "【移动规则】换场景只由玩家自己在地图上点选，你无法移动玩家：旁白绝不要写"
+                "玩家启程、赶路或到达别处；角色可以在台词里相邀相约，但那只是台词，玩家不动——"
+                "这一拍的戏必须仍然发生在此地。地点真的变了，系统会告诉你）：\n")
         lines.append("【当前所在·空间锚点】（玩家此刻就在这个具体地点，你的旁白必须扣住它来写——"
                      "写这里实际存在的陈设、光线、声响、距离与可触及的物件，让人能凭文字想象出画面；"
                      "不要把场景写得含糊或飘忽，也不要把不属于这里的东西搬进来。"
-                     "【移动规则】你可以主动提出带玩家去另一个【可去通路】里的地点（用 move_invite 字段申报），"
-                     "但旁白只写到你起身、招手、相邀为止——绝不要替玩家写出他已经跟你到了那里；"
-                     "系统会先征求玩家同意，玩家点头后才真正过去）：\n" + place)
+                     + _move_rule + place)
 
     memory = (prompt.get("memory") or "").strip()
     if memory:
@@ -1541,13 +1566,24 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
     _ws = prompt.get("world_seed")
     if _ws and not is_member and not is_think:
         _soft = _ws == "soft"
-        props["world_seed"] = {"type": "string", "description":
-            "这个世界该长点新东西了。这一轮找机会【自然地】带出一个新去处或一个新面孔"
-            "（顺着此刻的对话与场景，绝不硬转）：新去处填「地点：名字」（2~8字实名，"
-            "如 地点：竹棚渡口）；新面孔填「人物：名字|一句身份」（如 人物：陈皮|收保护费的瘦子）。"
-            + ("实在不合时宜就只填：无" if _soft else
-               "这一轮【必须】带出一个——选当前场景里最不突兀的方式（远处的招牌、"
-               "路过的一张生面孔、别人嘴里提到的去处都算），不许填无")}
+        # 🔒 地点通道跟着 LLM_MAP_WRITES 走 (对抗性审查 P1): 锁下地点种子必被驳回
+        #    且不销账, due 每拍重催 → 永动催生循环; 只教还活着的人物通道
+        if _lock_on("LLM_MAP_WRITES"):
+            props["world_seed"] = {"type": "string", "description":
+                "这个世界该长点新东西了。这一轮找机会【自然地】带出一个新去处或一个新面孔"
+                "（顺着此刻的对话与场景，绝不硬转）：新去处填「地点：名字」（2~8字实名，"
+                "如 地点：竹棚渡口）；新面孔填「人物：名字|一句身份」（如 人物：陈皮|收保护费的瘦子）。"
+                + ("实在不合时宜就只填：无" if _soft else
+                   "这一轮【必须】带出一个——选当前场景里最不突兀的方式（远处的招牌、"
+                   "路过的一张生面孔、别人嘴里提到的去处都算），不许填无")}
+        else:
+            props["world_seed"] = {"type": "string", "description":
+                "这个世界该长个新面孔了。这一轮找机会【自然地】带出一个新面孔"
+                "（顺着此刻的对话与场景，绝不硬转）：填「人物：名字|一句身份」"
+                "（如 人物：陈皮|收保护费的瘦子）。"
+                + ("实在不合时宜就只填：无" if _soft else
+                   "这一轮【必须】带出一个——选当前场景里最不突兀的方式（路过的一张生面孔、"
+                   "别人嘴里提到的人都算），不许填无")}
         required.append("world_seed")   # 必填 — 可选字段会被「只输出有内容的字段」省略
     if prompt.get("speaker_faction") and not is_think:
         props["faction_rep"] = {"type": "integer", "description":
@@ -1633,12 +1669,16 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                               "默认空字符串。仅当这一轮剧情让【玩家本人】获得了实打实的修为进益"
                               "（被人传功/服下灵物/顿悟/奇遇灌体，且确实生效）才按分量填：小、中、大。"
                               "玩家自己打坐修炼或掷骰吸收的不用你报（引擎自算）；没有就留空。"}
+    # 🔒 关着的锁不征字段 (半吊子锁收尾): 引擎侧丢弃的申报, schema 就别再要 ——
+    #    模型填了没人收, 只会造成散文先走人、状态没跟上的文实分家
     if has_map and not is_member and not is_think:
-        props["move_invite"] = {"type": "string", "description": "若你这轮提出或答应带玩家去某处，填那个地点名（【可去通路】外的新地点也可）；否则填空字符串"}
-        props["moved_to"] = {"type": "string", "description":
-                             "默认空字符串。仅当这一轮旁白已经把【玩家本人】实际带到了另一个地方"
-                             "（走进后台、出了大门、上了楼、进了里屋）才填到达的地点名；"
-                             "只是起身、提议、指路、还没走到，都不填。"}
+        if _lock_on("INVITE_MOVE"):
+            props["move_invite"] = {"type": "string", "description": "若你这轮提出或答应带玩家去某处，填那个地点名（【可去通路】外的新地点也可）；否则填空字符串"}
+        if _lock_on("LLM_MAP_WRITES"):
+            props["moved_to"] = {"type": "string", "description":
+                                 "默认空字符串。仅当这一轮旁白已经把【玩家本人】实际带到了另一个地方"
+                                 "（走进后台、出了大门、上了楼、进了里屋）才填到达的地点名；"
+                                 "只是起身、提议、指路、还没走到，都不填。"}
     if not observer and not is_member and not is_think and not prompt.get("sandbox"):
         props["ending"] = {"type": "string", "description": "默认空字符串；只有玩家本人此刻被你弄死填 death，走到不可挽回的坏结局填 bad"}
     # DYNAMIC WORLD judgments (all optional; empty string = nothing happened):
@@ -1652,13 +1692,17 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
         props["character_harmed"] = {"type": "string", "description":
                                      "若这一轮有角色受伤/伤势变化，填「名字|轻伤」「名字|重伤」或"
                                      "「名字|好转」（名字只能从：" + "、".join(cand) + "）；没有则空字符串"}
-        props["npc_moves"] = {"type": "array", "maxItems": 2,
-                              "items": {"type": "object", "properties": {
-                                  "who": {"type": "string"}, "to": {"type": "string"}},
-                                  "required": ["who", "to"]},
-                              "description": "若这一轮有在场角色【确实起身离开、去了别处】，填 who=名字、"
-                                             "to=去处地名。【铁律】叙述里写了TA走（转身离开/出了门/"
-                                             "说了『走了』动身）就必须填——写走不记走TA就滞留场上。通常省略"}
+        # 🔒 npc_moves 只在 LLM_MAP_WRITES 开着时征收: 锁下 apply_char_move 返 None,
+        #    申报是死信; 真离场早有 _settle_prose_exits 架构层从散文/台词里直接记账
+        #    (zh 正则; en 离场正则缺位是既有旧账, 记在 BUGS.md, 与本次摘字段无关)
+        if _lock_on("LLM_MAP_WRITES"):
+            props["npc_moves"] = {"type": "array", "maxItems": 2,
+                                  "items": {"type": "object", "properties": {
+                                      "who": {"type": "string"}, "to": {"type": "string"}},
+                                      "required": ["who", "to"]},
+                                  "description": "若这一轮有在场角色【确实起身离开、去了别处】，填 who=名字、"
+                                                 "to=去处地名。【铁律】叙述里写了TA走（转身离开/出了门/"
+                                                 "说了『走了』动身）就必须填——写走不记走TA就滞留场上。通常省略"}
         props["companion_join"] = {"type": "string", "description":
                                    "若这一轮在场的某个角色【当面答应要和玩家一起走/同行】"
                                    "（玩家邀TA一起去某处，TA应了；或TA主动说『我陪你去』『带你去』），"
@@ -1678,13 +1722,23 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
                                                     "NOT yours. Never write your own character's "
                                                     "action or line here, never address the player "
                                                     "as 'you'. One rides the momentum, one changes "
-                                                    "direction. English ONLY. No dashes" if en else
+                                                    "direction. English ONLY. No dashes"
+                                                    # 🔒 打字移动死了就别递「去某地」按钮 (审查确认:
+                                                    #    点了整条不走, 下一拍还被原地锚顶回来)
+                                                    + ("" if _lock_on("TYPED_MOVE") else
+                                                       ". Never suggest going somewhere else — "
+                                                       "travel is a map tap, not a line")
+                                                    if en else
                                                     "玩家下一步的两个可点建议。视角铁律：这两条写的是"
                                                     "【玩家】(你对面那个人) 接下来会说/会做的，用玩家"
-                                                    "的第一人称（我…/问他…/去…）——绝不是你自己这个"
+                                                    "的第一人称（我…/问他…/"
+                                                    + ("去…" if _lock_on("TYPED_MOVE") else "找…")
+                                                    + "）——绝不是你自己这个"
                                                     "角色的动作或台词，也绝不许写成对玩家说话的劝告腔"
                                                     "（你可以…/你不妨…）。每条≤16字，第一条顺着刚发生"
-                                                    "的势头，第二条换个方向；贴文风，不用破折号")}
+                                                    "的势头，第二条换个方向；贴文风，不用破折号"
+                                                    + ("" if _lock_on("TYPED_MOVE") else
+                                                       "；不出「去某地」类建议——换场景玩家自己会点地图"))}
         if prompt.get("creatures_here"):
             props["creature_hit"] = {"type": "string", "description":
                                      "若这一轮玩家的攻击【确实打中了】在场生物，填"
@@ -4941,7 +4995,9 @@ class QwenLLM:
             '"mandate":"选它之后剧情必须坚定走向的方向(≤30字)"}]}。'
             "要求：kind 按剧情自然选用不硬凑；2~3个选项，方向必须彼此相斥（不是同一件事的三种语气）；"
             "至少一个选项要有真实代价；kind=kill 只在剧情确实走到生死关头时才用，"
-            "target 只能原样抄写在场角色名；kind=move 的 target 优先用已知通路里的地点名；"
+            "target 只能原样抄写在场角色名；kind=move 的 target "
+            + ("优先用" if _lock_on("LLM_MAP_WRITES") else "【只能】原样抄写")
+            + "已知通路里的地点名；"
             "不许出现与眼下剧情无关的凭空事件。"
             + ("本局为成人向沙盒，抉择可以大胆、狠辣。" if prompt.get("mature") else "")
             + ("Write all player-facing text (prompt/label/mandate) in English."
