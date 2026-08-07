@@ -94,6 +94,15 @@ def smoke_one(title: str, content: dict) -> list[str]:
             return fails
         if not out.get("beats"):
             fails.append(f"{label}: no beats")
+        # 🗣 有 beats 不等于有人说话 (Yi 报障 2026-08-07「角色现在不能发言了」)。
+        # 那次全站台词占比从 52% 掉到 13%: 台词整坨落进无名旁白, 而这道门只看
+        # 「有没有 beats」—— 100% 全是旁白它照样放行。玩家开口那一路必须有人接。
+        # 注意: 这道门跑的是 MockLLM, 只抓得住【引擎侧】把台词弄丢; 抓不住
+        # 「真模型不打行首前缀了」那一类 —— 那类只有生产遥测 (speechless_turn) 能抓。
+        _here = bool(runtime.scene_characters(content, state))
+        if channel == "say" and runtime.speechless_turn(out.get("beats"), channel="say",
+                                                        present=_here):
+            fails.append(f"{label}: 有人在场却没人说话 (全是旁白, 无一条具名台词)")
         state = out.get("state") or state
         try:
             json.dumps(state, ensure_ascii=False)

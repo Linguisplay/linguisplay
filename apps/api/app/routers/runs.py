@@ -1214,9 +1214,21 @@ def play(
                     except Exception:
                         pass
                 # 📈 one line per turn: duration, beats, dice, what the audit decided
+                # 🗣 哑巴拍读口 (Yi 报障 2026-08-07「角色现在不能发言了」)。
+                # 那次台词占比从 52% 掉到 13%, 而当时【没有任何东西能看出来】——
+                # 只能等玩家来骂。剧本冒烟门跑的是 MockLLM, 原理上抓不住
+                # 「真模型不打行首前缀了」这一类, 只有生产数据能抓。
+                _mute = runtime.speechless_turn(
+                    [{"author": b.author, "type": b.type, "speaker_name": b.speaker_name}
+                     for b in (db2.query(BeatModel)
+                               .filter(BeatModel.run_id == run_id,
+                                       BeatModel.seq >= start_seq).all() or [])],
+                    channel=(body.channel or "say"),
+                    present=bool(runtime.scene_characters(content, final.get("state") or {})))
                 metrics.log("turn", run=run_id[:8],
                             ms=int((_time_mod.perf_counter() - _turn_t0) * 1000),
                             beats=seq - start_seq,
+                            mute=1 if _mute else 0,
                             dice=((final.get("dice") or {}).get("outcome") or ""),
                             audit=",".join(sorted({(e.get("e") or "") + ("" if e.get("ok") else "!")
                                                    for e in (final.get("audit") or [])})))

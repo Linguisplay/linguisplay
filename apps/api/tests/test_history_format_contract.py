@@ -104,3 +104,31 @@ def test_an_action_turn_is_allowed_to_be_silent():
     """玩家只是做了个动作, 角色不吭声是合法的, 不许误报。"""
     beats = [{"author": "engine", "type": "description", "text": "他看了你一眼。"}]
     assert runtime.speechless_turn(beats, channel="do") is False
+
+
+def test_the_players_own_line_does_not_count_as_speech():
+    """玩家自己那条 dialogue 不算角色开口 —— 算了就永远报不出哑巴。"""
+    beats = [{"author": "player", "type": "dialogue", "speaker_name": "蔡妍", "text": "你还好吗"},
+             {"author": "engine", "type": "description", "text": "他看了你一眼。"}]
+    assert runtime.speechless_turn(beats, channel="say") is True
+
+
+def test_a_nameless_dialogue_does_not_count_either():
+    """没有说话人的 dialogue 正是解析失败的产物, 不能拿它当「说话了」。"""
+    beats = [{"author": "engine", "type": "dialogue", "speaker_name": "", "text": "小伤。"}]
+    assert runtime.speechless_turn(beats, channel="say") is True
+
+
+# ── 冒烟门: 只断言「有 beats」是抓不住哑巴的 ──────────────────────────────────
+
+def test_the_story_gate_checks_that_someone_speaks():
+    """事故复盘: smoke_stories.py 只断言「no beats」—— 100% 全是旁白它也放行。
+    这就是 1340 个单测 + 两道门全绿却漏掉「角色不能发言」的直接原因之一。
+
+    (另一半原因是那道门跑的是 MockLLM, 桩永远按代码吐东西, 原理上抓不住
+     「真模型不打前缀了」。那一类只有生产遥测能抓, 见 speechless_turn。)
+    """
+    import io
+    src = io.open("smoke_stories.py", encoding="utf-8").read()
+    assert "speechless" in src or "没人说话" in src, \
+        "剧本冒烟门还是只看有没有 beats, 不看角色开没开口"

@@ -473,16 +473,21 @@ def _t(content: dict[str, Any], zh: str, en: str) -> str:
 NARRATOR_TAG = "旁白："
 
 
-def speechless_turn(beats: list[dict[str, Any]] | None, channel: str = "say") -> bool:
+def speechless_turn(beats: list[dict[str, Any]] | None, channel: str = "say",
+                    present: bool = True) -> bool:
     """🔭 这一拍【被直接搭话却一句台词都没有】吗。
 
     2026-08-07 的报障就是这个形状: 模型内容对、但行首前缀没了, 台词整坨落进旁白,
     角色看起来彻底哑了。当时没有任何读口能看出来, 只能等玩家来骂 —— 而这次就是
     等来的。所以补一个能数的口子, 别让同类问题再无声烂掉。
 
-    只在【玩家开口说话】那一路算数: 玩家做动作 (do) 时角色不吭声是合法的。
+    三个前提, 缺一就不算哑:
+      · 只在【玩家开口说话】那一路算数 —— 玩家做动作 (do) 时角色不吭声是合法的
+      · 场上得【有人】—— 这一条是这道闸自己上线当天就抓到的误报: 无界之地与
+        后宫物语开场一个人都不在场, 引擎正确地退回「你环顾四周」, 不是哑巴
+      · 玩家自己那条 dialogue、以及没有说话人的 dialogue (解析失败的产物) 都不算开口
     """
-    if channel != "say":
+    if channel != "say" or not present:
         return False
     for b in beats or []:
         if b.get("type") == "dialogue" and b.get("author") != "player" \
