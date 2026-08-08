@@ -840,6 +840,26 @@ def history_for(beat_log: list[dict[str, Any]] | None, char_id: str | None,
     return out
 
 
+def memory_cutoff(char_history: list[dict[str, str]] | None) -> int:
+    """🧠 摘要该从哪儿接手 = 逐字窗口够不着的那一段 (Yi 2026-08-08「帮助模型记忆」)。
+
+    ⚠️ 必须去问窗口【它到底留了哪些】, 不许自己另算一遍。这两层从前用的是两把尺:
+      窗口按【玩家回合】切 (08-04 改的: 旁白进记忆后一回合从 2 条变 3 条, 按条数切
+             会让覆盖的回合数不增反减)
+      摘要按【消息条数】切 (len(history) - MEMORY_WINDOW)
+    生产全量扫 48 个有摘要的角色: 47 个【重复覆盖】(中位 21 条同时躺在窗口和摘要里,
+    同一段话付两份钱), 1 个【真盲区】(漏 95 条, 那是 141 个玩家回合的长局 —— 玩家眼里
+    就是「聊得好好的突然失忆」)。两个症状同一个根。
+
+    跟关系判官那个 at 用 _time_index、判据用 turn_seq 是同一类错: 两把尺量同一件事。
+    """
+    h = char_history or []
+    if not h:
+        return 0
+    from . import qwen as _q     # 惰性: qwen 反过来要读 runtime 的常量
+    return max(0, len(h) - len(_q.history_window(h, MEMORY_WINDOW)))
+
+
 def _update_memory_for(state: dict[str, Any], char_id: str, char_history: list[dict[str, str]],
                        llm: LLM) -> None:
     """Per-CHARACTER rolling digest: fold this character's own witnessed turns that slid out
@@ -847,7 +867,7 @@ def _update_memory_for(state: dict[str, Any], char_id: str, char_history: list[d
     membyc = state.setdefault("memory_by_char", {})
     memcov = state.setdefault("memcov_by_char", {})
     covered = int(memcov.get(char_id, 0))
-    cutoff = max(0, len(char_history) - MEMORY_WINDOW)
+    cutoff = memory_cutoff(char_history)
     if cutoff - covered < MEMORY_BATCH:
         return
     prior = membyc.get(char_id, "")
@@ -876,7 +896,7 @@ def _folds_async(state: dict[str, Any], folds: list[tuple[str, list]], llm: LLM)
     jobs = []
     for cid, ch in folds:
         covered = int(memcov.get(cid, 0))
-        cutoff = max(0, len(ch) - MEMORY_WINDOW)
+        cutoff = memory_cutoff(ch)      # 🧠 跟窗口同一把尺 (见 memory_cutoff)
         if cutoff - covered < MEMORY_BATCH:
             continue
         jobs.append((cid, membyc.get(cid, ""), list(ch[covered:cutoff]), cutoff))
@@ -938,7 +958,7 @@ def _update_memory(state: dict[str, Any], history: list[dict[str, str]] | None, 
     place; degrades to leaving `memory` unchanged on any model failure."""
     history = history or []
     covered = int(state.get("memory_covered") or 0)
-    cutoff = max(0, len(history) - MEMORY_WINDOW)   # everything older than the window
+    cutoff = memory_cutoff(history)     # 🧠 跟窗口同一把尺 (见 memory_cutoff)
     if cutoff - covered < MEMORY_BATCH:
         return                                       # not enough new material yet
     new_lines = history[covered:cutoff]

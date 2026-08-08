@@ -65,7 +65,9 @@ def test_long_run_accumulates_digest():
 
 def test_locked_secret_never_enters_digest():
     # The leak tripwire: a never-unlocked secret's body must not surface in memory.
-    state, history = _drive(20)
+    # ⚠️ 回合数按【玩家回合】算 (2026-08-08「同一把尺」): 窗口留 24 个回合,
+    #    要压缩得先超过它 + MEMORY_BATCH。旧夹具的 20 在新尺下压根滑不出窗口。
+    state, history = _drive(runtime.MEMORY_WINDOW + runtime.MEMORY_BATCH + 2)
     assert state["memory"], "digest should exist after a long run"
     assert "LOCKED_SECRET_BODY_XYZ" not in state["memory"]
     # and it was never even spoken into history (the gate kept it out upstream)

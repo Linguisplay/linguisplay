@@ -167,3 +167,32 @@ def test_anchor_under_map_writes_alone_teaches_declared_travel(map_writes_on, in
     assert "move_invite" not in sys, "INVITE_MOVE 还关着, 不该教确认条"
     assert "玩家自己在地图上点" not in sys, "原地文案与 moved_to 征收自相矛盾"
     assert "moved_to" in sys, "声明式移动开着就要教申报, 文与实不许分家"
+
+
+# ── 两旗同时开着: 两件工具并存, 不是择一 (Yi 2026-08-08「模型决定」+「发挥空间」) ──
+
+def test_both_tools_are_taught_when_both_flags_are_on():
+    """⚠️ 这是我自己造的窟窿, 记在这里: 原来这段是 if/elif/else, 两旗同开时邀约那条
+    抢先, moved_to 永远轮不上 —— schema 在收这个字段, 提示词却从没教过它。收了不教,
+    模型自然不填, 于是「模型决定」那一刀在主拍上基本是空转的。"""
+    sys = qwen._build_system(PROMPT)
+    assert "moved_to" in sys, "收了 moved_to 却不教 —— 模型不知道自己能申报到达"
+    assert "move_invite" in sys, "相邀那条路也得留着"
+    assert "绝不要替玩家写出他已经" not in sys, \
+        "还在说「不许写已经到了」—— 这正是「模型决定」推翻的那句，会跟 moved_to 打架"
+
+
+def test_only_the_declared_move_when_the_invite_is_shut(invite_move_off):
+    sys = qwen._build_system(PROMPT)
+    assert "moved_to" in sys and "move_invite" not in sys
+
+
+def test_only_the_invite_when_declared_move_is_shut(map_writes_off):
+    sys = qwen._build_system(PROMPT)
+    assert "move_invite" in sys and "moved_to" not in sys
+
+
+def test_neither_falls_back_to_stay_put(map_writes_off, invite_move_off):
+    sys = qwen._build_system(PROMPT)
+    assert "玩家自己在地图上点" in sys
+    assert "moved_to" not in sys and "move_invite" not in sys

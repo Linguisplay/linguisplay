@@ -18,7 +18,14 @@ class DigestLLM:
 
 
 def _long_history(n):
-    return [{"speaker": "b", "text": f"第{i}句"} for i in range(n)]
+    """⚠️ n 是【玩家回合】数, 不是消息条数 (2026-08-08「同一把尺」之后)。
+    折叠的起点现在去问 qwen.history_window「你留了哪些」, 而它按玩家回合切 ——
+    按条数造的旧夹具在新尺下根本触发不了压缩。"""
+    out = []
+    for i in range(n):
+        out.append({"role": "user", "content": f"玩家第{i}句"})
+        out.append({"role": "assistant", "content": f"甲：第{i}句"})
+    return out
 
 
 def _wait_shelf(tok):
