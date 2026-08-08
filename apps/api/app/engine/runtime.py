@@ -473,6 +473,41 @@ def _t(content: dict[str, Any], zh: str, en: str) -> str:
 NARRATOR_TAG = "旁白："
 
 
+# 🚶 把人写去别处的动词。要有【动作】才算 —— 嘴上提一句别处不算。
+_PROSE_GO = re.compile(
+    r"(走[出进向到过]|来到|去了|穿过|拐[进过]|迈[进出]|踏[进入]|抵达|带[你我]|领着|牵着[你我]|"
+    r"推开.{0,12}(门|帘)|进了|下了车|上了车)")
+
+
+def prose_moved_elsewhere(content: dict[str, Any], state: dict[str, Any],
+                          texts: list[str] | None) -> list[str]:
+    """🔭 这一拍的正文有没有【把人写去了别的在册地点】(而位置其实没动)。
+
+    Yi 报障 2026-08-08:「在1场景旁白文字会移动到别的地方，但是玩家和 AI 角色一直在1场景」。
+    生产实测 8 例, 最典型的一例连着三拍把人从巷口 → 龙津道 → 街角 → 糖水店一路写过去,
+    location_id 一动没动。
+
+    根因不是提示词缺规则 —— 规则在, 而且写得很明白 (「这一拍的戏必须仍然发生在此地」)。
+    根因是【玩家亲口说了要走, 而引擎没有办法兑现】: 2026-08-06 三把锁把移动收成只剩
+    点地图之后, 玩家打「跟他走」时系统无路可走, 模型只好用文字兑现。那一例的上一拍
+    正是「（反手扣紧他的手，跟他走）好啊」。
+
+    这里只做【计数】不做拦截: 事后重打的代价在逐拍流式下太大 (守卫一响就是玩家眼前的
+    字被撕掉)。先有数, 才谈得上「改了有没有用」—— 今天两次都是没有数, 只能等玩家来骂。
+    场内走动 (「走到训练场角落的木桩前」) 不算, 否则这个读口全是噪音, 就没人看了。
+    """
+    here = state.get("location_id")
+    hit: list[str] = []
+    for loc in ((content.get("story") or {}).get("locations") or []):
+        nm = (loc.get("name") or "").strip()
+        if not nm or len(nm) < 2 or loc.get("id") == here:
+            continue          # 一个字的地名 (「巷」「街」) 到处误命中
+        for t in (texts or []):
+            if nm in (t or "") and _PROSE_GO.search(t or "") and nm not in hit:
+                hit.append(nm)
+    return hit
+
+
 def speechless_turn(beats: list[dict[str, Any]] | None, channel: str = "say",
                     present: bool = True) -> bool:
     """🔭 这一拍【被直接搭话却一句台词都没有】吗。

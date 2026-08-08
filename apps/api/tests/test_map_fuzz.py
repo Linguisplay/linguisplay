@@ -237,3 +237,66 @@ def test_red_sample_the_map_check_really_fires(monkeypatch):
     monkeypatch.setattr(runtime, "map_view", bad)
     with pytest.raises(AssertionError):
         test_map_random_walk(title, content, 1)
+
+
+# ── 🔭 旁白把人写去了别处, 而位置纹丝没动 (Yi 报障 2026-08-08) ──────────────────
+#
+# 生产实测: 8 例「正文点名了别的在册地点、而 location_id 全程不变」。最典型的一例
+# 连着三拍把人从巷口 → 龙津道 → 街角 → 糖水店一路写过去, 状态一动没动。
+#
+# 根因不在提示词缺规则 —— 规则在, 而且写得很明白 (「这一拍的戏必须仍然发生在此地」)。
+# 根因是【玩家亲口说了要走, 而引擎没有任何办法兑现】: 2026-08-06 三把锁把移动收成
+# 只剩点地图之后, 玩家打「跟他走」时系统无路可走, 模型只好用文字兑现。
+# 那一例的上一拍正是: 蔡妍「（反手扣紧他的手，跟他走）好啊」。
+#
+# 光加狠话不解决问题 (今天已经栽过两次)。先做一个【能量的】检测器: 正文里点名了
+# 别的在册地点 = 一次候选的文与实分家。有了数才谈得上「改了有没有用」。
+
+def _named_elsewhere(content, state, texts):
+    return runtime.prose_moved_elsewhere(content, state, texts)
+
+
+def test_it_catches_prose_that_walks_you_out():
+    """生产实弹原文。"""
+    content = {"story": {"locations": [
+        {"id": "kc", "name": "九龙城区"}, {"id": "gg", "name": "佳佳糖水店"}]}}
+    st = {"location_id": "kc"}
+    assert _named_elsewhere(content, st, [
+        "蓝信一推开佳佳糖水店的玻璃门，门楣上的风铃叮铃铃响了一串。"]) == ["佳佳糖水店"]
+
+
+def test_moving_around_inside_the_place_is_fine():
+    """场内走动是合法的 —— 误报会把这个读口变成噪音, 那就没人看了。"""
+    content = {"story": {"locations": [
+        {"id": "f", "name": "训练场"}, {"id": "g", "name": "学院前院"}]}}
+    st = {"location_id": "f"}
+    assert _named_elsewhere(content, st, [
+        "你走到训练场角落的木桩前，开始活动手腕和脚踝。"]) == []
+
+
+def test_merely_mentioning_a_place_is_not_moving():
+    """嘴上提一句别处不算把人写过去 —— 要有移动动词才算。"""
+    content = {"story": {"locations": [
+        {"id": "kc", "name": "九龙城区"}, {"id": "gg", "name": "佳佳糖水店"}]}}
+    st = {"location_id": "kc"}
+    assert _named_elsewhere(content, st, ["他说佳佳糖水店的杏仁茶最好。"]) == []
+
+
+def test_the_current_place_never_counts():
+    content = {"story": {"locations": [{"id": "kc", "name": "九龙城区"}]}}
+    assert _named_elsewhere(content, {"location_id": "kc"},
+                            ["你走进九龙城区深处。"]) == []
+
+
+def test_one_char_names_are_ignored():
+    """一个字的地名会到处误命中 (「街」「巷」)。"""
+    content = {"story": {"locations": [
+        {"id": "a", "name": "巷"}, {"id": "b", "name": "面档"}]}}
+    assert _named_elsewhere(content, {"location_id": "b"}, ["你走出巷口。"]) == []
+
+
+def test_it_is_quiet_on_a_normal_beat():
+    content = {"story": {"locations": [
+        {"id": "kc", "name": "九龙城区"}, {"id": "gg", "name": "佳佳糖水店"}]}}
+    assert _named_elsewhere(content, {"location_id": "kc"},
+                            ["他把蝴蝶刀收进腰间，歪头看你一眼。"]) == []

@@ -1225,10 +1225,20 @@ def play(
                                        BeatModel.seq >= start_seq).all() or [])],
                     channel=(body.channel or "say"),
                     present=bool(runtime.scene_characters(content, final.get("state") or {})))
+                # 🚶 正文把人写去了别处而位置没动 (Yi 报障 2026-08-08)。同「哑巴拍」
+                # 一样只计数不拦截: 逐拍流式下事后重打 = 玩家眼前的字被撕掉。
+                # 先有数, 才谈得上「改了有没有用」—— 今天两次都是没有数, 只能等玩家来骂。
+                _drift = runtime.prose_moved_elsewhere(
+                    content, final.get("state") or {},
+                    [b.text for b in (db2.query(BeatModel)
+                                      .filter(BeatModel.run_id == run_id,
+                                              BeatModel.seq >= start_seq).all() or [])
+                     if b.text])
                 metrics.log("turn", run=run_id[:8],
                             ms=int((_time_mod.perf_counter() - _turn_t0) * 1000),
                             beats=seq - start_seq,
                             mute=1 if _mute else 0,
+                            drift=(",".join(_drift[:2]) if _drift else ""),
                             dice=((final.get("dice") or {}).get("outcome") or ""),
                             audit=",".join(sorted({(e.get("e") or "") + ("" if e.get("ok") else "!")
                                                    for e in (final.get("audit") or [])})))
