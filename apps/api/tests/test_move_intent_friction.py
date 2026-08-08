@@ -72,7 +72,15 @@ def _sys(**kw):
 def test_the_model_is_told_the_move_was_refused():
     s = _sys(move_blocked=True)
     assert "留在" in s or "不许离开" in s or "仍然发生在此地" in s
-    assert "地图" in s, "没告诉模型玩家该去点地图, 角色就没法自然接这句"
+    # 🎟 2026-08-08 邀约锁开回来之后, 「该怎么办」的答案换了一个 —— 但必须【有】一个:
+    #    只有禁令没有出路, 模型就会自己找路, 那正是这条摩擦当初没拦住的原因。
+    assert "move_invite" in s, "只写了禁令没给出口, 模型只能用散文兑现"
+
+
+def test_the_friction_points_at_the_map_when_the_invite_lock_is_shut(invite_move_off):
+    """可逆合同: 锁关着时出路只剩点地图, 文案得跟着换回去。"""
+    s = _sys(move_blocked=True)
+    assert "地图" in s and "move_invite" not in s
 
 
 def test_the_character_may_still_agree_out_loud():

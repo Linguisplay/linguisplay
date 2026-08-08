@@ -340,20 +340,28 @@ LLM_MAP_WRITES = False
 # 都关上之后, 地图这个功能只剩两个输入: 作者写的地点/作息, 和玩家在图上点的那一下。
 TYPED_MOVE = False
 
-# 🎟 邀约确认条也取消 (Yi 2026-08-06 第三刀:「不通过文字控制！」)。
+# 🎟 邀约确认条: 2026-08-06 关, 2026-08-08 开回来 (两次都是 Yi 拍的, 原委都记在这)。
 #
-# 前两把锁关掉之后, 从文字里长出来的移动只剩最后一条【还活着】: 角色在台词里邀你去
-# 一个【已在册、已解锁、走得到】的地方 → 回合尾弹一张「跟 TA 去 / 留下」的确认条。
-# 玩家自己在输入框里提到一个已在册的地名, 同样弹。铸地那半边早被 LLM_MAP_WRITES
-# 堵死了 (generate_and_move 直接返回 None), 所以确认条现在只可能指向作者写好的地点。
+# 【为什么当初关】前两把锁关掉之后, 从文字里长出来的移动只剩这一条还活着, Yi 的裁定
+# 是「不通过文字控制！」—— 移动只剩点界面, 角色照样能嘴上邀你, 但要走得自己点地图。
 #
-# Yi 的裁定: 移动只剩【点界面】—— 地图面板点节点, 或顶栏「可去：X」点一下。
-# 角色照样可以嘴上说「跟我去果栏」, 但要走, 得玩家自己点。
-# 三把锁合起来: 说话不改地图, 打字不改地图, 台词里的邀约也不再变成一个能走人的按钮。
+# 【为什么开回来】线上实弹: 角色开口邀玩家去某处, 玩家开口答应, 而系统【没有任何办法
+# 兑现】。那一拍当天新上的三道东西全部正常工作 (意图认出来了、toast 弹了、压模型的
+# 规则也下了), 模型照样把两个人写去了别处, location_id 一动没动。
 #
-# 代价 (记在这里, 别装作没有): 邀约少了一个顺手的按钮, 玩家要多点一步; 而且确认条
-# 上那个「带上谁」的挑人器只挂在它身上 —— 地图那条路目前只带 following 里已有的人。
-INVITE_MOVE = False
+# 根因不是提示词不够狠, 是【把出口堵死了只留一条禁令】: 模型手上有戏要演, 就翻墙。
+# 这类洞补不完 —— 只要角色还能开口邀约, 每一次玩家答应都在重开这个坑。
+#
+# 【开回来的是什么】一个玩家必须【亲手点】的按钮, 所以「移动只剩点界面」这条没破:
+#   角色申报 move_invite → 引擎验目的地在册/已解锁/走得到 → 弹「跟 TA 去 / 留下」
+#   → 玩家点了才真的走。玩家不点, 位置一动不动。
+# 另外两把锁一动没动: 散文不许改地图 (LLM_MAP_WRITES), 打字不许改地图 (TYPED_MOVE)。
+# 铸地那半边也照旧堵着 (generate_and_move 在锁下返回 None), 所以确认条只可能指向
+# 作者写好的地点 —— 模型不能靠邀约凭空长出一个新场景。
+#
+# ⚠️ 一起回来的还有「打听到人在哪 → 去找 TA」那张条 (同一口闸, 见 seek 那一段)。
+# 守卫: tests/test_invite_move_back.py (下半截专门守另外两把锁没被顺手松掉)。
+INVITE_MOVE = True
 
 # 🔎 找人不再自动造真 (Yi 2026-08-05)。
 #
@@ -546,6 +554,78 @@ def prose_moved_elsewhere(content: dict[str, Any], state: dict[str, Any],
             if nm in (t or "") and _PROSE_GO.search(t or "") and nm not in hit:
                 hit.append(nm)
     return hit
+
+
+def _loc_aliases(name: str) -> set[str]:
+    """一个在册地点在正文/姿位里可能被写成的短名。
+
+    剧本爱把地点注册成复合名 (「甲·乙」「甲与乙」), 而模型只写其中一截 —— 只认全名的
+    读口对真实文字是瞎的。一个字的地名不要 (「巷」「街」到处误命中)。
+    """
+    out = {name}
+    for part in re.split(r"[·・\-—/／、,，(（]|与|和", name or ""):
+        part = part.strip()
+        if len(part) >= 2:
+            out.add(part)
+    return {a for a in out if len(a) >= 2}
+
+
+def position_names_elsewhere(content: dict[str, Any], state: dict[str, Any],
+                             text: str | None) -> str:
+    """🧍 这条姿位文本有没有点到【别的在册地点】。命中就返回那个地点的全名。
+
+    线上实弹 2026-08-08: 审计单上并排躺着「你:跟在她身后往X走」和「at=此地」——
+    一条记录里文说在往 X 走, 实说人在此地。姿位会回喂给下一拍当锚, 收下一条假的
+    等于让这次幻觉自己给自己续命, 位置永远追不上。
+
+    ⚠️ 别名撞车就不算数: 同一个剧本里「甲·前厅」「甲·后院」都会缩成「甲」, 拿它去
+    判谁都不对。线上扫过一遍, 误报几乎全是这个形状 —— 所以只认【全剧本唯一】的别名,
+    而且此地自己占着的别名一律让开。
+    """
+    text = str(text or "").strip()
+    if not text:
+        return ""
+    here = state.get("location_id")
+    locs = (content.get("story") or {}).get("locations") or []
+    owners: dict[str, set] = {}
+    for loc in locs:
+        for a in _loc_aliases((loc.get("name") or "").strip()):
+            owners.setdefault(a, set()).add(loc.get("id"))
+    mine = {a for a, ids in owners.items() if here in ids}
+    for loc in locs:
+        if loc.get("id") == here:
+            continue
+        nm = (loc.get("name") or "").strip()
+        for a in sorted(_loc_aliases(nm), key=len, reverse=True):
+            if a in mine or len(owners.get(a) or ()) != 1:
+                continue          # 此地也叫这个 / 好几个地点都叫这个 → 判不了
+            if a in text:
+                return nm
+    return ""
+
+
+def book_position(content: dict[str, Any], state: dict[str, Any],
+                  char_id: str | None, text: str | None) -> bool:
+    """🧍 姿位入账的唯一口子 (char_id 为空 = 玩家自己)。拦下来的那次要留痕 ——
+    不留痕就永远量不出「文与实长在同一行上打架」发生过多少回。"""
+    text = str(text or "").strip()
+    if not text:
+        return False
+    bad = position_names_elsewhere(content, state, text)
+    if bad:
+        _audit(state, "pos.refuse", False, text[:16], f"点了别处：{bad}")
+        try:
+            from .. import metrics as _pm
+            _pm.log("pos", ev="refuse", to=bad)
+        except Exception:
+            pass
+        return False
+    rec = {"text": text, "at": state.get("location_id")}
+    if char_id:
+        _sim(state, char_id)["pos"] = rec
+    else:
+        state["player_pos"] = rec
+    return True
 
 
 def speechless_turn(beats: list[dict[str, Any]] | None, channel: str = "say",
@@ -12243,14 +12323,14 @@ def run_turn_stream(
             _sim(state, sp_id)["intent_at"] = _time_index(state)   # ⏳ 应承有保质期
         # 🧍 姿位账本: where this body is inside the room and how it's held. Entries
         # carry the location id, so moving scenes auto-stales them (no cleanup pass).
+        # ⚠️ 两处都必须走 book_position: 姿位是模型填的自由文本, 从前引擎原样收下,
+        #    于是「往【别处】走」这种自相矛盾的值也能入账 (线上实弹 2026-08-08)。
         _spos = (directed.get("self_position") or "").strip()[:16]
-        if _spos and sp_id:
-            _sim(state, sp_id)["pos"] = {"text": _spos, "at": state.get("location_id")}
+        if _spos and sp_id and book_position(content, state, sp_id, _spos):
             _audit(state, "pos.set", True, f"{sp_name}:{_spos}")
         if is_primary:
             _ppos = (directed.get("player_position") or "").strip()[:14]
-            if _ppos:
-                state["player_pos"] = {"text": _ppos, "at": state.get("location_id")}
+            if _ppos and book_position(content, state, None, _ppos):
                 _audit(state, "pos.set", True, f"你:{_ppos}")
         # 📟 心象仪: the speaker's own judged inner state rides on their LAST line
         mood = (directed.get("self_state") or "").strip()[:40 if lang_of(content) == "en" else 12]
@@ -13202,7 +13282,9 @@ def run_turn_stream(
 
     # 🗺 玩家说了要走却走不了 —— 把这道摩擦摆到明处 (Yi 2026-08-08 拍板 A)。
     # 走 moments→toast 那条管道, 不进正文: 引擎硬写的旁白不过文风, 还会进历史污染示范。
-    if _wants_move:
+    # ⚠️ 确认条已经在屏幕上时不许再弹 —— 一个「跟 TA 去」的按钮配一条「自己去点地图」
+    #    的提示, 是两个不一样的指路, 玩家只会更懵 (2026-08-08 邀约锁开回来时的接缝)。
+    if _wants_move and not move_request:
         moments.append(map_move_hint())
 
     # 💡 建议单一来源 (Yi 2026-07-20 重做): 导演随主拍写的两条, 不够垫底句补齐。

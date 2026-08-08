@@ -51,7 +51,14 @@ def test_schema_omits_moved_to_and_npc_moves_by_default():
                                   "离场早有 _settle_prose_exits 架构层接管")
 
 
-def test_schema_omits_move_invite_by_default():
+def test_schema_asks_for_move_invite_by_default():
+    """🎟 2026-08-08 起邀约锁默认开着 —— 确认条弹得出来, 就得向模型收这个字段。
+    不收会怎样, 线上验过: 模型没有出口就用散文兑现, 把人写去别处而位置没动。"""
+    assert "move_invite" in _tool(PROMPT)
+
+
+def test_schema_omits_move_invite_when_locked(invite_move_off):
+    """可逆合同: 锁一关, 死信字段就不许再征。"""
     assert "move_invite" not in _tool(PROMPT), \
         "INVITE_MOVE 关着, 确认条永远不弹, move_invite 是死信"
 
@@ -67,7 +74,13 @@ def test_schema_returns_invite_when_unlocked(invite_move_on):
 
 # ── qwen 空间锚: 不再教模型发起移动 ──────────────────────────────────────────
 
-def test_anchor_stops_teaching_move_invite():
+def test_anchor_teaches_move_invite_by_default():
+    sys = qwen._build_system(PROMPT)
+    assert "move_invite" in sys, "锁开着却不教申报 —— 模型只剩散文一条路兑现"
+    assert "征求玩家同意" in sys or "玩家点头" in sys, "得说清是玩家点头才走, 否则模型会自己走"
+
+
+def test_anchor_stops_teaching_move_invite_when_locked(invite_move_off):
     sys = qwen._build_system(PROMPT)
     assert "move_invite" not in sys, "锁关着, 锚文案还在教模型用 move_invite 申报带路"
     assert "玩家自己在地图上点" in sys, "得告诉模型: 换场只由玩家点地图, 戏留在原地写"
@@ -135,9 +148,10 @@ def test_suggestions_en_allow_travel_when_unlocked(typed_move_on):
     assert "Never suggest going somewhere else" not in _tool({**PROMPT, "language": "en"})
 
 
-def test_anchor_under_map_writes_alone_teaches_declared_travel(map_writes_on):
+def test_anchor_under_map_writes_alone_teaches_declared_travel(map_writes_on, invite_move_off):
     # 🔒 可逆合同: 只翻回 LLM_MAP_WRITES 时, 锚必须教声明式移动 (moved_to),
     #    不许一边征收 moved_to 一边喊「绝不要写玩家启程」自相矛盾
+    # ⚠️ 必须显式关掉邀约锁: 它默认开着且在分支里优先, 否则这里测的根本不是本条合同
     sys = qwen._build_system(PROMPT)
     assert "move_invite" not in sys, "INVITE_MOVE 还关着, 不该教确认条"
     assert "玩家自己在地图上点" not in sys, "原地文案与 moved_to 征收自相矛盾"

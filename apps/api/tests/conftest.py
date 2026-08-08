@@ -78,14 +78,20 @@ def typed_move_on(monkeypatch):
 
 @pytest.fixture
 def invite_move_on(monkeypatch):
-    """开回「台词里的邀约 → 能走人的确认条」(runtime.INVITE_MOVE, Yi 2026-08-06 定默认关)。
+    """显式开「台词里的邀约 → 确认条」(runtime.INVITE_MOVE)。
 
-    产品行为: 移动只剩点界面 —— 地图面板点节点, 或顶栏「可去：X」点一下。角色照样能
-    嘴上说「跟我去果栏」, 但要走得玩家自己点。这是 2026-08-04 那两把锁的收尾: 那两把
-    关掉之后, 从文字里长出来的移动只剩这一条还活着。
-    测【确认条本身】的用例显式开旗跑, 与 map_writes_on / typed_move_on 同理。
+    ⚠️ 2026-08-08 起这把锁【默认就是开的】(见 runtime 那一段的原委), 所以这个夹具现在
+    是个 no-op 保险 —— 留着是为了让老用例的意图仍然读得出来, 也为了万一再关时它们
+    自己会红。要测「关着时」请用 invite_move_off。
     """
     monkeypatch.setattr(runtime, "INVITE_MOVE", True)
+
+
+@pytest.fixture
+def invite_move_off(monkeypatch):
+    """关掉邀约确认条 —— 守可逆合同: 锁一关, 提示词层必须跟着换说法, 不许一边不收
+    move_invite 一边还教模型申报 (那就是 2026-08-06 的半吊子锁)。"""
+    monkeypatch.setattr(runtime, "INVITE_MOVE", False)
 
 
 @pytest.fixture
