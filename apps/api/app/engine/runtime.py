@@ -6485,6 +6485,8 @@ def bank_transfer(content: dict[str, Any], state: dict[str, Any], persona: dict[
     msgs = compose_message(content, state, c, "received_transfer",
                            f"对方刚给你转了{amount}{currency_of(content)}，你按自己的性格回应"
                            "（谢/推辞/起疑/打趣都行），1~2条短消息",
+                           # 📱 转账回执这条路拿不到 beat_log (bank_transfer 的调用方没有),
+                           # 先按老样子走。要接上下文得先把历史递到这一层。
                            _t(content, "收到了。这是做什么？", "Got it. What's this for?"), llm)
     push = phone_push(content, state, c, msgs, now_label)
     return {"view": bank_view(content, state), "reply": push}
@@ -6808,7 +6810,8 @@ def phone_push(content: dict[str, Any], state: dict[str, Any], char: dict[str, A
 #   · 边界: 只有在场见证过的人才来聊那件事 —— 不在场的人不该知道。
 
 def reachout_on_meet(content: dict[str, Any], state: dict[str, Any], llm: LLM,
-                     busy: set[str] | None = None) -> list[dict[str, Any]]:
+                     busy: set[str] | None = None,
+                     beat_log: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     """初次见面之后的自我介绍短信。
 
     「照面即给联系方式」(08-04) 之后, 新玩家打开手机是一部空机: 通讯录里有人,
@@ -6848,7 +6851,7 @@ def reachout_on_meet(content: dict[str, Any], state: dict[str, Any], llm: LLM,
             "你们刚刚初次见面, 你把号存给了对方 —— 发一条自我介绍的短信",
             "一两句, 贴你的性格: 报个名号/说句场面话/或者只丢一句冷淡的确认。"
             "别热情得不像你, 也别写成客服话术。",
-            f"{c.get('name', '')}。", llm)
+            f"{c.get('name', '')}。", llm, beat_log)
         out.append(phone_push(content, state, c, msgs, now_label))
         _audit(state, "reach.intro", True, str(c.get("name") or "")[:12])
     return out
@@ -6856,7 +6859,8 @@ def reachout_on_meet(content: dict[str, Any], state: dict[str, Any], llm: LLM,
 
 def reachout_after_event(content: dict[str, Any], state: dict[str, Any], llm: LLM,
                          moments: list[dict[str, Any]] | None,
-                         busy: set[str] | None = None) -> list[dict[str, Any]]:
+                         busy: set[str] | None = None,
+                         beat_log: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     """刚一起经历了点什么, 事后来一条总结性的短信。
 
     「他还在想刚才那件事」是陪伴感里最便宜也最有效的一条。
@@ -6896,15 +6900,25 @@ def reachout_after_event(content: dict[str, Any], state: dict[str, Any], llm: LL
             f"你们刚一起经历了「{what}」—— 分开之后你回味起来, 给对方发一条",
             "别复述刚才的事, 那是你们俩都在场的; 写此刻心里剩下的那点东西, "
             "一两句, 可以只说半句。",
-            "……", llm)
+            "……", llm, beat_log)
         out.append(phone_push(content, state, c, msgs, now_label))
         _audit(state, "reach.after", True, f"{c.get('name', '')}·{what[:10]}")
     return out
 
 
 def compose_message(content: dict[str, Any], state: dict[str, Any], char: dict[str, Any],
-                    reason: str, hint: str, fallback: str, llm: LLM) -> list[str]:
-    """1~2 short in-voice bubbles for an occasion. LLM-written; deterministic fallback."""
+                    reason: str, hint: str, fallback: str, llm: LLM,
+                    beat_log: list[dict[str, Any]] | None = None) -> list[str]:
+    """1~2 short in-voice bubbles for an occasion. LLM-written; deterministic fallback.
+
+    📱 结合上下文 (Yi 2026-08-08:「第一句开场白也要结合上下文」)。主拍那条手机【回复】
+    路 08-06 就接上了刚才当面发生的事, 但角色【主动】发的消息走这条平行路, 从前拿得到
+    人设/关系/事实账/线程尾巴 —— 唯独看不见刚才那场戏。最明显的就是初次见面那条自我
+    介绍: 你俩刚一起经历了整场开场, 分开之后手机响一声, 内容却只能是「阿彩。」。
+    reachout_after_event 更甚 —— 它的名字就是「刚一起经历了点什么」, 而它看不见那件事。
+
+    认知边界照旧走 history_for 的见证过滤: 我不在场的那场雨, 我不该在短信里提。
+    """
     tun = tuning_for(content)
     scores = (state.get("rel") or {}).get(char.get("id")) or relationships.new_scores()
     try:
@@ -6921,6 +6935,10 @@ def compose_message(content: dict[str, Any], state: dict[str, Any], char: dict[s
                             # 「几天后 TA 主动用上」正是这条路 (半夜一条「你不是说不吃香菜」)。
                             # 认知边界照旧: 只给这个角色自己那本。
                             "knows": knows_of(state, char.get("id")),
+                            # 📱↔🎭 刚才当面那几拍 (只给 TA 亲历的那些)
+                            "recent_scene": [str(m.get("content") or "")[:80]
+                                             for m in history_for(beat_log, char.get("id"))[-6:]]
+                            if beat_log else [],
                             "thread_tail": _thread_tail(state, char.get("id"))}) or {}
         msgs = [dedash(m[:120]) for m in as_str_list(out.get("msgs"))][:2]
     except Exception:
@@ -6929,7 +6947,8 @@ def compose_message(content: dict[str, Any], state: dict[str, Any], char: dict[s
 
 
 def phone_deliveries(content: dict[str, Any], state: dict[str, Any], here_ids: set,
-                     llm: LLM) -> list[dict[str, Any]]:
+                     llm: LLM,
+                     beat_log: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     """Turn-end scan: which ABSENT characters have a reason to reach out RIGHT NOW.
     Deterministic triggers (LLM only writes the words): ① a promise whose hour is next
     (reminder, once); ② just stood up (the hurt text, once); ③ a 暧昧/恋人 the player
@@ -6960,14 +6979,14 @@ def phone_deliveries(content: dict[str, Any], state: dict[str, Any], here_ids: s
             msgs = compose_message(content, state, c, "reminder",
                                    f"你们约好了{when}（{what}），时辰快到了，你捎话提醒TA，带上你自己的语气",
                                    _t(content, f"别忘了{when}，{what}。我等你。",
-                                      f"Don't forget: {when}, {what}. I'll be waiting."), llm)
+                                      f"Don't forget: {when}, {what}. I'll be waiting."), llm, beat_log)
             out.append(phone_push(content, state, c, msgs, now_label))
         elif pr.get("status") in ("missed", "missed_noted") and not pr.get("texted"):
             pr["texted"] = True
             msgs = compose_message(content, state, c, "stood_up",
                                    f"TA爽约了你们约好的（{what}），你心里不好受，忍不住捎话给TA",
                                    _t(content, "我等了你很久。你没来。",
-                                      "I waited a long time. You never came."), llm)
+                                      "I waited a long time. You never came."), llm, beat_log)
             out.append(phone_push(content, state, c, msgs, now_label))
     # ③ afterglow: a romance-tier character the player was JUST with, now apart
     seen = (state.get("phone") or {}).get("seen") or {}
@@ -6993,7 +7012,7 @@ def phone_deliveries(content: dict[str, Any], state: dict[str, Any], here_ids: s
                                 "短、软、像TA的性格" if as_call else
                                 "TA刚离开你身边，你心里还想着TA，忍不住捎一句——短、软、像TA的性格"),
                                _t(content, "你刚走，我就开始想你了。",
-                                  "You just left and I already miss you."), llm)
+                                  "You just left and I already miss you."), llm, beat_log)
         out.append(phone_push(content, state, c, msgs, now_label, call=as_call))
     return out
 
@@ -13110,7 +13129,7 @@ def run_turn_stream(
     # 5e. 📱 the world texts back: absent characters with a live reason (a promise whose
     #     hour is next / just stood up / a lover just parted from) reach out. Capped.
     if not observer and not is_think:
-        for ev in phone_deliveries(content, state, here_after, llm):
+        for ev in phone_deliveries(content, state, here_after, llm, beat_log):
             yield ("phone", ev)
             moments.append({"kind": "phone", "name": ev["name"], "device": ev["device"]})
 
@@ -13120,9 +13139,9 @@ def run_turn_stream(
         # 「别忘了夜里后巷见」被一条自我介绍挤成第二条, 玩家一眼看到的成了打招呼。
         # busy 把本回合已经发过话的人让出去, 一个人一回合只响一次。
         _busy = {str(m.get("name") or "") for m in moments if m.get("kind") == "phone"}
-        _reach = list(reachout_after_event(content, state, llm, moments, _busy))
+        _reach = list(reachout_after_event(content, state, llm, moments, _busy, beat_log))
         _busy |= {str(e.get("name") or "") for e in _reach}
-        _reach += list(reachout_on_meet(content, state, llm, _busy))
+        _reach += list(reachout_on_meet(content, state, llm, _busy, beat_log))
         for ev in _reach:
             yield ("phone", ev)
             moments.append({"kind": "phone", "name": ev["name"], "device": ev["device"]})

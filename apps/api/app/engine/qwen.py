@@ -4211,6 +4211,12 @@ class QwenLLM:
                    + "' / '".join(ch["examples"]) + "'\n") if ch.get("examples") else "")
                + f"你与对方的关系：{prompt.get('relation','')}。\n"
                + _knows_line(prompt.get("knows"))
+               # 📱↔🎭 刚才当面发生的事 (Yi 2026-08-08:「开场白也要结合上下文」)。
+               # 排在情境之前: 它是这条消息为什么会发出来的由头, 不是补充材料。
+               + (("【你们刚才当面经历的事（你亲历的，就在不久前）】\n"
+                   + "\n".join(prompt.get("recent_scene") or [])
+                   + "\n这条消息要接得上这些——挑一个具体的细节说，别写成放之四海皆准的寒暄。\n")
+                  if prompt.get("recent_scene") else "")
                + f"你此刻不在对方身边，要通过{device}给TA捎话。情境：{prompt.get('hint','')}\n"
                "写1~2条【短消息】：每条一行、口语、短（20字内最好），必须一眼就是你的声音——"
                "你的口头禅、你的脾气、你的分寸。不要旁白、不要引号、不要署名，只输出消息本身。不用破折号。"
