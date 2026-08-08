@@ -605,6 +605,79 @@ def position_names_elsewhere(content: dict[str, Any], state: dict[str, Any],
     return ""
 
 
+INVITE_TTL = 2          # 邀约挂几拍作废 (隔太久的「走吧」多半说的不是那件事)
+
+# 🙅 明确回绝。挂着不销账, 玩家下一句随口一个「走吧」就被搬走了。
+_DECLINE = re.compile(r"^(不去|不了|算了|不用了)|不想去|不去了|下次吧|改天吧|待会|等一下再|先不")
+
+
+def note_invite(state: dict[str, Any], chip: dict[str, Any] | None) -> None:
+    """🤝 记下这一拍角色发出的邀约, 等玩家下一句答不答应。
+
+    只留一张 —— 两张没兑现的邀请同时挂着, 玩家一句「好啊」谁也说不清答的是哪个。
+    """
+    if not chip or not chip.get("to"):
+        return
+    state["pending_invite"] = {"to": chip["to"], "to_name": chip.get("to_name"),
+                              "by_name": chip.get("by_name"),
+                              "at": int(state.get("turn_seq") or 0)}
+
+
+def take_invite(content: dict[str, Any], state: dict[str, Any],
+                player_input: str | None, channel: str = "say") -> dict[str, Any] | None:
+    """🤝 两步握手 = 真移动 (Yi 2026-08-08, P0 实验的负结果逼出来的)。
+
+    上一拍角色邀约了一个在册可达的地方, 这一拍玩家答应 ⇒ 现在就走过去, 然后让这一拍
+    的戏【放心到达】。
+
+    【为什么改成这样】原本的做法是弹确认条, 并告诉模型「只演到起身相邀为止, 别写已经
+    到了」。拿真实存档跑了 5 轮 A/B: 有回执和没回执【一样】2/5 把人写到了别处。
+    复盘结论是那条指令本身违反戏理 —— 角色刚说完「要不要跟我去」, 玩家刚答「好」,
+    这时候不许到达是引擎在跟故事较劲, 而拦住的理由只是想让玩家再点一次按钮。
+    可玩家已经用嘴同意过了, 而且【角色提议 + 玩家答应】比点一下图标的同意更强。
+
+    三把锁的边界没破: 目的地仍由引擎验、仍只能是作者写好的地点、模型仍然搬不动人。
+    变的只是【玩家的同意可以用说的, 不是只能用点的】。
+
+    ⚠️ 兑现时必须【再验一次】可达性 —— 记下来之后地图可能变了 (通路上锁/地点没解锁)。
+    ⚠️ 无论走没走成, 只要玩家表了态就销账: 拒绝之后还挂着, 下一句随口的「走吧」会
+       把人搬到一个他早就说过不去的地方。
+    """
+    pend = state.get("pending_invite")
+    if not isinstance(pend, dict) or not pend.get("to"):
+        return None
+    if (state.get("mode") or "character") == "god":
+        return None            # 上帝视角没有脚
+    if int(state.get("turn_seq") or 0) - int(pend.get("at") or 0) > INVITE_TTL:
+        state.pop("pending_invite", None)
+        return None
+    text = str(player_input or "")
+    if _DECLINE.search(text):
+        state.pop("pending_invite", None)
+        _audit(state, "invite.decline", True, pend.get("to_name") or "")
+        return None
+    if not player_wants_to_move(text, channel):
+        return None
+    state.pop("pending_invite", None)   # 表了态就销账, 走没走成都不再挂着
+    dest = _location_by_id(content, pend["to"])
+    if not dest or not location_available(content, state, dest):
+        _audit(state, "invite.take", False, pend.get("to_name") or "", "此刻已不可达")
+        return None
+    cur = location_view(content, state) or {}
+    _ex = cur.get("exits") or []
+    if _ex and dest.get("name") not in _ex and dest.get("id") not in _ex:
+        _audit(state, "invite.take", False, dest.get("name") or "", "此地走不到")
+        return None
+    try:
+        apply_move(content, state, dest["id"])
+    except ValueError as e:
+        _audit(state, "invite.take", False, dest.get("name") or "", str(e)[:20])
+        return None
+    _audit(state, "invite.take", True, dest.get("name") or "",
+           f"{pend.get('by_name') or '对方'}相邀，玩家答应")
+    return dest
+
+
 def plan_render_call(llm: Any, prompt: dict[str, Any], settle=None):
     """🧾 双拍调用的唯一入口 (整改 P0)。老签名的后端照旧能跑。
 
@@ -11032,6 +11105,10 @@ def run_turn_stream(
     # 🗺 TYPED_MOVE 关掉后这条整条不走: 换场只认地图面板点的那一下 (Yi 2026-08-04)。
     moved = None if (not TYPED_MOVE or (state.get("mode") or "character") == "god") else \
         player_move(content, state, player_input, channel)
+    # 🤝 两步握手 (Yi 2026-08-08): 上一拍角色邀约、这一拍玩家答应 ⇒ 现在就过去。
+    # 必须排在这里 —— 后面整套 (到达旁白/在场名单/建议/责任人) 都读 location_id,
+    # 晚一步做就全都还在旧地点上, 而正文已经在写新地方了。
+    moved = moved or take_invite(content, state, player_input, channel)
     if moved:
         _audit(state, "move", True, moved.get("name", ""))
         _enc = creature_arrival_beat(content, state)   # 🐲 走进了它的领地
@@ -13244,6 +13321,9 @@ def run_turn_stream(
     if primary_invite and not observer:
         move_request = invite_chip(content, state, primary_invite,
                                    primary_id, primary_name_for_invite, llm=llm)
+        # 🤝 确认条照弹 (要点就点), 但同时记下这张邀约 —— 玩家下一句直接说「好啊跟你去」
+        # 也算数。按钮和嘴两条路都通, 这才是「引导」: 不逼玩家用我们规定的方式同意。
+        note_invite(state, move_request)
         if move_request and move_request.get("minted"):
             flags["content_mutated"] = True
             content_mutated = True
