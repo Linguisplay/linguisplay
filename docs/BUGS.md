@@ -22,6 +22,7 @@ bug 与欠账不再散落在聊天里。规矩:报障当天入账,修完标 ✅ 
 | 12 | 08-01 | 无头玩测驱动器时灵时不灵 (resumeRun 偶发静默失败原因未钉死) — 只坑验证不坑玩家 | 🟡 | scratchpad/pw/playtest*.js |
 | 13 | 08-06 | `_settle_prose_exits` 离场正则只认中文 — en 本子角色「说走」不会被记走 (锁下 npc_moves 又摘了, en 离场只剩作息换班一条路) | 🔴 | runtime.py `_SELF_EXIT_RE/_EXIT_TAIL_RE` 补英文构式; 对抗性审查 08-06 发现 |
 | 14 | 08-06 | free_day 第三张建议片「一个人去X转转」在锁下点了不走 (无 seek 形状, 打字移动已取消) — 前两张是 seek 形状还活着 | 🔴 | runtime.py free_day_suggestions ~9059; 改成原地或 seek 形状 |
+| 15 | 08-08 | 背景空镜铁律在 Seedream(Ark) 上是反效果 — Ark 无负词通道, `_generate_image_ark` 把负词折进正文, 铁律那墙「人、兽、猫狗、怪物」token 变成召唤 (樱见坂实弹: 运行时 `_bg_prompt` 出的六张背景**张张有人**, 固定 bg_seed 还把同一个女孩复制进六张; 七月弱提示词零生物 token 反而全空镜)。运行时三条背景路 (开档补图/游戏内重画/工坊) 全踩此雷 | 🔴 | runs.py `_bg_prompt` 铁律段 + qwen.py `_generate_image_ark` 折负词; 修法方向: ark 路生物负词不折正文, 铁律改「无人的空景」一句零 token 措辞, 生物压制靠 detail 消毒 (数据层 bg_style 已在樱见坂验证) |
 
 ## 已修的 (本周实弹归因)
 
