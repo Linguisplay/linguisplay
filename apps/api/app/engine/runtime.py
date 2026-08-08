@@ -12116,6 +12116,11 @@ def run_turn_stream(
                              if is_primary and not observer else None),
             # 📱 what you two texted lately — the scene remembers the phone
             "sms_tail": sms_tail_line(state, sp_id),
+            # 🧠 TA 记得你说过的【具体的事】。从前这本账只接在短信回复一条路上 ——
+            # 于是你在短信里说过"我不吃香菜", 见了面 TA 一句不提; 蒸馏出来的事实
+            # 也只在手机里用得上。Yi 要的是"几天后 TA 主动用上", 而当面才是最该用上
+            # 的场合 (旁白体检第 21 条)。认知边界照旧: 只给这个角色自己那一本。
+            "knows": knows_of(state, sp_id),
             # the sim sheet: body state + standing intention + how the LAST scene left them
             "condition": {"hp": _HP_LABEL.get(char_hp(state, sp_id), ""),
                           "intent": (((state.get("char_sim") or {}).get(sp_id) or {})

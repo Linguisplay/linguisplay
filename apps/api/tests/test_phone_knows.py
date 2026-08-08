@@ -222,3 +222,79 @@ def test_no_want_facts_no_behaviour_change(monkeypatch):
     out = _summarize_with(monkeypatch, "- 关系有进展。\n记住：不吃香菜", want_facts=False)
     assert "记住：不吃香菜" in out["memory"], "没开旗却把行吃掉了"
     assert out["facts"] == []
+
+
+# ── 🔗 线上线下共用一本事实账 (Yi 2026-08-08 问「手机和线下的记忆不通吗」) ──
+# 通的部分本来就通: memory_by_char 是【同一个键】, 手机蒸馏和正戏蒸馏都写它;
+# recent_scene 把线下的戏喂进手机, sms_tail 把手机喂回正戏。
+# 唯独这本【事实账】从前只有一个读点 —— 在 _phone_exchange 里。于是玩家在短信里
+# 说过"我不吃香菜", 当面 TA 一句不提。而当面才是最该用上的场合 (旁白体检第 21 条)。
+SCENE = {"story": {"id": "s", "phone": {"enabled": True, "device": "手机"},
+                   "characters": [{"id": "a", "name": "甲", "is_lead": True},
+                                  {"id": "b", "name": "乙"}],
+                   "acts": [{"index": 1, "title": "一"}],
+                   "locations": [{"id": "l1", "name": "旧巷", "detail": "x", "exits": []}]}}
+
+
+class ScenePrompts:
+    def __init__(self):
+        self.prompts = []
+
+    def generate(self, p):
+        self.prompts.append(p)
+        if p.get("risk_judge"):
+            return {"risk": 100}
+        return {"beats": [{"type": "dialogue", "speaker_name": "乙", "text": "嗯。"}],
+                "affinity_delta": 0, "advance_act": False, "ending": None}
+
+    def speaker_prompts(self):
+        # ⚠️ 一个回合会给【每个】说话人各建一份 prompt。用 next() 抓第一份就会抓到
+        #    "另一个角色"那份 —— 它本来就没有这条事实, 于是断言冤枉产品
+        #    (本会话第 N 次栽在抓取器上; 抓不到先怀疑抓法)。
+        return [p for p in self.prompts if "knows" in p and "can_new_char" in p]
+
+
+def test_a_fact_learned_over_text_is_remembered_face_to_face():
+    """短信里说的事, 当面 TA 也该记得 —— 两边是同一本账。"""
+    c, st = copy.deepcopy(SCENE), runtime.default_state()
+    st["location_id"] = "l1"
+    st["met_ids"] = ["b"]
+    runtime.knows_add(st, "b", ["不吃香菜"])
+    llm = ScenePrompts()
+    runtime.run_turn(c, st, {"name": "我"}, "晚上吃什么", channel="say", llm=llm)
+    ps = llm.speaker_prompts()
+    assert ps, "没抓到任何说话人的 prompt"
+    assert any("不吃香菜" in str(p.get("knows") or "") for p in ps), \
+        f"当面这条路读不到事实账: {[p.get('knows') for p in ps]}"
+
+
+def test_the_scene_prompt_actually_renders_it():
+    """喂进去还得真的写进提示词 —— 传了没人读是本仓的老毛病。"""
+    from app.engine.qwen import _build_system
+    txt = ""
+    try:
+        txt = _build_system({"knows": ["不吃香菜", "妹妹在城南"], "char": {"name": "乙"}})
+    except Exception:
+        import inspect
+        from app.engine import qwen
+        src = inspect.getsource(qwen)
+        assert 'prompt.get("knows")' in src.split("def _phone_reply")[0] or \
+               src.count('prompt.get("knows")') >= 2, \
+            "主拍装配没读 knows —— 只有手机那条路读"
+        return
+    assert "不吃香菜" in txt
+
+
+def test_the_boundary_still_holds_face_to_face():
+    """认知边界不许因为接上正戏就破 —— 只给这个角色自己那一本。"""
+    c, st = copy.deepcopy(SCENE), runtime.default_state()
+    st["location_id"] = "l1"
+    st["met_ids"] = ["b"]
+    # ⚠️ 必须记在一个【不在这场戏里】的人名下。头一版记在"甲"名下, 而甲本人就是
+    #    说话人之一 —— 他的 prompt 带着他自己的记忆是【对的】, 断言却把它当成越界,
+    #    冤枉了产品。认知边界要测的是"别人的账不许串过来", 不是"自己的账不许有"。
+    runtime.knows_add(st, "zzz_不在场的人", ["不吃香菜"])
+    llm = ScenePrompts()
+    runtime.run_turn(c, st, {"name": "我"}, "在吗", channel="say", llm=llm)
+    for p in llm.speaker_prompts():
+        assert "不吃香菜" not in str(p.get("knows") or ""),             f"把甲的记忆喂给了别人 = 开天眼: {p.get('knows')}"

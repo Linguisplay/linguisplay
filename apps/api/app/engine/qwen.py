@@ -1122,6 +1122,16 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append("")
         lines.append(f"【你们最近捎过的话（你记得，可自然接上，别当没发生过）】{sms}")
 
+    # 🧠 TA 记得的【具体的事】。这本账从前只接在短信回复那一条路上 —— 于是玩家在
+    # 短信里说过"我不吃香菜", 当面 TA 一句不提。而当面才是最该用上的场合。
+    # 与摘要分开列: 摘要是"感觉", 这些是"证据"。
+    _kn = [str(x).strip() for x in (prompt.get("knows") or []) if str(x).strip()]
+    if _kn:
+        lines.append("")
+        lines.append("【你记得TA说过的具体的事】" + "；".join(_kn[:8])
+                     + "。这些是你亲耳听来的，说话时可以自然地用上——"
+                       "想起来就提一句，比任何甜言蜜语都让人觉得你在听。别一次全倒出来。")
+
     rumor = (prompt.get("rumor") or "").strip()
     if rumor:
         lines.append("")
