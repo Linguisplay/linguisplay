@@ -696,6 +696,29 @@ def take_invite(content: dict[str, Any], state: dict[str, Any],
     return dest
 
 
+def drop_already_spoken(pool: list[dict[str, Any]] | None,
+                        said_this_turn: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """🗣 这一拍已经开过口的人, 不许再被叫起来说一次 (Yi 报障:「角色老是重复自己」)。
+
+    群戏里主答者常常一次就把整场多人对话写完, 包括别人的台词。引擎随后照旧把那些人
+    当「接话成员」再叫一遍 —— 同一个角色在一拍里有了两个作者。生产实弹: 阿娣在
+    seq122 说完, 3.3 秒后 seq123 换个措辞又说了一遍, 相似度 0.99。
+
+    said_this_turn 早就把「别人这一拍说过什么」喂给了后面的人, 让它「接话别复读」——
+    但那是【求模型自觉】, 它看见自己的台词在里面, 于是换个措辞又说一遍。
+    凡是靠自觉的地方都会漏。这一条改成确定性的。
+
+    ⚠️ 只认【说话人是 TA】的那些拍。旁白里被提到不算开口 —— 那样会把真正该接话的人
+    也筛掉, 把一个复读 bug 修成一个哑巴 bug。
+    """
+    spoke = {str(m.get("speaker") or "").strip()
+             for m in (said_this_turn or [])
+             if str(m.get("text") or "").strip()}
+    spoke.discard("")
+    spoke.discard(NARRATOR_TAG.rstrip("：:"))
+    return [c for c in (pool or []) if (c.get("name") or "").strip() not in spoke]
+
+
 def plan_render_call(llm: Any, prompt: dict[str, Any], settle=None):
     """🧾 双拍调用的唯一入口 (整改 P0)。老签名的后端照旧能跑。
 
@@ -1644,6 +1667,25 @@ def _now_for(state: dict[str, Any] | None = None):
         return now
 
 
+def guard_clock_forward(state: dict[str, Any], day: int, slot: int) -> tuple[int, int]:
+    """⏱ 时间不许倒流 —— day 和 slot 一起护 (Yi 报障 2026-08-08)。
+
+    sync_real_clock 本来就有这道护栏, 注释也写明了危害「已经到期的约定会在
+    open↔missed 之间来回翻面, 纪念日会二次触发」—— 但它【只护了 day, 不护 slot】,
+    而 slot 倒流对玩家更刺眼: 正文刚演完夜色, 下一拍变成午后的日头。
+
+    跨天当然可以从夜回到晨, 那是往前走。只在【同一天之内】禁止时段后退。
+    """
+    clk = state.setdefault("clock", {})
+    p_day, p_slot = int(clk.get("day") or 0), int(clk.get("slot") or 0)
+    if p_day and day < p_day:
+        day = p_day
+    if p_day and day == p_day and slot < p_slot:
+        slot = p_slot
+    clk["day"], clk["slot"] = day, slot
+    return day, slot
+
+
 def sync_real_clock(content: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
     """⏰ Mirror the real world into the story clock: day = real days since the run began
     (day 1 = the day it started), slot = 晨 05~11 / 午 12~17 / 夜 18~04. Everything
@@ -1661,10 +1703,10 @@ def sync_real_clock(content: dict[str, Any], state: dict[str, Any]) -> dict[str,
     # 账本不许倒流 —— _time_index = day*3+slot 是全船约定/心事/court 的时间轴,
     # 一倒退, 已经到期的约定会在 open↔missed 之间来回翻面, 纪念日会二次触发。
     # 最坏只是"停一天", 比倒流便宜得多。
-    _prev = int((state.get("clock") or {}).get("day", 0) or 0)
-    if _prev and day < _prev:
-        day = _prev
     slot = 0 if 5 <= now.hour < 12 else (1 if 12 <= now.hour < 18 else 2)
+    # ⏱ 单调护栏挪进 guard_clock_forward, 并且【day 和 slot 一起护】——
+    #    从前只护 day, 而 slot 倒流对玩家更刺眼 (正文刚演完夜色, 下一拍变午后日头)。
+    day, slot = guard_clock_forward(state, day, slot)
     if lang_of(content) == "en":
         # 🌐 en 剧本时间四件在源头就写英文 (GH 清剿: state 里不留中文, 免下游各自转换)
         _wd_en = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")[now.weekday()]
@@ -1783,6 +1825,14 @@ def align_clock_to_act(content: dict[str, Any], state: dict[str, Any],
     「这场戏发生在下一个这样的时辰」(same day if still ahead, else the next one).
     Returns the fresh clock_view when the snap actually moved time; None otherwise."""
     if tuning_for(content)["turns_per_slot"] <= 0:
+        return None
+    # ⏰ 现实赢 (Yi 2026-08-08:「reality wins」)。开着现实同步的剧本, 时间只有一个
+    # 权威 —— 墙上的钟。作者的 act.time 在这里拨过去, 下一拍 sync_real_clock 按真实
+    # 时刻一算就冲掉了, 净效果只是【让时间跳一下】。
+    # 生产实弹 (狗笼): 幕1 钉「夜」+ 现实同步开着, 玩家 16:34 开局 →
+    #   第一拍 夜 (开场白「夜色沉落」对得上) → 第二拍 午 (现实重算)
+    # 时间从夜倒回下午, 正文跟着从夜色改成午后日头。玩家眼里就是「这世界的逻辑不对」。
+    if real_time_on(content):
         return None
     anchor = (current_act(content, act_index) or {}).get("time") or {}
     want_slot = (anchor.get("slot") or "").strip()
@@ -12654,6 +12704,12 @@ def run_turn_stream(
                     if (cn and cn in (player_input or "")) or c.get("id") in probed_char_ids:
                         chosen.append(c)
                 chosen = chosen[:3]
+            # 🗣 主答者可能已经替他们说完了 —— 已经开过口的人这一拍不再叫 (见函数注释)
+            _before = len(chosen)
+            chosen = drop_already_spoken(chosen, said_this_turn)
+            if len(chosen) < _before:
+                _audit(state, "voice.dedup", True, sp_name,
+                       f"主答者已替 {_before - len(chosen)} 人开口")
             responders.extend(chosen)
         # 🚪 写走必记走（架构层）: narration walked someone out → the ledger walks them
         # out too, even when the npc_moves judgment forgot to file it
@@ -12663,6 +12719,9 @@ def run_turn_stream(
         # a spoken question must be answerable. Capped so chains can't run away.
         if len(responders) < 4:
             _voc = _addressed_char(content, state, d_beats, sp_id, pcid)
+            # 🗣 同一道闸: 被点名的人如果这一拍已经开过口, 就别再叫一次
+            if _voc is not None and not drop_already_spoken([_voc], said_this_turn):
+                _voc = None
             if _voc is not None and all(r.get("id") != _voc.get("id") for r in responders):
                 responders.append(_voc)
                 _audit(state, "floor.pass", True,

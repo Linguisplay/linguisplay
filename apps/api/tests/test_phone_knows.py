@@ -244,7 +244,11 @@ class ScenePrompts:
         self.prompts.append(p)
         if p.get("risk_judge"):
             return {"risk": 100}
-        return {"beats": [{"type": "dialogue", "speaker_name": "乙", "text": "嗯。"}],
+        # ⚠️ 台词要归到【被问的那个人】名下。从前这里写死「乙」——于是主答者甲一开口
+        #    就等于替乙说了话，2026-08-08 新上的「一拍不许被写两次」闸把乙筛掉，
+        #    乙那份 prompt 再也建不出来，断言就冤枉了产品。假模型也得说人话。
+        return {"beats": [{"type": "dialogue",
+                           "speaker_name": p.get("speaker_name") or "乙", "text": "嗯。"}],
                 "affinity_delta": 0, "advance_act": False, "ending": None}
 
     def speaker_prompts(self):
