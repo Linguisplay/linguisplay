@@ -11,6 +11,7 @@ proposes affinity deltas / flag changes as structured side-effects). The gate
 
 from __future__ import annotations
 
+import inspect as _inspect
 import random
 
 import re
@@ -437,13 +438,13 @@ class _LangLLM:
             prompt = {**prompt, "language": self._lang}
         return self._inner.generate(prompt)
 
-    def plan_and_render(self, prompt: dict[str, Any]):
+    def plan_and_render(self, prompt: dict[str, Any], settle=None):
         if not hasattr(self._inner, "plan_and_render"):
             yield ("final", self.generate(prompt))
             return
         if isinstance(prompt, dict) and "language" not in prompt:
             prompt = {**prompt, "language": self._lang}
-        yield from self._inner.plan_and_render(prompt)
+        yield from plan_render_call(self._inner, prompt, settle)
 
     def narrate_stream(self, prompt: dict[str, Any]):
         if not hasattr(self._inner, "narrate_stream"):
@@ -602,6 +603,56 @@ def position_names_elsewhere(content: dict[str, Any], state: dict[str, Any],
             if a in text:
                 return nm
     return ""
+
+
+def plan_render_call(llm: Any, prompt: dict[str, Any], settle=None):
+    """🧾 双拍调用的唯一入口 (整改 P0)。老签名的后端照旧能跑。
+
+    ⚠️ 这里【不许】用 `try: inner(prompt, settle=...) except TypeError: inner(prompt)` ——
+    生成器体内部任何一个 TypeError 都会被误判成「签名不对」而整拍重跑一遍: 两次计费、
+    两份散文、两套裁决。签名要在调用【之前】问清楚, 不能拿异常当判据。
+    """
+    fn = getattr(llm, "plan_and_render", None)
+    if fn is None:
+        yield ("final", llm.generate(prompt))
+        return
+    try:
+        takes = "settle" in _inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        takes = False
+    yield from (fn(prompt, settle=settle) if takes else fn(prompt))
+
+
+def plan_receipt(content: dict[str, Any], state: dict[str, Any],
+                 plan: dict[str, Any] | None, player_name: str = "") -> str:
+    """🧾 计划拍与渲染拍之间的【回执】: 引擎先判, 再把结果告诉模型, 模型照结果写。
+
+    双拍是两次独立调用, 中间那道缝一直空着 —— 模型在计划拍申报了动作, 引擎却要等散文
+    流完才结算, 于是驳回永远来得太晚, 字已经在玩家眼前了。这个函数站在那道缝里。
+
+    【P0 只接一条路】只处理带路申报, 其余申报字段一个不碰 —— 先验假设, 再谈铺开。
+
+    【驳回必须带出路】只写禁令就退化成又一条「绝不许」, 那正是要拆掉的东西。
+    模型手上有戏要演, 你不给它路它就自己找路 —— 线上已经验过一次了。
+
+    🔒 两条硬约束, 都有测试守着:
+      · 零模型调用 —— 这一步在首字之前, 混进一次调用 TTFT 当场崩
+      · 不动状态 —— 真正落账在结算级联里, 这里改就是双重记账
+    """
+    where = str(((plan or {}).get("move_invite") or "")).strip()
+    if not where:
+        return ""
+    you = player_name or "玩家"
+    chip = invite_chip(content, state, where, "_probe", None) if INVITE_MOVE else None
+    if chip:
+        return (f"【系统回执】你申报要带{you}去「{chip.get('to_name') or where}」，这条路走得通。"
+                f"系统会当场问{you}去不去，{you}点头才真的过去。"
+                f"所以这一拍只演到你起身、相邀、把话说出口为止——"
+                f"别替{you}答应，也别写{you}已经动身或已经到了那里。")
+    return (f"【系统回执】你申报要带{you}去「{where}」，但从此地【去不了】那里"
+            f"（没有通路，或者那地方还不在这张地图上）。别把它说成马上就能到。"
+            f"你可以：改约下次、指条路让{you}自己去、或者换一个此地走得到的地方相邀。"
+            f"这一拍的戏仍然发生在此地。")
 
 
 def book_position(content: dict[str, Any], state: dict[str, Any],
@@ -12260,7 +12311,14 @@ def run_turn_stream(
             # Members ride the same seam: their line-protocol render is speech-only and
             # 「无」 is a valid (silent) result — no fallback double-call on silence.
             directed = None
-            for _pr_kind, _pr_val in llm.plan_and_render(prompt):
+            # 🧾 整改 P0: 引擎在两拍之间先判, 把回执交给演员 (runtime.plan_receipt)。
+            # 闭包在这里成型是因为 qwen 拿不到 content/state —— 适配器不该知道世界长什么样,
+            # 它只负责在正确的时刻回头问一句。
+            def _settle_plan(_plan, _c=content, _s=state,
+                             _pn=(persona_for_prompt or {}).get("name") or ""):
+                return plan_receipt(_c, _s, _plan, _pn)
+
+            for _pr_kind, _pr_val in plan_render_call(llm, prompt, _settle_plan):
                 if _pr_kind == "token":
                     tok = _pr_val if isinstance(_pr_val, dict) else \
                         {"kind": "narration", "text": str(_pr_val)}

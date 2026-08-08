@@ -2683,7 +2683,8 @@ def _separate_speech(narration: str, dialogue: str) -> tuple[str, str]:
     return clean_narr, speech
 
 
-def _render_directive(prompt: dict[str, Any], speaker: str, outline: list[str]) -> str:
+def _render_directive(prompt: dict[str, Any], speaker: str, outline: list[str],
+                      receipt: str = "") -> str:
     """The render beat's closing instruction: the plan's shot list plus a LINE-PROTOCOL
     output contract — every line declares itself 旁白： or 名字：「…」, so a spoken line
     physically cannot hide inside narration (转述台词 was the failure mode of free
@@ -2693,6 +2694,10 @@ def _render_directive(prompt: dict[str, Any], speaker: str, outline: list[str]) 
     if outline:
         L.append("【导演分镜·已定案】这一拍按此顺序演出来，不加戏、不预支后续剧情：\n"
                  + "\n".join(f"{i + 1}. {s}" for i, s in enumerate(outline)))
+    # 🧾 引擎已经判过了 (整改 P0)。回执讲的是【此刻真正成立的世界】, 所以它压过分镜:
+    # 分镜是你自己刚才的打算, 回执是系统的裁定 —— 两者冲突时按回执改, 别硬演分镜。
+    if receipt:
+        L.append(receipt + "\n（这条是系统裁定，与上面的分镜冲突时以它为准。）")
     if prompt.get("group_mode") == "member":
         pl = (prompt.get("persona") or {}).get("name") or "对方"
         L.append(f"【输出格式·铁律】你是这一拍插话的成员。只输出「{speaker}：」开头的台词行"
@@ -5192,7 +5197,7 @@ class QwenLLM:
         detail = " ".join(lines[1:])[:160 if en else 120] if len(lines) > 1 else ""
         return {"name": name, "detail": detail}
 
-    def plan_and_render(self, prompt: dict[str, Any]):
+    def plan_and_render(self, prompt: dict[str, Any], settle=None):
         """两拍合同 (docs/plan-render.md)。拍1 plan_turn：函数调用，只裁决＋出分镜，低温快包；
         拍2 render：照分镜写纯散文，stream=true 逐 token 流出。渲染拍不产生任何状态，所以
         它不可能弄脏状态。Yields ("token", str) while prose streams, then ("final", directed)
@@ -5244,11 +5249,23 @@ class QwenLLM:
             yield ("final", self.generate(prompt))
             return
 
+        # ── 🧾 缝：引擎先判，再把回执交给演员 (整改 P0 2026-08-08) ──
+        # 从前这道缝是空的：模型在拍1申报了动作，引擎却要等散文流完才结算，于是驳回
+        # 永远来得太晚——字已经在玩家眼前了。回执必须在这里算完，而且【不许调模型】：
+        # 这一步顶在首字之前，混进一次调用 TTFT 当场崩 (见 runtime.plan_receipt)。
+        # 回执是加分项不是承重墙：它炸了这一拍照演，绝不因为一句提示把整回合弄丢。
+        receipt = ""
+        if settle is not None:
+            try:
+                receipt = str(settle(plan) or "")
+            except Exception:
+                receipt = ""
+
         # ── 拍2 · 演员：照分镜写正文，逐 token 流出 ──
         body_r = {"model": self._model,
                   "messages": messages + [{"role": "system",
                                            "content": _render_directive(prompt, speaker,
-                                                                        outline)}],
+                                                                        outline, receipt)}],
                   "max_tokens": 900 if prompt.get("mature") else 600,
                   "temperature": 0.85, "presence_penalty": 0.3}
         if prompt.get("mature"):
