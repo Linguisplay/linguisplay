@@ -298,3 +298,74 @@ def test_the_boundary_still_holds_face_to_face():
     runtime.run_turn(c, st, {"name": "我"}, "在吗", channel="say", llm=llm)
     for p in llm.speaker_prompts():
         assert "不吃香菜" not in str(p.get("knows") or ""),             f"把甲的记忆喂给了别人 = 开天眼: {p.get('knows')}"
+
+
+# ══ 🔗 剩下三条路 (Yi 2026-08-08「接上」) ═══════════════════════════════════
+# 事实账原本只有手机回复一个读点; 上一刀接了正戏。这一刀把剩下三条【TA 主动开口】
+# 的路接完 —— 而那三条恰恰是 Yi 要的「几天后 TA 主动用上」最有戏的场合:
+#     主动找你 compose_msg  —— 半夜一条「你不是说不吃香菜」
+#     朋友圈   social_posts —— 发条动态提到你那件事
+#     信       compose_letter
+# 认知边界照旧: 每条路只拿【那个角色自己】的账。
+def _kn_st():
+    st = runtime.default_state()
+    st["location_id"] = "l1"
+    st["met_ids"] = ["b"]
+    st["contact_ids"] = ["b"]
+    runtime.knows_add(st, "b", ["不吃香菜"])
+    runtime.knows_add(st, "zzz_别人", ["怕打雷"])   # 不许串过来
+    return st
+
+
+class CatchAll:
+    def __init__(self, key):
+        self.key = key
+        self.p = None
+
+    def generate(self, prompt):
+        if prompt.get(self.key):
+            self.p = dict(prompt)
+        return {}
+
+
+def test_a_proactive_message_knows_what_you_told_them():
+    """TA 半夜主动发一条 —— 这是「几天后用上」最有戏的场合。"""
+    c, st = copy.deepcopy(STORY), _kn_st()
+    ch = next(x for x in c["story"]["characters"] if x["id"] == "b")
+    llm = CatchAll("compose_msg")
+    runtime.compose_message(c, st, ch, "刚下工想起你", "写一两句", "……", llm)
+    assert llm.p is not None, "没抓到 compose_msg 的 prompt"
+    assert "不吃香菜" in str(llm.p.get("knows") or ""), \
+        f"主动找你这条路读不到事实账: {llm.p.get('knows')}"
+    assert "怕打雷" not in str(llm.p.get("knows") or ""), "别人的账串过来了"
+
+
+def test_a_letter_knows_it_too():
+    from app.engine import qwen
+    import inspect
+    src = inspect.getsource(qwen.QwenLLM._compose_letter)
+    assert 'prompt.get("knows")' in src, "信这条路的装配没读 knows"
+
+
+def test_the_social_feed_carries_it_per_character():
+    """朋友圈是一次调用带多个角色的 items —— 事实必须【跟着各自的 cid】走,
+    不能拍平成一份, 否则甲的事会出现在乙的动态里 (开天眼)。"""
+    from app.engine import qwen
+    import inspect
+    # ⚠️ 渲染在 _social_material 里 (_social_posts 调它) —— 扫错函数就会冤枉产品。
+    src = inspect.getsource(qwen.QwenLLM._social_material)
+    assert "knows" in src, "朋友圈素材没带 knows"
+    assert "不许" in src and "影子" in src,         "朋友圈的用法跟别处不同: 不许直说, 只留影子 —— 提示词得写明"
+
+
+def test_every_proactive_path_renders_it_in_the_prompt():
+    """传了没人读是本仓的老毛病 —— 三条路的装配都要真的把它写进提示词。"""
+    from app.engine import qwen
+    import inspect
+    for fn in (qwen.QwenLLM._compose_msg, qwen.QwenLLM._compose_letter,
+               qwen.QwenLLM._social_material):
+        src = inspect.getsource(fn)
+        assert "_knows_line" in src or "knows" in src,             f"{fn.__name__} 没把事实写进提示词"
+    # 共用的那一行渲染器本身要真的渲染
+    assert "你还记得TA说过的具体的事" in qwen._knows_line(["不吃香菜"])
+    assert qwen._knows_line([]) == "", "空账不该塞一行废话进提示词"

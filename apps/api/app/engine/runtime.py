@@ -6379,6 +6379,9 @@ def social_feed(content: dict[str, Any], state: dict[str, Any],
                               # 认知边界照旧: 只给【这个角色自己的】那本, 绝不给全局
                               # 摘要 (信息不开天眼), 也绝不给未解锁秘密。
                               "memory": ((state.get("memory_by_char") or {}).get(cid) or "")[:160],
+                              # 🧠 事实【跟着各自的 cid 走】—— 这条调用一次带多个角色,
+                              # 拍平成一份就等于甲的事出现在乙的动态里 (开天眼)。
+                              "knows": knows_of(state, cid)[:4],
                               "player_read": profile_mod.impression_of(state, cid)})
         posted = {p.get("cid") for p in (so.get("posts") or [])[-3:]}
         items = [i for i in items if i["cid"] not in posted][:2]
@@ -6692,6 +6695,10 @@ def compose_message(content: dict[str, Any], state: dict[str, Any], char: dict[s
                             "relation": relationships.name_of(
                                 relationships.derive_mode(char, scores, tun)),
                             "reason": reason, "hint": hint,
+                            # 🧠 TA 主动开口时最该用上那些具体的事 —— Yi 要的
+                            # 「几天后 TA 主动用上」正是这条路 (半夜一条「你不是说不吃香菜」)。
+                            # 认知边界照旧: 只给这个角色自己那本。
+                            "knows": knows_of(state, char.get("id")),
                             "thread_tail": _thread_tail(state, char.get("id"))}) or {}
         msgs = [dedash(m[:120]) for m in as_str_list(out.get("msgs"))][:2]
     except Exception:
@@ -7720,6 +7727,8 @@ def compose_letter(content: dict[str, Any], state: dict[str, Any], char: dict[st
                             "relation": relationships.name_of(
                                 relationships.derive_mode(char, scores, tun)),
                             "reason": reason, "hint": hint,
+                            # 🧠 信是最该提起旧事的地方 —— 认知边界照旧, 只给这一本
+                            "knows": knows_of(state, char.get("id")),
                             "memory": (state.get("memory_by_char", {}) or {})
                             .get(char.get("id")) or ""}) or {}
     except Exception:

@@ -3372,6 +3372,19 @@ def generate_knowledge(name: str, profile: str, world: str = "") -> str:
     )[:2500]
 
 
+def _knows_line(knows, lead: str = "你还记得TA说过的具体的事") -> str:
+    """🧠 事实账渲染成提示词里的一行 (三条「TA 主动开口」的路 + 手机回复共用)。
+
+    与滚动摘要分开列: 摘要是"感觉", 这些是"证据"。明说【可以主动提起】—— 陪伴感
+    最便宜的一招就是「你不是说不吃香菜」, 而 Yi 要的正是「几天后 TA 主动用上」。
+    """
+    xs = [str(x).strip() for x in (knows or []) if str(x).strip()]
+    if not xs:
+        return ""
+    return (chr(10) + "【" + lead + "】" + "；".join(xs[:6])
+            + "。这些是你亲耳听来的，提起来最见心意——想起来就带一句，别一次全倒出来。")
+
+
 def _arrive_people_block(people: list) -> str:
     """到达旁白的人物名单, 同行者【单列】。
 
@@ -4046,6 +4059,12 @@ class QwenLLM:
                 s += f"；此刻人在：{i['at']}"
             if i.get("memory"):
                 s += f"\n  ·你们之间最近发生的（你记得，但发动态时不许直说）：{i['memory']}"
+            # 🧠 事实【逐条挂在各自名下】—— 这段一次带多个角色, 拍平成一份就等于
+            # 甲的事出现在乙的动态里 (开天眼)。朋友圈的用法也不同: 不许直说, 只留影子。
+            _kn = [str(x).strip() for x in (i.get("knows") or []) if str(x).strip()]
+            if _kn:
+                s += ("\n  ·你记得TA说过的具体的事（可以借它起个由头，但绝不许在动态里"
+                      "直接点出来，只留个影子）：" + "；".join(_kn[:4]))
             if i.get("player_read"):
                 s += f"\n  ·你眼里的TA：{i['player_read']}"
             out.append(s)
@@ -4177,7 +4196,8 @@ class QwenLLM:
                + (("你的台词范例（语气分寸以此为准，不照抄）：'"
                    + "' / '".join(ch["examples"]) + "'\n") if ch.get("examples") else "")
                + f"你与对方的关系：{prompt.get('relation','')}。\n"
-               f"你此刻不在对方身边，要通过{device}给TA捎话。情境：{prompt.get('hint','')}\n"
+               + _knows_line(prompt.get("knows"))
+               + f"你此刻不在对方身边，要通过{device}给TA捎话。情境：{prompt.get('hint','')}\n"
                "写1~2条【短消息】：每条一行、口语、短（20字内最好），必须一眼就是你的声音——"
                "你的口头禅、你的脾气、你的分寸。不要旁白、不要引号、不要署名，只输出消息本身。不用破折号。"
                + _lang_rule(prompt) + _era_rule(prompt))
@@ -4379,7 +4399,8 @@ class QwenLLM:
                + (("你的台词范例（语气分寸以此为准，不照抄）：'"
                    + "' / '".join(ch["examples"]) + "'\n") if ch.get("examples") else "")
                + f"你与收信人的关系：{prompt.get('relation','')}。\n"
-               f"你们此前的经历（你的记忆）：{(prompt.get('memory') or '')[:400]}\n"
+               + _knows_line(prompt.get("knows"))
+               + f"你们此前的经历（你的记忆）：{(prompt.get('memory') or '')[:400]}\n"
                f"情境：{prompt.get('hint','')}\n"
                "写一封【信】：第一行是信的标题（≤12字，像你会写的，不要「无题」）；"
                "空一行后是正文，120~250字，第二人称写给TA。要具体，写到你们之间真实发生过的事、"
