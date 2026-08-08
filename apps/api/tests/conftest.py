@@ -55,15 +55,28 @@ def _fictional_clock_default(monkeypatch):
 
 @pytest.fixture
 def map_writes_on(monkeypatch):
-    """🔒 解开「对话改地图」的锁 (runtime.LLM_MAP_WRITES, Yi 2026-08-04 定默认关)。
+    """🔒 把 2026-08-04 那把【旧的整锁】完全打开 —— 移动 + 铸造两半都开。
 
-    产品行为是关的 —— 对话不许铸新场景、不许把人挪到场景。但那套代码还在, 留着可逆,
-    所以测它【本身】的用例显式开旗跑: 它们是这套休眠代码的回归网, 哪天翻回 True 才不
-    会一片废墟。
-
-    ⚠️ 新写的用例别顺手挂这个。默认关才是玩家看到的行为, 挂上就测不到真实产品了。
+    ⚠️ 2026-08-08 起这把锁拆成了两个 (Yi:「模型决定」):
+        LLM_MAP_WRITES   谁在哪 —— 已默认 True，模型说了算
+        LLM_MINTS_PLACES 有哪些地方 —— 仍是 False
+    老用例挂的是「整锁」的语义 (它们测的多半是铸造那条路)，所以这个夹具两个都开，
+    保持它们原来测的东西不变。只想开铸造那一半的用例请用 mints_on。
     """
     monkeypatch.setattr(runtime, "LLM_MAP_WRITES", True)
+    monkeypatch.setattr(runtime, "LLM_MINTS_PLACES", True)
+
+
+@pytest.fixture
+def mints_on(monkeypatch):
+    """只开【铸造新地点】那一半 (runtime.LLM_MINTS_PLACES)。"""
+    monkeypatch.setattr(runtime, "LLM_MINTS_PLACES", True)
+
+
+@pytest.fixture
+def map_writes_off(monkeypatch):
+    """把「谁在哪」收回引擎手里 —— 守可逆合同: 锁一关，提示词层必须跟着换说法。"""
+    monkeypatch.setattr(runtime, "LLM_MAP_WRITES", False)
 
 
 @pytest.fixture

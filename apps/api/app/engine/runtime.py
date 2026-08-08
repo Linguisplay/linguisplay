@@ -315,21 +315,39 @@ SLOTS = ("晨", "午", "夜")
 _SLOT_EN = {"晨": "Morning", "午": "Noon", "夜": "Night"}  # display names for en stories
 AWAY = "__away__"  # a scheduled character whose no entry covers this hour: off somewhere, unreachable
 
-# 🔒 对话不许改地图 (Yi 2026-08-04 定)。
+# 🗺 谁在哪, 模型说了算 (Yi 2026-08-08:「模型决定」)。2026-08-04 关, 08-08 开回来。
 #
-# 引擎原本有八条「模型/对话 → 地图」的写路径, 闸还不统一: 沙盒闸 3 条、自己的旗 2 条,
-# 剩下 3 条 (找人铸去处 / 邀约提及即立档 / 无图剧本开场地点) 压根没有世界级闸 ——
-# 任何剧本都会被 LLM 加地点。Yi 的裁定: 用对话铸造新场景、用对话移动至场景、新场景,
-# 统统取消, 而且【所有剧本一律如此】。
+# 【为什么当初关】引擎原本有八条「模型/对话 → 地图」的写路径, 闸还不统一, 任何剧本都
+# 会被 LLM 加地点、挪位置。Yi 的裁定是全部取消, 换场只认玩家自己点。
 #
-# 所以这里是模块级常量而不是 tuning 键 —— 作者在剧本里开不了它。留常量是为了可逆
-# (翻成 True 就全回来), 不是为了给谁用。守卫: tests/test_llm_map_lockdown.py。
+# 【为什么开回来】两场实弹, 拿线上真实存档 + 线上模型跑的:
+#   实验一 有回执 vs 无回执, 各 5 轮 —— 【一样】2/5 把人写到了别处。
+#   实验二 只剪掉一条通路, 回执明说「从此地去不了那里」—— A 3/5 到达、B 3/5 到达,
+#          而且五次【一次都没提过】去不了。
+# 第二场是关键: 那个剧本里两个地点走三分钟就到, 角色的开场台词就是相邀去那儿,
+# 是我人为剪了那条边。【模型是对的, 地图是错的】。
 #
-# 关掉的只是【对话/模型驱动】那一半。玩家自己驱动的照常活着:
-#   · 地图面板出图、玩家在图上点着走 (apply_move / player_move)
-#   · 作者作息表决定 NPC 在哪 (char_position 第 7 级)
-#   · 🦇 猎手押送等不经对话的系统机制
-LLM_MAP_WRITES = False
+# 作者写的 exits 只是对相邻关系的一次猜测, 而故事知道得更准。引擎拿一张不完整的
+# 邻接表去否决故事, 输的永远是引擎 —— 模型照样把人写过去, 只是账本不跟, 于是文与实
+# 分家。所以引擎的活从【否决】改成【跟上】。
+#
+# 【没有一起交出去的两样】
+#   · 铸造新地点 —— 归 LLM_MINTS_PLACES, 那条有造出「个地方」这种垃圾地名的前科
+#   · 解锁闸 (location_available) —— 哪一幕能去哪, 是作者的剧作结构, 不是地理
+#
+# 玩家自己驱动的那条路照常: 地图面板点节点 (apply_move)、作者作息表、猎手押送。
+# 守卫: tests/test_model_decides_place.py
+LLM_MAP_WRITES = True
+
+# 🏗 但【有哪些地方】还不归模型 (Yi 2026-08-08 只交出了「谁在哪」)。
+#
+# 从前这两件事共用一把锁。它们其实是两个问题: 「他们走到码头了」是叙事事实, 模型最清楚;
+# 「这个世界有没有一个叫 X 的地方」是世界设定, 而模型在这上面有前科 —— 2026-07-22 实弹
+# 把「换个地方聊」铸成了一个叫「个地方」的地点并上了地图。
+#
+# 铸造那条路上有判官 (generate_and_move 的 describe_place + _bad_place_name 预筛),
+# 但判官的效果还没有像这次移动这样被实弹验过。等有数据再谈。
+LLM_MINTS_PLACES = False
 
 # 🗺 地图是独立于 LLM 的功能 (Yi 2026-08-04 第二刀): 换场只走地图面板 —— 玩家点节点,
 # 客户端发 POST /runs/{id}/move。输入框里写「我去码头」不再算数。
@@ -2587,10 +2605,10 @@ def ensure_start_location(content: dict[str, Any], state: dict[str, Any],
         if loc and loc.get("id"):
             state["location_id"] = loc["id"]
         return loc
-    # 🔒 无图剧本不再凭空造开场地点 (LLM_MAP_WRITES) —— 那也是"新场景"。
+    # 🔒 无图剧本不再凭空造开场地点 (LLM_MINTS_PLACES) —— 那是"有哪些地方", 不是"谁在哪"。
     # 退回 char_position 早就支持的无地图模式: 没有地点概念, 谁也不"在哪",
     # 纯对话推进 (legacy behavior, 不是新分支)。
-    if not LLM_MAP_WRITES:
+    if not LLM_MINTS_PLACES:
         return None
     story = content.get("story") or {}
     world = story.get("world_facts") or story.get("world_long") or ""
@@ -2691,9 +2709,9 @@ def generate_and_move(content: dict[str, Any], state: dict[str, Any], place_name
     there. Mutates `content` (caller must persist it). Returns the new location dict.
 
     Idempotent-ish: if the name actually matches a place that already exists, just go there."""
-    # 🔒 对话不许铸新场景 (LLM_MAP_WRITES)。这是全部六条铸造路的共同咽喉 —— 卡在这里
+    # 🔒 对话不许铸新场景 (LLM_MINTS_PLACES)。这是全部六条铸造路的共同咽喉 —— 卡在这里
     # 一刀断干净, 不用去八个调用点各补一道闸 (那正是当初闸不统一的由来)。
-    if not LLM_MAP_WRITES:
+    if not LLM_MINTS_PLACES:
         _audit(state, "loc.mint", False, (place_name or "")[:12], "对话改地图已关闭")
         return None
     place_name = (place_name or "").strip()
@@ -4595,8 +4613,8 @@ def fate_generate(content: dict[str, Any], state: dict[str, Any], llm,
             if dest and dest.get("id"):
                 target = dest["id"]
             # 🔒 沙盒放行未在册地名靠兑现时 generate_and_move 铸造 —— 锁下必返 None,
-            #    紫卡点了只会静默没收, 所以放行也跟着 LLM_MAP_WRITES 走 (审查确认)
-            elif not (LLM_MAP_WRITES and sandbox_on(content) and not _bad_place_name(str(target))):
+            #    紫卡点了只会静默没收, 所以放行也跟着 LLM_MINTS_PLACES 走 (审查确认)
+            elif not (LLM_MINTS_PLACES and sandbox_on(content) and not _bad_place_name(str(target))):
                 kind, target = "story", ""      # closed map / bad name → direction only
         elif kind == "identity":
             target = str(target)[:12]
@@ -10225,11 +10243,17 @@ def _settle_directed(content, state, tun, sp, sp_id, sp_name, is_primary, direct
             dest_l = resolve_location(content, mv_to)
             if dest_l and dest_l.get("id") == (cur_l or {}).get("id"):
                 pass                                   # narrated arriving where we already are
+            # 🗺 通路检查已拿掉 (Yi 2026-08-08「模型决定」)。作者写的 exits 只是对相邻
+            # 关系的一次猜测, 而故事知道得更准 —— 实弹: 某剧本里两地走三分钟就到、
+            # 角色开场台词就是相邀去那儿, 作者只是没把这条边写进 exits。引擎拿一张
+            # 不完整的邻接表去否决, 模型照样把人写过去, 只是账本不跟 = 文与实分家。
+            # 解锁闸留着: 哪一幕能去哪是作者的剧作结构, 不是地理。
             elif dest_l and dest_l.get("id") \
-                    and location_available(content, state, dest_l) \
-                    and _route_exists(content, state, (cur_l or {}).get("id"), dest_l["id"]):
+                    and location_available(content, state, dest_l):
                 commit_move(content, state, dest_l, lead_id=sp_id)   # 带路的人一起走
-                _audit(state, "move.narrated", True, mv_to)
+                _audit(state, "move.narrated", True, mv_to,
+                       "" if _route_exists(content, state, (cur_l or {}).get("id"),
+                                           dest_l["id"]) else "作者没写这条通路")
             elif not dest_l and sandbox_on(content) and not _bad_place_name(mv_to):
                 try:
                     if generate_and_move(content, state, mv_to, llm=llm,
@@ -12074,10 +12098,10 @@ def run_turn_stream(
              "primary_name_for_invite": None, "time_skip": time_skip,
              "pressure_blown": pressure_blown, "content_mutated": content_mutated,
              "gen_count": gen_count, "contact_given": False}
-    # 🔒 生长通道盘点 (对抗性审查 P1): 地点通道锁死 (LLM_MAP_WRITES) 且人物额度
+    # 🔒 生长通道盘点 (对抗性审查 P1): 地点通道锁死 (LLM_MINTS_PLACES) 且人物额度
     #    用尽时, 没有任何通道能兑现 world_seed —— 这拍就不问 (问了必被驳回, 驳回
     #    不销账, due 每拍重催), 结算侧按同一口径跳过, 不记幻影空账
-    ws_askable = bool(_ws_mode) and (LLM_MAP_WRITES or gen_count < tun["max_new_characters"])
+    ws_askable = bool(_ws_mode) and (LLM_MINTS_PLACES or gen_count < tun["max_new_characters"])
     # ━━━━━━━━━━ 管线 P7 · 导演循环（逐人：门控提示词→生成→守卫→落账） ━━━━━━━━━━
     for idx, sp in enumerate(responders):
         sp_id = sp.get("id")

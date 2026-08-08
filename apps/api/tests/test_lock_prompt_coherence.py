@@ -44,11 +44,15 @@ def _tool(prompt):
 
 # ── schema: 关着的锁不许再征字段 ──────────────────────────────────────────────
 
-def test_schema_omits_moved_to_and_npc_moves_by_default():
-    s = _tool(PROMPT)
-    assert "moved_to" not in s, "LLM_MAP_WRITES 关着还在征 moved_to —— 引擎收到只会静默丢弃"
-    assert "npc_moves" not in s, ("LLM_MAP_WRITES 关着还在征 npc_moves (apply_char_move 锁下返 None)；"
-                                  "离场早有 _settle_prose_exits 架构层接管")
+def test_schema_asks_for_moved_to_by_default():
+    """🗺 2026-08-08「模型决定」: 谁在哪归模型, 所以要向它收申报。
+    不收会怎样, 线上两场实弹验过: 模型没有申报口就用散文兑现, 账本跟不上。"""
+    assert "moved_to" in _tool(PROMPT)
+
+
+def test_schema_omits_moved_to_when_locked(map_writes_off):
+    """可逆合同: 旗一关, 死信字段就不许再征 —— 引擎收到只会静默丢弃。"""
+    assert "moved_to" not in _tool(PROMPT)
 
 
 def test_schema_asks_for_move_invite_by_default():
@@ -80,7 +84,7 @@ def test_anchor_teaches_move_invite_by_default():
     assert "征求玩家同意" in sys or "玩家点头" in sys, "得说清是玩家点头才走, 否则模型会自己走"
 
 
-def test_anchor_stops_teaching_move_invite_when_locked(invite_move_off):
+def test_anchor_stops_teaching_move_invite_when_locked(invite_move_off, map_writes_off):
     sys = qwen._build_system(PROMPT)
     assert "move_invite" not in sys, "锁关着, 锚文案还在教模型用 move_invite 申报带路"
     assert "玩家自己在地图上点" in sys, "得告诉模型: 换场只由玩家点地图, 戏留在原地写"
@@ -92,7 +96,14 @@ def test_anchor_teaches_invite_again_when_unlocked(invite_move_on):
 
 # ── runtime 地点锚: 不再要求「把移动过程写出来」 ─────────────────────────────
 
-def test_place_anchor_stops_demanding_travel_prose():
+def test_place_anchor_demands_travel_prose_by_default():
+    """开着就要教叙写赶路 —— 一边收 moved_to 一边喊「绝不要写玩家启程」是自相矛盾。"""
+    st = {**runtime.default_state(), "location_id": "hall"}
+    block = runtime._physical_place(MAP, st)
+    assert "把移动过程写出来" in block or "不能瞬移" in block
+
+
+def test_place_anchor_stops_demanding_travel_prose(map_writes_off):
     st = {**runtime.default_state(), "location_id": "hall"}
     block = runtime._physical_place(MAP, st)
     assert "把移动过程写出来" not in block and "不能瞬移" not in block, \
@@ -101,7 +112,7 @@ def test_place_anchor_stops_demanding_travel_prose():
     assert "糖水店" in block  # 通路数据照常给（台词相邀、描写方位都用得上）
 
 
-def test_place_anchor_stops_demanding_travel_prose_en():
+def test_place_anchor_stops_demanding_travel_prose_en(map_writes_off):
     st = {**runtime.default_state(), "location_id": "hall"}
     block = runtime._physical_place(MAP_EN, st)
     assert "must be narrated" not in block and "no teleporting" not in block
@@ -115,7 +126,7 @@ def test_place_anchor_teaches_travel_again_when_unlocked(map_writes_on):
 
 # ── 审查补刀 (对抗性审查 2026-08-06 六条确认): 其余还在教死流程的嘴 ──────────
 
-def test_world_seed_stops_soliciting_places():
+def test_world_seed_stops_soliciting_places(map_writes_off):
     # 🌱 P1: 地点种子锁下必被判官驳回且不销账, due 每拍重催 → 永动催生循环。
     #    锁关着只教「人物：」, 地点通道整个不教。
     s = _tool({**PROMPT, "world_seed": "soft"})

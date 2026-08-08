@@ -24,8 +24,11 @@ from app.engine import runtime
 
 @pytest.fixture
 def unlocked(monkeypatch):
-    """把锁打开 —— 只给红样本用, 证明这些路径本来真的会动地图。"""
+    """把 2026-08-04 那把【旧的整锁】完全打开 —— 只给红样本用, 证明这些路径本来
+    真的会动地图。⚠️ 08-08「模型决定」把它拆成了两把 (移动已默认开、铸造仍关),
+    这里两个都开, 保持红样本原来的语义。"""
     monkeypatch.setattr(runtime, "LLM_MAP_WRITES", True)
+    monkeypatch.setattr(runtime, "LLM_MINTS_PLACES", True)
 
 
 SBOX = {
@@ -101,7 +104,7 @@ def test_red_sample_unlocked_really_does_mint(unlocked):
 
 
 # ── 🚶 模型请求挪 NPC: 不许 ─────────────────────────────────────────────────
-def test_apply_char_move_refused_when_locked():
+def test_apply_char_move_refused_when_locked(map_writes_off):
     c, st = _c(), _st()
     assert runtime.apply_char_move(c, st, "乙", "老码头") is None, "锁上了还准了挪人请求"
     assert not ((st.get("char_sim") or {}).get("b") or {}).get("pos"), \
@@ -115,7 +118,7 @@ def test_red_sample_unlocked_really_moves_npc(unlocked):
 
 
 # ── 📜 旁白扫描收账 (settle_prose_arrival): 不许 ────────────────────────────
-def test_prose_arrival_does_not_move_when_locked():
+def test_prose_arrival_does_not_move_when_locked(map_writes_off):
     c, st = _c(), _st()
     beats = [{"type": "description", "text": "我们一路走到了老码头边上。"}]
     moved = runtime.settle_prose_arrival(c, st, beats, "l1")
@@ -186,18 +189,24 @@ def test_author_schedule_still_owns_positions():
 
 
 # ── 🔒 开关本身 ─────────────────────────────────────────────────────────────
-def test_lock_is_a_module_constant_not_a_story_flag():
-    """Yi 定「都不开」: 作者不许在剧本里把它打开, 所以不能是 tuning 键。"""
-    assert runtime.LLM_MAP_WRITES is False, "默认必须是关的"
-    assert "llm_map" not in runtime.DEFAULT_TUNING, \
-        "别做成 tuning 键 —— 那就等于给作者留了开关, 违背「都不开」"
+def test_the_lock_split_in_two():
+    """⚠️ 2026-08-08「模型决定」把这把锁拆开了（原委见 runtime 那一段与
+    tests/test_model_decides_place.py）：
+        LLM_MAP_WRITES   谁在哪     —— 开，模型说了算
+        LLM_MINTS_PLACES 有哪些地方 —— 仍关
+    本文件从「守整把锁」改成「守还关着的那一半 + 玩家自己那条路毫发无伤」。"""
+    assert runtime.LLM_MAP_WRITES is True
+    assert runtime.LLM_MINTS_PLACES is False
+    for k in ("llm_map", "llm_mints_places"):
+        assert k not in runtime.DEFAULT_TUNING, \
+            "别做成 tuning 键 —— 作者在剧本里开不了它"
 
 
 # ── 📜 旁白把人挪到【已有】地点: 同样不许 ──────────────────────────────────
 # (上面那条测的是"未知地点"—— 它是被铸造闸挡下的。已有地点走的是另一条分支:
 #  director 的 moved_to 直接 commit_move, 不经铸造。两条分支要分开验, 不然会
 #  以为堵上了其实只堵了一半。)
-def test_full_turn_narrated_move_to_known_place_does_not_move():
+def test_full_turn_narrated_move_to_known_place_does_not_move(map_writes_off):
     c, st = _c(), _st()
     out = runtime.run_turn(c, st, {"name": "我"}, "我们走吧",
                            channel="say", llm=MintLLM(moved_to="老码头"))

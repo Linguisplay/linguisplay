@@ -17,7 +17,8 @@
 所以开回来的是【一个玩家必须亲手点的按钮】—— 仍然符合「移动只剩点界面」:
   · 角色申报 move_invite → 引擎验目的地在册/已解锁/走得到 → 弹确认条
   · 玩家点「跟 TA 去」才真的走; 点「留下」就留下
-另外两把锁【一动不动】: 散文不许改地图 (LLM_MAP_WRITES), 打字不许改地图 (TYPED_MOVE)。
+当时另外两把锁一动不动。(⚠️ 同日晚些时候「模型决定」又把 LLM_MAP_WRITES 开了,
+本文件里凡是断言它关着的用例已改成守可逆合同。)
 本文件下半截就是守这一条 —— 开一把不许顺手松另外两把。
 """
 import copy
@@ -48,9 +49,10 @@ def test_the_invite_lock_is_open():
     assert runtime.INVITE_MOVE is True
 
 
-def test_the_other_two_locks_stay_shut():
-    """这一刀只开邀约那一把。散文/打字改地图仍然是死的。"""
-    assert runtime.LLM_MAP_WRITES is False
+def test_only_the_typed_move_lock_stays_shut():
+    """⚠️ 本条随 2026-08-08 晚些时候的「模型决定」更新: 那一刀把 LLM_MAP_WRITES
+    也开了 (谁在哪归模型)。三把锁里现在只剩 TYPED_MOVE 关着 —— 玩家在输入框里
+    点一个地名仍然不算数, 那是玩家自己驱动那条路, 归地图面板。"""
     assert runtime.TYPED_MOVE is False
 
 
@@ -73,7 +75,7 @@ def test_an_unreachable_place_still_makes_no_chip():
 
 
 def test_a_place_that_does_not_exist_mints_nothing():
-    """铸地那半边归 LLM_MAP_WRITES 管, 这一刀没碰它。"""
+    """铸地那半边归 LLM_MINTS_PLACES 管, 这一刀没碰它。"""
     class _L:
         def generate(self, p):
             if p.get("describe_place"):
@@ -136,7 +138,10 @@ def test_typing_a_destination_still_moves_nobody():
     assert out.get("move_request") is None, "玩家打字也弹条了 —— 那是另一把锁"
 
 
-def test_prose_arrival_is_still_dead():
+def test_prose_arrival_is_settled_now(map_writes_off):
+    """⚠️ 这一条本来断言「散文到达是死的」。2026-08-08 晚些时候「模型决定」把它翻了 ——
+    散文写到哪就是到哪, 引擎跟上记账 (见 test_model_decides_place.py)。
+    这里改成守【可逆合同】: 把旗关回去, 旧行为必须原样回来。"""
     st = _st()
     runtime.settle_prose_arrival(CONTENT, st, [
         {"type": "description", "text": "你们一路走到了老码头，风很大。"}], "l1", None)

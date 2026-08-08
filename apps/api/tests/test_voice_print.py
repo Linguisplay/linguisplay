@@ -116,7 +116,7 @@ def test_emergent_new_char_without_voice_still_births():
     assert nc["voice_print"] == "" and nc["persona_text"] == "码头挑夫，背比人宽"
 
 
-def test_scout_mint_carries_voice():
+def test_scout_mint_carries_voice(mints_on):
     class L:
         def generate(self, prompt):
             if prompt.get("describe_place"):

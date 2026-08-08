@@ -101,7 +101,7 @@ def test_fate_move_generation_path_releases_pins(map_writes_on, monkeypatch):
 
 # ── 5. 铸造不是移动: mint_sought_character 不动位置、不误伤现场钉 ──────────────
 
-def test_mint_sought_character_leaves_position_and_pins_alone():
+def test_mint_sought_character_leaves_position_and_pins_alone(mints_on):
     content = copy.deepcopy(SBOX)
     st = _st(pins={"b": "l1"})
     got = runtime.mint_sought_character(content, st, "陈四",
