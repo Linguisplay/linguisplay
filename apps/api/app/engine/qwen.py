@@ -1402,6 +1402,19 @@ def _build_system(prompt: dict[str, Any]) -> str:
                      "过招的具体动作、决定性的那一下、胜负落定，全部演出来并就此收束——"
                      "不许再热身、不许再报数、不许拖到下一拍。")
 
+    # 🚶 玩家这一拍亲口说了要走, 而换场只能他自己点地图 (Yi 2026-08-08 拍板 A)。
+    # 只告诉玩家「点地图」是半件事: 不同时压住模型, 它照样把人写去别处, 玩家就会看到
+    # 「点地图」的提示 + 一段已经到了别处的正文, 比不提示还乱。
+    # 也不许把角色演成拒绝 —— 玩家说「跟你走」, 角色回「不行」是另一种坏。
+    if prompt.get("move_blocked"):
+        lines.append("")
+        lines.append(
+            "【玩家说要走，但脚还没动】换场只能由玩家自己点地图，你搬不动他。"
+            "你可以答应、起身、招手、往门口走一步、把话说到「走吧」为止；"
+            "但这一拍的戏【仍然发生在此地】，绝不许写玩家已经动身、在路上、"
+            "或到了别处，也绝不许提别的地点名当作你们此刻所在。"
+            "系统会提醒他去点地图，你只管把这一刻演完。")
+
     # 🫂 此刻你心里把 TA 当什么 (Yi 2026-08-06:「任何时候都有一个关系存在」)。
     # 从前关系只有 derive_mode(亲近, 心动) 那一条算术路 —— 算得出「朋友」,
     # 算不出「面和心不和」。这一段是定期由判官读着正文得出来的, 盖在算术之上。
@@ -5426,7 +5439,11 @@ class QwenLLM:
         return {"items": items[:6]} if items else {}
 
     def generate(self, prompt: dict[str, Any]) -> dict[str, Any]:
-        if prompt.get("relation_read"):
+        # ⚠️ 分派键必须跟【载荷键】分开 (2026-08-08 实弹, 我自己造的):
+        # 主拍载荷里也有一个 relation_read (TA 此刻怎么看玩家), 一旦非空,
+        # 整个主回合就被路由到关系判官, 一个 beat 都不出 —— 角色彻底哑掉,
+        # 而且没有任何守卫开枪、审计单干干净净, 只能靠 e2e 才撞得出来。
+        if prompt.get("relation_judge"):
             return self._relation_read(prompt)
         if prompt.get("summarize"):
             return self._summarize(prompt)

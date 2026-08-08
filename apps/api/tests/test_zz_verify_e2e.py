@@ -1,4 +1,15 @@
-"""E2E 复核: 用真 QwenLLM.generate (只挡住 HTTP), 跑一整拍 run_turn_stream。"""
+# -*- coding: utf-8 -*-
+"""🧪 E2E: 用真 QwenLLM.generate (只挡住 HTTP) 跑一整拍 run_turn_stream。
+
+⚠️ 这个文件抓到过一个只有 e2e 才撞得出来的实弹 (2026-08-08, 我自己造的):
+qwen.generate 的【分派键】叫 relation_read, 而主拍载荷里也有一个同名键
+(TA 此刻怎么看玩家)。于是关系一落账, 整个主回合就被路由到关系判官 ——
+一个 beat 都不出, 角色彻底哑掉。而且没有任何守卫开枪、审计单干干净净,
+单测全绿 (它们只测 _build_system 的字符串, 测不到分派)。
+
+教训跟今天早上那次「角色不能发言」是同一个: 组件各自都对, 接缝上错了。
+只有真的把一整拍跑完才看得见。
+"""
 import json
 
 from app.engine import qwen, runtime
@@ -50,13 +61,37 @@ def _run(state, monkeypatch):
     return beats
 
 
-def test_main_turn_dies_once_rel_read_is_populated(monkeypatch):
-    clean = {"met_ids": ["c1"]}
-    got_ok = _run(clean, monkeypatch)
-    assert any(b.get("type") == "dialogue" for b in got_ok), got_ok
+def test_a_populated_relation_does_not_kill_the_turn(monkeypatch):
+    """关系落了账, 主拍照样得出台词。(修之前: 0 个 beat, 角色彻底哑掉。)"""
+    clean = _run({"met_ids": ["c1"]}, monkeypatch)
+    assert any(b.get("type") == "dialogue" for b in clean), clean
 
-    poisoned = {"met_ids": ["c1"],
-                "rel_read": {"c1": {"mode": "旧相识", "feeling": "念着旧情",
-                                    "why": "上回替我挡了一刀", "at": 3}}}
-    got_bad = _run(poisoned, monkeypatch)
-    assert not any(b.get("type") == "dialogue" for b in got_bad), got_bad
+    withrel = _run({"met_ids": ["c1"],
+                    "rel_read": {"c1": {"mode": "旧相识", "feeling": "念着旧情",
+                                        "why": "上回替我挡了一刀", "at": 3}}}, monkeypatch)
+    assert any(b.get("type") == "dialogue" for b in withrel), withrel
+    assert any(b.get("type") == "description" for b in withrel), withrel
+
+
+def test_even_a_bare_timestamp_does_not_kill_the_turn(monkeypatch):
+    """最小复现: 只有 at 也会触发 —— 因为它跟提示词无关, 纯粹是分派被劫。"""
+    got = _run({"met_ids": ["c1"], "rel_read": {"c1": {"at": 3}}}, monkeypatch)
+    assert any(b.get("type") == "dialogue" for b in got), got
+
+def test_the_dispatch_key_never_collides_with_a_payload_key():
+    """真正的合同: generate 的【分派键】不许跟主拍载荷里的键同名。
+
+    同名 = 主拍被静默路由去别的处理器 —— 审计单干净、守卫不响、单测全绿
+    (它们只测 _build_system 吐出来的字符串, 测不到分派这一层)。
+    只看真正的分派行, generate 里顺手读的 channel/speaker_name 那些不算。
+    """
+    import inspect
+    import re as _re
+    src = inspect.getsource(qwen.QwenLLM.generate)
+    dispatch = set(_re.findall(
+        r'if\s+prompt\.get\("(\w+)"\)\s*:\s*\n\s*return\s+self\.', src))
+    assert dispatch, "一条分派行都没认出来 — 正则跟代码对不上, 这条合同在空转"
+    payload = set(_re.findall(r'prompt\.get\("(\w+)"\)',
+                              inspect.getsource(qwen._build_system)))
+    clash = dispatch & payload
+    assert not clash, f"分派键与主拍载荷键撞名: {sorted(clash)}"

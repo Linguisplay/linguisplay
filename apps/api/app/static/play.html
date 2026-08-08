@@ -5991,6 +5991,9 @@ function showMoments(moments, relDeltas) {
     else if (m.kind === "ending" && !m.terminal) pushToast(B(`🏆 达成结局：「${m.title || m.ending_kind}」`, `🏆 Ending reached: “${m.title || m.ending_kind}”`), "t-end", i++ * 650);
     else if (m.kind === "pressure") pushToast(`⚠️ ${m.note || ""}`, "t-press", i++ * 650);
     else if (m.kind === "death") pushToast(B(`☠️ ${m.name || "有人"} 死了`, `☠️ ${m.name || "Someone"} is dead`), "t-press", i++ * 650);
+    // 🗺 玩家说了要走却走不了: 换场只由玩家点地图 (Yi 2026-08-08 拍板 A —— 宁可生硬,
+    //    不许让旁白替他走)。带一键开图, 摩擦摆到明处但只多一次点击。
+    else if (m.kind === "map_move") pushToast(B(`🗺 ${escapeHtml(m.text || "想去别处？点地图选地点")}　<a style="color:var(--gold);cursor:pointer" onclick="openMap()">打开地图</a>`, `🗺 To go elsewhere, pick a place on the map　<a style="color:var(--gold);cursor:pointer" onclick="openMap()">Open map</a>`), "t-act", i++ * 650);
     else if (m.kind === "arrival") pushToast(B(`👋 新面孔登场：${escapeHtml(m.name || "")}${m.id ? ` <a style="color:#d8b57a;cursor:pointer" onclick="renameChar('${m.id}')">✏️改名</a>` : ""}`, `👋 A new face: ${escapeHtml(m.name || "")}`), "t-act", i++ * 650);
     else if (m.kind === "peek_window") pushToast(B(`📱 ${m.name || ""}的${m.device || "手机"}就搁在手边…（做：翻${m.name || "TA"}的${m.device || "手机"}）`, `📱 ${m.name || ""}'s ${m.device || "phone"} is right there…`), "t-unlock", i++ * 650);
     else if (m.kind === "creature" && m.slain) pushToast(`🏆 ${B(`讨伐完成：${m.name}`, `${m.name} slain`)}`, "t-end", i++ * 650);

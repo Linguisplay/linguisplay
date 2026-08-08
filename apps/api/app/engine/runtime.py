@@ -473,6 +473,46 @@ def _t(content: dict[str, Any], zh: str, en: str) -> str:
 NARRATOR_TAG = "旁白："
 
 
+# 🚶 玩家【自己说要走】的说法 (Yi 2026-08-08 拍板 A)。三把锁之后换场只剩点地图,
+# 所以这一句必须被认出来 —— 否则玩家说了、引擎没反应、模型只好用文字兑现,
+# 那正是「旁白把人写去别处而位置没动」的形状。
+# 只认【离开此地】: 场内走动 (「我走到窗边」) 不算 —— 误报比漏报更坏, 每句话都弹
+# 「点地图」等于把玩家赶走。所以「走」单独出现不算, 要么带人, 要么带地名。
+_WANT_MOVE = re.compile(
+    r"跟(着)?(他|她|你|TA|你们|他们)(一起)?(走|去|回)"
+    r"|(和|跟)(他|她|你|TA)(一起)?(去|走)"
+    r"|一起(去|走)"
+    r"|带我(去|走)"
+    r"|我(也)?(跟|随)(你|他|她|TA)"
+    r"|(我们|咱们)(去|回)[^。！？，、]{1,10}"
+    # 第一人称单数「我去天台」。要带个真去处 (≥2 字), 「我去看看」「我去死」进不来;
+    # 前面有「不」「别」「想」的一律不算 (「我不想去」)。
+    r"|(?<![不别想])我(去|回)(?!看看|试试|问问|找)[^。！？，、]{2,8}$"
+    # 无主语的「去庙街看看」「回警署吧」: 句首起、带个去处收尾;
+    # 前面有「不」「别」的进不来 (「我不想去」)。
+    r"|^(?<!不)(?<!别)(去|回)[^。！？，、]{2,8}(吧|看看|一趟|一下|$)")
+
+
+def player_wants_to_move(text: str | None, channel: str = "say") -> bool:
+    """🚶 玩家这一拍是不是【亲口说了要离开此地】。
+
+    Yi 2026-08-08 拍板 A: 引擎明说「想去哪点地图」, 把摩擦摆到明处 —— 宁可生硬,
+    不许撒谎。从前玩家打「跟他走」时系统无路可走 (三把锁把换场收成只剩点地图),
+    模型只好用文字兑现, 于是正文一路走到别处而 location_id 一动没动。
+    """
+    t = (text or "").strip()
+    if not t:
+        return False
+    from . import growth as _g
+    return bool(_WANT_MOVE.search(t) or _g.explore_intent(t))
+
+
+def map_move_hint() -> dict[str, Any]:
+    """🗺 给玩家的那条提示。走 moments→toast 那条管道, 【不进正文】——
+    引擎硬写的旁白不过文风, 而且会进历史污染示范 (2026-08-07 的教训)。"""
+    return {"kind": "map_move", "text": "想去别处？点右上角的地图选地点"}
+
+
 # 🚶 把人写去别处的动词。要有【动作】才算 —— 嘴上提一句别处不算。
 _PROSE_GO = re.compile(
     r"(走[出进向到过]|来到|去了|穿过|拐[进过]|迈[进出]|踏[进入]|抵达|带[你我]|领着|牵着[你我]|"
@@ -10863,6 +10903,13 @@ def run_turn_stream(
     # 🗺 同上: 打字点名图外地点的「造一个并过去」确认条也一并取消 (要新场景请作者手加)。
     emergent_dest = None if (moved or not TYPED_MOVE) else \
         player_move_emergent(content, state, player_input, channel)
+    # 🚶 玩家亲口说要走? (Yi 2026-08-08 拍板 A: 把摩擦摆到明处, 宁可生硬不许撒谎)
+    # 已经真的换过场的那一拍不算 —— 那是点地图走成了, 没有摩擦可言。
+    # ⚠️ 这里【不能】用 observer: 它要到一千多行之后才赋值, 提早引用会 UnboundLocalError
+    #    (实弹: 258 条测试当场全红)。上帝视角本来就没有「玩家的脚」, 用 mode 判。
+    _wants_move = (not moved) and (state.get("mode") or "character") != "god" \
+        and player_wants_to_move(player_input, channel)
+
     # 🧍 姿位孪生: a plain first-person posture statement books itself (坐下就是坐下)
     if (state.get("mode") or "character") != "god":
         _pose = player_pose(state, player_input, channel)
@@ -11874,6 +11921,8 @@ def run_turn_stream(
             "channel": channel,
             # 🫂 TA 此刻心里把玩家当什么 (定期由判官读着正文得出, 盖在算术之上)
             "relation_read": (state.get("rel_read") or {}).get(sp_id) or {},
+            # 🚶 玩家亲口说要走, 而换场只剩点地图 —— 压住模型别用文字兑现
+            "move_blocked": _wants_move,
             # 💞 事件记账制旗 (Yi 定): 开着 = 契约只收 rel_event 申报, 不收每句打分
             "rel_events": bool(tun.get("rel_events")),
             "context": ctx,
@@ -13137,6 +13186,11 @@ def run_turn_stream(
                 growth_mod.note_mint(state)   # 🌱 双通道共享额度
                 _audit(state, "place.mint", True, _chip.get("to_name", ""), "你说起的去处已立档")
 
+    # 🗺 玩家说了要走却走不了 —— 把这道摩擦摆到明处 (Yi 2026-08-08 拍板 A)。
+    # 走 moments→toast 那条管道, 不进正文: 引擎硬写的旁白不过文风, 还会进历史污染示范。
+    if _wants_move:
+        moments.append(map_move_hint())
+
     # 💡 建议单一来源 (Yi 2026-07-20 重做): 导演随主拍写的两条, 不够垫底句补齐。
     # 旧的独立小调用/门控模板层已删 — 少一层逻辑, 少一次调用, 一个声音。
     suggestions = []
@@ -13488,7 +13542,7 @@ def relation_reads_async(content: dict[str, Any], state: dict[str, Any],
         got = {}
         for cid, c, ledger, lines in snap:
             try:
-                out = llm.generate({"relation_read": True,
+                out = llm.generate({"relation_judge": True,
                                     "char": {"name": c.get("name") or ""},
                                     "player_name": _pl, "ledger_mode": ledger,
                                     "lines": lines}) or {}
