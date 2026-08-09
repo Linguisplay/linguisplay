@@ -7540,8 +7540,13 @@ def _phone_beat(content: dict[str, Any], state: dict[str, Any], c: dict[str, Any
             return "soon" if mode in ("flirt", "lover") else "morning"
         if _promise_loc_now(state, cid):
             return "later"                      # 此刻正赴另一个约
-        if (sim.get("intent") or "").strip() and not _intent_stale(state, sim):
-            return "later"                      # 应承了具体差事, 手上有活
+        # ⚠️ 从前这里是「应承了具体差事 (sim.intent) 就 later」。拿掉了 ——
+        # self_intent 是模型【几乎每拍都会填】的字段 (「我先去问问」「回头找他」),
+        # 于是角色只要说过接下来要干什么, 就变成不方便回消息。而真人恰恰是边干活边回,
+        # 手机就是干这个用的。Yi 2026-08-09:「可以耍脾气或有原因，但没事的话一定要
+        # 及时回复」—— 手上有个打算不算「有原因」。
+        # 留下来的延迟理由都是真有事: 死/被掳走/作者班表说联系不上/半夜在睡/
+        # 此刻正赴另一个约/钉子 AWAY。
         if char_position(content, state, c) == AWAY:
             return "later"                      # 钉子 AWAY: 只是慢, 不是关机
         return "now"

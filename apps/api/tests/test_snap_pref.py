@@ -134,8 +134,10 @@ def test_a_delayed_reply_can_still_carry_a_photo(monkeypatch):
                         lambda *a, **k: {"url": "/scene/snap/x.jpg", "prompt": "p"})
     c, st = copy.deepcopy(STORY), _st(snap_pref=3)
     st["char_pins"] = {"b": "l2"}
-    runtime._sim(st, "b")["intent"] = "在码头卸货"
-    runtime._sim(st, "b")["intent_at"] = runtime._time_index(st)
+    # ⚠️ 2026-08-09 起「手上有个打算」不再是延迟的理由（self_intent 几乎每拍都填，
+    #    于是角色永远不方便回消息）。延迟机制本身没动——这里换一个【真有事】的
+    #    理由来触发：作者班表说此刻联系不上。
+    runtime._pin_away(st, "b") if hasattr(runtime, "_pin_away") else st.setdefault("char_pins", {}).update({"b": runtime.AWAY})
     view = runtime.phone_send(c, st, {"name": "我"}, "b", "你在哪", llm=Reply())
     pend = ((st.get("phone") or {}).get("threads") or {})["b"].get("pending") or []
     assert pend, "夹具没走到延迟分支"

@@ -66,10 +66,12 @@ def _busy(st):
     """把乙支到别处 + 手上有活 → 判定必然走 later。
     钉在 l2 是为了让 phone_send 算出 here=False; intent 才是被测的那条判据。"""
     st["char_pins"] = {"b": "l2"}
-    runtime._sim(st, "b")["intent"] = "去码头取一件东西"
+    # ⚠️ 2026-08-09 起「手上有个打算」不再是延迟的理由（self_intent 几乎每拍都填，
+    #    于是角色永远不方便回消息）。延迟机制本身没动——这里换一个【真有事】的
+    #    理由来触发：作者班表说此刻联系不上。
+    runtime._pin_away(st, "b") if hasattr(runtime, "_pin_away") else st.setdefault("char_pins", {}).update({"b": runtime.AWAY})
     # ⏳ 应承有保质期 (INTENT_FRESH_SLOTS): 没盖时间戳的一律当过期 —— 老档里那些
     #    没人清除的陈年 intent 会让角色永远慢半拍, 所以默认从宽。这里盖上"刚应承"。
-    runtime._sim(st, "b")["intent_at"] = runtime._time_index(st)
     return st
 
 

@@ -113,19 +113,28 @@ def test_someone_pinned_elsewhere_replies_later_not_never():
 
 def test_busy_with_an_errand_replies_later():
     st = _st()
-    runtime._sim(st, "b")["intent"] = "去码头取一件东西"
+    # ⚠️ 2026-08-09 起「手上有个打算」不再是延迟的理由（self_intent 几乎每拍都填，
+    #    于是角色永远不方便回消息）。延迟机制本身没动——这里换一个【真有事】的
+    #    理由来触发：作者班表说此刻联系不上。
+    runtime._pin_away(st, "b") if hasattr(runtime, "_pin_away") else st.setdefault("char_pins", {}).update({"b": runtime.AWAY})
     # ⏳ 应承有保质期: 没盖 intent_at 的一律当过期。char_sim["intent"] 全仓原本没有
     #    任何清除点, 于是说过一次差事的角色【此后每一条短信都判 later】, 永远慢半拍
     #    (2026-08-05 对抗验收抓出)。老档从宽, 新写的都盖章。
-    runtime._sim(st, "b")["intent_at"] = runtime._time_index(st)
     assert _beat(st)[0] == "later"
 
 
-def test_a_stale_errand_stops_slowing_them_down():
+def test_an_errand_never_slows_a_reply_down_at_all():
+    """⚠️ 本条 2026-08-09 换了前提。从前测的是「【过期】的差事不再拖慢」——
+    因为那时候【没过期】的差事是会拖慢的。现在差事一律不拖慢：
+
+    self_intent 是模型几乎每拍都会填的字段（「我先去问问」「回头找他」），于是角色
+    只要说过接下来要干什么，就变成不方便回消息。而真人恰恰是边干活边回，手机就是
+    干这个用的。Yi:「可以耍脾气或有原因，但没事的话一定要及时回复」——
+    手上有个打算不算「有原因」。见 tests/test_reply_promptly.py。"""
     st = _st()
     runtime._sim(st, "b")["intent"] = "去码头取一件东西"
-    runtime._sim(st, "b")["intent_at"] = runtime._time_index(st) - 9
-    assert _beat(st)[0] == "now", "几天前应承的事还在拖慢每一条短信"
+    runtime._sim(st, "b")["intent_at"] = runtime._time_index(st)   # 刚应承的，最"新鲜"
+    assert _beat(st)[0] == "now", "手上有个打算就不回消息了"
 
 
 # ── 🌙 深夜 ────────────────────────────────────────────────────────────────
@@ -164,7 +173,10 @@ def test_an_outstanding_read_receipt_forces_an_answer_now():
 def test_a_pending_message_also_forces_an_answer_now():
     st = _st()
     runtime._thread(st, "b")["pending"] = [{"text": "等下说", "due_ts": 1}]
-    runtime._sim(st, "b")["intent"] = "去码头取一件东西"
+    # ⚠️ 2026-08-09 起「手上有个打算」不再是延迟的理由（self_intent 几乎每拍都填，
+    #    于是角色永远不方便回消息）。延迟机制本身没动——这里换一个【真有事】的
+    #    理由来触发：作者班表说此刻联系不上。
+    runtime._pin_away(st, "b") if hasattr(runtime, "_pin_away") else st.setdefault("char_pins", {}).update({"b": runtime.AWAY})
     assert _beat(st)[0] == "now"
 
 
