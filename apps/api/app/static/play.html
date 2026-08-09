@@ -1535,7 +1535,11 @@ function translateNode(root) {
   return root;
 }
 function applyUiLang() {
-  if (uiLang !== "en") return;
+  // ⚠️ 这个函数只【翻成英文】，翻不回来（translateNode 是就地改文本节点的）。
+  // 所以切回中文时：新渲染的东西立刻是中文（B() 每次渲染求值），而已经被就地翻译过的
+  // 静态外壳要刷新才回来。报障那句在手机线程里、属于新渲染，切变量就够了。
+  // 这里不硬塞一个 reload —— 会丢 SPA 状态，也容易写出循环。
+  if (uiLang !== "en") { document.documentElement.lang = "zh"; return; }
   document.documentElement.lang = "en";
   const heroT = document.querySelector(".hero-t"), heroS = document.querySelector(".hero-s");
   if (heroT) heroT.textContent = "Everyone here has something they won't tell you.";
@@ -2012,9 +2016,16 @@ async function chooseRole(storyId, posterUrl) {
     }
   }
   const story = await j(`/stories/${storyId}`);
-  // 🌐 an English story flips the UI for the session (unless the player chose a language)
-  if (story.language === "en" && uiLang !== "en" && !localStorage.getItem("lp_lang")) {
-    uiLang = "en"; applyUiLang(); updatePlaceholder && updatePlaceholder();
+  // 🌐 UI 语言跟着剧本走 —— 【两个方向都要走】(Yi 报障 2026-08-09)。
+  // 从前这里只有「英文剧本 → 翻成英文」那一半，没有翻回来的那一半。uiLang 是页面级
+  // 变量、不落盘，于是：开过一次英文剧本 → 不刷新页面直接进中文剧本 → 整个 UI 一直
+  // 是英文。玩家在中文局里看到「They're tied up — they'll get back to you」就是这么来的。
+  // 玩家自己选过语言 (lp_lang) 的话，谁也别动他的选择。
+  if (!localStorage.getItem("lp_lang")) {
+    const want = story.language === "en" ? "en" : "zh";
+    if (uiLang !== want) {
+      uiLang = want; applyUiLang(); updatePlaceholder && updatePlaceholder();
+    }
   }
   const sandbox = !!(story.sandbox && story.sandbox.enabled);
   document.getElementById("wvWrap").classList.toggle("hidden", !sandbox);
