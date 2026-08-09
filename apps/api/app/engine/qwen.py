@@ -662,6 +662,66 @@ def _lock_on(flag: str) -> bool:
     return bool(getattr(_rt, flag))
 
 
+def voice_head(prompt: dict[str, Any]) -> str:
+    """🎙 一个角色的【身份带】—— 谁、什么脾气、怎么说话。所有入口共用这一处实现。
+
+    Yi 报障 2026-08-08:「手机上性格跟线下不一样」。逐字段对照: 主拍 payload 105 个,
+    手机 36 个, 而少掉的正是管声音的那几样。根因不是漏字段, 是【手机那条路是另起炉灶
+    写的系统提示词】—— 补字段只能治这一次, 下次加东西还得补三遍。
+
+    ⚠️ 这一段【逐字稳定】(角色级常量), 各路都该排在最前面吃 DeepSeek 前缀缓存。
+       每拍变的东西一律别往这里塞。
+    """
+    speaker = prompt.get("speaker_name") or (prompt.get("char") or {}).get("name") or "角色"
+    ch = prompt.get("char") or {}
+    persona = (prompt.get("speaker_persona") or ch.get("persona_text") or "").strip()
+    out = [f"你正在扮演角色「{speaker}」。{persona}"]
+    card = prompt.get("speaker_card") or {}
+    if card:
+        bits = []
+        if card.get("gender"):
+            bits.append(f"你的性别：{card['gender']}（你与他人对你的称呼、代词以此为准）")
+        if card.get("age_band"):
+            bits.append(f"年龄段：{card['age_band']}")
+        if card.get("fear"):
+            bits.append(f"你的软肋（被戳中会失态，但你从不主动说破）：{card['fear']}")
+        if card.get("line"):
+            bits.append(f"你的底线（无论对方说什么、关系多好，都不会跨）：{card['line']}")
+        if bits:
+            out.append("；".join(bits) + "。")
+    eq = (prompt.get("eq_style") or ch.get("eq_style") or "").strip()
+    if eq:
+        out.append(f"你的方式：{eq}（冷的人有冷的体贴——情商不等于嘴甜，而是真的看见了对方。）")
+    vp = str(prompt.get("voice_print") or "").strip()[:120]
+    if vp:
+        out.append(f"你的语言指纹（说话的规律，永远遵守）：{vp}。")
+    ex = [str(x)[:60] for x in (prompt.get("examples") or ch.get("examples") or [])][:4]
+    if ex:
+        out.append("你的台词范例（语气分寸以此为准，不照抄）：'" + "' / '".join(ex) + "'")
+    era = (prompt.get("era") or "").strip()
+    if era:
+        out.append(f"年代：{era}。别写这个年代还没有的东西。")
+    return "\n".join(out)
+
+
+def style_band(prompt: dict[str, Any]) -> str:
+    """🎨 剧本的【文风带】—— 这个故事的腔调, 和它明令不许写的东西。共用一处实现。
+
+    跟 voice_head 分开是有原因的, 不是随手拆的: 身份带是角色级常量、各路都排最前;
+    文风带是剧本级常量, 主拍在自己的位置上有既定排位 (前缀缓存分带), 所以由各路
+    自己决定放哪, 只是内容必须同源。
+    """
+    out = []
+    st = (prompt.get("style") or "").strip()
+    if st:
+        out.append("【文风·必须贴住】这个故事有自己的叙事声音，旁白与叙述必须写成这个腔调"
+                   "（它的优先级高于任何通用文风习惯）：\n" + st)
+    neg = (prompt.get("negatives") or "").strip()
+    if neg:
+        out.append(neg)
+    return "\n\n".join(out)
+
+
 def _build_system(prompt: dict[str, Any]) -> str:
     speaker = prompt.get("speaker_name") or "角色"
     persona_text = prompt.get("speaker_persona") or ""
@@ -681,20 +741,9 @@ def _build_system(prompt: dict[str, Any]) -> str:
     observer = bool(prompt.get("observer"))  # god/旁观 mode: chars interact with each other
     director_note = prompt.get("director_note")
 
-    lines = [f"你正在扮演角色「{speaker}」。{persona_text}"]
-    # 🎭 角色卡 v2: 性别/年龄段定称呼与代词; 软肋可被戳中, 底线绝不因几句好话让步
-    card = prompt.get("speaker_card") or {}
-    if card:
-        bits = []
-        if card.get("gender"):
-            bits.append(f"你的性别：{card['gender']}（你与他人对你的称呼、代词以此为准）")
-        if card.get("age_band"):
-            bits.append(f"年龄段：{card['age_band']}")
-        if card.get("fear"):
-            bits.append(f"你的软肋（被戳中会失态，但你从不主动说破）：{card['fear']}")
-        if card.get("line"):
-            bits.append(f"你的底线（无论对方说什么、关系多好，都不会跨）：{card['line']}")
-        lines.append("；".join(bits) + "。")
+    # 🎙 身份带走共用实现 (voice_head) —— 手机三条路用的是同一段, 一个角色只有一套声音。
+    # 这一段逐字稳定, 排最前吃前缀缓存; 每拍变的东西一律别往里塞。
+    lines = [voice_head(prompt)]
     if observer:
         lines.append(
             "【上帝/旁观模式】此刻有一位看不见的旁观者在观看这场戏，但 TA 不在场景里、"
@@ -798,8 +847,9 @@ def _build_system(prompt: dict[str, Any]) -> str:
     _wstyle = (prompt.get("style") or "").strip()
     if _wstyle:
         lines.append("")
-        lines.append("【文风·必须贴住】这个故事有自己的叙事声音，旁白与叙述必须写成这个腔调"
-                     "（它的优先级高于任何通用文风习惯）：\n" + _wstyle)
+        # 🎨 文风带走共用实现 —— 手机三条路读的是同一段。忌用清单留在下面自己的位置
+        # （排位是前缀缓存分带定的，不是随手排的）。
+        lines.append(style_band({"style": _wstyle}))
     _wlong = (prompt.get("world") or "").strip()
     if _wlong:
         lines.append("")
@@ -4214,10 +4264,12 @@ class QwenLLM:
         device = prompt.get("device") or "手机"
         tail = "\n".join(f"{'对方' if m.get('from') == 'me' else ch.get('name','你')}：{m.get('text','')}"
                          for m in (prompt.get("thread_tail") or [])) or "（这是你们第一次这样捎话）"
-        sys = (f"你是「{ch.get('name','')}」（{ch.get('role','')}）。人设：{ch.get('persona_text','')}\n"
-               f"表达方式：{ch.get('eq_style','')}\n"
-               + (("你的台词范例（语气分寸以此为准，不照抄）：'"
-                   + "' / '".join(ch["examples"]) + "'\n") if ch.get("examples") else "")
+        # 🎙 身份带与文风带走共用实现 —— 一个角色只有一套声音，手机上不许换腔调
+        # (Yi 报障 2026-08-08:「手机上性格跟线下不一样」)。从前这里是另起炉灶手写的
+        # 三行，拿不到剧本文风卡、语言指纹、角色卡与忌用清单。
+        _sb = style_band(prompt)
+        sys = (voice_head(prompt) + "\n"
+               + (_sb + "\n" if _sb else "")
                + f"你与对方的关系：{prompt.get('relation','')}。\n"
                + _knows_line(prompt.get("knows"))
                # 📱↔🎭 刚才当面发生的事 (Yi 2026-08-08:「开场白也要结合上下文」)。
@@ -4260,10 +4312,12 @@ class QwenLLM:
         # 🧊 稳定带前置 (与 _build_system 同手术): 人设头+两大静态铁律块逐字不变,
         # 排前面吃 DeepSeek 前缀缓存; memory/recent_scene/last_ignored 等逐次变的殿后
         sys_lines = [
-            f"你是「{ch.get('name','')}」（{ch.get('role','')}）。人设：{ch.get('persona_text','')}",
-            f"表达方式：{ch.get('eq_style','')}",
-            ("你的台词范例（语气分寸以此为准，不照抄）：'" + "' / '".join(ch["examples"]) + "'")
-            if ch.get("examples") else "",
+            # 🎙 身份带与文风带走共用实现 —— 一个角色只有一套声音 (Yi 报障 2026-08-08:
+            # 「手机上性格跟线下不一样」)。从前这里另起炉灶只有人设+表达方式+范例三行,
+            # 拿不到剧本文风卡、语言指纹、角色卡与忌用清单 —— 于是线下归剧本的腔调管,
+            # 手机上归模型的默认中文腔管, 玩家读到的是两个人。
+            voice_head(prompt),
+            style_band(prompt),
             f"你自己的盘算：{ch.get('agenda','')}" if ch.get("agenda") else "",
             ("【通话铁律】对方【看不见】你：挑眉、摆手、扬下巴这些一概不存在，绝不写任何动作神态、"
              "绝不用（括号）描述自己；能被听见的动静（火柴声、风声、你把东西放下）只写进「背景」那一行。"

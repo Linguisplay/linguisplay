@@ -6976,6 +6976,35 @@ def reachout_after_event(content: dict[str, Any], state: dict[str, Any], llm: LL
     return out
 
 
+def voice_payload(content: dict[str, Any], state: dict[str, Any],
+                  char: dict[str, Any]) -> dict[str, Any]:
+    """🎙 一个角色的声音由这几样定 —— 所有入口都该带上它 (Yi 2026-08-08)。
+
+    主拍本来就全有; 手机的三条路一样都没有, 于是同一个角色线下归剧本的文风管、
+    手机上归模型的默认中文腔管。补字段只能治一次, 所以连【取哪些字段】也收在这里,
+    下次加一样东西只改这一处。
+    """
+    story = (content.get("story") or {})
+    return {
+        "speaker_name": char.get("name") or "",
+        "speaker_persona": (char.get("persona_text") or "")[:300],
+        "speaker_card": {k: v for k, v in (
+            ("gender", char.get("gender")), ("age_band", char.get("age_band")),
+            ("fear", char.get("fear")), ("line", char.get("line"))) if v},
+        "eq_style": (char.get("eq_style") or "")[:120],
+        "voice_print": (char.get("voice_print") or "")[:120],
+        "examples": [str(x)[:60] for x in (char.get("examples") or [])][:4],
+        "style": story.get("style") or "",
+        # 🚫 负面清单按好感档查表 —— 跟主拍同一个口径, 不另算一遍
+        "negatives": relationships.negative_list(
+            relationships.derive_mode(
+                char, (state.get("rel") or {}).get(char.get("id"))
+                or relationships.new_scores(), tuning_for(content)),
+            lang_of(content) != "en"),
+        "era": era_of(content),
+    }
+
+
 def compose_message(content: dict[str, Any], state: dict[str, Any], char: dict[str, Any],
                     reason: str, hint: str, fallback: str, llm: LLM,
                     beat_log: list[dict[str, Any]] | None = None) -> list[str]:
@@ -6992,7 +7021,8 @@ def compose_message(content: dict[str, Any], state: dict[str, Any], char: dict[s
     tun = tuning_for(content)
     scores = (state.get("rel") or {}).get(char.get("id")) or relationships.new_scores()
     try:
-        out = llm.generate({"compose_msg": True, "device": phone_device(content), "era": era_of(content),
+        out = llm.generate({**voice_payload(content, state, char),
+                            "compose_msg": True, "device": phone_device(content),
                             "char": {"name": char.get("name"), "role": char.get("role") or "",
                                      "persona_text": (char.get("persona_text") or "")[:160],
                                      "eq_style": (char.get("eq_style") or "")[:120],
@@ -7531,7 +7561,9 @@ def _phone_exchange(content: dict[str, Any], state: dict[str, Any], persona: dic
     pcid = state.get("player_character_id")
     pc = _char_by_id(content, pcid) if pcid else None
     _th_lr = (_thread(state, char_id).get("last_read") or {}).get("reason") or ""
-    out = llm.generate({"phone_reply": True, "call": bool(call), "same_room": bool(same_room),
+    # 🎙 身份带+文风带跟主拍同源 (Yi 报障:「手机上性格跟线下不一样」)
+    out = llm.generate({**voice_payload(content, state, c),
+                        "phone_reply": True, "call": bool(call), "same_room": bool(same_room),
                         # 📱 引擎点名的时机与形状 —— 模型不再自选 (它永远选中庸那一档)
                         "shape": shape,
                         "reply_when": {"tier": tier,
