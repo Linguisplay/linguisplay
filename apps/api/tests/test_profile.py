@@ -5,10 +5,13 @@ from app.engine.llm import MockLLM
 
 
 def test_note_turn_cadence():
+    """⚠️ 节拍 2026-08-08 改成「头一次早、之后稀疏」：从前是每 8 拍一次，而一局的
+    玩家回合数中位只有 4 —— 一半以上的玩家在档案第一次运行之前就走了。
+    详见 test_profile_lands_early.py。"""
     st = {}
-    hits = [profile.note_turn(st) for _ in range(profile.DISTILL_EVERY * 2)]
-    assert hits.count(True) == 2
-    assert hits[profile.DISTILL_EVERY - 1] is True
+    hits = [profile.note_turn(st) for _ in range(profile.DISTILL_FIRST + profile.DISTILL_EVERY)]
+    assert hits[profile.DISTILL_FIRST - 1] is True, "第一次没落在 DISTILL_FIRST 上"
+    assert hits.count(True) == 2, "这一段里应该正好蒸两次（首次 + 一个间隔）"
 
 
 def test_distill_merges_facts_and_impressions():

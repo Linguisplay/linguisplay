@@ -14,7 +14,13 @@ from __future__ import annotations
 
 from typing import Any
 
-DISTILL_EVERY = 8      # 玩家真实回合间隔 (说/做才算, 观剧/上帝位不算)
+# ⏱ 第一次要早, 之后可以稀疏 (Yi 反复强调「收集玩家信息建档再对症下药」)。
+# 线上实测: 从前 DISTILL_EVERY=8, 而一局的玩家回合数【中位是 4】(133 局里 69 局
+# 活不过 4 拍) —— 一半以上的玩家在档案第一次运行之前就已经离开了。184 局里只有
+# 23 局有「每个角色自己对玩家的印象」, 而那是演员唯一读得到的那一份。
+# 收集要落在玩家还在的窗口里, 否则建了给谁看。
+DISTILL_FIRST = 3      # 第一次蒸馏落在第几个玩家回合
+DISTILL_EVERY = 6      # 之后的间隔 (说/做才算, 观剧/上帝位不算)
 FACTS_CAP = 6
 IMPRESSION_CAP = 60    # 单角色印象长度上限 (进 prompt, 要省着花)
 
@@ -42,8 +48,10 @@ def facts_of(state: dict[str, Any]) -> list[str]:
 def note_turn(state: dict[str, Any]) -> bool:
     """记一个玩家真实回合; 到蒸馏节拍返回 True (调用方负责真的去蒸)."""
     p = _prof(state)
-    p["turns"] = int(p.get("turns") or 0) + 1
-    return p["turns"] % DISTILL_EVERY == 0
+    p["turns"] = n = int(p.get("turns") or 0) + 1
+    if n < DISTILL_FIRST:
+        return False
+    return n == DISTILL_FIRST or (n - DISTILL_FIRST) % DISTILL_EVERY == 0
 
 
 def _merge(state: dict[str, Any], out: Any,
