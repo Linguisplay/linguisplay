@@ -306,6 +306,11 @@ _REL_EVENTS = {
     "越界": (0, -3, 0, True, -3),   # 油腻/廉价/冒进
 }
 
+# 💘 追求线读玩家回应, 直接复用上面这七种事件 —— 不另收一个申报字段。
+# 没列进来的 (和好) 走「回避」: 原地不动, 由 court_apply_response 的两拍保底推进兜着。
+COURT_RESP = {"心动": "接受", "交心": "暧昧", "帮衬": "暧昧",
+              "冒犯": "明拒", "争执": "明拒", "越界": "明拒"}
+
 MAX_OPEN_PROMISES = 3  # 🤝 open appointments a run may hold at once (per char: one)
 
 # ⏳ the diegetic clock: three slots make a day. Slot-restricted schedule entries and
@@ -12739,6 +12744,13 @@ def run_turn_stream(
         # 💘 追求节拍落账: 戏真的产出了才消费当天的名额 (取数见上方 court_directive_for)
         if court_dir and any((b.get("text") or "").strip() for b in d_beats):
             court_beat_book(content, state, sp_id)
+            # 💘 玩家怎么接的 → 推进/原地/记振。第四环从前【没有任何调用点】: stage 只在
+            # court_tick 里被设成 1, 之后再没有代码能加到 2。线上 5 个角色全卡在第 1 步,
+            # court.step / court.over / court.won 一次都没响过。
+            # 不新增申报字段 —— 模型这一拍已经在报 rel_event 了, 拿它映射就够。
+            _cr = str((directed.get("rel_event") or {}).get("kind") or "").strip() \
+                if isinstance(directed.get("rel_event"), dict) else ""
+            court_apply_response(content, state, sp_id, COURT_RESP.get(_cr, ""))
         # 🪃 回调收卷 (Spec E): 报审+验真 — 报的摘录必须真出现在这一轮的拍里
         if is_primary and _cb_mode:
             _cbq = str(directed.get("callback_done") or "").strip().strip("「」\"'")

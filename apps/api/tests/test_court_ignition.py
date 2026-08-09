@@ -90,13 +90,16 @@ def test_a_long_sitting_gets_more_than_one_beat():
     st["rel"] = {"c1": {"closeness": 5, "romance": 6}}
     c = _content(ROMANCEABLE)
     llm = runtime_mock()
-    beats_seen = 0
     for _ in range(12):
         out = runtime.run_turn(c, st, {"name": "我"}, "你今天真好看", channel="say", llm=llm)
         st = out["state"]
-        beats_seen = int((((st.get("char_sim") or {}).get("c1") or {})
-                          .get("court") or {}).get("beats") or 0)
-    assert beats_seen >= 2, f"12 拍只演了 {beats_seen} 次主动 — 一次长坐等于只被追一下"
+    court = (((st.get("char_sim") or {}).get("c1") or {}).get("court") or {})
+    # ⚠️ 判据 2026-08-09 换了。从前用 beats >= 2 当「被追了不止一次」的代理——那时候
+    #    beats 只增不减，因为消费它的 court_apply_response 【没有任何调用点】。
+    #    第四环接上之后 beats 会在推进时清零，所以要看走到第几步：保底推进需要攒够
+    #    两拍才走一级，stage >= 2 就等于至少演过两次主动，比原来的代理更硬。
+    assert int(court.get("stage") or 0) >= 2, \
+        f"12 拍追求线没往前走一步（stage={court.get('stage')}, beats={court.get('beats')}）"
 
 
 def test_turn_gap_is_tunable_and_respected():
