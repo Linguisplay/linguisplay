@@ -7028,6 +7028,48 @@ def ask_pressure(beat_log: list[dict[str, Any]] | None, char_id: str | None,
     return out
 
 
+def private_moment(content: dict[str, Any], state: dict[str, Any],
+                   char_id: str | None, beat_log: list[dict[str, Any]] | None,
+                   window: int = 6) -> str:
+    """🤫 此刻是不是「你和 TA 两个人的戏」—— 是就返回一句为什么, 不是就返回空。
+
+    Yi 真人反馈 2026-08-08: 玩家和有好感的角色正说到要紧处, 第三个 NPC 被叫来插了
+    两次话, 整段暧昧当场散掉。
+
+    ⚠️ 这【不是】「默认所有人都接话」那种 bug —— next_speakers 是必填字段, 模型主动
+    申报了那个人该插嘴, 而且从人物合理性上她确实会插 (爱管闲事的面档阿姨)。
+    缺的是另一样: 字段描述只问「谁会自然地接话」—— 那是在问【合理性】, 不在问
+    【玩家此刻的投入在哪】。所以这里算的是后者, 算完交给模型自己决定。
+
+    两个条件都要满足, 缺一不算:
+      · 这一小段历史里【只有】玩家和 TA 在说话 (别人已经在场上说话了就不算独处)
+      · 玩家对 TA 有实打实的投入 (亲近或心动过线) —— 否则全世界都不许说话了
+    """
+    if not char_id or not beat_log:
+        return ""
+    sc = (state.get("rel") or {}).get(char_id) or {}
+    close, rom = int(sc.get("closeness") or 0), int(sc.get("romance") or 0)
+    if close < 25 and rom < 12:
+        return ""
+    me = (_char_by_id(content, char_id) or {}).get("name") or ""
+    if not me:
+        return ""
+    others = 0
+    turns = 0
+    for b in [x for x in beat_log if x.get("type") == "dialogue"][-window:]:
+        sp = (b.get("speaker_name") or "").strip()
+        if b.get("author") == "player" or not sp:
+            turns += 1
+            continue
+        if sp == me:
+            turns += 1
+        else:
+            others += 1
+    if others or turns < 3:
+        return ""
+    return f"你和{me if False else 'TA'}已经这样来回说了好几轮，旁人一直没插进来"
+
+
 def voice_payload(content: dict[str, Any], state: dict[str, Any],
                   char: dict[str, Any]) -> dict[str, Any]:
     """🎙 一个角色的声音由这几样定 —— 所有入口都该带上它 (Yi 2026-08-08)。
@@ -12397,6 +12439,8 @@ def run_turn_stream(
                if idx == 0 and _owe_disclose else {}),
             # ❓ 你最近连着问了几句 (Yi 2026-08-08:「先花时间理解玩家想干什么」)
             "ask_pressure": ask_pressure(beat_log, sp_id, sp_name),
+            # 🤫 读空气: 此刻是不是你和 TA 两个人的戏 (决定谁该闭嘴)
+            "private_moment": private_moment(content, state, sp_id, beat_log),
             # 🚫 负面清单 (Spec J): 按好感档查表 — 热情过载的缰绳
             "negatives": relationships.negative_list(
                 relationships.derive_mode(sp, (state.get("rel") or {}).get(sp_id)

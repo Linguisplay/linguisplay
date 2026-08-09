@@ -2001,7 +2001,16 @@ def _render_tool(prompt: dict[str, Any], speaker: str, observer: bool,
         props["next_speakers"] = {"type": "array", "items": {"type": "string"}, "description":
                                   "你说完后，在场还有谁会自然地接话或忍不住插嘴（0~2个，按谁先开口排；"
                                   "凭各人性格和这句话与TA的相干程度定，不必人人说话，谁都不接就填[]）。"
-                                  "只能从这些名字里原样抄写：" + "、".join(others)}
+                                  "只能从这些名字里原样抄写：" + "、".join(others)
+                                  # 🤫 读空气 (Yi 真人反馈 2026-08-08): 只问「谁会自然地
+                                  # 接话」是在问【合理性】—— 爱管闲事的邻居当然会插嘴，
+                                  # 于是玩家和有好感的角色正说到要紧处，第三个人插了两次话，
+                                  # 整段暧昧当场散掉。还得问【玩家此刻的投入在哪】。
+                                  + ("　⚠️ 此刻是你和 TA 两个人的戏（"
+                                     + str(prompt.get("private_moment") or "")
+                                     + "）。旁人就算性格上会插嘴，这一拍也该忍住——"
+                                       "除非 TA 非说不可、不说反而不合理。拿不准就填 []。"
+                                     if prompt.get("private_moment") else "")}
         required.append("next_speakers")
     # ask/event JUDGMENT (anti keyword-stuffing): the model — not substring matching —
     # decides what the player genuinely probed and which authored events truly happened.
