@@ -6976,6 +6976,58 @@ def reachout_after_event(content: dict[str, Any], state: dict[str, Any], llm: LL
     return out
 
 
+_ASK = re.compile(r"[？?]")
+
+
+def ask_pressure(beat_log: list[dict[str, Any]] | None, char_id: str | None,
+                 char_name: str | None = None, window: int = 10) -> dict[str, int]:
+    """❓ 这个角色最近问了几个问题, 其中有几个是【连着问】的 (Yi 2026-08-08)。
+
+    生产实测: 2001 条角色台词里 632 条带问号 = 32%, 三句里有一句在问玩家;
+    连续提问最长链 7 条。而带邀约措辞的只有 2% —— 所以「一昧邀请」的体感, 真正来源
+    是被连续追问。
+
+    剧本的忌用清单第一条早就写着「每轮至多问一个问题」, inner_read 也早就要求
+    「动笔前先想 TA 想要什么」。两条都在, 32% 照旧 —— 因为它们【说一句就完了】:
+    没有事实支撑, 也没有后果。所以这里不加第 242 条禁令 (家规: 引导而非制止),
+    只把「你已经连着问了几个」变成一个模型看得见的事实, 让它自己判断。
+
+    ⚠️ 认知边界照旧走见证过滤: 我不在场的那几拍不进我的账。
+    """
+    out = {"asked": 0, "streak": 0}
+    if not beat_log or not char_id:
+        return out
+    name_lines = []
+    for b in beat_log:
+        pres = b.get("present_ids")
+        if not (pres is None or char_id in pres):
+            continue
+        if b.get("author") == "player":
+            name_lines.append(("player", b.get("text") or ""))
+        elif b.get("type") == "dialogue":
+            name_lines.append((b.get("speaker_name") or "", b.get("text") or ""))
+    tail = name_lines[-window:]
+    # ⚠️ 说话人在 beat 里是【名字】, 见证名单里是【id】—— 两把尺, 各用各的:
+    #    见证过滤用 id, 数谁问的用名字。我第一版靠「最后一个说话的人」反推名字, 结果
+    #    别的角色最后开口时就数到了别人头上 (测试当场抓到)。
+    speaker = (char_name or "").strip()
+    if not speaker:
+        return out
+    out["asked"] = sum(1 for who, t in tail if who == speaker and _ASK.search(t))
+    # streak: 从尾巴往回数, 玩家没插话之前, 这个角色连着问了几句
+    n = 0
+    for who, t in reversed(tail):
+        if who == "player":
+            break
+        if who == speaker:
+            if _ASK.search(t):
+                n += 1
+            else:
+                break
+    out["streak"] = n
+    return out
+
+
 def voice_payload(content: dict[str, Any], state: dict[str, Any],
                   char: dict[str, Any]) -> dict[str, Any]:
     """🎙 一个角色的声音由这几样定 —— 所有入口都该带上它 (Yi 2026-08-08)。
@@ -12343,6 +12395,8 @@ def run_turn_stream(
                     sp, (state.get("rel") or {}).get(sp_id)
                     or relationships.new_scores(), tun) if sp_id else "stranger")}
                if idx == 0 and _owe_disclose else {}),
+            # ❓ 你最近连着问了几句 (Yi 2026-08-08:「先花时间理解玩家想干什么」)
+            "ask_pressure": ask_pressure(beat_log, sp_id, sp_name),
             # 🚫 负面清单 (Spec J): 按好感档查表 — 热情过载的缰绳
             "negatives": relationships.negative_list(
                 relationships.derive_mode(sp, (state.get("rel") or {}).get(sp_id)
