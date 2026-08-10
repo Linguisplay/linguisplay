@@ -94,6 +94,8 @@ def my_stories(user: User = Depends(current_user), db: Session = Depends(get_db)
     return [
         {"id": s.id, "title": s.title, "status": s.status, "version": s.version,
          "visibility": s.visibility, "mine": s.owner_id == user.id,
+         # 🧩 对齐包A: 设计稿 11_CreateHub 的草稿行要「N 幕 · 编辑于何时」
+         "updated_at": s.updated_at, "acts_count": len(s.acts or []),
          **_shelf_stats(s, plays.get(s.id, 0))}
         for s in rows
     ]

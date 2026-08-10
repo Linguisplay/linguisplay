@@ -205,9 +205,14 @@ def discover(
     q = db.query(StoryModel).filter(
         StoryModel.visibility == "public", StoryModel.status == "published"
     )
-    rows = q.order_by(StoryModel.updated_at.desc()).limit(50).all()
+    # 🧩 对齐包A: 过滤必须在截断之前 —— 从前先掐 50 再按 tags 过滤, 库一超过
+    # 50 本, 老书就永远筛不出来 (trope_tags 是 JSON 列, 筛选只能进程内做)。
+    # 无 tags 的主路径保住 SQL limit (复审抓的: 这是主页最热端点, 全量吃表不行)。
+    q = q.order_by(StoryModel.updated_at.desc())
     if tags:
-        rows = [s for s in rows if set(tags) & set(s.trope_tags or [])]
+        rows = [s for s in q.all() if set(tags) & set(s.trope_tags or [])][:50]
+    else:
+        rows = q.limit(50).all()
     # 🔒 the mystery affordance: how many secrets each story guards (one grouped query)
     from sqlalchemy import func
     counts = dict(db.query(SecretModel.story_id, func.count(SecretModel.id))

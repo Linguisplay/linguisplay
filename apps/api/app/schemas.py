@@ -55,6 +55,8 @@ class SignupIn(BaseModel):
     password: str = Field(min_length=8)
     dob: date
     accepted_tos: bool
+    # 🧩 对齐包A: 设计稿注册屏就要用户名, 从前得注册完再 PATCH /me 补一刀
+    display_name: Optional[str] = Field(default=None, max_length=80)
 
 
 class LoginIn(BaseModel):
@@ -543,6 +545,10 @@ class RunState(BaseModel):
     scene: Optional[dict[str, Any]] = None
     ended: bool = False
     ending: Optional[dict[str, Any]] = None  # {kind, title, text} when the run has concluded
+    # 🎵 进档那一屏的演出单 {bgm, cue, mood, tint}。修 bug (对齐包A):
+    # _to_run 一直在传 direct=_boot_direct(...), 但 schema 没这个字段 —— pydantic
+    # 静默丢弃, 客户端 run.direct 永远拿不到, 开档第一屏没有音乐。字段补上即通。
+    direct: dict[str, Any] = {}
     mode: str = "character"
     player_character_id: Optional[str] = None
     goal: str = ""  # the player's current small objective (this act)
@@ -587,6 +593,9 @@ class Run(BaseModel):
     story_version: int
     persona_id: str
     state: RunState
+    # 🎵 进档演出单, 顶层镜像一份 —— 现网 play.html 读的就是 run.direct (复审抓的:
+    # 只加 state.direct 等于 bug 没修完)。state.direct 给新前端的通用绑定用。
+    direct: dict[str, Any] = {}
     cast: list[dict[str, Any]] = []  # [{id, name, is_lead, avatar_url}] for the play UI
     created_at: Optional[datetime] = None
     # arrival discoveries from a /move (走到对的地方，真相当场揭开) — [{title, text}]
@@ -602,7 +611,9 @@ class RunSummary(BaseModel):
     cover_url: AssetUrl = None
     persona_id: str
     last_beat_preview: Optional[str] = None
-    unread: bool = False
+    # 🧩 对齐包A: 从写死的 False bool 改成真未读条数 (手机未读账本本来就有,
+    # 只是列表从来没接) —— ChatList 的角标靠它
+    unread: int = 0
     updated_at: Optional[datetime] = None
     act: int = 1
     mode: str = "character"
@@ -615,6 +626,13 @@ class RunSummary(BaseModel):
     # 🎵 进档那一屏的演出单 {bgm, cue, mood, tint}。以前 direct 只在回合流里发,
     # 于是新开一档【第一屏是没有音乐的】—— 得等玩家打完第一个回合才响。开场曲就是这么没的。
     direct: dict[str, Any] = {}
+    # 🧩 对齐包A: 列表一次给够料 —— orb 进度环 (act/acts_total)、Lobby 卡的
+    # 下一步钩子 (goal)、词条数 (entries)、地图完成度 (map_pct, 无图=None)。
+    # 从前这些全躺在单 run 端点里, N 张卡就要 N 次请求 (出口带宽 0.4Mbps 禁不起)。
+    goal: str = ""
+    acts_total: int = 0
+    entries: int = 0
+    map_pct: Optional[int] = None
 
 
 class CalendarIn(BaseModel):
@@ -649,6 +667,10 @@ class RunCreate(BaseModel):
     # 🃏 a character card (from the cross-run collection) to carry into this run —
     # an old acquaintance from a previous life walks back in. NG+ only.
     carry_card_id: Optional[str] = None
+    # 🧩 对齐包A (设计稿 04 EnterWorldNaming): 进这个世界用的【局内名】——
+    # 「manor takes names at the door」。空 = 沿用 persona.name; 附身模式不吃它
+    # (你就是那个角色, 名字是 TA 的)。
+    player_name: str = ""
     # 🏖 sandbox only: the worldview the player defines at run start (their private
     # copy of the story runs on it; ignored for normal authored stories)
     worldview: str = ""
@@ -676,6 +698,11 @@ class Beat(BaseModel):
     text: str = ""
     author: str = "engine"
     mood: Optional[str] = None  # 📟 the speaker's judged true inner state (心象仪)
+    # 🧩 对齐包A: 观战要按角色筛、改名不断链 —— 光有名字不够, 得有 id。
+    # 落库时从班底解析; 老拍没有 (None), 前端按名字兜底。
+    speaker_id: Optional[str] = None
+    # character ids present when this beat happened (None on legacy rows)
+    present_ids: Optional[list[str]] = None
 
 
 class PlayIn(BaseModel):

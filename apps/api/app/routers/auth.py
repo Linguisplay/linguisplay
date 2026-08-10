@@ -40,6 +40,8 @@ def signup(body: SignupIn, response: Response, db: Session = Depends(get_db)):
         password_hash=hash_password(body.password),
         dob=dob_dt,
         accepted_tos=True,
+        # 🧩 对齐包A: 注册屏一并收用户名, 不再逼前端注册完补一刀 PATCH /me
+        display_name=(body.display_name or "").strip()[:80] or None,
     )
     db.add(user)
     db.commit()

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from ..db import get_db
@@ -85,3 +85,60 @@ def set_default(persona_id: str, user: User = Depends(current_user), db: Session
     p.is_default = True
     db.commit()
     return {"ok": True}
+
+
+# ── 🧩 对齐包A: 玩家自己的脸 (设计稿 03_CreateCharacter: add a face / generate) ──
+# 上传/生成从前只挂 角色卡·剧本角色·run内涌现 三处, persona 偏偏没有 ——
+# 管线全部复用那三处的: 同一张验图、同一个瘦身、同一条生图队列。
+
+
+@router.post("/{persona_id}/avatar")
+async def upload_avatar(persona_id: str, file: UploadFile = File(...),
+                        user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from ..engine.gal import shrink_jpg
+    from .stories import _media_dir, _sniff_image
+    p = _own(persona_id, user, db)
+    data = await file.read()
+    if len(data) > 5 * 1024 * 1024:
+        raise HTTPException(413, "图片太大（上限 5MB）")
+    if not _sniff_image(data):
+        raise HTTPException(415, "只支持 JPG / PNG / WebP 图片")
+    path = _media_dir("avatar") / f"{persona_id}.jpg"
+    path.write_bytes(shrink_jpg(data, quality=82, max_side=1024))
+    p.avatar_url = f"/scene/avatar/{persona_id}.jpg"
+    db.commit()
+    return {"avatar_url": p.avatar_url}
+
+
+# 🧊 重画冷却 (复审: 生图是计费调用, 一个账号裸 loop 就是无上限烧钱)。进程内
+# 账本, 与 run 内背景重画的 60s 冷却同款口径。
+_GEN_LAST: dict[str, float] = {}
+_GEN_COOLDOWN_S = 60
+
+
+@router.post("/{persona_id}/gen_avatar")
+def gen_avatar(persona_id: str,
+               user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """AI 画一张玩家小像。没有剧本上下文 → 不吃任何画风圣经, 用中性的肖像口径;
+    种子钉在 persona id 上 — 重画不换人。排队后台画, 约十几秒, 前端轮询 URL
+    (轮询记得带 cache-buster: /scene 静态带 24h 缓存头)。
+    ⚠️ 不先删旧图 — 老脸留到新字节落盘那一刻 (overwrite 旗), 生成失败不丢脸。"""
+    import time as _time
+    import zlib
+
+    from .runs import _AV_DIR, _enqueue_image
+    p = _own(persona_id, user, db)
+    now = _time.monotonic()
+    if now - _GEN_LAST.get(user.id, -1e9) < _GEN_COOLDOWN_S:
+        raise HTTPException(429, "画笔还热着——过一分钟再重画")
+    _GEN_LAST[user.id] = now
+    bits = "，".join(b for b in (p.name, (p.tagline or "")[:80],
+                                 (p.background or "")[:160]) if b)
+    prompt = ("人物肖像，胸像特写，正面微侧，目光看向镜头外，柔和的侧光，"
+              f"背景虚化，情绪克制内敛：{bits}")
+    path = _AV_DIR / f"{persona_id}.jpg"
+    _enqueue_image(prompt, path, "768*768", overwrite=True,
+                   seed=zlib.crc32(persona_id.encode("utf-8")) % 2_000_000_000)
+    p.avatar_url = f"/scene/avatar/{persona_id}.jpg"
+    db.commit()
+    return {"queued": True, "avatar_url": p.avatar_url}

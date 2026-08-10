@@ -318,6 +318,10 @@ class Beat(Base):
     # of history (they only "remember" scenes they were in). None on legacy beats = witnessed
     # by everyone (backward-compatible, no isolation for old runs).
     present_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # 🧩 对齐包A: the speaker's character id, resolved from the cast at write time —
+    # name-only beats break the moment a character is renamed (观战按角色筛选断链)。
+    # NULL on legacy rows / narration / player-as-persona beats.
+    speaker_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # 📟 心象仪: the speaker's judged TRUE inner state when this line landed (nullable)
     mood: Mapped[str | None] = mapped_column(String(24), nullable=True)
     # 重说/回溯 (docs/ux-design.md P1): run state as it stood BEFORE this player turn —

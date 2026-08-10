@@ -204,6 +204,27 @@ def lint_story(content: dict[str, Any]) -> list[Issue]:
         scid = s.get("character_id")
         if scid and scid not in char_ids:
             warn("secret_bad_owner", f"secret:{sid}", f"秘密「{s.get('title','')}」的 character_id={scid} 不是已知角色。")
+    # 🧩 对齐包A (设计稿 15b 画的那条警告): 同一秘密里, 更深的层好感门槛反而更低
+    # → 最敏感的反转会提前漏出来。只比都写了 affinity_min 的层; 深层改用
+    # act/asks/事件锁而不写好感的, 不算倒挂 (那是另一种合法设计)。
+    # 按层分组、整层查完才把本层门槛并进「浅层最高」—— 逐条追高的写法会被同层
+    # 兄弟的排列顺序骗过 (复审实测: L1(30),L2(40),L2(20) 曾静默放行)。
+    for s in secrets:
+        _am = lambda f: int((f.get("unlock") or {}).get("affinity_min") or 0)  # noqa: E731
+        by_layer: dict[int, list] = {}
+        for f in (s.get("fragments") or []):
+            if _am(f) > 0:
+                by_layer.setdefault(int(f.get("layer") or 0), []).append(f)
+        prev = None    # (frag_id, affinity_min) — 已查完的浅层里的最高门槛
+        for layer in sorted(by_layer):
+            for f in by_layer[layer]:
+                if prev and _am(f) < prev[1]:
+                    warn("frag_gate_inverted", f"frag:{f.get('id')}",
+                         f"秘密「{s.get('title', '')}」第 {layer} 层的好感门槛 {_am(f)} "
+                         f"低于外层 {prev[0]} 的 {prev[1]} —— 深层会先解锁，反转提前漏底。")
+            fmax = max(by_layer[layer], key=_am)
+            if prev is None or _am(fmax) > prev[1]:
+                prev = (fmax.get("id"), _am(fmax))
     for f in frags:
         kb = f.get("known_by_character_ids") or []
         bad = [k for k in kb if k not in char_ids]
