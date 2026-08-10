@@ -21,7 +21,7 @@ import sys
 os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///./dev.db")
 os.environ.setdefault("JWT_SECRET", "dev")
 
-from app.db import SessionLocal  # noqa: E402
+from app.db import SessionLocal, init_db  # noqa: E402
 from app.engine import logic, runtime  # noqa: E402
 from app.engine.llm import MockLLM  # noqa: E402
 from app.models import Story, StorySnapshot  # noqa: E402
@@ -167,6 +167,10 @@ def live(title_filter: str, n_turns: int) -> None:
 
 
 def main() -> None:
+    # 🧱 门自己先迁库: 从前靠「服务器起过一次」的隐性假设, 模型加列后本地 dev.db
+    # 落后于模型, 门在这台机上直接 no such column 起不来 (08-04 creatures 同款,
+    # 08-10 featured 又踩一次)。init_db 的差分器是幂等的, 跑一遍不吃亏。
+    init_db()
     if "--live" in sys.argv:
         i = sys.argv.index("--live")
         title = sys.argv[i + 1] if len(sys.argv) > i + 1 else ""
