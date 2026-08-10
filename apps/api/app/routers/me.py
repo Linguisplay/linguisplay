@@ -2,6 +2,7 @@ import pathlib
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..db import get_db
@@ -17,10 +18,30 @@ def _to_me(u: User) -> Me:
         id=u.id,
         email=u.email,
         display_name=u.display_name,
+        handle=getattr(u, "handle", None),
         avatar_url=u.avatar_url,
         subscription_tier=u.subscription_tier,
         tz=getattr(u, "tz", "") or "",
     )
+
+
+_HANDLE_RE = __import__("re").compile(r"^[a-z0-9_]{3,20}$")
+
+
+def claim_handle(db: Session, user: User, raw: str) -> None:
+    """🧩 对齐包B: @handle 收口的唯一入口 (signup 与 PATCH /me 共用)。
+    小写字母/数字/下划线 3~20; 全站唯一 (老库 ALTER 加不了 UNIQUE 约束, 这里查重)。"""
+    h = (raw or "").strip().lower()
+    if not _HANDLE_RE.match(h):
+        raise HTTPException(400, "用户名只收小写字母、数字、下划线，3~20 位")
+    # ⚠️ signup 路径上 user.id 还是 None (uuid 在 flush 时才生成), 直接写
+    # User.id != None 在 SQL 里恒假, 查重会整个漏掉 —— 有 id 才排除自己。
+    q = db.query(User).filter(User.handle == h)
+    if user.id:
+        q = q.filter(User.id != user.id)
+    if q.first():
+        raise HTTPException(409, "这个用户名已经有人用了")
+    user.handle = h
 
 
 def _to_settings(u: User) -> Settings:
@@ -40,6 +61,8 @@ def get_me(user: User = Depends(current_user)):
 def patch_me(body: MePatch, user: User = Depends(current_user), db: Session = Depends(get_db)):
     if body.display_name is not None:
         user.display_name = body.display_name
+    if body.handle is not None:
+        claim_handle(db, user, body.handle)
     if body.avatar_url is not None:
         user.avatar_url = body.avatar_url
     if body.tz is not None:
@@ -55,7 +78,12 @@ def patch_me(body: MePatch, user: User = Depends(current_user), db: Session = De
                 user.tz = tz
             except Exception:
                 raise HTTPException(400, f"认不出这个时区：{tz}")
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # handle 查重是先查后写, 并发缝里唯一索引兜底 → 409 不 500
+        db.rollback()
+        raise HTTPException(409, "这个用户名已经有人用了")
     return _to_me(user)
 
 

@@ -17,7 +17,7 @@ for _sub in ("bg", "bgm", "sfx", "creature"):
 
 from .config import get_settings
 from .db import init_db
-from .routers import auth, cards, gal, me, packs, personas, push, runs, stories
+from .routers import auth, cards, community, gal, me, packs, personas, push, runs, stories
 
 settings = get_settings()
 
@@ -90,6 +90,7 @@ app.include_router(me.router, prefix=API)
 app.include_router(personas.router, prefix=API)
 app.include_router(cards.router, prefix=API)  # 📚 角色卡库 (cross-story characters)
 app.include_router(stories.router, prefix=API)
+app.include_router(community.router, prefix=API)  # 🧩 平台社区层 (赞/藏/关注/评论/作者主页)
 app.include_router(packs.router, prefix="/api/v1")
 app.include_router(runs.router, prefix=API)
 # 🪦 phone_mock 已删 (2026-07-30): 它的每条路由都被 runs.router 的 /{run_id}/phone/{char_id}

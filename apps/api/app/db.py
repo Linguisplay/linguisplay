@@ -46,6 +46,16 @@ def init_db() -> None:
 
     Base.metadata.create_all(bind=engine)
     _ensure_columns()
+    # 🧩 对齐包B: 老库的 users.handle 经 ALTER 加列拿不到唯一索引 (create_all 不碰
+    # 已有表), 查重就只剩应用层一道 TOCTOU 窗。补一根同名索引: 新库上是 no-op,
+    # 老库上该列全 NULL (SQLite 唯一索引允许多个 NULL), 建索引必然成功。
+    from sqlalchemy import text as _text
+    try:
+        with engine.begin() as conn:
+            conn.execute(_text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_handle ON users (handle)"))
+    except Exception:
+        pass   # 非 SQLite 方言或权限问题不拦启动; 应用层查重仍在
 
 
 def _column_default_sql(col) -> str:

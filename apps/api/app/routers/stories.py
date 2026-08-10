@@ -124,7 +124,8 @@ def _ensure_cover(s: StoryModel) -> None:
         pass
 
 
-def _to_card(s: StoryModel, secrets_count: int = 0) -> StoryCard:
+def _to_card(s: StoryModel, secrets_count: int = 0, *,
+             likes: int = 0, plays: int = 0, author: dict | None = None) -> StoryCard:
     sandbox = bool((s.sandbox or {}).get("enabled"))
     ranks = ((s.sandbox or {}).get("progression") or {}).get("ranks") or []
     ladder = " → ".join(str(r) for r in ranks if r) if sandbox else ""
@@ -143,6 +144,12 @@ def _to_card(s: StoryModel, secrets_count: int = 0) -> StoryCard:
         art_url=_card_art(s),
         poster_url=(_auto_cover(s) or {}).get("poster"),
         opening_tease=((s.opening or "").strip().splitlines() or [""])[0][:64] or None,
+        # 🧩 对齐包B: 卡面的社区数据 (只长在卡上, Story 对象不许长 — 快照红线)
+        likes=likes,
+        plays=plays,
+        author=author,
+        mature=bool(s.mature),
+        featured=bool(getattr(s, "featured", False)),
     )
 
 
@@ -200,29 +207,73 @@ def _my_story(story_id: str, user: User, db: Session) -> StoryModel:
 def discover(
     tags: list[str] = Query(default=[]),
     cursor: str | None = None,
+    q: str | None = None,
+    sort: str = "new",
+    featured: bool = False,
     db: Session = Depends(get_db),
 ):
-    q = db.query(StoryModel).filter(
-        StoryModel.visibility == "public", StoryModel.status == "published"
-    )
-    # 🧩 对齐包A: 过滤必须在截断之前 —— 从前先掐 50 再按 tags 过滤, 库一超过
-    # 50 本, 老书就永远筛不出来 (trope_tags 是 JSON 列, 筛选只能进程内做)。
-    # 无 tags 的主路径保住 SQL limit (复审抓的: 这是主页最热端点, 全量吃表不行)。
-    q = q.order_by(StoryModel.updated_at.desc())
+    """🧩 对齐包B 重构: 先在【轻列】(id/tags/updated_at) 上选完候选, 再按需吃重行。
+    tags 是 JSON 列只能进程内筛, 但轻列全表也只是 id+标签, 不再像旧写法那样把
+    每本的全部剧本 JSON 都灌进内存 (复审抓的最热端点性能坑, 这版连 tags 路径一起治)。
+    sort=hot: 赞×3+游玩数; q: 标题/一句话/简介检索; featured: 运营精选位。"""
+    from datetime import datetime as _dt
+
+    from sqlalchemy import func, or_
+    base = (db.query(StoryModel.id, StoryModel.trope_tags, StoryModel.updated_at)
+            .filter(StoryModel.visibility == "public",
+                    StoryModel.status == "published"))
+    if featured:
+        base = base.filter(StoryModel.featured.is_(True))
+    if q and q.strip():
+        needle = f"%{q.strip()[:60]}%"
+        base = base.filter(or_(StoryModel.title.ilike(needle),
+                               StoryModel.one_liner.ilike(needle),
+                               StoryModel.synopsis.ilike(needle)))
+    cand = base.all()
     if tags:
-        rows = [s for s in q.all() if set(tags) & set(s.trope_tags or [])][:50]
+        cand = [c for c in cand if set(tags) & set(c[1] or [])]
+    ids = [c[0] for c in cand]
+    from .community import social_counts
+    upd = {c[0]: (c[2] or _dt.min) for c in cand}
+    # 计数只在需要的范围上算 (复审: 默认 sort=new 时全候选的计数一格都用不上,
+    # 而 plays 那次分组扫的是只增不减的 runs 表 —— 最热端点不背这个成本)
+    if sort == "hot":
+        likes, plays = social_counts(db, ids)
+        ids.sort(key=lambda i: (likes.get(i, 0) * 3 + plays.get(i, 0), upd[i]),
+                 reverse=True)
+        top = ids[:50]
     else:
-        rows = q.limit(50).all()
+        ids.sort(key=lambda i: upd[i], reverse=True)
+        top = ids[:50]
+        likes, plays = social_counts(db, top)
+    by_id = ({s.id: s for s in db.query(StoryModel)
+              .filter(StoryModel.id.in_(top)).all()} if top else {})
+    rows = [by_id[i] for i in top if i in by_id]
     # 🔒 the mystery affordance: how many secrets each story guards (one grouped query)
-    from sqlalchemy import func
     counts = dict(db.query(SecretModel.story_id, func.count(SecretModel.id))
                   .filter(SecretModel.story_id.in_([s.id for s in rows] or [""]))
                   .group_by(SecretModel.story_id).all()) if rows else {}
+    # 🖋 卡面署名: 作者一次分组取齐 (设计稿卡上的 by @handle)
+    from ..models import User as UserModel
+    owners = {s.owner_id for s in rows}
+    authors = ({u.id: u for u in db.query(UserModel)
+                .filter(UserModel.id.in_(owners)).all()} if owners else {})
     # 🎴 书架顺手自愈: 谁的封面缺了/素材换了就排队重画。判缺只是几次 stat, 排版在后台
     for s in rows:
         _ensure_cover(s)
-    return StoryCardPage(items=[_to_card(s, counts.get(s.id, 0)) for s in rows],
-                         next_cursor=None)
+
+    def _author(s):
+        u = authors.get(s.owner_id)
+        # avatar 出库消毒: author 是 dict 字段, AssetUrl 验证器管不到 (08-02 家法)
+        from ..schemas import _safe_asset_url
+        return ({"id": u.id, "name": u.display_name or "玩家",
+                 "handle": getattr(u, "handle", None),
+                 "avatar_url": _safe_asset_url(u.avatar_url)} if u else None)
+
+    return StoryCardPage(
+        items=[_to_card(s, counts.get(s.id, 0), likes=likes.get(s.id, 0),
+                        plays=plays.get(s.id, 0), author=_author(s)) for s in rows],
+        next_cursor=None)
 
 
 class CharBlobInput(BaseModel):

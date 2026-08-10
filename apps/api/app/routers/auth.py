@@ -1,6 +1,7 @@
 from datetime import datetime, time
 
 from fastapi import APIRouter, Depends, HTTPException, Response
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
@@ -43,11 +44,23 @@ def signup(body: SignupIn, response: Response, db: Session = Depends(get_db)):
         # 🧩 对齐包A: 注册屏一并收用户名, 不再逼前端注册完补一刀 PATCH /me
         display_name=(body.display_name or "").strip()[:80] or None,
     )
+    # 🧩 对齐包B: @handle 也在注册屏收 (可空); 校验与查重走同一入口
+    if (body.handle or "").strip():
+        from .me import claim_handle
+        claim_handle(db, user, body.handle)
     db.add(user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as e:
+        # 查重是先查后写, 并发缝里由唯一索引兜底 —— 翻译成人话而不是 500
+        db.rollback()
+        if "handle" in str(getattr(e, "orig", e)):
+            raise HTTPException(409, "这个用户名已经有人用了")
+        raise HTTPException(400, "email already registered")
     db.refresh(user)
     _set_session_cookie(response, user.id)
-    return SessionUser(id=user.id, email=user.email, display_name=user.display_name)
+    return SessionUser(id=user.id, email=user.email, display_name=user.display_name,
+                       handle=user.handle)
 
 
 @router.post("/login", response_model=SessionUser)

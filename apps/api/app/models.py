@@ -6,11 +6,13 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
 )
+from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -48,6 +50,9 @@ class User(Base):
     accepted_tos: Mapped[bool] = mapped_column(Boolean, default=False)
 
     display_name: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # 🧩 对齐包B: 唯一用户名 (@handle)。display_name 可重名, 社区署名/作者主页要一个
+    # 认得出的把手。app 层查重 (老库 ALTER 加不了 UNIQUE 约束, 新库靠这里的 unique 索引)。
+    handle: Mapped[str | None] = mapped_column(String(20), nullable=True, unique=True, index=True)
     avatar_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     subscription_tier: Mapped[str] = mapped_column(String(32), default="free")
     taste: Mapped[dict] = mapped_column(JSON, default=dict)   # 🧭 账号级口味 (跨档风格沉淀)
@@ -121,6 +126,9 @@ class Story(Base):
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
 
     title: Mapped[str] = mapped_column(String(255), default="Untitled")
+    # 🧩 对齐包B: 精选运营位 (设计稿 Discover 的 Featured world)。没有公开写入口 —
+    # 运营手动置 (谁都能给自己点精选 = 没有精选)。
+    featured: Mapped[bool] = mapped_column(Boolean, default=False)
     # story language: "zh" | "en" — drives the engine's OUTPUT language (prompt directive
     # + localized deterministic narration). NA-market stories author with "en".
     language: Mapped[str] = mapped_column(String(8), default="zh")
@@ -376,4 +384,70 @@ class PackPurchase(Base):
     pack_id: Mapped[str] = mapped_column(ForeignKey("story_packs.id"), index=True)
     price: Mapped[int] = mapped_column(Integer, default=0)          # 成交价快照
     creator_share: Mapped[int] = mapped_column(Integer, default=0)  # 创作者分成 (70%)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+# ── 🧩 对齐包B: 平台社区层 (世界之外的社交; 剧内朋友圈在 run.state, 别混) ──────
+class StoryLike(Base):
+    """❤️ 点赞: (user, story) 一人一票。计数 = count(*), 不做冗余列。"""
+
+    __tablename__ = "story_likes"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    story_id: Mapped[str] = mapped_column(ForeignKey("stories.id"), primary_key=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+class StoryFavorite(Base):
+    """🔖 收藏 (设计稿 16_Me 的 saved worlds)。与点赞分账: 赞是公开态度, 藏是私人书架。"""
+
+    __tablename__ = "story_favorites"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    story_id: Mapped[str] = mapped_column(ForeignKey("stories.id"), primary_key=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+class UserFollow(Base):
+    """👤 关注作者 (社媒语义)。⚠️ /runs/{id}/follow 是剧内物理同行, 两码事。"""
+
+    __tablename__ = "user_follows"
+
+    follower_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    followee_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+class StoryReview(Base):
+    """⭐ 读者评论: 顶层带星级 (一人一评, 再评=改评), 回复挂 parent_id (只一层)。
+
+    ⚠️ 唯一性只锁【顶层】(partial index): 三列 UniqueConstraint 是复审抓的双重错 ——
+    NULL 各不相等所以顶层根本锁不住, 回复三列全非空反而把「同一人回同一条第二次」
+    炸成 IntegrityError 500。"""
+
+    __tablename__ = "story_reviews"
+    __table_args__ = (
+        Index("uq_review_user_story_top", "user_id", "story_id", unique=True,
+              sqlite_where=sa_text("parent_id IS NULL"),
+              postgresql_where=sa_text("parent_id IS NULL")),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    story_id: Mapped[str] = mapped_column(ForeignKey("stories.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    rating: Mapped[int | None] = mapped_column(Integer, nullable=True)   # 1..5; 回复无星
+    text: Mapped[str] = mapped_column(Text, default="")
+    parent_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+
+
+class ReviewLike(Base):
+    """👍 评论点赞。"""
+
+    __tablename__ = "review_likes"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    review_id: Mapped[str] = mapped_column(ForeignKey("story_reviews.id"),
+                                           primary_key=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)

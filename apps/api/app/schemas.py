@@ -57,6 +57,8 @@ class SignupIn(BaseModel):
     accepted_tos: bool
     # 🧩 对齐包A: 设计稿注册屏就要用户名, 从前得注册完再 PATCH /me 补一刀
     display_name: Optional[str] = Field(default=None, max_length=80)
+    # 🧩 对齐包B: @唯一用户名也在注册屏收 (可空, 之后 PATCH /me 补)
+    handle: Optional[str] = Field(default=None, max_length=20)
 
 
 class LoginIn(BaseModel):
@@ -72,6 +74,7 @@ class SessionUser(BaseModel):
     id: str
     email: str
     display_name: Optional[str] = None
+    handle: Optional[str] = None   # 🧩 对齐包B: @唯一用户名
 
 
 # ── me ────────────────────────────────────────────────────
@@ -79,6 +82,7 @@ class Me(BaseModel):
     id: str
     email: str
     display_name: Optional[str] = None
+    handle: Optional[str] = None   # 🧩 对齐包B
     avatar_url: AssetUrl = None
     subscription_tier: str = "free"
     # ⏰ 玩家时区的 IANA 名。客户端每次进站拿浏览器探到的值来对表, 不一致就 PATCH —
@@ -88,6 +92,7 @@ class Me(BaseModel):
 
 class MePatch(BaseModel):
     display_name: Optional[str] = None
+    handle: Optional[str] = None   # 🧩 对齐包B: 小写字母/数字/下划线 3~20, 全站唯一
     avatar_url: AssetUrl = None
     tz: Optional[str] = None
 
@@ -477,11 +482,59 @@ class StoryCard(BaseModel):
     sandbox: bool = False
     acts_count: int = 0
     progression: Optional[str] = None  # sandbox growth ladder, e.g. 生面人 → … → 城寨王
+    # 🧩 对齐包B: 设计稿 Discover 卡要 作者/热度/分级/精选 —— 这些是【卡面】数据,
+    # 只长在 StoryCard 上; Story 对象一个都不许长 (它会被钉进 run 快照)。
+    author: Optional[dict[str, Any]] = None   # {id, name, handle, avatar_url}
+    likes: int = 0
+    plays: int = 0
+    mature: bool = False
+    featured: bool = False
 
 
 class StoryCardPage(BaseModel):
     items: list[StoryCard]
     next_cursor: Optional[str] = None
+
+
+# ── 🧩 对齐包B: 平台社区层 ─────────────────────────────────
+class ReviewIn(BaseModel):
+    rating: Optional[int] = Field(default=None, ge=1, le=5)  # 顶层必填; 回复不带
+    text: str = Field(default="", max_length=2000)
+
+
+class ReviewOut(BaseModel):
+    id: str
+    rating: Optional[int] = None
+    text: str = ""
+    author: dict[str, Any] = {}     # {id, name, handle, avatar_url, mine}
+    likes: int = 0
+    liked: bool = False
+    replies: list["ReviewOut"] = []
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class CommunityStats(BaseModel):
+    """剧本详情页的社区面板。与 Story 对象分开走 —— 社区数据不进 run 快照。"""
+    likes: int = 0
+    favorites: int = 0
+    liked: bool = False
+    faved: bool = False
+    reviews: int = 0
+    rating_avg: Optional[float] = None
+    author: Optional[dict[str, Any]] = None  # {id,name,handle,avatar_url,followers,following}
+
+
+class AuthorProfile(BaseModel):
+    """作者公开主页 (设计稿 06 WorldDetail 的 @moorwitch · N stories · N plays)。"""
+    id: str
+    name: str = "作者"
+    handle: Optional[str] = None
+    avatar_url: AssetUrl = None
+    followers: int = 0
+    following: bool = False          # 当前观者是否已关注
+    plays: int = 0                   # 全部已发布作品的累计游玩档数
+    works: list[StoryCard] = []      # 已发布作品
 
 
 # ── secrets / fragments ───────────────────────────────────
