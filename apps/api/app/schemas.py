@@ -626,6 +626,8 @@ class RunState(BaseModel):
     player_events: list[dict[str, Any]] = []  # 🗓 玩家自己的行程 [{id,text,day,slot,told,when,passed}]
     player_notes: list[dict[str, Any]] = []   # 📔 玩家备忘录 [{id,text}] — 叙事罗盘
     phone_unread: int = 0  # 📱 unread incoming messages (badge)
+    # 🧩 包D: 拉黑状态 {char_id: "mute"|"block"|"removed"} — 前端据此画 36/37 屏
+    blocks: dict[str, str] = {}
     phone_on: bool = True  # 📵 false = this story has no signal (texting/calls/mail dead)
     verdict: Optional[dict[str, Any]] = None  # 🔍 the case-closing panel (None until unlocked)
     cultivation: Optional[dict[str, Any]] = None  # ⚡ {name, rank, prog, ready} story ladder

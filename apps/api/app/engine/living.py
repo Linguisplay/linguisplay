@@ -135,10 +135,13 @@ def _pick_invite_char(content, state) -> dict[str, Any] | None:
     met = set(state.get("met_ids") or [])
     open_ids = {p.get("char_id") for p in state.get("promises") or []
                 if p.get("status") == "open"}
+    from . import socialfic as _sf
     cands = [c for c in runtime._characters(content)
              if c.get("id") and c.get("id") in met and c.get("id") not in dead
              and c.get("id") not in open_ids
              and runtime.has_contact(state, c.get("id"))   # 📇 没交换过联系方式, TA联系不上你
+             # 🧩 包D: 拉黑的人不选来发邀约 — 邀约会铸真实约定, 玩家赴不了还要吃爽约账
+             and not _sf.holds_incoming(state, c.get("id"))
              and c.get("id") != state.get("player_character_id")]
     if not cands:
         return None
@@ -334,7 +337,11 @@ def settle_pending(content: dict[str, Any], state: dict[str, Any],
                     content, state, char, "stood_up",
                     f"TA爽约了你们约好的（{pend.get('what', '')}），你心里不好受，忍不住捎话给TA",
                     "我等了你很久。你没来。", llm)
-                events.append(runtime.phone_push(content, state, char, msgs, now_label))
+                # 🧩 包D: 拉黑期 phone_push 返回 None (消息进暂扣账本) — None 不许
+                # 进 events, 下游 _pev.get() 会当场 AttributeError 炸断回合流 (复审 high)
+                _p = runtime.phone_push(content, state, char, msgs, now_label)
+                if _p:
+                    events.append(_p)
         elif kind == "anniv":
             months = int(pend.get("months") or 1)
             if pend.get("msg_due") and runtime.phone_enabled(content):
@@ -343,7 +350,9 @@ def settle_pending(content: dict[str, Any], state: dict[str, Any],
                     f"今天是你们认识满{months}个月的日子，TA记得，想对玩家说点什么"
                     "（贴人设，可以提一件你们共同经历的小事，别煽情过头）",
                     f"今天，是我们认识满{months}个月的日子。我记得。", llm)
-                events.append(runtime.phone_push(content, state, char, msgs, now_label))
+                _p = runtime.phone_push(content, state, char, msgs, now_label)
+                if _p:
+                    events.append(_p)
         elif kind == "invite":
             ev = _write_invite(content, state, char, llm)
             if not ev:   # 订不上 (档满/作息/世道变了) — 邀约作废, 不硬凑
@@ -351,7 +360,8 @@ def settle_pending(content: dict[str, Any], state: dict[str, Any],
                 nw["told"] = True
                 continue
             nw["text"] = f"{ev['name']}约了你{ev['when']}：{ev['what']}。"
-            events.append(ev["_phone"])
+            if ev.get("_phone"):   # 🧩 包D: 拉黑期邀约短信被暂扣 → 没有 UI 事件可发
+                events.append(ev["_phone"])
         nw.pop("pend", None)
         done += 1
     return events
