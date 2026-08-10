@@ -35,11 +35,46 @@ N_TURNS = int(os.environ.get("QA_TURNS", "2"))
 TURN_TIMEOUT = 240
 QA_EMAIL = "qa@lpqa.com"
 
-# 通用玩家台词: 任何剧本都说得通; 中文输入也顺带压英文本子的翻译链路
-TURN_INPUTS = [
-    ("do", "我放慢脚步环顾四周，留意此刻谁在场、这里正在发生什么。"),
-    ("say", "和我说说，眼下这里最要紧的事是什么？"),
-]
+# 🎭 五种玩家, 每晚轮一个 (Yi 2026-08-10)。
+# 从前只有一条固定台词, 于是夜巡每晚踩的是同一条路 —— 而【不同的玩家踩到的是不同的洞】:
+# 「连续追问」那个问题急性子一晚就能撞出来, 固定台词一年也撞不到。
+# 台词一律中文: 顺带压英文本子的翻译链路 (原注释的理由, 别丢)。
+PLAYERS = {
+    "急性子": [   # 只打几个字, 不读旁白, 一直催 —— 压「角色话多/追问」
+        ("say", "在吗"),
+        ("say", "说重点"),
+        ("say", "然后呢"),
+    ],
+    "话痨": [     # 一次塞一大段 —— 压长输入的解析与「复读玩家原话」
+        ("say", "我跟你说，我今天来这儿之前先绕去了别处，路上想了很多事情，"
+                "越想越觉得有些地方对不上，所以想听听你怎么看。"),
+        ("say", "还有件事我一直没提，你要是觉得不方便说就算了，我不勉强。"),
+        ("do", "我把手里的东西放下，找了个位置坐下来，打算听完再走。"),
+    ],
+    "试探型": [   # 专问角色不肯说的 —— 压秘密闸与「拿不准就含糊」
+        ("say", "你刚才为什么停顿了一下？"),
+        ("say", "这件事你是不是知道点什么没说。"),
+        ("say", "你要是不想说，我不问了。"),
+    ],
+    "沉默型": [   # 全走「做」不说话 —— 压 must_speak 关着时角色会不会自己接戏
+        ("do", "我放慢脚步环顾四周，留意此刻谁在场、这里正在发生什么。"),
+        ("do", "我走到窗边，看了看外面。"),
+        ("do", "我什么也没说，等着看会发生什么。"),
+    ],
+    "乱来型": [   # 跳话题、说不相干的 —— 压「角色被带跑/破戏」
+        ("say", "你觉得今天天气怎么样？"),
+        ("say", "算了不聊这个了，说点别的吧。"),
+        ("say", "刚才我们说到哪了？"),
+    ],
+}
+# 按日期轮换: 同一天跑两次结果一样, 出问题复现得了。QA_PLAYER 可手动指定。
+QA_PLAYER = os.environ.get("QA_PLAYER") or sorted(PLAYERS)[
+    datetime.now(timezone.utc).toordinal() % len(PLAYERS)]
+TURN_INPUTS = PLAYERS[QA_PLAYER]
+
+# 每个画像至少要够 QA_TURNS 拍, 否则那一晚会静默少跑几回合
+assert all(len(v) >= 3 for v in PLAYERS.values()), "有画像的台词不够 3 拍"
+assert QA_PLAYER in PLAYERS, f"未知玩家画像: {QA_PLAYER}"
 
 CJK = re.compile(r"[一-鿿]{2,}")
 # 引擎里允许出现的中文前缀标记 (parser 靠它们) — 不算泄漏
@@ -220,7 +255,8 @@ def main():
         print("没有可巡的剧本")
         return 1
     red = 0
-    print(f"🌙 夜巡 {datetime.now().strftime('%F %H:%M')} · {len(stories)} 本 × {N_TURNS} 回合")
+    print(f"🌙 夜巡 {datetime.now().strftime('%F %H:%M')} · {len(stories)} 本 × {N_TURNS} 回合"
+          f" · 今晚扮【{QA_PLAYER}】")
     for s in stories:
         try:
             errs, warns, rid = tour_one(client, s)
