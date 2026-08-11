@@ -1600,7 +1600,10 @@ const MOOD_GRAD = {
 };
 
 async function j(path, opts={}) {
-  const r = await fetch(API + path, { credentials: "include", headers: {"Content-Type":"application/json"}, ...opts });
+  // 📷 FormData 不许硬塞 Content-Type —— 浏览器要自己带 multipart 的 boundary
+  const isForm = opts.body instanceof FormData;
+  const r = await fetch(API + path, { credentials: "include",
+    ...(isForm ? {} : { headers: {"Content-Type":"application/json"} }), ...opts });
   if (!r.ok) { const b = await r.json().catch(()=>({})); throw new Error(b.detail || r.status); }
   return r.status === 204 ? null : r.json();
 }
@@ -3461,7 +3464,10 @@ function renderThread(th) {
     : `<div class="pcompose"><input id="pmsgIn" placeholder="${uiLang === "en" ? `Text ${escapeHtml(th.device || "them")}…` : `发条${escapeHtml(th.device || "消息")}…`}"
          onkeydown="if(event.key==='Enter')sendPhoneMsg('${escapeHtml(th.char_id)}')">
        <button onclick="sendPhoneMsg('${escapeHtml(th.char_id)}')">${t("发送")}</button>
-       <button class="ghost" title="${uiLang === "en" ? "Call them — talk live" : "拨过去，实时说话"}" onclick="sendPhoneCall('${escapeHtml(th.char_id)}')">📞</button></div>`;
+       <button class="ghost" title="${uiLang === "en" ? "Send a photo" : "发张照片"}" onclick="document.getElementById('pfile').click()">📷</button>
+       <button class="ghost" title="${uiLang === "en" ? "Call them — talk live" : "拨过去，实时说话"}" onclick="sendPhoneCall('${escapeHtml(th.char_id)}')">📞</button>
+       <input type="file" id="pfile" accept="image/*" style="display:none"
+              onchange="sendPhoneMsg('${escapeHtml(th.char_id)}', false, this.files[0]); this.value=''"></div>`;
   const ov = phoneShell(`<div class="pmsgs" id="pmsgs">${bubbles}</div>${composer}`,
                         `${escapeHtml(th.name)}`, "openInbox()");
   const box = ov.querySelector("#pmsgs"); if (box) box.scrollTop = box.scrollHeight;
@@ -3517,16 +3523,19 @@ function renderMarket(mv) {
     };
   });
 }
-async function sendPhoneMsg(cid, callMode) {
+async function sendPhoneMsg(cid, callMode, file) {
   const inp = document.getElementById("pmsgIn");
   const text = (inp && inp.value || "").trim();
-  if (!text) { if (callMode) pushToast(t("先在输入框里写下你开口要说的话，再按 📞"), "", 2600); return; }
+  // 📷 发图时文字可以为空 (一张图本身就是一句话); 其余分支一个字没改 —— 乐观气泡、
+  // 「对方正在输入」、已读回执、解锁提示全部复用同一条路。
+  if (!text && !file) { if (callMode) pushToast(t("先在输入框里写下你开口要说的话，再按 📞"), "", 2600); return; }
   inp.value = ""; inp.disabled = true;
   const box = document.getElementById("pmsgs");
   let mine = null, tip = null;
   if (box) {
     const empty = box.querySelector(".jempty"); if (empty) empty.remove();
-    mine = pmsgEl({ from: "me", text: callMode ? `📞 ${text}` : text, at: "", call: !!callMode });
+    mine = pmsgEl({ from: "me", text: callMode ? `📞 ${text}` : (text || (file ? "📷" : "")),
+                    at: "", call: !!callMode });
     mine.querySelector("small").textContent = B("发送中…", "sending…");
     box.appendChild(mine); box.scrollTop = box.scrollHeight;
   }
@@ -3535,8 +3544,10 @@ async function sendPhoneMsg(cid, callMode) {
     tip = pTypingEl(callMode); box.appendChild(tip); box.scrollTop = box.scrollHeight;
   }, callMode ? 150 : 700);
   try {
-    const url = `/runs/${runId}/phone/${cid}` + (callMode ? "/call" : "");
-    const th = await j(url, { method:"POST", body: JSON.stringify({ text }) });
+    let url = `/runs/${runId}/phone/${cid}` + (callMode ? "/call" : "");
+    let body = JSON.stringify({ text });
+    if (file) { url += "/photo"; body = new FormData(); body.append("file", file); body.append("text", text); }
+    const th = await j(url, { method:"POST", body });
     clearTimeout(tipTimer);
     const msgs = th.msgs || [];
     let lastMe = -1;
