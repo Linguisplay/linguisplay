@@ -560,14 +560,21 @@
   .pcompose button { border-radius: 18px; padding: 0 16px; background: var(--ok-bg); border: 1px solid #3c5a44; color: #dfeadb; cursor: pointer; }
   .pcalnow, .pcalddl { font-size: 13.5px; color: var(--ink1); padding: 6px 4px; }
   .pcalddl { color: #ffb27a; }
-  .pcalitem { font-size: 13px; color: #d5cfe0; padding: 7px 4px; border-bottom: 1px solid #282622; }
+  .pcalitem { font-size: 13px; color: #d5cfe0; padding: 7px 4px; border-bottom: 1px solid #282622;
+    white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; }
   /* 🗓 我的行程: 玩家亲手写的日子 */
   .pcalitem.past { opacity: .55; }
   .pcaldel { float: right; color: #857c6b; padding: 0 6px; cursor: pointer; }
   .pcalform { padding: 4px 0 10px; border-bottom: 1px solid #282622; }
-  .pcalform input[type="text"], .pcalform input:not([type]) { width: 100%; padding: 9px 11px;
+  .pcalform input[type="text"], .pcalform input:not([type]), .pcalform textarea { width: 100%; padding: 9px 11px;
     border-radius: 10px; border: .5px solid rgba(216,181,122,.25); background: rgba(20,16,11,.6);
     color: var(--paper); font-size: 13px; }
+/* 📝 手账的两个输入框是【写字的地方】不是填空格 (Yi 2026-08-09:「输入 box 太小」)。
+   400 字要能一眼看完再落笔, 所以给足高度、可手动拉高、字距按正文走。box-sizing 必须
+   显式写: textarea 的 UA 默认是 content-box, 与上面那条 width:100%+padding 相加会溢出格子。 */
+.pcalform textarea { box-sizing: border-box; min-height: 84px; resize: vertical;
+    font-family: inherit; line-height: 1.55; }
+.pcalform #noteText { min-height: 108px; }
   .pcalrow { display: flex; align-items: center; justify-content: space-between;
     gap: 8px; margin-top: 8px; flex-wrap: wrap; }
   .pcalrow .chips { display: flex; gap: 5px; flex-wrap: wrap; }
@@ -620,13 +627,15 @@
   .ical-day.today .dot { background: #ff453a; }
   .ical-sep { height: 1px; background: rgba(255,255,255,.12); margin: 8px 0 10px; }
   .ical-dayh { font-size: 13px; font-weight: 600; color: var(--sys-gray); margin: 2px 0 4px; }
-  .ical-ev { display: flex; align-items: center; gap: 8px; padding: 8px 2px;
+  /* 一条行程现在最长 400 字, 必然换行: 顶端对齐 + 色条随行高拉伸, 否则长条目的
+   色条会浮在正中间, 时段标签也会被挤扁。 */
+.ical-ev { display: flex; align-items: flex-start; gap: 8px; padding: 8px 2px;
     border-bottom: 1px solid rgba(255,255,255,.08); font-size: 14px; color: #eee; }
-  .ical-ev .bar { flex: 0 0 3.5px; height: 26px; border-radius: 2px; background: #ff9f0a; }
+  .ical-ev .bar { flex: 0 0 3.5px; align-self: stretch; min-height: 26px; border-radius: 2px; background: #ff9f0a; }
   .ical-ev.locked .bar { background: var(--sys-gray); }
   .ical-ev.past { opacity: .5; }
-  .ical-ev .t { flex: 1; }
-  .ical-ev .when { color: var(--sys-gray); font-size: 12.5px; }
+  .ical-ev .t { flex: 1; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .ical-ev .when { flex: none; color: var(--sys-gray); font-size: 12.5px; }
   /* 🎯 门面 */
   .hero { padding: 6px 2px 12px; border-bottom: 1px solid var(--panel); }
   .hero-t { font-size: 22px; font-weight: 800; letter-spacing: 1px; color: #f0f2f8; line-height: 1.4; }
@@ -3720,7 +3729,7 @@ function _calTab() {
   // ✍️ 折叠式添加: 记在选中的那天 (iOS 惯例: 先选日子再添事)
   const form = `<div class="pcaladd" id="calAdd" onclick="plannerExpand('calAdd','calText')">＋ ${sel === today ? B("在今天记一笔…", "Add for today…") : B(`在第 ${sel} 天记一笔…`, `Add for day ${sel}…`)}</div>
     <div class="pcalform hidden" id="calFormBox">
-      <input id="calText" maxlength="60" placeholder="${B("周五考试 / 明晚加班…", "exam Friday / late shift tomorrow…")}">
+      <textarea id="calText" maxlength="400" rows="3" placeholder="${B("周五考试 / 明晚加班…", "exam Friday / late shift tomorrow…")}"></textarea>
       <div class="pcalrow"><span class="chips" id="calSlot">
         ${[["", B("全天", "All day")], ["晨", B("晨", "AM")], ["午", B("午", "Noon")], ["夜", B("夜", "Night")]].map(([v, l], i) => `<span class="chk${i === 0 ? " on" : ""}" data-v="${v}" onclick="calPick(this,'calSlot')">${l}</span>`).join("")}
       </span></div>
@@ -3743,7 +3752,7 @@ function _notesTab() {
     `<a class="pcaldel" onclick="delNote('${n.id}')">✕</a></div>`).join("")
     || `<div class="jempty">${B("本子还是空的。记下你在意的事，世界会顺着它出牌。", "Empty so far. Write what you care about — the world will deal you cards along it.")}</div>`;
   const form = `<div class="pcalform">
-      <input id="noteText" maxlength="80" placeholder="${B("记一条：信封里的钱不对劲 / 想知道他为什么改名…", "e.g. the envelope money is off / why did he change his name…")}">
+      <textarea id="noteText" maxlength="400" rows="4" placeholder="${B("记一条：信封里的钱不对劲 / 想知道他为什么改名…", "e.g. the envelope money is off / why did he change his name…")}"></textarea>
       <div class="pcalrow"><span class="muted" style="font-size:11px">${B("角色看不见这个本子，但故事会顺着你记的线走", "Characters can't see this, but the story follows your threads")}</span>
         <span>${_noteEditing ? `<button class="sm ghost" onclick="_noteEditing=null;openPlanner('notes')">${B("算了", "Cancel")}</button> ` : ""}<button class="sm" id="noteBtn" onclick="saveNote()">${_noteEditing ? B("改好", "Save") : B("记上", "Add")}</button></span></div>
       <div class="muted" id="noteMsg" style="font-size:11px"></div></div>`;
@@ -5528,7 +5537,8 @@ async function playBeat(b) {
   if (b.sfx) { if (pendingSfx === b.sfx) pendingSfx = null; playSfx(b.sfx); }
   else if (pendingSfx) { const n = pendingSfx; pendingSfx = null; playSfx(n); }
   if (b.type === "description") {
-    const node = document.createElement("div"); node.className = "desc"; chat.appendChild(node);
+    const node = document.createElement("div"); node.className = "desc";
+    clearLive(); chat.appendChild(node);   // 🩹 清和补落在同一帧，不留空档
     if (b._instant) node.textContent = b.text || "";   // already read as live tokens
     else await typeInto(node, b.text, 16);   // narration types a bit faster
   } else {
@@ -5538,6 +5548,7 @@ async function playBeat(b) {
       hideTyping();
     }
     voxSprite(b.speaker_name || "", b.expr, b.text);   // 🎙 开口那声简语音
+    clearLive();                                        // 🩹 同上：清和补同一帧
     const txt = makeTypingRow("left", b.speaker_name || "");
     if (b._instant) { txt.textContent = b.text || ""; }
     else await typeInto(txt, b.text, 22);
@@ -5830,13 +5841,18 @@ async function streamTurn(url, bodyObj) {
         if (!line.startsWith("data:")) continue;
         const ev = JSON.parse(line.slice(5));
         if (ev.event === "beat") { if (firstBeat){ hideTyping(); firstBeat=false; }
-          clearLive();
+          // 🩹 一闪的修法 (Yi 报障 2026-08-11)。从前这里无条件 clearLive()，而正式拍
+          // 要经 playQ + await 才上屏——中间那一帧屏幕上什么都没有，字先消失再出现。
+          // 分两种情况：
+          //   直播稿【对得上】这一拍 → 留着，等 playBeat 里 append 的同一帧再清（无空档）
+          //   对不上 → 立刻清，那是错的字，留着更糟（会和「思考中」并排站着）
           // 🔒 正式拍登台 = 直播永久封版 (狗笼实弹 2026-08-01: 尾部迟到的 token 在拍演完后
           // 复活直播, 拿整回合的原始流缓冲重切首页盖回对话框 — A+B 段拼接、半角标点混入,
           // 正文变尸块。vnLiveDone 只在无人占台的空档才立得起来, 时序一歪就漏)
           vnLiveDone = true;
           if (liveText && ev.beat && ev.beat.text
               && _normLive(liveText).indexOf(_normLive(ev.beat.text).slice(0, 30)) >= 0) ev.beat._instant = true;
+          if (!ev.beat._instant) clearLive();
           playQ.push(ev.beat); pump(); }
         else if (ev.event === "token") { onToken(ev.t); }
         else if (ev.event === "state") { renderState(ev.state); }
