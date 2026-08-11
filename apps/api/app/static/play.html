@@ -1904,9 +1904,10 @@ async function afterAuth() {
     if (runs.length) {
       const h = sechead(t("继续你的故事"));
       stories.appendChild(h);
-      // 📚 先剧本再存档 (Yi 2026-08-11:「存档太多难以寻找」)。
-      //   同一本剧本的档收在一起, 剧本之间按「哪本你玩得最久」排;
-      //   本内 置顶 > 玩得久 > 最近动过。置顶的整本剧本也提到最前面。
+      // 📚 先剧本再存档, 而且是【两屏】(Yi 2026-08-11: 「要先是大封面然后跳转到下一个界面」)。
+      //   第一屏: 一本剧本一张大封面 (复用剧本列表那张 .scard, 不另造样式)
+      //   第二屏: 点进去才是这本的存档卡
+      //   排序: 置顶 > 玩得久 > 最近动过。置顶的整本剧本也提到最前面。
       const byStory = new Map();
       runs.forEach(r => {
         const g = byStory.get(r.story_id) ||
@@ -1920,17 +1921,37 @@ async function afterAuth() {
                             || String(b.updated_at || b.at || "").localeCompare(String(a.updated_at || a.at || ""));
       const groups = [...byStory.values()].sort(cmp);
       groups.forEach(g => g.runs.sort(cmp));
-      // 一本剧本只有一档时不必多一层标题 —— 那层是给「同一本好几档」用的
-      const flat = groups.length === runs.length;
-      groups.slice(0, 8).forEach(g => {
-        if (!flat) {
-          const sh = document.createElement("div");
-          sh.className = "sechead"; sh.style.cssText = "margin-top:10px";
-          sh.innerHTML = `<b>${g.pinned ? "📌 " : ""}${escapeHtml(g.title)}</b>` +
-            `<i>${g.runs.length} ${B("段进度", "runs")} · ${g.turns} ${B("拍", "turns")}</i>`;
-          stories.appendChild(sh);
-        }
-        g.runs.forEach(r => {
+      // 第二屏: 只列这一本的存档, 顶上一条返回
+      const openShelf = (g) => {
+        let n = h.nextSibling;
+        while (n && n !== shelfEnd) { const x = n; n = n.nextSibling; x.remove(); }
+        h.querySelector("b").textContent = (g.pinned ? "📌 " : "") + g.title;
+        const back = document.createElement("p");
+        back.className = "muted"; back.style.cssText = "margin:6px 0;font-size:13px;cursor:pointer";
+        back.textContent = B("← 所有剧本", "← All stories");
+        back.onclick = () => { h.querySelector("b").textContent = t("继续你的故事"); drawCovers(); };
+        stories.insertBefore(back, shelfEnd);
+        g.runs.forEach(r => stories.insertBefore(stubEl(r), shelfEnd));
+      };
+      const drawCovers = () => {
+        let n = h.nextSibling;
+        while (n && n !== shelfEnd) { const x = n; n = n.nextSibling; x.remove(); }
+        groups.slice(0, 12).forEach(g => {
+          const r0 = g.runs[0];
+          const c = document.createElement("div");
+          c.className = "scard" + (r0.cover_url ? "" : " noart");
+          c.innerHTML =
+            `<div class="art"${r0.cover_url ? ` style="background-image:url('${r0.cover_url}')"` : ""}></div>` +
+            `<div class="scrim"></div>` +
+            `<div class="body"><b>${g.pinned ? "📌 " : ""}${escapeHtml(g.title)}</b>` +
+              `<div class="sub">${g.runs.length} ${B("段进度", "runs")} · ` +
+              `${B("玩了", "played")} ${g.turns} ${B("拍", "turns")}</div></div>`;
+          c.onclick = () => openShelf(g);
+          stories.insertBefore(c, shelfEnd);
+        });
+      };
+      // 存档卡抽成函数 —— 两屏共用一份 (从前它内联在 forEach 里)
+      const stubEl = (r) => {
         // 🎟 戏票存根: 左侧宋体幕数是结构不是装饰 (它就是你的进度)
         const div = document.createElement("div");
         div.className = "stub" + (r.ended ? " done" : "");
@@ -1973,9 +1994,12 @@ async function afterAuth() {
         ops.appendChild(del);
         div.appendChild(ops);
         div.onclick = () => resumeRun(r.id);
-        stories.appendChild(div);
-        });
-      });
+        return div;
+      };
+      // 锚点: 两屏都往它前面插, 清屏时清到它为止 —— 底下「已隐藏的局」不受影响
+      const shelfEnd = document.createComment("shelf-end");
+      stories.appendChild(shelfEnd);
+      drawCovers();
       const shelf = document.createElement("p");
       shelf.className = "muted"; shelf.style.cssText = "margin:6px 0; font-size:12px; cursor:pointer";
       shelf.textContent = B("🙈 查看已隐藏的局…", "🙈 Hidden runs…");

@@ -7374,7 +7374,7 @@ def _phone_unreachable(content: dict[str, Any], state: dict[str, Any],
 
 
 def _phone_target(content: dict[str, Any], state: dict[str, Any], char_id: str,
-                  text: str) -> dict[str, Any]:
+                  text: str, allow_empty: bool = False) -> dict[str, Any]:
     """Shared reachability checks for texting/calling someone. Raises player-readable."""
     if not phone_enabled(content):
         raise ValueError("这个故事里没有这种联系方式")
@@ -7387,7 +7387,10 @@ def _phone_target(content: dict[str, Any], state: dict[str, Any], char_id: str,
         raise ValueError("不能发给你自己")
     if char_id not in set(state.get("met_ids") or []):
         raise ValueError("你还不认识TA，没有TA的联系方式")
-    if not (text or "").strip():
+    if not (text or "").strip() and not allow_empty:
+        # 📷 发图那条路文字本来就可以是空的 —— 一张图本身就是一句话 (Yi 报障 2026-08-11:
+        # 「图片发送失败」)。我加了客户端「发图允许空文字」的分支, 却没开服务端这道闸,
+        # 于是不打字直接发图一律 400。半件事比没做更糟。
         raise ValueError("说点什么吧")
     if state.get("player_hp") == "dead":
         raise ValueError("你已经死了，发不出任何消息")
@@ -8003,7 +8006,7 @@ def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str
     thread (the unlock is global and sticky, same as in-scene)."""
     llm = lang_llm(llm or get_llm(), content)
     text = (text or "").strip()
-    c = _phone_target(content, state, char_id, text)
+    c = _phone_target(content, state, char_id, text, allow_empty=bool(img))
     # 📍 same-room check: texting someone standing right next to you is a MOMENT, not
     # an error — they get to react to the absurdity in voice（「我人不就在这？」）
     here = any(ch.get("id") == char_id for ch in scene_characters(content, state))
