@@ -7289,6 +7289,45 @@ def phone_deliveries(content: dict[str, Any], state: dict[str, Any], here_ids: s
         _p = phone_push(content, state, c, msgs, now_label, call=as_call)
         if _p:
             out.append(_p)
+
+    # ④ 托事汇报 (Yi 2026-08-11:「玩家让 AI 角色去做一件事，合理就去做，然后汇报进度」)
+    #
+    # 托事的【入口】早就有了: 你在手机上说「帮我看看 X」, TA 答应了就写进 sim.intent,
+    # 还留了痕 (phone.task)。而那个字段写完就躺着 —— 没有任何东西让 TA 去做、去回话。
+    # 应承完了没有下文, 比不能托事更伤。
+    #
+    # 「判断为合理」这一步【不新造判官】: TA 当时是用自己的声音答应或推掉的, 那就是判断,
+    # 而且是最好的那个判断 —— 一个只看任务字符串的判官, 判不出「这事该不该由我来办」。
+    # 所以只补最后一环: 人不在你身边、事领了有一阵了, TA 就发条进度回来。
+    for c in _characters(content):
+        if len(out) >= PHONE_MAX_PER_TURN:
+            break
+        cid = c.get("id")
+        if not absent(cid):
+            continue
+        sim = (state.get("char_sim") or {}).get(cid) or {}
+        task = str(sim.get("intent") or "").strip()
+        if not task or _intent_stale(state, sim):
+            continue
+        at = sim.get("intent_at")
+        if at is None or now_idx - int(at) < 1:
+            continue                      # 刚领的事, 别转身就汇报
+        if sim.get("intent_told") == task:
+            continue                      # 这件事已经回过话了, 不许每拍复读
+        sim["intent_told"] = task
+        msgs = compose_message(
+            content, state, c, "task_report",
+            _t(content,
+               f"你答应了对方要「{task}」。你人不在 TA 身边，正在办或刚办完——"
+               "发条消息说说进展：办到哪一步了、碰上什么、还是压根没办成。"
+               "照你的性格说，别写成工作汇报。",
+               f"You said you'd “{task}”. Text them how it's going — where you got to, "
+               "what got in the way, or that you never did it. In your own voice."),
+            _t(content, f"{task}，我在弄了。", f"{task} — on it."), llm, beat_log)
+        _p = phone_push(content, state, c, msgs, now_label)
+        if _p:
+            out.append(_p)
+            _audit(state, "task.report", True, f"{c.get('name', '')}:{task[:16]}")
     return out
 
 
