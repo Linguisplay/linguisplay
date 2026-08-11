@@ -589,3 +589,52 @@ def negative_list(mode_id: str, zh: bool = True) -> str:
             "② 每句都带「~」或堆表情堆语气词——腻死人的甜是廉价的；"
             f"③ {no_confess}"
             f"④ 称呼有上限：{cap}。")
+
+
+# ── 🫂 好感的白话呈现 (Yi 拍板 2026-08-11) ─────────────────────────────────────
+# 主界面不出数字, 关系网给一段【按上下文总结】的文字: 有过程感 (从X到Y), 零数字。
+# 素材全是关系账本的人话 (档位名/此刻感受/缘由/大事记/经历标签), 无密可泄。
+# 账本指纹缓存: 素材没变不重写; 兜底不占缓存位 (预算回来要能升级成 LLM 版)。
+
+def _brief_mark(material: dict[str, Any]) -> int:
+    import zlib
+    raw = "|".join([str(material.get("mode_name") or ""),
+                    str(material.get("feeling") or ""),
+                    str(material.get("why") or ""),
+                    "&".join(material.get("tags") or []),
+                    "&".join(material.get("log") or [])])
+    return zlib.crc32(raw.encode("utf-8"))
+
+
+def _brief_fallback(material: dict[str, Any], lang: str) -> str:
+    mode = str(material.get("mode_name") or ("someone you know" if lang == "en" else "相识"))
+    bits = [b for b in (str(material.get("feeling") or "").strip(),
+                        (material.get("log") or [""])[-1]) if b]
+    if lang == "en":
+        return f"{mode}. " + (bits[0] if bits else "The story between you is still being written.")
+    return f"{mode}。" + (bits[0] if bits else "你们的故事还在往下写。")
+
+
+def rel_brief(state: dict[str, Any], cid: str, material: dict[str, Any],
+              llm, lang: str = "zh", allow_llm: bool = True) -> str:
+    """关系网卡片上的那段白话。material = {mode_name, feeling, why, tags, log}。"""
+    import re as _re
+    cache = state.setdefault("rel_brief", {})
+    mark = _brief_mark(material)
+    hit = cache.get(cid) or {}
+    if hit.get("mark") == mark and (hit.get("text") or "").strip():
+        return hit["text"]
+    if not allow_llm:
+        return _brief_fallback(material, lang)   # 不缓存: 预算回来时升级
+    text = ""
+    try:
+        out = llm.generate({"rel_brief": True, "language": lang, **{
+            k: material.get(k) for k in ("mode_name", "feeling", "why", "tags", "log")}}) or {}
+        text = str(out.get("brief") or "").strip()[:120]
+    except Exception:
+        text = ""
+    # 数字黑箱是硬约束不是措辞建议: 模型不听话写了数字 → 整句弃用走兜底
+    if not text or _re.search(r"\d", text):
+        text = _brief_fallback(material, lang)
+    cache[cid] = {"mark": mark, "text": text}
+    return text
