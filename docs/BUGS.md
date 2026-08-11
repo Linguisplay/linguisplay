@@ -22,6 +22,7 @@ bug 与欠账不再散落在聊天里。规矩:报障当天入账,修完标 ✅ 
 | 12 | 08-01 | 无头玩测驱动器时灵时不灵 (resumeRun 偶发静默失败原因未钉死) — 只坑验证不坑玩家 | 🟡 | scratchpad/pw/playtest*.js |
 | 13 | 08-06 | `_settle_prose_exits` 离场正则只认中文 — en 本子角色「说走」不会被记走 (锁下 npc_moves 又摘了, en 离场只剩作息换班一条路) | 🔴 | runtime.py `_SELF_EXIT_RE/_EXIT_TAIL_RE` 补英文构式; 对抗性审查 08-06 发现 |
 | 14 | 08-06 | free_day 第三张建议片「一个人去X转转」在锁下点了不走 (无 seek 形状, 打字移动已取消) — 前两张是 seek 形状还活着 | 🔴 | runtime.py free_day_suggestions ~9059; 改成原地或 seek 形状 |
+| 17 | 08-11 | 双会话部署对撞实锤：我 restart 的瞬间另一路正在写 runtime.py → 首启 SyntaxError(11809行字符串被撕断)，systemd 3s 自愈。#8 的部署版：restart 可能读到写了一半的文件 | 🟡 systemd 兜底 | 根治=写临时名+mv 原子替换（scp 到 .tmp 再 ssh mv），或部署前喊一嗓子对齐两路会话 |
 | 16 | 08-10 | 现网反复出现 `CLIENT-JS [promise] undefined`（08-09 21:13 三连 + 08-10 02:16）— 某个 promise 用裸 reject/throw undefined，遥测 `String(e.reason)` 拿不到任何线索，来源钉不死 | 🔴 | play.html reportClientError 的 unhandledrejection 分支该补：reason 为空时上报 `document.visibilityState + runId + 最近一次动作名`；play.html 归手账会话在改，别混文件，等那边提交后跟一刀 |
 | 15 | 08-08 | 背景空镜铁律在 Seedream(Ark) 上是反效果 — Ark 无负词通道, `_generate_image_ark` 把负词折进正文, 铁律那墙「人、兽、猫狗、怪物」token 变成召唤 (樱见坂实弹: 运行时 `_bg_prompt` 出的六张背景**张张有人**, 固定 bg_seed 还把同一个女孩复制进六张; 七月弱提示词零生物 token 反而全空镜)。运行时三条背景路 (开档补图/游戏内重画/工坊) 全踩此雷 | 🔴 | runs.py `_bg_prompt` 铁律段 + qwen.py `_generate_image_ark` 折负词; 修法方向: ark 路生物负词不折正文, 铁律改「无人的空景」一句零 token 措辞, 生物压制靠 detail 消毒 (数据层 bg_style 已在樱见坂验证) |
 
