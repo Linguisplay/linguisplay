@@ -662,6 +662,45 @@ def _lock_on(flag: str) -> bool:
     return bool(getattr(_rt, flag))
 
 
+def see_image(data: bytes, hint: str = "") -> str:
+    """👁 一句话说清这张图里是什么 —— 玩家在手机上发图, 角色得看得懂 (Yi 2026-08-11)。
+
+    不加供应商: dashscope 早就配着 (QwenLLM 那条路), qwen-vl-max 跟主拍走同一个
+    OpenAI 兼容端点、同一把 key, 只是换个模型名。
+
+    ⚠️ 必须先转 JPEG。实测直接发仓库里的立绘 PNG (RGBA、大图) 一律 400
+    「image format is illegal」, 转成 JPEG 之后同一张图立刻认得出。
+    看不出来就返回空字符串 —— 图发得出去, 角色当没看清, 比整条消息发不出去强。
+    """
+    try:
+        import base64
+        import io as _io
+
+        from PIL import Image
+        im = Image.open(_io.BytesIO(data))
+        if im.mode != "RGB":
+            im = im.convert("RGB")
+        im.thumbnail((1024, 1024))          # 省 token, 也躲开大图那条 400
+        buf = _io.BytesIO()
+        im.save(buf, "JPEG", quality=82)
+        b64 = base64.b64encode(buf.getvalue()).decode()
+        s = get_settings()
+        resp = _post_chat(
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+            s.dashscope_api_key,
+            {"model": "qwen-vl-max", "max_tokens": 90, "temperature": 0.3,
+             "messages": [{"role": "user", "content": [
+                 {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + b64}},
+                 {"type": "text", "text":
+                  "用一句中文说清这张图里有什么：主体、动作、环境、气氛。40字内，"
+                  "只描述看得见的，不要猜动机、不要评价、不要说「这张图」。"
+                  + (f"（对方随图说了：{hint[:40]}）" if hint else "")}]}]},
+            timeout=40, kind="vision")
+        return (resp.json()["choices"][0]["message"]["content"] or "").strip()[:60]
+    except Exception:
+        return ""
+
+
 def voice_head(prompt: dict[str, Any]) -> str:
     """🎙 一个角色的【身份带】—— 谁、什么脾气、怎么说话。所有入口共用这一处实现。
 
@@ -1225,6 +1264,21 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append(f"【你新近听来的传闻】{rumor}。若话头合适，用你自己的口吻自然带给对方"
                      "（街坊闲话的讲法，别念播报）；话头不合适就先按下不提。")
 
+    # 🧩 包D: 玩家公开发的动态被TA看到 (一次性) — 可自然提起/打趣/装作没看见, 不强制
+    _echo = (prompt.get("social_echo") or "").strip()
+    if _echo:
+        lines.append("")
+        lines.append(f"【{_echo}】你可以在合适的话头自然提起这条动态（引用一两个词就够，"
+                     "别整段复述），或者用眼神和态度让对方知道你看过；提不提、怎么提，"
+                     "按你的性子来。")
+    # 🧩 包D: 被拉黑是TA知道的事实 — 情绪要真实 (受挫/自尊/不甘/克制), 不许当没发生
+    _blk = (prompt.get("blocked_line") or "").strip()
+    if _blk:
+        lines.append("")
+        lines.append(f"【{_blk}】这件事压在你心上：见了面你的态度必须带着这道坎"
+                     "（按你的性子——可以是自尊撑着不提，也可以憋不住质问），"
+                     "绝不允许表现得像什么都没发生。")
+
     pm = prompt.get("player_money")
     if pm and not observer and group_mode != "member":
         lines.append(f"「{player_name}」身上现有 {pm.get('amount', 0)} {pm.get('currency', '')}。"
@@ -1307,26 +1361,30 @@ def _build_system(prompt: dict[str, Any]) -> str:
         lines.append(f"【TA爽约了】你们本约好了（{bp}），TA却没来。你心里存着这件事——这一轮用你自己的方式"
                      "让TA知道（讥一句、冷一点、装不在意、或直接质问，贴你的性格），说完这一场就翻篇，别没完没了。")
 
+    # 🗓 手账不再逐条进上下文 (Yi 2026-08-09:「不进上下文, 就是一个工具, 每过一个
+    # 礼拜简单总结一次然后给上下文」)。原文留在手账里给玩家自己看, 这里只收摘要。
+    # 「那天过去了」保留原样 —— 它是【一次性事件】(日子过了问一句, 问过盖 asked
+    # 章翻篇), 不是每回合常驻的占位, 不在 Yi 要清的那一类里。
     pd = prompt.get("player_diary") or {}
-    if pd.get("upcoming"):
-        lines.append("")
-        lines.append("【你知道TA的安排】对面这个人提过接下来的打算："
-                     + "；".join(pd["upcoming"])
-                     + "。这不是任务，是你心里装着的事——话题自然靠近时才顺着关心一句，"
-                       "或替TA着想着安排（贴你的性格），绝不要报日程式地逐条问。")
     if pd.get("passed"):
         lines.append("")
         lines.append(f"【那天过去了】TA之前提过（{pd['passed']}），日子已经过了。"
                      "你若在意TA，这一轮找个自然的口子问一句结果如何——一句就好，问过就翻篇。")
 
-    pn = prompt.get("player_notes") or []
-    if pn:
+    dg_plans = str(prompt.get("diary_plans") or "").strip()
+    if dg_plans:
         lines.append("")
-        lines.append("【叙事罗盘·玩家的备忘录】玩家私下在本子上记着："
-                     + "；".join(str(x)[:80] for x in pn)
-                     + "。这个本子任何角色都看不见，角色绝不能提及或凭空知道其中内容；"
-                       "但它标出了玩家在意的方向——写这一轮的戏时，让与之相关的细节、"
-                       "契机、人物动向有机会自然浮现，给玩家顺着在意的线往下走的抓手。")
+        lines.append(f"【你知道TA的安排】这阵子TA大致的打算：{dg_plans}。"
+                     "这不是任务，是你心里装着的事——话题自然靠近时才顺着关心一句，"
+                     "或替TA着想着安排（贴你的性格），绝不要报日程式地逐条问。")
+
+    dg_compass = str(prompt.get("diary_compass") or "").strip()
+    if dg_compass:
+        lines.append("")
+        lines.append(f"【叙事罗盘·玩家的备忘录】玩家私下在意的方向：{dg_compass}。"
+                     "这个本子任何角色都看不见，角色绝不能提及或凭空知道其中内容；"
+                     "但它标出了玩家在意的方向——写这一轮的戏时，让与之相关的细节、"
+                     "契机、人物动向有机会自然浮现，给玩家顺着在意的线往下走的抓手。")
 
     conf = prompt.get("confrontation") or {}
     if conf:
@@ -4276,6 +4334,79 @@ class QwenLLM:
         except Exception:
             return {}
 
+    def _forum_posts(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🧩 包D 世界论坛铸帖: 素材=账本人话 (在办的事/演变由头), 结构化保证无密可泄。"""
+        items = prompt.get("items") or []
+        mat = "；".join(f"{i.get('name')}：{'、'.join(i.get('hooks') or [])}" for i in items)
+        sys = (f"你在写一个虚构世界的本地网络论坛帖（年代：{prompt.get('era') or '当代'}）。"
+               f"素材（谁·最近在心上的事）：{mat or '无'}\n"
+               "给其中至多3人各写一条论坛短帖（每条一行，格式「名字|帖文」，帖文≤40字，"
+               "口语、像深夜发的帖：一半是事一半是情绪，可以带一个问句）。"
+               "【铁律】只基于素材写，绝不发明新的人名、地名、秘密或具体情节。"
+               "【铁律】帖文是发帖人自己写的第一人称——帖文里绝不出现发帖人自己的名字"
+               "（有的帖是匿名马甲发的，一个名字就足以让马甲当场穿帮）。不用破折号。"
+               + _lang_rule(prompt))
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model, "messages": [{"role": "system", "content": sys},
+                               {"role": "user", "content": "论坛帖："}],
+                               "max_tokens": 160, "temperature": 0.9}, timeout=20)
+            txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+            posts = []
+            for line in txt.splitlines():
+                if "|" in line:
+                    nm, _, body = line.partition("|")
+                    posts.append({"name": nm.strip().strip("「」\"'"),
+                                  "text": body.strip().strip("「」\"'")})
+            return {"posts": posts[:3]} if posts else {}
+        except Exception:
+            return {}
+
+    def _forum_reply(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🧩 包D: 玩家的论坛帖有人接话 — 一条, TA自己的声口。"""
+        sys = (f"论坛上有人发帖：「{prompt.get('post', '')}」\n"
+               f"你是「{prompt.get('name', '')}」（{prompt.get('persona') or ''}），"
+               "跟一条回复（≤30字，口语，像真人回帖：可附和可抬杠可反问）。只输出回复。"
+               "不用破折号。" + _lang_rule(prompt))
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model, "messages": [{"role": "system", "content": sys},
+                               {"role": "user", "content": "回复："}],
+                               "max_tokens": 50, "temperature": 0.9}, timeout=15)
+            txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+            return {"reply": txt.splitlines()[0].strip().strip("「」\"'")} if txt else {}
+        except Exception:
+            return {}
+
+    def _peek_browser(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🧩 包D 深翻附带: TA的搜索历史+未发送草稿 — 暴露心事的措辞, 素材即人话。"""
+        owner = prompt.get("owner") or {}
+        sys = (f"你在写「{owner.get('name', '')}」（{owner.get('persona') or ''}）的"
+               f"浏览器搜索历史和未发送的草稿（年代：{prompt.get('era') or '当代'}）。\n"
+               f"TA最近在心上的事：{prompt.get('intent') or '无'}；"
+               f"最近的往来由头：{'；'.join(prompt.get('whys') or []) or '无'}；"
+               f"与看手机的人：亲密{prompt.get('closeness')}/心动{prompt.get('romance')}。\n"
+               "写：搜索记录3~5条（每条一行，前缀「搜|」，像深夜真会搜的短句，可暴露脆弱）；"
+               "草稿0~2条（前缀「稿|」，写给看手机的这个人但没发出去的话，≤30字）。"
+               "【铁律】只基于素材，绝不发明人名地名秘密。不用破折号。" + _lang_rule(prompt))
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model, "messages": [{"role": "system", "content": sys},
+                               {"role": "user", "content": "记录："}],
+                               "max_tokens": 180, "temperature": 0.95}, timeout=20)
+            txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+            searches, drafts = [], []
+            for line in txt.splitlines():
+                line = line.strip()
+                if line.startswith(("搜|", "搜｜")):
+                    searches.append(line[2:].strip().strip("「」\"'"))
+                elif line.startswith(("稿|", "稿｜")):
+                    drafts.append(line[2:].strip().strip("「」\"'"))
+            return ({"searches": searches[:5], "drafts": drafts[:2]}
+                    if searches or drafts else {})
+        except Exception:
+            return {}
+
     def _peek_twist(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """📱🔍 立场跳变的转折消息: 上周还在密谋这周已翻脸 — 线程里必须留下裂痕。"""
         sys = (f"「{prompt.get('with','')}」的对话线程里，两人立场刚从 {prompt.get('old_stance')} 档"
@@ -4300,6 +4431,8 @@ class QwenLLM:
         ch = prompt.get("char") or {}
         device = prompt.get("device") or "手机"
         tail = "\n".join(f"{'对方' if m.get('from') == 'me' else ch.get('name','你')}：{m.get('text','')}"
+                         + (f"［{'对方' if m.get('from') == 'me' else '你'}发来一张图："
+                            f"{m['seen']}］" if m.get("seen") else "")
                          for m in (prompt.get("thread_tail") or [])) or "（这是你们第一次这样捎话）"
         # 🎙 身份带与文风带走共用实现 —— 一个角色只有一套声音，手机上不许换腔调
         # (Yi 报障 2026-08-08:「手机上性格跟线下不一样」)。从前这里是另起炉灶手写的
@@ -4344,7 +4477,10 @@ class QwenLLM:
         new_reveal = ctx.get("new_reveal") or []
         has_hidden = bool(ctx.get("has_hidden"))
         pl = prompt.get("player_name") or "对方"
+        # 👁 发来的图翻成一句话跟着那条消息走 —— 下游一个字都不用改 (Yi 2026-08-11)
         tail = "\n".join(f"{pl if m.get('from') == 'me' else ch.get('name','')}：{m.get('text','')}"
+                         + (f"［{'TA' if m.get('from') == 'me' else '你'}发来一张图："
+                            f"{m['seen']}］" if m.get("seen") else "")
                          for m in (prompt.get("thread_tail") or []))
         # 🧊 稳定带前置 (与 _build_system 同手术): 人设头+两大静态铁律块逐字不变,
         # 排前面吃 DeepSeek 前缀缓存; memory/recent_scene/last_ignored 等逐次变的殿后
@@ -5020,6 +5156,35 @@ class QwenLLM:
         except Exception:
             return {}
 
+    def _diary_digest(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🗓 手账摘要蒸馏: 日程 + 笔记 → 两句话 (Yi 2026-08-09「每过一个礼拜简单总结一次」).
+
+        两格分开是【披露边界】不是排版: plans 角色可以顺着关心, compass 角色永远
+        看不见。合成一格会让角色说出玩家私人本子里的话。Degrades to {} (下轮再蒸)。"""
+        sys = ("你为一个长线运转的游戏维护【玩家手账的摘要】。只输出JSON："
+               '{"plans":"玩家接下来打算做的事，一句话，≤40字",'
+               '"compass":"玩家私下在意/想弄清楚的方向，一句话，≤40字"}。'
+               "要求：写成人话不要列清单；只压缩不要发挥，手账里没有的别编；"
+               "过期的安排不必再提；两格各自独立，plans 只写日程、compass 只写笔记；"
+               "对应的料是空的就把那一格写成空字符串。" + _lang_rule(prompt))
+        u = (f"上一版摘要：{prompt.get('prior') or {}}\n"
+             f"今天是第 {prompt.get('day')} 天\n"
+             f"日程（玩家公开的安排）：\n" + "\n".join(str(x) for x in prompt.get("plans") or []) +
+             "\n笔记（玩家私下记的）：\n" + "\n".join(str(x) for x in prompt.get("notes") or []))
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model,
+                               "messages": [{"role": "system", "content": sys},
+                                            {"role": "user", "content": u}],
+                               "max_tokens": 220, "temperature": 0.5,
+                               "response_format": {"type": "json_object"}},
+                              timeout=10)   # 跑在后台线程里, 慢了宁可这周不蒸
+            import json as _json
+            data = _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
     def _player_profile(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """🪞 玩家档案蒸馏: 近期对话 → 玩家习惯 facts + 每个在场角色眼中的印象.
         见证名单由引擎给定, 只许更新名单内的角色. Degrades to {} (下轮再蒸)."""
@@ -5640,6 +5805,8 @@ class QwenLLM:
             return self._absent_scene(prompt)
         if prompt.get("player_profile"):
             return self._player_profile(prompt)
+        if prompt.get("diary_digest"):
+            return self._diary_digest(prompt)
         if prompt.get("intro_vignettes"):
             return self._intro_vignettes(prompt)
         if prompt.get("director_brief"):
@@ -5672,6 +5839,12 @@ class QwenLLM:
             return self._peek_threads(prompt)
         if prompt.get("peek_twist"):
             return self._peek_twist(prompt)
+        if prompt.get("forum_posts"):
+            return self._forum_posts(prompt)
+        if prompt.get("forum_reply"):
+            return self._forum_reply(prompt)
+        if prompt.get("peek_browser"):
+            return self._peek_browser(prompt)
         if prompt.get("mint_item_cards"):
             # 🪦 死调用短路 (审查实弹 2026-08-01): 这个 key 从没有过 handler, 掉进主拍
             # narrate 分支白烧一次大调用还拿不到 cards — 卡属性走 items.rule_card 确定性兜底

@@ -27,6 +27,8 @@ from . import heat as heat_mod
 from . import intent as intent_mod
 from . import items as items_mod
 from . import logic
+from . import diary as diary_mod
+from . import socialfic as socialfic_mod
 from . import profile as profile_mod
 from . import relationships
 from . import sanity as sanity_mod
@@ -2276,14 +2278,29 @@ def _physical_roster(content: dict[str, Any], state: dict[str, Any], persona: di
             + pose_line
         )
     if offstage:
-        lines.append(
-            f"The following are NOT living people in the scene. They appear only in mirrors, "
-            f"shadows, or rumor. Never count them among those present, and never let them "
-            f"join a conversation like a normal person: {sep.join(offstage)}."
-            if en else
-            f"以下并不是在场的活人，只会出现在镜中、暗处或传闻里——永远不要把 TA 算进在场人数，"
-            f"也不要让 TA 像普通人一样正常参与对话：{'、'.join(offstage)}。"
-        )
+        # 🧩 包D: 被玩家「移出剧情」的是下台的活人, 不是镜中物 —— 措辞分流,
+        # 不然拉黑一个正常人, 提示词把TA写成超自然存在 (复审抓的)。
+        _removed = [n for n in offstage if n in {
+            (c.get("name") or "") for c in _characters(content)
+            if c.get("_removed_by_player")}]
+        _spectral = [n for n in offstage if n not in _removed]
+        if _removed:
+            lines.append(
+                f"These people have walked out of the player's life. They do not appear in "
+                f"scenes and never join conversations: {sep.join(_removed)}."
+                if en else
+                f"以下的人已退出了玩家的生活——不会出现在场景里，也不要让 TA 参与对话："
+                f"{'、'.join(_removed)}。"
+            )
+        if _spectral:
+            lines.append(
+                f"The following are NOT living people in the scene. They appear only in mirrors, "
+                f"shadows, or rumor. Never count them among those present, and never let them "
+                f"join a conversation like a normal person: {sep.join(_spectral)}."
+                if en else
+                f"以下并不是在场的活人，只会出现在镜中、暗处或传闻里——永远不要把 TA 算进在场人数，"
+                f"也不要让 TA 像普通人一样正常参与对话：{'、'.join(_spectral)}。"
+            )
     if names:
         # 🎭 the headcount pins NAMED cast only — it must not sterilize the scene of the
         # nameless extras a real place would have (waiters, guards, passers-by)
@@ -6197,6 +6214,22 @@ _PEEK_WINDOW_TURNS = 3
 _PEEK_RE = re.compile(
     r"(?:偷看|偷翻|翻看|翻查|查看|检查|翻|查)\s*(?:一下|了|看)?\s*"
     r"([^，。！？\s]{1,10}?)的(?:手机|设备|通讯|传呼机|数据板|沃克斯|水晶|留言|口信)")
+# 🧩 包D 前置修理: EN 剧本整条偷看线曾点不着 (正则纯中文, 名段还禁空格 —
+# 「Mrs. Ainsley」这种名字永远漏)。英文构式单独一条, 名段放行空格/点号/弯引号。
+_PEEK_RE_EN = re.compile(
+    r"(?:look(?:ing)?\s+at|check(?:ing)?|peek(?:ing)?\s+(?:at|into)|go(?:ing)?\s+through|"
+    r"pick(?:ing)?\s+up|glanc(?:e|ing)\s+at|read(?:ing)?|search(?:ing)?)\s+"
+    r"([A-Za-z][A-Za-z .'’-]{0,28}?)[’']s\s+"
+    r"(?:phone|device|pager|slate|crystal|vox|messages?)", re.IGNORECASE)
+
+
+def _peek_ref(text: str) -> str | None:
+    """「翻TA的手机」这句话里的 TA — 中西任一构式命中即返回名指涉, 否则 None。"""
+    m = _PEEK_RE.search(text or "")
+    if m:
+        return m.group(1)
+    m = _PEEK_RE_EN.search(text or "")
+    return m.group(1).strip() if m else None
 
 
 def peekable(content: dict[str, Any]) -> bool:
@@ -6324,14 +6357,19 @@ def _peek_cache(content: dict[str, Any], state: dict[str, Any],
     return pk
 
 
-def _peek_deep_frags(content: dict[str, Any], c: dict[str, Any]) -> list[str]:
-    """深翻的碎片收成: unlock.device_of 指着TA的 + authored 素材标 reveals 的。"""
+def _peek_deep_frags(content: dict[str, Any], c: dict[str, Any],
+                     dp_entries: list | None = None) -> list[str]:
+    """深翻的碎片收成: unlock.device_of 指着TA的 + authored 素材标 reveals 的。
+    🧩 包D 复审抓的: reveals 必须只从【本幕可见】的 device_peek 条目收 (dp_entries=
+    过滤后的清单) —— 否则按幕锁只锁了字没锁碎片, 玩家一个字没见着秘密却解了。
+    锁着的条目等幕到了、下次机会窗再翻时自然收成 (窗口按账本新货重开)。"""
     fids = []
     for sec in content.get("secrets") or []:
         for f in sec.get("fragments") or []:
             if (f.get("unlock") or {}).get("device_of") == c.get("id") and f.get("id"):
                 fids.append(f["id"])
-    for e in (c.get("device_peek") or []):
+    entries = dp_entries if dp_entries is not None else (c.get("device_peek") or [])
+    for e in entries:
         if e.get("reveals"):
             fids.append(str(e["reveals"]))
     return fids
@@ -6342,12 +6380,13 @@ def peek_attempt(content: dict[str, Any], state: dict[str, Any], player_input: s
     """玩家「做:翻TA的手机」。返回 {beats, frag_ids, moments} 或 None (不是这个动作)。"""
     if channel != "do" or not peekable(content):
         return None
-    m = _PEEK_RE.search(player_input or "")
-    if not m:
+    ref = _peek_ref(player_input or "")
+    if not ref:
         return None
-    ref = m.group(1)
+    _rl = ref.lower()
     c = next((x for x in _characters(content) if x.get("name")
-              and (x["name"] == ref or x["name"] in ref or ref in x["name"])), None)
+              and (x["name"].lower() == _rl or x["name"].lower() in _rl
+                   or _rl in x["name"].lower())), None)
     if not c or c.get("id") == state.get("player_character_id"):
         return None
     cid = c["id"]
@@ -6427,24 +6466,37 @@ def peek_attempt(content: dict[str, Any], state: dict[str, Any], player_input: s
     # 深翻: 全文 + authored 素材 + 碎片收成
     pk["window"] = 0
     pk["ledger_mark"] = _peek_ledger_mark(content, state, cid)
+    # 🧩 包D: 作者素材按幕位过滤 (设计稿 23b「到第三幕才能读」)。从前深翻一次全给,
+    # act_min 根本没人看 —— 现在锁着的只报条数, 幕到了才见字。
+    vis_dp, locked_n, unlock_at = socialfic_mod.filter_device_peek(
+        c, int(state.get("act", 1) or 1))
     lines = []
     for t in (cache.get("threads") or {}).values():
         lines.append(f"和{t.get('with')}：" + " / ".join((t.get("msgs") or [])[-4:]))
-    for e in (c.get("device_peek") or []):
+    for e in vis_dp:
         who = str(e.get("with") or "未知号码")
         lines.append(f"和{who}：" + " / ".join(str(x)[:60] for x in (e.get("msgs") or [])[:4]))
     body = "。".join(lines) or "里面干净得反常。"
+    if locked_n:
+        body += _t(content,
+                   f"还有 {locked_n} 段对话锁在更深处，现在还读不动。",
+                   f" {locked_n} more threads sit locked deeper in.")
     _audit(state, "peek", True, c.get("name", ""), "深翻")
     _b(f"（你把{c.get('name')}的{dev}翻了个底朝天。{body}）",
        f"(You went through {c.get('name')}'s {dev}. {body})")
+    # 🧩 包D: 深翻附带浏览器历史与未发送草稿 (一次生成永久一致, _peek_cache 家法)
+    extras = socialfic_mod.device_extras(content, state, c, llm)
     view = {"mode": "deep", "device": dev, "nickname": pk.get("nickname"),
             "owner": {"name": c.get("name"), "avatar_url": c.get("avatar_url")},
+            "locked_msgs": locked_n, "unlock_act": unlock_at,
+            "browser": extras.get("browser") or [],
+            "drafts": extras.get("drafts") or [],
             "threads": ([{"with": t.get("with"), "msgs": list(t.get("msgs") or [])}
                          for t in (cache.get("threads") or {}).values()]
                         + [{"with": str(e.get("with") or "未知号码"),
                             "msgs": [str(x)[:60] for x in (e.get("msgs") or [])[:4]]}
-                           for e in (c.get("device_peek") or [])])}
-    return {"beats": beats, "frag_ids": _peek_deep_frags(content, c),
+                           for e in vis_dp])}
+    return {"beats": beats, "frag_ids": _peek_deep_frags(content, c, dp_entries=vis_dp),
             "moments": moments, "view": view}
 
 
@@ -6538,6 +6590,9 @@ def bank_transfer(content: dict[str, Any], state: dict[str, Any], persona: dict[
         raise ValueError("没有这个收款人")
     if not has_contact(state, char_id):
         raise ValueError("你还没有TA的账户——先要到联系方式")
+    # 🧩 包D: 拉着黑还打钱? 先把人放出来 (send_phone 同判; 钱不动, LLM 不烧)
+    if socialfic_mod.block_level(state, char_id) in ("block", "removed"):
+        raise ValueError("你把TA拉黑了——想转账，先解除拉黑。")
     amount = _to_int(amount, 0, 9999)
     if amount <= 0:
         raise ValueError("金额不对")
@@ -6852,6 +6907,14 @@ def phone_push(content: dict[str, Any], state: dict[str, Any], char: dict[str, A
     """Deliver incoming message bubbles from a character. Returns the UI event payload.
     call=True marks the lines as spoken down the line (📞 来电) — the UI rings.
     A text delivery may carry a 📷 随手拍 on the last bubble (never on a call)."""
+    # 🧩 包D 非对称账本: block/removed 期间的来信被暂扣 — TA 视角已发出, 你的
+    # {dev} 从没响过; 解除拉黑时按原时序回放 (可撤销不删档)。mute 不拦信只静音角标。
+    if socialfic_mod.holds_incoming(state, char.get("id")):
+        now_label_held = (clock_view(content, state) or {}).get("label", "")
+        socialfic_mod.hold_incoming(state, char.get("id"), msgs,
+                                    now_label or now_label_held, call=call)
+        _audit(state, "phone.held", False, char.get("name", ""), f"拉黑期暂扣×{len(msgs or [])}")
+        return None
     th = _thread(state, char.get("id"))
     snap = None if call else maybe_snap(content, state, char, (msgs or [""])[-1])
     for i, m in enumerate(msgs):
@@ -6922,8 +6985,10 @@ def reachout_on_meet(content: dict[str, Any], state: dict[str, Any], llm: LLM,
             "一两句, 贴你的性格: 报个名号/说句场面话/或者只丢一句冷淡的确认。"
             "别热情得不像你, 也别写成客服话术。",
             f"{c.get('name', '')}。", llm, beat_log)
-        out.append(phone_push(content, state, c, msgs, now_label))
-        _audit(state, "reach.intro", True, str(c.get("name") or "")[:12])
+        _p = phone_push(content, state, c, msgs, now_label)
+        if _p:
+            out.append(_p)
+            _audit(state, "reach.intro", True, str(c.get("name") or "")[:12])
     return out
 
 
@@ -6971,8 +7036,10 @@ def reachout_after_event(content: dict[str, Any], state: dict[str, Any], llm: LL
             "别复述刚才的事, 那是你们俩都在场的; 写此刻心里剩下的那点东西, "
             "一两句, 可以只说半句。",
             "……", llm, beat_log)
-        out.append(phone_push(content, state, c, msgs, now_label))
-        _audit(state, "reach.after", True, f"{c.get('name', '')}·{what[:10]}")
+        _p = phone_push(content, state, c, msgs, now_label)
+        if _p:
+            out.append(_p)
+            _audit(state, "reach.after", True, f"{c.get('name', '')}·{what[:10]}")
     return out
 
 
@@ -7174,14 +7241,18 @@ def phone_deliveries(content: dict[str, Any], state: dict[str, Any], here_ids: s
                                    f"你们约好了{when}（{what}），时辰快到了，你捎话提醒TA，带上你自己的语气",
                                    _t(content, f"别忘了{when}，{what}。我等你。",
                                       f"Don't forget: {when}, {what}. I'll be waiting."), llm, beat_log)
-            out.append(phone_push(content, state, c, msgs, now_label))
+            _p = phone_push(content, state, c, msgs, now_label)
+            if _p:
+                out.append(_p)
         elif pr.get("status") in ("missed", "missed_noted") and not pr.get("texted"):
             pr["texted"] = True
             msgs = compose_message(content, state, c, "stood_up",
                                    f"TA爽约了你们约好的（{what}），你心里不好受，忍不住捎话给TA",
                                    _t(content, "我等了你很久。你没来。",
                                       "I waited a long time. You never came."), llm, beat_log)
-            out.append(phone_push(content, state, c, msgs, now_label))
+            _p = phone_push(content, state, c, msgs, now_label)
+            if _p:
+                out.append(_p)
     # ③ afterglow: a romance-tier character the player was JUST with, now apart
     seen = (state.get("phone") or {}).get("seen") or {}
     rels = state.get("rel") or {}
@@ -7207,7 +7278,9 @@ def phone_deliveries(content: dict[str, Any], state: dict[str, Any], here_ids: s
                                 "TA刚离开你身边，你心里还想着TA，忍不住捎一句——短、软、像TA的性格"),
                                _t(content, "你刚走，我就开始想你了。",
                                   "You just left and I already miss you."), llm, beat_log)
-        out.append(phone_push(content, state, c, msgs, now_label, call=as_call))
+        _p = phone_push(content, state, c, msgs, now_label, call=as_call)
+        if _p:
+            out.append(_p)
     return out
 
 
@@ -7885,6 +7958,15 @@ def deliver_due_phone(content: dict[str, Any], state: dict[str, Any]) -> int:
         if cid in dead or _hp == "dead":
             th["pending"] = []               # ⚰️ 死了: 连同还没到期的一起作废
             continue
+        # 🧩 包D: 拉黑期到点的延迟消息改道暂扣账本 (复审抓的: 这条路曾绕过拦截 —
+        # 玩家拉黑之后, 之前判了延迟的回复照样弹进线程)。解除时按原时序回放。
+        if socialfic_mod.holds_incoming(state, cid):
+            due = [p for p in pend if _ready(p)]
+            if due:
+                socialfic_mod.hold_incoming(
+                    state, cid, [str(p.get("text") or "")[:120] for p in due], label)
+                th["pending"] = [p for p in pend if not _ready(p)]
+            continue
         if _hp == "dying":
             # 🩸 判定侧 (_phone_beat) 判 never 认的是 (dead, dying), 读侧这道闸从前只
             # 写了 "dead" —— 而 set_char_hp 全仓只写 hurt/dying/None, 那半句是死代码,
@@ -7912,7 +7994,8 @@ def deliver_due_phone(content: dict[str, Any], state: dict[str, Any]) -> int:
 
 def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str, Any],
                char_id: str, text: str, llm: LLM | None = None,
-               beat_log: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+               beat_log: list[dict[str, Any]] | None = None,
+               img: str | None = None, seen: str | None = None) -> dict[str, Any]:
     """The player texts a character from anywhere. The character answers IN VOICE with
     their gated context (locked truths can't leak over text either) — or reads and says
     nothing (已读不回 is a statement too). Small relationship movement applies. Probing
@@ -7927,7 +8010,9 @@ def phone_send(content: dict[str, Any], state: dict[str, Any], persona: dict[str
     now_label = (clock_view(content, state) or {}).get("label", "")
     deliver_due_phone(content, state)   # 📬 打开线程先收到期的延迟消息 (Spec D)
     th = _thread(state, char_id)
-    th["msgs"].append({"from": "me", "text": text[:200], "at": now_label})
+    # 👁 玩家发的图: url 给客户端显示, seen 是「角色看见了什么」进提示词 (Yi 2026-08-11)
+    th["msgs"].append({"from": "me", "text": text[:200], "at": now_label,
+                       **({"img": img} if img else {}), **({"seen": seen} if seen else {})})
     _thread_cap(th)
     newly, cracked = _phone_probe(content, state, char_id, text)
     # 📱 时机与形状一次判完 (引擎判定, 模型写词) —— 判据见 _phone_beat
@@ -8204,8 +8289,13 @@ def mail_open(state: dict[str, Any], mail_id: str) -> dict[str, Any] | None:
 
 
 def phone_total_unread(content: dict[str, Any], state: dict[str, Any]) -> int:
-    """Everything blinking on the 小手机: unread texts + unread letters."""
-    return (phone_threads_view(content, state)["unread"]
+    """Everything blinking on the 小手机: unread texts + unread letters.
+    🧩 包D: mute 档的线程不进角标 (静音=不吵你, 信照收, 点开线程照旧能看)。"""
+    muted = socialfic_mod.muted_ids(state)
+    quiet = sum(int((th or {}).get("unread", 0) or 0)
+                for cid, th in (((state.get("phone") or {}).get("threads")) or {}).items()
+                if cid in muted)
+    return (phone_threads_view(content, state)["unread"] - quiet
             + sum(1 for m in (state.get("phone") or {}).get("mail") or [] if not m.get("read")))
 
 
@@ -8230,6 +8320,10 @@ def offline_pulse(content: dict[str, Any], state: dict[str, Any], here_ids: set,
         cid = c.get("id")
         if not cid or cid not in met or cid in dead or cid in here_ids \
                 or cid == state.get("player_character_id"):
+            continue
+        # 🧩 包D: 拉黑的人不进「你不在的时候」候选 —— 不然长离别的【信】走
+        # mail_push 绕过暂扣 (复审抓的), 还白占别人的主动名额和骰位
+        if socialfic_mod.holds_incoming(state, cid):
             continue
         mode = relationships.derive_mode(c, rels.get(cid) or relationships.new_scores(), tun)
         if mode == "lover":
@@ -8277,7 +8371,9 @@ def offline_pulse(content: dict[str, Any], state: dict[str, Any], here_ids: set,
                                f"你们有阵子没见了（离开了约{max(1, int(away_hours))}小时）。{hint}。",
                                _t(content, "好久没你的消息了。一切都好吗？",
                                   "Haven't heard from you in a while. Everything okay?"), llm)
-        out.append(phone_push(content, state, c, msgs, now_label))
+        _p = phone_push(content, state, c, msgs, now_label)
+        if _p:
+            out.append(_p)
     return out
 
 
@@ -12573,12 +12669,21 @@ def run_turn_stream(
                                     if p.get("status") == "missed" and p.get("char_id") == sp_id), None),
             # 🌆 a rumor from offscreen life, told once when the moment fits
             "rumor": (serve_rumor(state) if is_primary and not observer else ""),
-            # 🗓 玩家公开的行程: 将来的可以顺着关心, 刚过去的问一句结果 (只主叙者问)
+            # 🧩 包D: TA看到了你公开发的动态 (一次性核销, 主叙者限定) + 被拉黑的
+            # 事实 (谁被拉黑谁的提示词里就有这回事 — 拉黑要在戏里疼)
+            "social_echo": (socialfic_mod.take_echo(content, state)
+                            if is_primary and not observer else None),
+            "blocked_line": (socialfic_mod.blocked_line(content, state, sp_id)
+                             if not observer else None),
+            # 🗓 手账: 原文不再逐条进上下文 (Yi 2026-08-09), 只下发【每周蒸的摘要】。
+            # player_diary 保留是为了「那天过去了」那一条一次性事件 + 它的 _passed_id
+            # 盖章 (见回合尾), 它不是常驻占位; upcoming 那半边 qwen 侧已不再渲染。
             "player_diary": (player_diary_for_prompt(content, state)
                              if is_primary and not observer else None),
-            # 📔 玩家备忘录: 叙事罗盘 (角色看不见本子, 但相关线头要有机会浮现)
-            "player_notes": ([n.get("text") for n in (state.get("player_notes") or [])][:8]
-                             if is_primary and not observer else None),
+            "diary_plans": (diary_mod.plans_line(state)
+                            if is_primary and not observer else None),
+            "diary_compass": (diary_mod.compass_line(state)
+                              if is_primary and not observer else None),
             # 📱 what you two texted lately — the scene remembers the phone
             "sms_tail": sms_tail_line(state, sp_id),
             # 🧠 TA 记得你说过的【具体的事】。从前这本账只接在短信回复一条路上 ——
@@ -13732,6 +13837,13 @@ def run_turn_stream(
     # ⚡ 蒸馏在后台线程 (Yi: 等待太长 — 曾最多顶 10s), 结果下一回合 apply_pending 合账
     if profile_mod.apply_pending(state):
         _audit(state, "profile.merged", True, "后台蒸馏入账")
+    # 🗓 手账摘要 (Yi 2026-08-09): 手账原文退出上下文, 跨一个游戏周蒸一次摘要再进。
+    # 同一套家法 —— 后台线程蒸, 下一回合合账; 蒸失败不盖周章, 下一拍自己重试。
+    if diary_mod.apply_pending(state):
+        _audit(state, "diary.merged", True, "手账摘要入账")
+    if not observer and diary_mod.due(state):
+        diary_mod.distill_async(state, llm)
+        _audit(state, "diary.distill", True, f"第{(state.get('clock') or {}).get('day', 1)}天 跨周")
     if player_input and channel in ("say", "do") and not observer:
         if profile_mod.note_turn(state):
             _wit = [{"id": c.get("id"), "name": c.get("name")}

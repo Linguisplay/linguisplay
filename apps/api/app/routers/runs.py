@@ -6,7 +6,9 @@ import tempfile
 import time as _time_mod
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
+import uuid
+
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -86,9 +88,12 @@ def _img_worker():
     from ..engine.gal import debg, shrink_jpg, to_webp, trim_alpha
     from ..engine.qwen import generate_image
     while True:
-        prompt, path, size, negative, seed = _IMG_Q.get()
+        prompt, path, size, negative, seed, *_rest = _IMG_Q.get()
+        overwrite = bool(_rest[0]) if _rest else False
         try:
-            if not path.exists():
+            # overwrite=重画: 老脸留到新字节真落盘那一刻才被覆盖 —— 先删后画的写法
+            # 在生图 API 欠费/限流那天 (实弹发生过) 会把玩家的脸永久删没。
+            if overwrite or not path.exists():
                 img = generate_image(prompt, size=size, negative=negative, seed=seed)
                 if not img:      # throttled / transient → one measured retry
                     import time
@@ -113,7 +118,8 @@ def _img_worker():
 
 
 def _enqueue_image(prompt: str, path, size: str,
-                   negative: str = "", seed: int | None = None) -> None:
+                   negative: str = "", seed: int | None = None,
+                   overwrite: bool = False) -> None:
     with _IMG_LOCK:
         if str(path) in _IMG_PENDING:
             return
@@ -122,7 +128,7 @@ def _enqueue_image(prompt: str, path, size: str,
             t = _imgthreading.Thread(target=_img_worker, daemon=True)
             _IMG_WORKER.append(t)
             t.start()
-    _IMG_Q.put((prompt, path, size, negative, seed))
+    _IMG_Q.put((prompt, path, size, negative, seed, overwrite))
 
 
 def _queue_item_icons(state: dict, rows) -> None:
@@ -385,11 +391,15 @@ def _to_run(r: RunModel) -> Run:
         r.pinned_content or {}, int(st.get("act", 1)),
         exclude_id=pcid if mode == "character" else None, state=st,
     )
+    # 🎵 进档就有音乐: 拿当前存档现判一次节拍 (新档 turn_seq=0 → 开场曲)。
+    # 算一次, 顶层与 state 各挂一份 (现网客户端读顶层 run.direct)。
+    boot_direct = _boot_direct(r, st)
     return Run(
         id=r.id,
         story_id=r.story_id,
         story_version=r.story_version,
         persona_id=r.persona_id,
+        direct=boot_direct,
         state=RunState(
             act=st.get("act", 1),
             affinity=st.get("affinity", 0),
@@ -398,8 +408,7 @@ def _to_run(r: RunModel) -> Run:
             scene=st.get("scene"),
             ended=st.get("ended", False),
             ending=st.get("ending"),
-            # 🎵 进档就有音乐: 拿当前存档现判一次节拍 (新档 turn_seq=0 → 开场曲)
-            direct=_boot_direct(r, st),
+            direct=boot_direct,
             mode=mode,
             player_character_id=pcid,
             goal=st.get("goal", "") or runtime.goal_for(r.pinned_content or {}, st),
@@ -435,6 +444,8 @@ def _to_run(r: RunModel) -> Run:
             player_events=runtime.player_events_view(r.pinned_content or {}, st),
             player_notes=runtime.player_notes_view(st),
             phone_unread=runtime.phone_total_unread(r.pinned_content or {}, st),
+            blocks={cid: (b or {}).get("level") for cid, b in (st.get("blocks") or {}).items()
+                    if isinstance(b, dict) and b.get("level")},
             phone_on=runtime.phone_enabled(r.pinned_content or {}),
             verdict=runtime.verdict_view(r.pinned_content or {}, st),
             cultivation=runtime.cult_view(r.pinned_content or {}, st),
@@ -446,7 +457,20 @@ def _to_run(r: RunModel) -> Run:
 
 def _to_beat(b: BeatModel) -> Beat:
     return Beat(id=b.id, seq=b.seq, type=b.type, speaker_name=b.speaker_name, text=b.text,
-                author=b.author, mood=b.mood)
+                author=b.author, mood=b.mood,
+                speaker_id=getattr(b, "speaker_id", None), present_ids=b.present_ids)
+
+
+def _sid(content: dict, speaker_name) -> str | None:
+    """🧩 对齐包A: 落库时把说话人名字解析成角色 id (含涌现角色) —— 观战按角色筛、
+    改名不断链靠它。引擎的拍只带名字; 对不上号 (旁白/路人/改名前的老名) → None。"""
+    nm = (speaker_name or "").strip()
+    if not nm:
+        return None
+    for c in ((content.get("story") or {}).get("characters") or []):
+        if (c.get("name") or "").strip() == nm:
+            return c.get("id")
+    return None
 
 
 def _persona_dict(p: PersonaModel) -> dict:
@@ -524,6 +548,25 @@ def list_runs(archived: bool = False,
                          if c.get("avatar_url") and c.get("id") != pcid][:3]
         except Exception:
             pass
+        # 🧩 对齐包A: 列表一次给够料 (orb 环/Lobby 卡/ChatList 角标)。
+        # 单档算坏绝不拖垮整张列表 — 和上面存档卡视觉化同一条家规。
+        unread = 0
+        map_pct = None
+        entries = 0
+        direct: dict = {}
+        try:
+            unread = int(runtime.phone_total_unread(content, st) or 0)
+            entries = (len(st.get("unlocked_fragment_ids") or [])
+                       + len(st.get("player_notes") or [])
+                       + len(st.get("album") or []))
+            locs = ((content.get("story") or {}).get("locations") or [])
+            if locs:
+                avail = sum(1 for l in locs
+                            if runtime.location_available(content, st, l))
+                map_pct = round(100 * avail / len(locs))
+            direct = _boot_direct(r, st)
+        except Exception:
+            pass
         out.append(
             RunSummary(
                 id=r.id,
@@ -532,7 +575,7 @@ def list_runs(archived: bool = False,
                 cover_url=story.get("cover_url"),
                 persona_id=r.persona_id,
                 last_beat_preview=last,
-                unread=False,
+                unread=unread,
                 act=int(st.get("act", 1) or 1),
                 mode=st.get("mode", "character"),
                 player_character_name=(runtime._char_name(content, pcid) if pcid else None),
@@ -541,6 +584,11 @@ def list_runs(archived: bool = False,
                 scene_name=scene_name,
                 faces=faces,
                 updated_at=r.updated_at,
+                goal=str(st.get("goal") or ""),
+                acts_total=len(story.get("acts") or []),
+                entries=entries,
+                map_pct=map_pct,
+                direct=direct,
             )
         )
     return out
@@ -609,6 +657,20 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
     state = {**runtime.default_state(), "scene": runtime.opening_scene(content),
              "mode": body.mode, "player_character_id": pcid}
     state["goal"] = runtime.goal_for(content, state, 1)
+    # 🧩 对齐包A (设计稿 04 EnterWorldNaming): 进这个世界的【局内名】。
+    # 只在「以自己身份进」时生效 —— 附身角色时你就是 TA, 名字是 TA 的。
+    # 撞名拒收 (复审): 和剧中人重名/互为子串的名字会让 POV 守卫每回合空转一次
+    # 纠错生成 (成本翻倍), 还会让观战的按名筛选把玩家台词算到 NPC 头上 ——
+    # 涌现管线早就拒收同名 (runtime 同名角色检查), 这个入口同规矩。
+    _pn = runtime.dedash((body.player_name or "").strip())[:24]
+    if _pn and not pcid:
+        if len(_pn) < 2:
+            raise HTTPException(400, "名字至少两个字")
+        for _c in ((content.get("story") or {}).get("characters") or []):
+            _nm = (_c.get("name") or "").strip()
+            if _nm and (_pn == _nm or _pn in _nm or _nm in _pn):
+                raise HTTPException(400, f"这个名字和剧中人「{_nm}」撞了——换一个，别抢戏")
+        state["player_name"] = _pn
     # 🧭 口味温启动: 账号级风格先验 (只学风格不带剧透) — 换个本子世界依然懂你
     _seed_taste = taste_mod.seed_from_account(getattr(user, "taste", None))
     if _seed_taste:
@@ -738,7 +800,7 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
     run.beats = [
         BeatModel(seq=i, type=b.get("type", "description"),
                   speaker_name=b.get("speaker_name"), text=b.get("text", ""),
-                  author="engine")
+                  author="engine", speaker_id=_sid(content, b.get("speaker_name")))
         for i, b in enumerate(opening)
     ]
     db.add(run)
@@ -1022,7 +1084,8 @@ def play(
     elif pcid:
         player_name = runtime._char_name(r.pinned_content or {}, pcid) or (persona.name if persona else None)
     else:
-        player_name = persona.name if persona else None
+        # 🧩 对齐包A: 开档起的局内名压过 persona.name (设计稿 04 EnterWorldNaming)
+        player_name = st.get("player_name") or (persona.name if persona else None)
     # empty input (god "keep watching" / "look around") → nothing to echo as a player beat
     if (body.input or "").strip():
         db.add(BeatModel(
@@ -1033,6 +1096,7 @@ def play(
             text=("（旁观指引）" + body.input) if mode == "god" else body.input,
             author="player",
             present_ids=present_ids,
+            speaker_id=(pcid if mode == "character" else None),  # 附身=那个角色的 id
             state_before=(r.state or {}),  # 重说/回溯: this turn is a rewind point
         ))
         next_seq += 1
@@ -1043,6 +1107,9 @@ def play(
     if body.client_turn_id:   # 🎫 随 final state 落库 — 重放的同一键在上面被 409
         state0["last_client_turn_id"] = body.client_turn_id
     persona_dict = _persona_dict(persona) if persona else {}
+    # 🧩 对齐包A: 局内名进提示词 — 角色喊你的是这个名字, 不是 persona 档案名
+    if st.get("player_name") and not pcid:
+        persona_dict["name"] = st["player_name"]
     start_seq = next_seq
     # pre-turn content snapshot: only PERSISTED if this turn ends up mutating content —
     # then a rewind can erase everything the erased timeline created (Yi: 重说要清记忆)
@@ -1104,6 +1171,7 @@ def play(
                         run_id=run_id, seq=seq, type=payload.get("type", "description"),
                         speaker_name=payload.get("speaker_name"), text=payload.get("text", ""),
                         author="engine", present_ids=present_ids, mood=payload.get("mood"),
+                        speaker_id=_sid(content, payload.get("speaker_name")),
                     )
                     db2.add(eb)
                     db2.commit()
@@ -1163,8 +1231,23 @@ def play(
                                   BeatModel.seq == turn_first_seq).first())
                     if fb is not None and fb.content_before is None:
                         fb.content_before = content_snapshot
+                    # 🧩 涌现角色的出场拍生在 TA 注册进班底之前 → 落库时 _sid 解析
+                    # 不到 id (复审抓的)。班底落定后回填这一回合的拍 —— 出场那场戏
+                    # 正是观战筛选最需要的一场。
+                    for _bb in (db2.query(BeatModel)
+                                .filter(BeatModel.run_id == run_id,
+                                        BeatModel.seq >= turn_first_seq,
+                                        BeatModel.speaker_id.is_(None),
+                                        BeatModel.speaker_name.isnot(None)).all()):
+                        _sid2 = _sid(content, _bb.speaker_name)
+                        if _sid2:
+                            _bb.speaker_id = _sid2
                 db2.commit()
-                yield _event({"event": "state", "state": _to_run(run).state.model_dump()})
+                # direct 不随 state 事件走: 回合内的演出权威是下面单独的 direct 事件
+                # (stage_turn 带 乐师/压力/威胁), _boot_direct 只有裸状态 —— 两份并发
+                # 会打架 (tint 闪断/一回合换两次曲)。direct 只在 GET /runs/{id} 开档时给。
+                yield _event({"event": "state",
+                              "state": _to_run(run).state.model_dump(exclude={"direct"})})
                 yield _event({"event": "scene", "scene": final.get("scene")})
                 yield _event({"event": "cast", "cast": final.get("cast", [])})
                 yield _event({"event": "here", "here": final.get("here", []),
@@ -1580,7 +1663,7 @@ def calendar_add(run_id: str, body: CalendarIn,
     st = dict(r.state or {})
     if (st.get("mode") or "character") == "god":
         raise HTTPException(403, "旁观模式没有自己的日历")
-    text = (body.text or "").strip()[:60]
+    text = (body.text or "").strip()[:400]
     if len(text) < 2:
         raise HTTPException(400, "写清楚一点：至少两个字")
     ck = st.get("clock") or {}
@@ -1627,7 +1710,7 @@ def note_add(run_id: str, body: NoteIn,
     import uuid as _uuid
     r = _own_run(run_id, user, db)
     st = dict(r.state or {})
-    text = (body.text or "").strip()[:80]
+    text = (body.text or "").strip()[:400]
     if len(text) < 2:
         raise HTTPException(400, "写清楚一点：至少两个字")
     notes = list(st.get("player_notes") or [])
@@ -1643,7 +1726,7 @@ def note_edit(run_id: str, note_id: str, body: NoteIn,
               user: User = Depends(current_user), db: Session = Depends(get_db)):
     r = _own_run(run_id, user, db)
     st = dict(r.state or {})
-    text = (body.text or "").strip()[:80]
+    text = (body.text or "").strip()[:400]
     if len(text) < 2:
         raise HTTPException(400, "写清楚一点：至少两个字")
     notes = list(st.get("player_notes") or [])
@@ -1786,6 +1869,10 @@ def send_phone(run_id: str, char_id: str, body: PhoneSendIn,
     # 📇 联系方式要靠剧情挣 (Yi): 没交换过, 你压根拨不通TA
     if not runtime.has_contact(st, char_id):
         raise HTTPException(403, "你还没有TA的联系方式。见面聊出交情，或者直接开口要一个。")
+    # 🧩 包D: 拉着黑还给TA发消息? 先把人放出来 (mute 只静音, 不拦你自己发)
+    from ..engine import socialfic as _sf
+    if _sf.block_level(st, char_id) in ("block", "removed"):
+        raise HTTPException(400, "你把TA拉黑了——想说话，先解除拉黑。")
     persona = db.get(PersonaModel, r.persona_id)
     # 📱↔🎭 线上线下通气: 把TA亲历的最近正文喂给短信/来电 (per-char过滤在引擎侧)
     _cut = int(st.get("history_cut_seq") or 0)
@@ -1798,6 +1885,58 @@ def send_phone(run_id: str, char_id: str, body: PhoneSendIn,
     except ValueError as e:
         raise HTTPException(400, str(e))
     _queue_snap(view)  # 📷 the reply may carry a photo — render it off-path
+    r.state = st
+    flag_modified(r, "state")
+    db.commit()
+    return view
+
+
+@router.post("/{run_id}/phone/{char_id}/photo")
+async def send_phone_photo(run_id: str, char_id: str, file: UploadFile = File(...),
+                           text: str = Form(""),
+                           user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """📷👁 玩家在手机上发一张图，角色得看得懂 (Yi 2026-08-11)。
+
+    做法上一个字都不新造：入口把图翻成一句话，剩下全走 send_phone 那条路。
+    客户端早就会渲染带 img 的消息（两侧都渲染），线程结构也早就有这个字段。
+    看图用 qwen-vl-max —— dashscope 早就配着，同一把 key 同一个端点，不加供应商。
+
+    看不出来（模型哑火/额度用尽）就只发文字，图照样上屏：图发得出去、角色当没看清，
+    比整条消息发不出去强。
+    """
+    from .stories import _sniff_image
+    r = _own_run(run_id, user, db)
+    if (r.state or {}).get("ended"):
+        raise HTTPException(409, "这局已经结束了")
+    data = await file.read()
+    if len(data) > 5 * 1024 * 1024:
+        raise HTTPException(413, "图片太大（上限 5MB）")
+    if not _sniff_image(data):
+        raise HTTPException(415, "只支持 JPG / PNG / WebP 图片")
+    st = dict(r.state or {})
+    if not runtime.has_contact(st, char_id):
+        raise HTTPException(400, "你还没有TA的联系方式")
+    from ..engine import socialfic as _sf
+    if _sf.block_level(st, char_id) in ("block", "removed"):
+        raise HTTPException(400, "你把TA拉黑了——想说话，先解除拉黑。")
+    _SNAP_DIR.mkdir(parents=True, exist_ok=True)
+    name = f"up_{uuid.uuid4().hex}.jpg"
+    (_SNAP_DIR / name).write_bytes(data)
+    from ..engine.qwen import see_image
+    seen = see_image(data, text)
+    persona = db.get(PersonaModel, r.persona_id)
+    _cut = int(st.get("history_cut_seq") or 0)
+    _bl = [{"author": b.author, "type": b.type, "text": b.text,
+            "speaker_name": b.speaker_name, "present_ids": b.present_ids}
+           for b in r.beats if b.seq >= _cut][-40:]
+    try:
+        view = runtime.phone_send(r.pinned_content or {}, st,
+                                  _persona_dict(persona) if persona else {},
+                                  char_id, text, beat_log=_bl,
+                                  img=f"/scene/snap/{name}", seen=seen)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    _queue_snap(view)
     r.state = st
     flag_modified(r, "state")
     db.commit()
@@ -2007,7 +2146,8 @@ def confront(run_id: str, body: ConfrontIn, user: User = Depends(current_user),
                                    speaker_name=payload.get("speaker_name"),
                                    text=payload.get("text", ""),
                                    author="engine", present_ids=present_ids,
-                                   mood=payload.get("mood"))
+                                   mood=payload.get("mood"),
+                                   speaker_id=_sid(content, payload.get("speaker_name")))
                     db2.add(eb)
                     db2.commit()
                     db2.refresh(eb)
@@ -2024,7 +2164,9 @@ def confront(run_id: str, body: ConfrontIn, user: User = Depends(current_user),
             if final is not None:
                 run.state = final["state"]
                 db2.commit()
-                yield _event({"event": "state", "state": _to_run(run).state.model_dump()})
+                # direct 不随 state 走 — 同主流的理由 (演出权威是单独的 direct 事件)
+                yield _event({"event": "state",
+                              "state": _to_run(run).state.model_dump(exclude={"direct"})})
                 if final.get("moments") or final.get("rel_deltas"):
                     yield _event({"event": "moments", "moments": final.get("moments", []),
                                   "rel_deltas": final.get("rel_deltas", {})})
