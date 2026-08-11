@@ -4407,6 +4407,27 @@ class QwenLLM:
         except Exception:
             return {}
 
+    def _rel_brief(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🫂 关系网卡片的白话总结 (Yi 拍板 2026-08-11): 按上下文写这段关系走到哪了。
+        【硬约束】零数字 — 好感是黑箱, 写了数字整句会被引擎弃用。"""
+        sys = ("你在写关系图谱卡片上的一句话：玩家和这个角色的关系走到哪了。\n"
+               f"关系档位：{prompt.get('mode_name') or '相识'}；"
+               f"TA此刻的感受：{prompt.get('feeling') or '无'}（{prompt.get('why') or ''}）；"
+               f"经历标签：{'、'.join(prompt.get('tags') or []) or '无'}；"
+               f"最近的大事：{'；'.join(prompt.get('log') or []) or '无'}\n"
+               "写1~2句（≤50字）：要有过程感（从什么走到什么），落在此刻的温度上。"
+               "【铁律】绝不出现任何数字、分数、百分比、档位编号；只基于素材，"
+               "不发明事件。不用破折号。" + _lang_rule(prompt))
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model, "messages": [{"role": "system", "content": sys},
+                               {"role": "user", "content": "总结："}],
+                               "max_tokens": 70, "temperature": 0.8}, timeout=15)
+            txt = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+            return {"brief": txt.splitlines()[0].strip().strip("「」\"'")} if txt else {}
+        except Exception:
+            return {}
+
     def _peek_twist(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """📱🔍 立场跳变的转折消息: 上周还在密谋这周已翻脸 — 线程里必须留下裂痕。"""
         sys = (f"「{prompt.get('with','')}」的对话线程里，两人立场刚从 {prompt.get('old_stance')} 档"
@@ -5416,6 +5437,9 @@ class QwenLLM:
              + (f"世界观：{wf}" + chr(10) if wf else "")
              + (f"文风：{stl}" + chr(10) if stl else "")
              + (f"可点到的话头：{topics[0]}" + chr(10) if topics else "")
+             + ("刚刚真的发生的事（定格旁白必须从这里面取材，绝不许另编一件没发生过的）：" + chr(10)
+                + chr(10).join(prompt.get("recent") or []) + chr(10)
+                if prompt.get("recent") else "")
              + "玩家此刻暂时放下游戏。写那1~2句定格旁白。")
         try:
             resp = _post_chat(self._url, self._key,
@@ -5845,6 +5869,8 @@ class QwenLLM:
             return self._forum_reply(prompt)
         if prompt.get("peek_browser"):
             return self._peek_browser(prompt)
+        if prompt.get("rel_brief"):
+            return self._rel_brief(prompt)
         if prompt.get("mint_item_cards"):
             # 🪦 死调用短路 (审查实弹 2026-08-01): 这个 key 从没有过 handler, 掉进主拍
             # narrate 分支白烧一次大调用还拿不到 cards — 卡属性走 items.rule_card 确定性兜底

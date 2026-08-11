@@ -10083,7 +10083,8 @@ def _secret_has_newly(content: dict[str, Any], sid, newly) -> bool:
 
 def build_parting_hook(content: dict[str, Any], state: dict[str, Any],
                        persona: dict[str, Any], llm: LLM | None = None,
-                       comeback: bool = False) -> list[dict[str, Any]]:
+                       comeback: bool = False,
+                       beat_log: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     """悬念离场: ONE cliffhanger narration — the last thing they see on return, pulling
     them back in. Spoiler-safe (topic labels only).
     ⚖️ comeback=True (现行唯一入口): /leave 只暂存, 归来的点击回合才在这里写词回放,
@@ -10093,8 +10094,14 @@ def build_parting_hook(content: dict[str, Any], state: dict[str, Any],
     topics = _pending_topics(act_progress(content, state, act))
     here = [c.get("name") for c in scene_characters(content, state) if c.get("name")]
     loc = current_location(content, state) or {}
+    # 📺 「上回」得知道上回发生了什么 (Yi 的陌生玩家实弹 2026-08-10): 从前这份提示词里
+    # 只有地点/在场的人/话题标签/幕设定 —— 没有一个字是【真的发生过的事】。模型只好照着
+    # 幕设定编: 玩家隔了 15 小时回来, 读到的是「她把章鱼烧递向你」, 而那一局里
+    # 从头到尾没出现过章鱼烧。回归玩家读到的第一句话是编的。
+    _recent = [f"{b.get('speaker_name') or '旁白'}：{(b.get('text') or '')[:70]}"
+               for b in (beat_log or []) if (b.get("text") or "").strip()][-6:]
     out = llm.generate({"parting": True, "persona": persona,
-                        "place": loc.get("name") or "", "cast": here,
+                        "place": loc.get("name") or "", "cast": here, "recent": _recent,
                         "topics": topics[:2], "scene": current_act(content, act)}) or {}
     beats = [b for b in (out.get("beats") or [])
              if b.get("type") == "description" and (b.get("text") or "").strip()]
@@ -12120,7 +12127,8 @@ def run_turn_stream(
     _pp = state.pop("parting_pending", None)
     if (_pp and returning and (state.get("mode") or "character") != "god"
             and channel != "think"):
-        for _b in build_parting_hook(content, state, persona, llm, comeback=True):
+        for _b in build_parting_hook(content, state, persona, llm, comeback=True,
+                                     beat_log=beat_log):
             all_beats.append(_b)
             yield ("beat", _b)
 
