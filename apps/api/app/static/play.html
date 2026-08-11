@@ -1904,7 +1904,33 @@ async function afterAuth() {
     if (runs.length) {
       const h = sechead(t("继续你的故事"));
       stories.appendChild(h);
-      runs.slice(0, 8).forEach(r => {
+      // 📚 先剧本再存档 (Yi 2026-08-11:「存档太多难以寻找」)。
+      //   同一本剧本的档收在一起, 剧本之间按「哪本你玩得最久」排;
+      //   本内 置顶 > 玩得久 > 最近动过。置顶的整本剧本也提到最前面。
+      const byStory = new Map();
+      runs.forEach(r => {
+        const g = byStory.get(r.story_id) ||
+          { title: r.story_title, turns: 0, pinned: false, at: "", runs: [] };
+        g.runs.push(r); g.turns += (r.turns || 0);
+        g.pinned = g.pinned || !!r.pinned;
+        if ((r.updated_at || "") > g.at) g.at = r.updated_at || "";
+        byStory.set(r.story_id, g);
+      });
+      const cmp = (a, b) => (b.pinned - a.pinned) || ((b.turns || 0) - (a.turns || 0))
+                            || String(b.updated_at || b.at || "").localeCompare(String(a.updated_at || a.at || ""));
+      const groups = [...byStory.values()].sort(cmp);
+      groups.forEach(g => g.runs.sort(cmp));
+      // 一本剧本只有一档时不必多一层标题 —— 那层是给「同一本好几档」用的
+      const flat = groups.length === runs.length;
+      groups.slice(0, 8).forEach(g => {
+        if (!flat) {
+          const sh = document.createElement("div");
+          sh.className = "sechead"; sh.style.cssText = "margin-top:10px";
+          sh.innerHTML = `<b>${g.pinned ? "📌 " : ""}${escapeHtml(g.title)}</b>` +
+            `<i>${g.runs.length} ${B("段进度", "runs")} · ${g.turns} ${B("拍", "turns")}</i>`;
+          stories.appendChild(sh);
+        }
+        g.runs.forEach(r => {
         // 🎟 戏票存根: 左侧宋体幕数是结构不是装饰 (它就是你的进度)
         const div = document.createElement("div");
         div.className = "stub" + (r.ended ? " done" : "");
@@ -1927,6 +1953,13 @@ async function afterAuth() {
           `</div>`;
         const ops = document.createElement("div");
         ops.className = "ops";
+        const pin = document.createElement("a");
+        pin.textContent = r.pinned ? "📌" : "📍";
+        pin.title = r.pinned ? B("取消置顶", "Unpin") : B("置顶这段进度", "Pin this run");
+        pin.onclick = async (e) => { e.stopPropagation();
+          const out = await j(`/runs/${r.id}/pin?pinned=${!r.pinned}`, { method:"POST" });
+          r.pinned = out.pinned; pin.textContent = r.pinned ? "📌" : "📍"; };
+        ops.appendChild(pin);
         const hid = document.createElement("a");
         hid.textContent = "🙈"; hid.title = B("隐藏这段进度（不删除，可在下方「已隐藏的局」里找回）", "Hide this run (kept — recover under Hidden runs)");
         hid.onclick = async (e) => { e.stopPropagation();
@@ -1941,6 +1974,7 @@ async function afterAuth() {
         div.appendChild(ops);
         div.onclick = () => resumeRun(r.id);
         stories.appendChild(div);
+        });
       });
       const shelf = document.createElement("p");
       shelf.className = "muted"; shelf.style.cssText = "margin:6px 0; font-size:12px; cursor:pointer";

@@ -572,6 +572,9 @@ def list_runs(archived: bool = False,
                 id=r.id,
                 story_id=r.story_id,
                 story_title=story.get("title", ""),
+                pinned=bool((r.state or {}).get("pinned")),
+                # r.beats 上面已经加载过 (last_beat_preview 用了), 这里不额外查库
+                turns=sum(1 for b in r.beats if b.author == "player"),
                 cover_url=story.get("cover_url"),
                 persona_id=r.persona_id,
                 last_beat_preview=last,
@@ -1889,6 +1892,19 @@ def send_phone(run_id: str, char_id: str, body: PhoneSendIn,
     flag_modified(r, "state")
     db.commit()
     return view
+
+
+@router.post("/{run_id}/pin")
+def pin_run(run_id: str, pinned: bool = True,
+            user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """📌 置顶一段进度。存 state 里而不是加一列 —— 零迁移，而且它本来就是这一局的事。"""
+    r = _own_run(run_id, user, db)
+    st = dict(r.state or {})
+    st["pinned"] = bool(pinned)
+    r.state = st
+    flag_modified(r, "state")
+    db.commit()
+    return {"pinned": st["pinned"]}
 
 
 @router.post("/{run_id}/phone/{char_id}/photo")

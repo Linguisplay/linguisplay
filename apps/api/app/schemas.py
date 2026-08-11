@@ -684,6 +684,9 @@ class RunSummary(BaseModel):
     # 🧩 对齐包A: 列表一次给够料 —— orb 进度环 (act/acts_total)、Lobby 卡的
     # 下一步钩子 (goal)、词条数 (entries)、地图完成度 (map_pct, 无图=None)。
     # 从前这些全躺在单 run 端点里, N 张卡就要 N 次请求 (出口带宽 0.4Mbps 禁不起)。
+    # 📌 存档太多难找 (Yi 2026-08-11): 置顶 + 玩了多久, 列表靠这两样排序与分组
+    pinned: bool = False
+    turns: int = 0                      # 玩家真的打过多少拍 —— 「玩了多久」的口径
     goal: str = ""
     acts_total: int = 0
     entries: int = 0
