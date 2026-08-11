@@ -1894,6 +1894,28 @@ def send_phone(run_id: str, char_id: str, body: PhoneSendIn,
     return view
 
 
+@router.patch("/{run_id}/phone/{char_id}/msg/{msg_id}")
+def edit_phone_msg(run_id: str, char_id: str, msg_id: str, body: dict = Body(...),
+                   user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """✏️ 改一条自己发过的手机消息 (Yi 2026-08-11:「线下和线上都可以修改自己说过的话」)。
+    线下那条 2026-07-23 就有了 (PATCH /beat/{id})，这条补上手机那一半。"""
+    r = _own_run(run_id, user, db)
+    text = str(body.get("text") or "").strip()
+    if not text or len(text) > 200:
+        raise HTTPException(400, "内容不能为空，也别超过200字")
+    st = dict(r.state or {})
+    try:
+        ok = runtime.edit_phone_msg(st, char_id, msg_id, text)
+    except ValueError as e:
+        raise HTTPException(403, str(e))
+    if not ok:
+        raise HTTPException(404, "没有这条消息")
+    r.state = st
+    flag_modified(r, "state")
+    db.commit()
+    return runtime.phone_thread(r.pinned_content or {}, st, char_id, mark_read=False)
+
+
 @router.post("/{run_id}/pin")
 def pin_run(run_id: str, pinned: bool = True,
             user: User = Depends(current_user), db: Session = Depends(get_db)):
@@ -2341,6 +2363,8 @@ def get_relweb(run_id: str, user: User = Depends(current_user), db: Session = De
     tun = runtime.tuning_for(content)
     rel_all = st.get("rel") or {}
     player = []
+    _brief_budget = 3      # 🫂 每次请求至多现写 3 条白话总结, 其余下次续
+    _brief_dirty = False
     for c in chars:
         # 🫂 见了面就一定有一条边 (Yi 2026-08-06:「任何时候都有一个关系存在」)。
         # 从前这里是 `if not sc: continue` —— 没打过分的人跟玩家之间一条边都没有。
@@ -2375,18 +2399,46 @@ def get_relweb(run_id: str, user: User = Depends(current_user), db: Session = De
             tags.append("Confronted once" if _en else "当面对质过")
         if "hurt" in _kinds:
             tags.append("Bad blood" if _en else "结过梁子")
+        # 🫂 好感的白话呈现 (Yi 拍板 2026-08-11): 主界面不出数字, 关系网给一段
+        # 按上下文总结的文字。指纹缓存在 state.rel_brief; 每次请求至多现写 3 条
+        # (其余先吃兜底, 下次打开续写), 打开关系网不许变成一排 LLM 调用。
+        _recent = [str(e.get("text") or "")
+                   for e in list((st.get("rel_log") or {}).get(c["id"]) or [])[-3:]]
+        _material = {"mode_name": view.get("mode_name") or "",
+                     "feeling": view.get("feeling") or "",
+                     "why": view.get("why") or "",
+                     "tags": tags[:3], "log": _recent}
+        _llm_ok = _brief_budget > 0
+        _before = ((st.get("rel_brief") or {}).get(c["id"]) or {}).get("mark")
+        _summary = rel_mod.rel_brief(st, c["id"], _material,
+                                     runtime.lang_llm(runtime.get_llm(), content),
+                                     lang=runtime.lang_of(content), allow_llm=_llm_ok)
+        if _llm_ok and ((st.get("rel_brief") or {}).get(c["id"]) or {}).get("mark") != _before:
+            _brief_budget -= 1
+            _brief_dirty = True
         player.append({"id": c["id"], "mode": view.get("mode") or "",
                        "mode_name": view.get("mode_name") or "",
                        "closeness": int(sc.get("closeness", 0) or 0),
                        "romance": int(sc.get("romance", 0) or 0),
                        "trust": int(view.get("trust") or 0),
                        "tags": tags[:3],
+                       "summary": _summary,
                        # ⤴ 差一点就到下一档 (每日回访钩) + 💞 大事记尾巴: 玩家边的「渊源」
                        # (UX 升级 2026-08-01: NPC 边一直有 log 可点, 玩家边此前是哑的)
                        "next": view.get("next"),
                        "recent": [{"act": e.get("act"), "kind": e.get("kind"),
                                    "text": e.get("text")}
                                   for e in list((st.get("rel_log") or {}).get(c["id"]) or [])[-3:]]})
+    # rel_brief 缓存落库: 键级合并 (forum 同款家法) — LLM 窗口里玩家可能打了回合,
+    # 整包写回会盖档
+    if _brief_dirty:
+        db.expire_all()
+        r2 = _own_run(run_id, user, db)
+        st2 = dict(r2.state or {})
+        st2["rel_brief"] = st.get("rel_brief")
+        r2.state = st2
+        flag_modified(r2, "state")
+        db.commit()
     return {"nodes": nodes, "edges": edges, "player": player,
             "act": int(st.get("act", 1) or 1),
             "player_name": (st.get("player_character_id") and

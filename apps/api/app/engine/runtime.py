@@ -7340,12 +7340,41 @@ def phone_threads_view(content: dict[str, Any], state: dict[str, Any]) -> dict[s
             "apps": sorted(apps)}   # 🏦📸 现代设定的扩展 app 清单
 
 
+def _stamp_msg_ids(th: dict[str, Any]) -> None:
+    """✏️ 消息第一次被碰到时补一个 id —— 【不写迁移】(Yi 2026-08-11 那条 A/B, 我选 B)。
+
+    要改自己发过的话就得能指名道姓地指一条。按下标改是脆的: 线程有 200 条上限、
+    从头丢, 一丢就全错位, 改到别人的话上去。
+    所以给 id —— 但存量消息没有, 而与其写一支迁移, 不如在读/写这条线程时顺手补上:
+    零迁移、零停机、老档下次被打开时自己就长好了。
+    """
+    for i, m in enumerate(th.get("msgs") or []):
+        if not m.get("id"):
+            m["id"] = f"m{i}_{int(m.get('t') or 0)}_{abs(hash((m.get('at'), m.get('text')))) % 10**8}"
+
+
+def edit_phone_msg(state: dict[str, Any], char_id: str, msg_id: str, text: str) -> bool:
+    """✏️ 改一条【自己发过的】手机消息。只改文本, 不重算账本 —— 跟线下那条同一条家规
+    (好感/解锁都是当时的裁决, 要重算走撤回)。改动会进后续的线程尾巴, 那正是编辑的意义。"""
+    th = _thread(state, char_id)
+    _stamp_msg_ids(th)
+    for m in th.get("msgs") or []:
+        if m.get("id") == msg_id:
+            if m.get("from") != "me":
+                raise ValueError("只能改自己说过的话")
+            m["text"] = text[:200]
+            m["edited"] = True
+            return True
+    return False
+
+
 def phone_thread(content: dict[str, Any], state: dict[str, Any], char_id: str,
                  mark_read: bool = True) -> dict[str, Any] | None:
     c = _char_by_id(content, char_id)
     if not c:
         return None
     th = _thread(state, char_id)
+    _stamp_msg_ids(th)          # ✏️ 要改得能指名道姓指一条 (见 _stamp_msg_ids)
     if mark_read:
         th["unread"] = 0
     pend = th.get("pending") or []

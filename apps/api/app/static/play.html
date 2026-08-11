@@ -3496,7 +3496,9 @@ async function openInbox() {
   const ov = phoneShell(rows, B("信息", "Messages"), "openPhone()", "msg");
   ov.querySelectorAll(".pthread").forEach(el => { el.onclick = () => openThread(el.dataset.cid); });
 }
+let curThreadCid = null;   // ✏️ 改自己那条消息时要知道是哪条线程
 async function openThread(cid) {
+  curThreadCid = cid;
   let th;
   try { th = await j(`/runs/${runId}/phone/${cid}`); } catch (e) { return; }
   renderThread(th);
@@ -3514,7 +3516,10 @@ function pimgRetry(im) {
 function renderThread(th) {
   const bubbles = (th.msgs || []).map(m => {
     const who = m.from === "me" ? "me" : m.from === "sys" ? "sys" : "them";
-    return `<div class="pmsg ${who}${m.call ? " call" : ""}"><span>${escapeHtml(m.text)}</span>${m.img ? snapHtml(m.img) : ""}<small>${escapeHtml(m.at||"")}</small></div>`;
+    // ✏️ 自己发的话可以改 —— 跟线下气泡上那支铅笔同一个习惯 (Yi 2026-08-11)
+    const pen = (who === "me" && m.id)
+      ? `<a class="bedit" title="${B("改这句","Edit")}" onclick="editPhoneMsg(event,'${escapeHtml(m.id)}')">✎</a>` : "";
+    return `<div class="pmsg ${who}${m.call ? " call" : ""}" data-mid="${escapeHtml(m.id||"")}">${pen}<span>${escapeHtml(m.text)}</span>${m.img ? snapHtml(m.img) : ""}<small>${escapeHtml(m.at||"")}${m.edited ? " · " + B("已改","edited") : ""}</small></div>`;
   }).join("") || `<div class="jempty">还没说过话，发一条试试。</div>`;
   const dead = th.dead;
   const composer = dead
@@ -3674,6 +3679,20 @@ async function sendPhoneMsg(cid, callMode, file) {
 // 📞 通话: same composer, live down the line — rings first, then their voice lands
 // line by line through the same paced channel
 async function sendPhoneCall(cid) { return sendPhoneMsg(cid, true); }
+// ✏️ 改自己发过的那条消息。只改文本，不重算账本——跟线下那条同一条家规。
+async function editPhoneMsg(ev, mid) {
+  ev.stopPropagation();
+  const el = ev.target.closest(".pmsg"); if (!el) return;
+  const span = el.querySelector("span");
+  const cur = span ? span.textContent : "";
+  const next = prompt(B("改成：", "Edit to:"), cur);
+  if (next === null || !next.trim() || next.trim() === cur) return;
+  try {
+    const th = await j(`/runs/${runId}/phone/${curThreadCid}/msg/${mid}`,
+                       { method:"PATCH", body: JSON.stringify({ text: next.trim() }) });
+    openThread(curThreadCid);
+  } catch (e) { pushToast("⚠️ " + escapeHtml(e.message), "", 3000); }
+}
 async function openContacts() {
   // 通讯录是服务端真相：只列你真正【见过】的人（met_ids）——没打过照面的角色
   // 绝不出现在这里（不开天眼）。点一个人直接进对话，捎话/召人/托事都从这儿走。
