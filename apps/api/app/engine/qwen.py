@@ -5268,6 +5268,7 @@ class QwenLLM:
         """🏖 conjure the sandbox's opening cast from the player's worldview. Strict
         JSON; degrades to {} (runtime seeds a deterministic stranger instead)."""
         wv = (prompt.get("worldview") or "").strip() or "一个由玩家亲手定义的世界。"
+        _pl = prompt.get("player") or None   # 🪪 沙盒要吃玩家人设 (Yi 2026-08-11)
         sys = ("你为一个玩家自定义世界观的无尽沙盒剧情设计【开场人物】。只输出一个JSON对象，形如"
                ' {"characters":[{"name":"名字","role":"身份(≤12字)","persona":"外貌、性格与说话方式(≤80字)",'
                '"voice":"说话规律(≤30字：句长习惯/口头禅或用词癖/标点脾气)",'
@@ -5284,7 +5285,12 @@ class QwenLLM:
             resp = _post_chat(self._url, self._key,
                               {"model": self._model,
                       "messages": [{"role": "system", "content": sys},
-                                   {"role": "user", "content": f"世界观：{wv}"}],
+                                   {"role": "user", "content": f"世界观：{wv}" + (
+                                       chr(10) + "玩家是谁：" + (_pl.get("name") or "（未具名）")
+                                       + ("　" + _pl["背景"] if _pl.get("背景") else "")
+                                       + chr(10) + "开场这几个人要跟【这个人】有关系：该来找他的、"
+                                         "该躲着他的、欠他的、盯上他的。别写成一批跟他毫无瓜葛的路人。"
+                                       if _pl else "")}],
                       "max_tokens": 420, "temperature": 0.9,
                       "response_format": {"type": "json_object"}},
                               timeout=30)

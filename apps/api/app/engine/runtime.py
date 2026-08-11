@@ -1764,17 +1764,25 @@ def place_name_ok(nm: str) -> bool:
 
 
 def seed_sandbox_cast(content: dict[str, Any], llm: LLM | None = None,
-                      mature: bool = False) -> None:
+                      mature: bool = False, persona: dict[str, Any] | None = None) -> None:
     """🏖 the sandbox opens ALIVE: conjure a small starting cast from the player's
     worldview (this run's private copy owns them; more will be born in play).
-    Deterministic fallback guarantees at least one person to meet."""
+    Deterministic fallback guarantees at least one person to meet.
+
+    🪪 卡司要贴【玩家是谁】(Yi 2026-08-11): 从前这里只喂世界观, 于是你演一个刑警和
+    演一个赌徒, 开局撞见的是同一批人 —— 世界对你是谁毫无反应。玩家自己那张人设卡
+    (名字/自述) 一起喂进去, 让第一批人跟你有关系: 该找你的人、该躲你的人、欠你的人。
+    """
     story = content.get("story") or {}
     if story.get("characters"):
         return
     llm = lang_llm(llm or get_llm(), content)
     try:
         out = llm.generate({"sandbox_cast": True, "mature": bool(mature),
-                            "worldview": (story.get("world_long") or "")[:1200]}) or {}
+                            "worldview": (story.get("world_long") or "")[:1200],
+                            "player": {"name": (persona or {}).get("name") or "",
+                                       "背景": ((persona or {}).get("background") or "")[:300]}
+                            if persona else None}) or {}
     except Exception:
         out = {}
     import uuid as _uuid

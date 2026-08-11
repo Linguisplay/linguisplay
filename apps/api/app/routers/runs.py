@@ -640,7 +640,10 @@ def create_run(body: RunCreate, user: User = Depends(current_user), db: Session 
                 content["story"].setdefault("sandbox", {})["era"] = era
             content["story"]["world_long"] = wv
             content["story"]["world_facts"] = wv[:400]
-        runtime.seed_sandbox_cast(content, mature=mature_run)
+        # 🪪 沙盒要吃玩家人设 (Yi:「根据用户角色的设定发展沙盒」) —— 你演刑警和演赌徒，
+        # 开局撞见的人不该是同一批。persona 本来就在手上，从前只是没传下去。
+        runtime.seed_sandbox_cast(content, mature=mature_run,
+                                  persona=_persona_dict(persona) if persona else None)
         # 🌱 开局立法: no authored ladder → generate one that FITS this worldview
         # (每个世界都该有自己的升级之路); lands in the run's private pinned copy.
         try:
