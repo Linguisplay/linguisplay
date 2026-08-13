@@ -82,15 +82,26 @@ def base_of(cid: str) -> Path | None:
     return None
 
 
-def _head_window(w: int, h: int, cx: int | None = None) -> tuple[int, int, int]:
-    """站姿立绘里的头胸方窗。
+def _head_window(w: int, h: int, bb: tuple[int, int, int, int] | None = None,
+                 head: tuple[int, int] | None = None) -> tuple[int, int, int]:
+    """人形里的头胸方窗 —— **按头宽定尺寸**, 不按画幅。
 
-    ⚠️ 别用 side=min(w,h) (2026-08-13 实弹): 全身立绘框是 720×1280, 头只占
-    高度的八分之一左右, 取 720×720 等于把「头+半身+一整片背景」当头像。
-    0.42*h 才是头胸特写的量级。cx 为空时按水平居中。"""
-    side = max(64, min(w, int(h * 0.42)))
-    cx = w // 2 if cx is None else cx
-    return max(0, min(cx - side // 2, w - side)), 0, side
+    两次踩坑都记在这:
+    ⚠️ 别用 side=min(w,h) (2026-08-13): 全身立绘框 720×1280 里头只占高度八分之一,
+       取 720×720 等于把「小头+半身+一整片背景」当头像。
+    ⚠️ 也别用 0.42*h (同日, 上传的横版剧照): 素材是 1052×608 的横幅时窗口只剩
+       255px, 裁出来是一块空底。竖版立绘碰巧对, 横版全崩。
+    头宽×2.4 是头胸特写的量级, 横竖都成立。head=(左,右) 是人形顶端那道横条的
+    水平范围; 给不出就退回包围盒的三分之一宽。"""
+    bb = bb or (0, 0, w, h)
+    if head and head[1] > head[0]:
+        hw, cx = head[1] - head[0], (head[0] + head[1]) // 2
+    else:
+        hw, cx = max(1, (bb[2] - bb[0]) // 3), (bb[0] + bb[2]) // 2
+    side = max(64, min(int(hw * 2.4), w, h))
+    left = max(0, min(cx - side // 2, w - side))
+    top = max(0, min(bb[1] - side // 12, h - side))
+    return left, top, side
 
 
 def avatar_from_base(cid: str) -> bytes | None:
@@ -114,10 +125,13 @@ def avatar_from_base(cid: str) -> bytes | None:
             if ci.mode == "RGBA":
                 a = ci.getchannel("A")
                 w, h = ci.size
-                # 头的水平中心: 只看最上面那道横条, 别被伸开的手臂/裙摆带偏
-                strip = a.crop((0, 0, w, max(1, int(h * 0.18)))).getbbox()
-                cx = (strip[0] + strip[2]) // 2 if strip else None
-                left, top, side = _head_window(w, h, cx)
+                bb = a.getbbox() or (0, 0, w, h)
+                # 头: 人形顶端那道横条 (从包围盒顶开始量, 别从画幅顶量 —— 上传的
+                # 素材四周常有大片透明), 别被伸开的手臂/裙摆带偏
+                band = max(1, int((bb[3] - bb[1]) * 0.18))
+                strip = a.crop((bb[0], bb[1], bb[2], bb[1] + band)).getbbox()
+                head = (bb[0] + strip[0], bb[0] + strip[2]) if strip else None
+                left, top, side = _head_window(w, h, bb, head)
                 # 透底 → 头像要落地成 jpg, 垫一层深底 (和暗色 UI 同调)
                 flat = Image.new("RGB", (side, side), (26, 26, 28))
                 win = ci.crop((left, top, left + side, top + side))

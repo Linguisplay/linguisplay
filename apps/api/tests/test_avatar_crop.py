@@ -16,17 +16,29 @@ from app.engine.sprites import _head_window, avatar_from_base
 
 def test_head_window_is_a_head_not_the_whole_frame():
     """全身立绘框: 方窗得是头胸的量级, 不是 min(w,h)。"""
-    left, top, side = _head_window(720, 1280)
+    # 720×1280 里头宽约 110px
+    left, top, side = _head_window(720, 1280, (0, 0, 720, 1280), (300, 410))
     assert side < 720, "又取了整幅宽 —— 那是半身照不是头像"
-    assert top == 0 and 0 <= left <= 720 - side
+    assert 0 <= left <= 720 - side and 0 <= top <= 1280 - side
 
 
 def test_head_window_follows_the_head_not_the_center():
     """人偏在画面一侧时, 方窗跟着头走。"""
-    l_left, _, side = _head_window(800, 1400, cx=120)
-    l_mid, _, _ = _head_window(800, 1400, cx=400)
+    bb = (0, 0, 800, 1400)
+    l_left, _, side = _head_window(800, 1400, bb, (70, 170))
+    l_mid, _, _ = _head_window(800, 1400, bb, (350, 450))
     assert l_left < l_mid
     assert l_left >= 0 and l_mid + side <= 800
+
+
+def test_landscape_source_still_gets_a_real_window():
+    """横版素材 (上传的剧照就是这样): 窗口按头宽走, 不能被画幅高压成一条缝。
+
+    实弹: 旧写法 side=0.42*h, 1052×608 的剧照只剩 255px 窗 —— 裁出来是块空底。
+    """
+    _, _, side = _head_window(1052, 608, (0, 0, 1052, 608), (500, 640))
+    assert side >= 300, f"横版窗口塌成 {side}px —— 又按画幅高算了"
+    assert side <= 608
 
 
 def test_crops_from_the_trimmed_cutout(tmp_path, monkeypatch):
