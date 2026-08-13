@@ -60,12 +60,16 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry", action="store_true", help="report only, change nothing")
     ap.add_argument("--redo", default="", help="story title whose art re-renders from scratch")
+    # 🎯 只跑一本 (Yi 2026-08-12): 生图花真钱, 修一本不该顺手替另外十几本渲。
+    ap.add_argument("--only", default="", help="只处理这一本剧本 (标题完整匹配)")
     args = ap.parse_args()
     init_db()
     db = SessionLocal()
     jobs: list[tuple[Path, str, str]] = []   # (path, prompt, size)
     try:
         for s in db.query(Story).filter(Story.status == "published").all():
+            if args.only.strip() and s.title != args.only.strip():
+                continue
             content = {"story": {"tuning": s.tuning or {}}}
             art = runtime.art_style_of(content)
             world = ((s.world_long or "").strip().replace("\n", " "))[:140]
