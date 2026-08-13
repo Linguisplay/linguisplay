@@ -1117,14 +1117,12 @@ def gen_avatar(story_id: str, cid: str,
     c = next((x for x in (s.characters or []) if x.get("id") == cid), None)
     if not c:
         raise HTTPException(404, "这个剧本里没有该角色")
+    from ..engine.sprites import portrait_prompt
     from .runs import _AV_DIR, _char_seed, _enqueue_image, _story_art
     content = {"story": _to_story(s).model_dump()}
     art, neg = _story_art(content)
     world = ((s.world_long or "").strip().replace("\n", " "))[:120]
-    bits = "，".join(b for b in (c.get("name"), c.get("role") or "",
-                                 (c.get("persona_text") or "")[:160]) if b)
-    prompt = (f"{art}。人物肖像，胸像特写，正面微侧，目光看向镜头外，"
-              f"柔和的侧光，背景虚化，情绪克制内敛：{bits}。世界背景：{world}")
+    prompt = portrait_prompt(c, world, art)
     path = _AV_DIR / f"{cid}.jpg"
     if path.exists():
         path.unlink()   # 作者主动重画 — 旧脸让位

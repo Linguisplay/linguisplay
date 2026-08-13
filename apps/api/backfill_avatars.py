@@ -19,8 +19,9 @@ from pathlib import Path
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.db import SessionLocal, init_db
-from app.engine import runtime
+from app.engine.sprites import avatar_from_base, portrait_prompt
 from app.models import Run, Story, StorySnapshot
+from app.routers.runs import _char_seed, _story_art
 
 _STATIC = Path(__file__).resolve().parent / "app" / "static" / "scene"
 AV_DIR = _STATIC / "avatar"
@@ -37,15 +38,6 @@ def _fill(story_dict: dict) -> list[tuple[str, dict]]:
         c["avatar_url"] = f"/scene/avatar/{cid}.jpg"
         changed.append((cid, c))
     return changed
-
-
-def _portrait_prompt(c: dict, world: str, art: str) -> str:
-    # same recipe as runs._ensure_char_avatars so all faces share one look
-    bits = "，".join(b for b in (c.get("name"), c.get("role") or "",
-                                 (c.get("persona_text") or "")[:160]) if b)
-    return (f"{bits}。世界背景：{world}。电影质感人物肖像，胸像特写，正面微侧，"
-            "目光看向镜头外，写实风格，柔和的侧光，背景虚化，情绪克制内敛，"
-            "高细节，胶片颗粒感" + (f"。画面基调：{art}" if art else ""))
 
 
 def _bg_prompt(loc: dict, world: str, art: str) -> str:
@@ -65,13 +57,16 @@ def main() -> None:
     args = ap.parse_args()
     init_db()
     db = SessionLocal()
-    jobs: list[tuple[Path, str, str]] = []   # (path, prompt, size)
+    # (path, prompt, size, negative, seed)
+    jobs: list[tuple[Path, str, str, str, int | None]] = []
     try:
         for s in db.query(Story).filter(Story.status == "published").all():
             if args.only.strip() and s.title != args.only.strip():
                 continue
-            content = {"story": {"tuning": s.tuning or {}}}
-            art = runtime.art_style_of(content)
+            # ⚠️ id 必须在: _char_seed 按 (story_id, cid) 定脸种, 缺了 id 全站
+            # 同名角色共用一颗种 —— 和这次 (2026-08-13) 共用 id 的坑是同一类
+            content = {"story": {"id": s.id, "tuning": s.tuning or {}}}
+            art, neg = _story_art(content)
             world = ((s.world_long or "").strip().replace("\n", " "))[:140]
             redo = bool(args.redo.strip()) and s.title == args.redo.strip()
             if redo and not args.dry:
@@ -101,14 +96,17 @@ def main() -> None:
                 cid = c.get("id")
                 if cid and (c.get("avatar_url") or "") == f"/scene/avatar/{cid}.jpg" \
                         and not (AV_DIR / f"{cid}.jpg").exists():
-                    jobs.append((AV_DIR / f"{cid}.jpg", _portrait_prompt(c, world, art), "768*768"))
+                    jobs.append((AV_DIR / f"{cid}.jpg", portrait_prompt(c, world, art),
+                                 "768*768", neg, _char_seed(content, cid)))
             for l in s.locations or []:
                 lid = l.get("id")
                 if lid and not (BG_DIR / f"{lid}.jpg").exists():
-                    jobs.append((BG_DIR / f"{lid}.jpg", _bg_prompt(l, world, art), "1280*720"))
+                    # 背景这条路这次没坏, 保持原样 (无反向词/无种子) 不顺手改
+                    jobs.append((BG_DIR / f"{lid}.jpg", _bg_prompt(l, world, art),
+                                 "1280*720", "", None))
         if args.dry:
             db.rollback()
-            for p, _, size in jobs:
+            for p, _, size, *_ in jobs:
                 print(f"  would render {p.name} ({size})")
             print(f"dry run — {len(jobs)} render job(s), nothing written")
             return
@@ -117,11 +115,24 @@ def main() -> None:
         AV_DIR.mkdir(parents=True, exist_ok=True)
         BG_DIR.mkdir(parents=True, exist_ok=True)
         done = 0
-        for p, prompt, size in jobs:
+        for p, prompt, size, neg, seed in jobs:
             if p.exists():
                 done += 1
                 continue
-            img = generate_image(prompt, size=size)
+            # 📇 同脸捷径: 有立绘底图就从底图裁头像 —— 零成本, 且与立绘绝对同脸。
+            # 运行时 (runs._ensure_char_avatars) 一直这么干, 这里以前没有, 于是
+            # 花钱重画出一张和立绘不是同一个人的脸。
+            if p.parent == AV_DIR:
+                try:
+                    cut = avatar_from_base(p.stem)
+                except Exception:
+                    cut = None
+                if cut:
+                    p.write_bytes(cut)
+                    done += 1
+                    print(f"  ✂️ {p.name} 从立绘裁出 (没花钱)")
+                    continue
+            img = generate_image(prompt, size=size, negative=neg, seed=seed)
             if img:
                 p.write_bytes(img)
                 done += 1

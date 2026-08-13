@@ -132,10 +132,10 @@ def gen_avatar(persona_id: str,
     if now - _GEN_LAST.get(user.id, -1e9) < _GEN_COOLDOWN_S:
         raise HTTPException(429, "画笔还热着——过一分钟再重画")
     _GEN_LAST[user.id] = now
-    bits = "，".join(b for b in (p.name, (p.tagline or "")[:80],
-                                 (p.background or "")[:160]) if b)
-    prompt = ("人物肖像，胸像特写，正面微侧，目光看向镜头外，柔和的侧光，"
-              f"背景虚化，情绪克制内敛：{bits}")
+    # 玩家人设走同一份取景 (无剧本画风/无世界背景 → 两头留空), 卡面字段对位过去
+    from ..engine.sprites import portrait_prompt
+    prompt = portrait_prompt({"name": p.name, "role": (p.tagline or "")[:80],
+                              "persona_text": (p.background or "")[:160]}, "", "")
     path = _AV_DIR / f"{persona_id}.jpg"
     _enqueue_image(prompt, path, "768*768", overwrite=True,
                    seed=zlib.crc32(persona_id.encode("utf-8")) % 2_000_000_000)

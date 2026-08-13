@@ -82,41 +82,58 @@ def base_of(cid: str) -> Path | None:
     return None
 
 
+def _head_window(w: int, h: int, cx: int | None = None) -> tuple[int, int, int]:
+    """站姿立绘里的头胸方窗。
+
+    ⚠️ 别用 side=min(w,h) (2026-08-13 实弹): 全身立绘框是 720×1280, 头只占
+    高度的八分之一左右, 取 720×720 等于把「头+半身+一整片背景」当头像。
+    0.42*h 才是头胸特写的量级。cx 为空时按水平居中。"""
+    side = max(64, min(w, int(h * 0.42)))
+    cx = w // 2 if cx is None else cx
+    return max(0, min(cx - side // 2, w - side)), 0, side
+
+
 def avatar_from_base(cid: str) -> bytes | None:
-    """📇 头像同脸捷径 (Yi 2026-07-15: 手机头像也要形象稳定): 有立绘底图的角色,
-    头像直接从底图裁 — 零成本且与立绘绝对同脸, 不再单独 t2i 一张新想象的脸。
-    透底 webp 的 alpha 框与底图同尺寸时按人形定位; 否则按立绘惯例顶部取方窗
-    (站姿立绘的脸在顶部)。无底图返回 None (调用方回落 t2i)。"""
+    """📇 头像同脸捷径 (Yi 2026-07-15: 手机头像也要形象稳定): 有立绘的角色, 头像
+    直接从立绘裁 — 零成本且与立绘绝对同脸, 不再单独 t2i 一张新想象的脸。
+
+    **优先吃透底 webp**, 不吃 _src.jpg: 人物已经被抠出来, 头的水平位置可以从
+    alpha 量出来, 而且背景里的招牌/建筑不会被一起裁进头像。
+    (旧写法要求 webp 与 _src 同尺寸才定位, 但 webp 出厂就被 trim_alpha 裁过,
+     这条件实际上永远不成立 —— 于是一直在走那个错的回落分支。)
+    两个源都没有则返回 None, 调用方回落 t2i。"""
     import io as _io
 
     from PIL import Image
 
     from .gal import shrink_jpg
-    src = SPRITE_DIR / f"{cid}_src.jpg"
-    if not src.exists():
-        return None
-    try:
-        im = Image.open(src).convert("RGB")
-    except Exception:
-        return None
-    box = None
-    cut = SPRITE_DIR / f"{cid}.webp"
+    cut, src = SPRITE_DIR / f"{cid}.webp", SPRITE_DIR / f"{cid}_src.jpg"
     try:
         if cut.exists():
             ci = Image.open(cut)
-            if ci.mode == "RGBA" and ci.size == im.size:
-                box = ci.getchannel("A").getbbox()
+            if ci.mode == "RGBA":
+                a = ci.getchannel("A")
+                w, h = ci.size
+                # 头的水平中心: 只看最上面那道横条, 别被伸开的手臂/裙摆带偏
+                strip = a.crop((0, 0, w, max(1, int(h * 0.18)))).getbbox()
+                cx = (strip[0] + strip[2]) // 2 if strip else None
+                left, top, side = _head_window(w, h, cx)
+                # 透底 → 头像要落地成 jpg, 垫一层深底 (和暗色 UI 同调)
+                flat = Image.new("RGB", (side, side), (26, 26, 28))
+                win = ci.crop((left, top, left + side, top + side))
+                flat.paste(win, (0, 0), win)
+                buf = _io.BytesIO()
+                flat.save(buf, format="JPEG", quality=88)
+                return shrink_jpg(buf.getvalue(), quality=85, max_side=768)
     except Exception:
-        box = None
-    if box and box[2] > box[0]:
-        side = max(64, min(int((box[2] - box[0]) * 1.25), im.width, im.height))
-        cx = (box[0] + box[2]) // 2
-        left = max(0, min(cx - side // 2, im.width - side))
-        top = max(0, min(box[1] - side // 12, im.height - side))
-    else:   # 站姿立绘: 顶部居中方窗 = 头胸特写
-        side = min(im.size)
-        left = (im.width - side) // 2
-        top = 0
+        pass
+    if not src.exists():
+        return None
+    try:    # 没抠图: 只能按惯例居中取头胸窗
+        im = Image.open(src).convert("RGB")
+    except Exception:
+        return None
+    left, top, side = _head_window(im.width, im.height)
     buf = _io.BytesIO()
     im.crop((left, top, left + side, top + side)).save(buf, format="JPEG", quality=88)
     return shrink_jpg(buf.getvalue(), quality=85, max_side=768)
@@ -228,6 +245,45 @@ def _fetch_person_image(urls: list[str]) -> bytes | None:
         except Exception:
             continue
     return None
+
+
+def look_bits(c: dict[str, Any]) -> str:
+    """🚻 性别/年龄从卡上走 (角色卡 v2): 「武备官/佣兵」这类词会被生图模型脑补成
+    男性 — 实弹: 女武备官的立绘画成了男骑士, 头像另一条提示词碰巧画对, 同脸法随之破。"""
+    sp = (c.get("species") or "").strip()
+    g = (c.get("gender") or "").strip()
+    if sp and sp not in ("人", "人类"):
+        # 🐱 非人角色: 性别词换物种语系, 并硬性排除人类身影
+        g = {"男": "公", "女": "母"}.get(g, "")
+        return f"{g}{sp}，画面中只有这只{sp}——绝不出现任何人类或人形身影"
+    g = {"男": "男性", "女": "女性"}.get(g, g)
+    return "，".join(x for x in (g, (c.get("age_band") or "").strip()) if x)
+
+
+# 📐 取景语 —— 全站头像共用这一句。同人管线 (enrich_portraits) 正向条款不同,
+# 但取景必须一致, 否则同一个人在不同入口画出来的构图对不上。
+PORTRAIT_FRAME = ("人物肖像，胸像特写，正面微侧，目光看向镜头外，"
+                  "柔和的侧光，背景虚化，情绪克制内敛")
+
+
+def portrait_prompt(c: dict[str, Any], world: str, art: str) -> str:
+    """🎨 头像提示词——**唯一**一份配方。
+
+    ⚠️ 别再抄一份 (Yi 2026-08-13 报障):
+    backfill_avatars.py 曾私藏一份注释写着「same recipe」的复制品, 但四道保护
+    一个都没有, 于是十二少那张把整块数值卡当画面文字画进了图里
+    (persona_text 开头就是「战力：8.5/10 / 颜值：7.5/10 / 身高：180cm…」)。
+    四道保护缺一不可, 而且必须和调用方的 negative/seed 配套:
+      ① art 压在最前 —— 画风定调, 不放句尾被人物描述盖过
+      ② look_bits —— 性别/年龄/物种硬写, 不让模型按职业脑补
+      ③ 调用方传 negative (末尾含「文字,水印」) —— 挡住数值卡被画成字
+      ④ 调用方传 seed —— 同角色重画不换脸
+    """
+    bits = "，".join(b for b in (c.get("name"), look_bits(c), c.get("role") or "",
+                                 (c.get("persona_text") or "")[:160]) if b)
+    head = f"{art}。" if (art or "").strip() else ""      # 玩家人设没有剧本画风
+    tail = f"。世界背景：{world}" if (world or "").strip() else ""
+    return f"{head}{PORTRAIT_FRAME}：{bits}{tail}"
 
 
 def char_importance(c: dict[str, Any]) -> int:

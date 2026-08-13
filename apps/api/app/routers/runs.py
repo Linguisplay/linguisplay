@@ -297,22 +297,10 @@ def _ensure_char_avatars(content: dict, vn: bool = False) -> bool:
     keeps whatever art its author set — only empty faces are filled (寂声 shipped an
     all-authored cast and played faceless for a day). Returns True when an avatar_url
     was newly written (caller persists)."""
-    from ..engine.sprites import rank_cast
+    from ..engine.sprites import look_bits as _look_bits, portrait_prompt, rank_cast
     story = content.get("story") or {}
     world = ((story.get("world_long") or "").strip().replace("\n", " "))[:120]
     changed = False
-
-    # 🚻 性别/年龄从卡上走 (角色卡 v2): 「武备官/佣兵」这类词会被生图模型脑补成
-    # 男性 — 实弹: 女武备官的立绘画成了男骑士, 头像另一条提示词碰巧画对, 同脸法随之破
-    def _look_bits(c: dict) -> str:
-        sp = (c.get("species") or "").strip()
-        g = (c.get("gender") or "").strip()
-        if sp and sp not in ("人", "人类"):
-            # 🐱 非人角色: 性别词换物种语系, 并硬性排除人类身影
-            g = {"男": "公", "女": "母"}.get(g, "")
-            return f"{g}{sp}，画面中只有这只{sp}——绝不出现任何人类或人形身影"
-        g = {"男": "男性", "女": "女性"}.get(g, g)
-        return "，".join(x for x in (g, (c.get("age_band") or "").strip()) if x)
 
     # 🏅 重要性排序 (Yi: 智能检索要给人物重要性排名): 限流/排队时主角位、恋爱位
     # 的脸先落地; 重要角色哪怕此刻不在场, 立绘也在这条每回合补漏的队里
@@ -339,14 +327,10 @@ def _ensure_char_avatars(content: dict, vn: bool = False) -> bool:
                 continue
         except Exception:
             pass
-        bits = "，".join(b for b in (name, _look_bits(c), c.get("role") or "",
-                                     (c.get("persona_text") or "")[:160]) if b)
         # 🎨 一世界一画风: 风格开头压阵 + 反向词 + 稳定种子 (同角色重画不换脸)
         art, neg = _story_art(content)
-        prompt = (f"{art}。人物肖像，胸像特写，正面微侧，目光看向镜头外，"
-                  f"柔和的侧光，背景虚化，情绪克制内敛：{bits}。世界背景：{world}")
-        _enqueue_image(prompt, path, "768*768", negative=neg,
-                       seed=_char_seed(content, cid))
+        _enqueue_image(portrait_prompt(c, world, art), path, "768*768",
+                       negative=neg, seed=_char_seed(content, cid))
     # 🎀 VN stories also render a TALL standing sprite per character (the galgame 立绘);
     # deep near-black backdrop → worker 抠底成透底剪影 (Yi: 和 galgame 一样要无背景)
     if vn or (story.get("tuning") or {}).get("vn_mode"):

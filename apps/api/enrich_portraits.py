@@ -31,8 +31,11 @@ from app.engine import ipface  # noqa: E402
 
 AV_DIR = Path(__file__).parent / "app" / "static" / "scene" / "avatar"
 
-STYLE = ("电影质感人物肖像，胸像特写，正面微侧，目光看向镜头外，"
-         "写实风格，柔和的侧光，背景虚化，情绪克制内敛，高细节，胶片颗粒感")
+from app.engine.sprites import PORTRAIT_FRAME  # noqa: E402
+
+# 同人管线的正向条款和运行时不同 (先钉「这是谁」, 见 build_prompt), 但**取景共用**
+# 那一句 —— 否则同一个人在不同入口画出来构图对不上 (2026-08-13 配方漂移教训)
+STYLE = f"电影质感{PORTRAIT_FRAME}，写实风格，高细节，胶片颗粒感"
 
 
 def build_prompt(c: dict, world: str, ip: str = "") -> str:
