@@ -27,69 +27,12 @@ OUT = _CONTRACT / "openapi.json"
 SSE_OUT = _CONTRACT / "sse-events.json"
 
 
-def sse_catalog() -> list[dict]:
-    """🔴 把主循环推的 SSE 事件抽成目录。
-
-    为什么必须单独抽 (Yi 2026-08-14 追问「确定这样就可以吗」):
-    /play 和 /confront 是 StreamingResponse, FastAPI 推不出响应模型 —— 生成的契约里
-    这两个接口写着 `application/json` + `schema: {}`, 既是错的 content-type 又没有
-    任何字段。**整个游戏就在这条流里**, 前端照契约施工等于拿到一片空白。
-
-    走 AST 而不是正则: 事件是 `_event({"event": "beat", "beat": ...})` 这种字面量,
-    AST 能保证抽全且不误伤字符串里的同名词。
-    """
-    import ast
-    src = Path(__file__).resolve().parent / "app" / "routers" / "runs.py"
-    tree = ast.parse(src.read_text(encoding="utf-8"))
-    found: dict[str, dict] = {}
-    for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call) and getattr(node.func, "id", "") == "_event"
-                and node.args and isinstance(node.args[0], ast.Dict)):
-            continue
-        d = node.args[0]
-        keys = [k.value for k in d.keys
-                if isinstance(k, ast.Constant) and isinstance(k.value, str)]
-        name = next((v.value for k, v in zip(d.keys, d.values)
-                     if isinstance(k, ast.Constant) and k.value == "event"
-                     and isinstance(v, ast.Constant)), None)
-        if not name:
-            continue
-        e = found.setdefault(name, {"event": name, "payload_keys": [], "lines": []})
-        for k in keys:
-            if k != "event" and k not in e["payload_keys"]:
-                e["payload_keys"].append(k)
-        e["lines"].append(node.lineno)
-    return [found[k] for k in sorted(found)]
-
-
 def build() -> dict:
+    """⚠️ 直接吃 app.openapi() —— 增强逻辑住在 app/openapi_ext.py, 线上那个端点走的
+    是同一个函数。以前这里私藏过一份增强, 结果线上 /openapi.json 和这个文件分了家,
+    而交接文档还写着「两者同源」(2026-08-14 对抗性核查实锤)。别再在这里加逻辑。"""
     from app.main import app
-    spec = app.openapi()
-    # 🔑 cookie 认证补进 spec: FastAPI 不会从 Cookie(...) 依赖自动推出 securityScheme,
-    # 于是生成的契约里 securitySchemes 是空的 —— 前端和 codegen 都看不出要怎么登录。
-    comp = spec.setdefault("components", {})
-    comp.setdefault("securitySchemes", {})["cookieAuth"] = {
-        "type": "apiKey", "in": "cookie", "name": "lp_session",
-        "description": "登录/注册后由服务端下发的 httpOnly 会话 cookie (samesite=lax, 30 天)。"
-                       "浏览器端 fetch 必须带 credentials:'include'。",
-    }
-    # 🔴 把两个流式接口的响应改对: FastAPI 给 StreamingResponse 填的是
-    # application/json + 空 schema, 前端照着建不出游戏。
-    cat = sse_catalog()
-    names = ", ".join(e["event"] for e in cat)
-    for p in ("/api/v1/runs/{run_id}/play", "/api/v1/runs/{run_id}/confront"):
-        op = ((spec.get("paths") or {}).get(p) or {}).get("post")
-        if not op:
-            continue
-        op["responses"]["200"] = {
-            "description": f"SSE 逐拍推流。每帧一行 `data: {{...}}`，空行分帧；"
-                           f"帧内 `event` 字段区分类型，共 {len(cat)} 种：{names}。"
-                           "字段明细见 packages/contract/sse-events.json。"
-                           "⚠️ EventSource 用不了（只支持 GET），须 fetch + ReadableStream。",
-            "content": {"text/event-stream": {"schema": {"type": "string"}}},
-        }
-        op["x-sse-events"] = [e["event"] for e in cat]
-    return spec
+    return app.openapi()
 
 
 def main() -> int:
@@ -98,6 +41,7 @@ def main() -> int:
     a = ap.parse_args()
     spec = build()
     text = json.dumps(spec, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    from app.openapi_ext import sse_catalog
     cat = sse_catalog()
     sse_text = json.dumps(cat, ensure_ascii=False, indent=2) + "\n"
     n = len(spec.get("paths") or {})

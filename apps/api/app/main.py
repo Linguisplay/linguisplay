@@ -101,6 +101,14 @@ app.include_router(runs.router, prefix=API)
 app.include_router(gal.router, prefix=API)  # 🎀 galgame 生成器 (docs/galgame-maker.md)
 app.include_router(push.router, prefix=API)  # 🔔 Web Push 订阅 (活世界 P3)
 
+# 📜 契约增强 (必须在全部 include_router 之后 —— 它要遍历路由的依赖树)。
+# 线上 /openapi.json 和仓库里导出的 packages/contract/openapi.json 从此走同一个函数,
+# 不会再出现「文档说两者同源、实际线上缺一半」的情况。见 app/openapi_ext.py 抬头。
+from .openapi_ext import install as _install_openapi  # noqa: E402
+
+_install_openapi(app, cookie_name=settings.cookie_name,
+                 base_url=getattr(settings, "public_base_url", "") or "")
+
 
 @app.get("/", include_in_schema=False)
 def root():

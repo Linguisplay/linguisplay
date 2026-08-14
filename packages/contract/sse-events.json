@@ -23,10 +23,10 @@
       "beat"
     ],
     "lines": [
-      1334,
-      2210,
       1176,
-      2186
+      1334,
+      2186,
+      2210
     ]
   },
   {
@@ -81,8 +81,8 @@
     "payload_keys": [],
     "lines": [
       1318,
-      2208,
       1336,
+      2208,
       2212
     ]
   },
@@ -278,7 +278,36 @@
     "lines": [
       1150,
       2164
-    ]
+    ],
+    "payload_shape": {
+      "t": {
+        "type": "object",
+        "description": "⚠️ 是对象不是字符串。text 是**增量片段**(append 不是替换); kind/speaker 会在一次推流中途翻转 —— 前端必须按 (kind, speaker) 分气泡各自维护草稿。beat 事件到达时用完整 beat 替换该段草稿。",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "增量文本片段"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "narration",
+              "speech"
+            ],
+            "description": "旁白 / 台词，流中途会翻转"
+          },
+          "speaker": {
+            "type": "string",
+            "description": "说话人名，旁白时为空串"
+          }
+        },
+        "x-extracted-keys": [
+          "kind",
+          "speaker",
+          "text"
+        ]
+      }
+    }
   },
   {
     "event": "verdict",
