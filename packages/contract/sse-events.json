@@ -1,0 +1,292 @@
+[
+  {
+    "event": "achievements",
+    "payload_keys": [
+      "achievements"
+    ],
+    "lines": [
+      1286
+    ]
+  },
+  {
+    "event": "audit",
+    "payload_keys": [
+      "audit"
+    ],
+    "lines": [
+      1278
+    ]
+  },
+  {
+    "event": "beat",
+    "payload_keys": [
+      "beat"
+    ],
+    "lines": [
+      1334,
+      2210,
+      1176,
+      2186
+    ]
+  },
+  {
+    "event": "cast",
+    "payload_keys": [
+      "cast"
+    ],
+    "lines": [
+      1242
+    ]
+  },
+  {
+    "event": "choice",
+    "payload_keys": [
+      "choice"
+    ],
+    "lines": [
+      1272,
+      2207
+    ]
+  },
+  {
+    "event": "clock",
+    "payload_keys": [
+      "clock"
+    ],
+    "lines": [
+      1141
+    ]
+  },
+  {
+    "event": "dice",
+    "payload_keys": [
+      "dice"
+    ],
+    "lines": [
+      1138,
+      2162
+    ]
+  },
+  {
+    "event": "direct",
+    "payload_keys": [
+      "direct"
+    ],
+    "lines": [
+      1262
+    ]
+  },
+  {
+    "event": "done",
+    "payload_keys": [],
+    "lines": [
+      1318,
+      2208,
+      1336,
+      2212
+    ]
+  },
+  {
+    "event": "ending",
+    "payload_keys": [
+      "ending"
+    ],
+    "lines": [
+      1281
+    ]
+  },
+  {
+    "event": "goal",
+    "payload_keys": [
+      "goal"
+    ],
+    "lines": [
+      1250,
+      2198
+    ]
+  },
+  {
+    "event": "here",
+    "payload_keys": [
+      "here",
+      "beasts",
+      "relations",
+      "following"
+    ],
+    "lines": [
+      1243
+    ]
+  },
+  {
+    "event": "hint",
+    "payload_keys": [
+      "hint"
+    ],
+    "lines": [
+      1252
+    ]
+  },
+  {
+    "event": "moments",
+    "payload_keys": [
+      "moments",
+      "rel_deltas"
+    ],
+    "lines": [
+      1248,
+      2196
+    ]
+  },
+  {
+    "event": "move_request",
+    "payload_keys": [
+      "move_request"
+    ],
+    "lines": [
+      1274
+    ]
+  },
+  {
+    "event": "newday",
+    "payload_keys": [
+      "day"
+    ],
+    "lines": [
+      1268
+    ]
+  },
+  {
+    "event": "peek",
+    "payload_keys": [
+      "peek"
+    ],
+    "lines": [
+      1154,
+      2166
+    ]
+  },
+  {
+    "event": "phone",
+    "payload_keys": [
+      "message"
+    ],
+    "lines": [
+      1145
+    ]
+  },
+  {
+    "event": "place",
+    "payload_keys": [
+      "location"
+    ],
+    "lines": [
+      1259
+    ]
+  },
+  {
+    "event": "pressure",
+    "payload_keys": [
+      "pressure"
+    ],
+    "lines": [
+      1254,
+      2201
+    ]
+  },
+  {
+    "event": "progress",
+    "payload_keys": [
+      "progress"
+    ],
+    "lines": [
+      1251,
+      2199
+    ]
+  },
+  {
+    "event": "promises",
+    "payload_keys": [
+      "promises"
+    ],
+    "lines": [
+      1269
+    ]
+  },
+  {
+    "event": "sanity",
+    "payload_keys": [
+      "sanity"
+    ],
+    "lines": [
+      1258,
+      2205
+    ]
+  },
+  {
+    "event": "scene",
+    "payload_keys": [
+      "scene"
+    ],
+    "lines": [
+      1241
+    ]
+  },
+  {
+    "event": "state",
+    "payload_keys": [
+      "state"
+    ],
+    "lines": [
+      1239,
+      2193
+    ]
+  },
+  {
+    "event": "sugg",
+    "payload_keys": [
+      "suggestions"
+    ],
+    "lines": [
+      1157,
+      2168
+    ]
+  },
+  {
+    "event": "suggest",
+    "payload_keys": [
+      "suggestions"
+    ],
+    "lines": [
+      1279
+    ]
+  },
+  {
+    "event": "threat",
+    "payload_keys": [
+      "threat"
+    ],
+    "lines": [
+      1256,
+      2203
+    ]
+  },
+  {
+    "event": "token",
+    "payload_keys": [
+      "t"
+    ],
+    "lines": [
+      1150,
+      2164
+    ]
+  },
+  {
+    "event": "verdict",
+    "payload_keys": [
+      "verdict"
+    ],
+    "lines": [
+      1270
+    ]
+  }
+]

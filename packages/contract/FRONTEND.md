@@ -93,12 +93,56 @@ export default {
 
 ## 4. ⚠️ 主循环是 SSE，而且挂在 POST 上
 
-两个接口返回 `text/event-stream`：
+### 调用顺序
+
+58 个 `/runs` 接口里，跑通一局只需要这五个：
+
+```
+GET    /api/v1/stories              列出可玩剧本
+POST   /api/v1/runs                 开一局（body 带 story_id）→ 拿 run_id
+GET    /api/v1/runs/{run_id}/play   回放：拉这一局已有的历史（非流式，进游戏先调它）
+POST   /api/v1/runs/{run_id}/play   推进一拍 ← SSE，游戏主体
+POST   /api/v1/runs/{run_id}/choose 当流里来了 choice 事件，用它交选择
+GET    /api/v1/runs                 存档列表
+```
+
+注意 `/play` 的 **GET 是回放、POST 是推进**，同一个路径两种语义。
+
+### 两个流式接口
 
 ```
 POST /api/v1/runs/{run_id}/play        ← 游戏主循环，逐拍推流
 POST /api/v1/runs/{run_id}/confront
 ```
+
+### SSE 事件目录（30 种）
+
+⚠️ **`openapi.json` 里这两个接口的响应是空的**，因为 FastAPI 推不出 `StreamingResponse`
+的模型。字段明细在同目录的 **`sse-events.json`**（由 `dump_openapi.py` 从代码 AST 抽取，
+不是手写的）。每帧一行 `data: {...}`，空行分帧，帧内 `event` 字段区分类型。
+
+**先把这三个做对，游戏就能跑起来：**
+
+| 事件 | 载荷 | 干什么 |
+|---|---|---|
+| `token` | `t` | 逐字推流的正文，追加到当前这拍 |
+| `beat` | `beat` | 一拍落地（完整对象，替换掉刚才逐字拼的草稿） |
+| `done` | 无 | 这一轮结束，可以放开输入框 |
+
+其余 27 种按用途分：
+
+| 用途 | 事件 |
+|---|---|
+| 场面 | `scene` `cast` `here` `place` `state` `clock` `newday` |
+| 等玩家操作 | `choice` `move_request` `suggest` `sugg` `direct` |
+| 进度与结算 | `goal` `progress` `hint` `promises` `verdict` `moments` `achievements` `ending` |
+| 主题包（恐怖等） | `pressure` `threat` `sanity` |
+| 其他 | `dice` `phone` `peek` `audit` |
+
+未知事件一律**静默忽略**，别抛错：后端会加新事件，加了不通知你。
+
+> `sugg` 和 `suggest` 是两个不同的事件（流中途给的和最终给的），载荷键都叫 `suggestions`。
+> 这是历史遗留，别当成一个。
 
 **`EventSource` 用不了**，它只支持 GET，也不能带 body。必须用 `fetch` + `ReadableStream`：
 
@@ -141,6 +185,16 @@ while (true) {
 - 图片（`/scene/...`）一律懒加载，列表页别一次拉几十张立绘
 - 首屏能少拉就少拉，能缓存就缓存
 - 感觉"卡"的时候先量传了多少字节，再怀疑接口慢
+
+---
+
+## 6. 你还需要一个测试账号
+
+注册没有邀请码门槛，`POST /api/v1/auth/signup` 可以自助开号。但新号是空的：
+没有存档、没有剧本进度，`/api/v1/runs` 返回空列表，游戏主循环没东西可测。
+
+要看真实数据（有剧情进度的存档、有立绘的角色、跑起来的关系网），找后端要一个
+**播过种的测试账号**。别拿生产账号调试。
 
 ---
 

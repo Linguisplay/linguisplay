@@ -9174,11 +9174,13 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "SSE 逐拍推流。每帧一行 `data: {...}`，空行分帧；帧内 `event` 字段区分类型，共 30 种：achievements, audit, beat, cast, choice, clock, dice, direct, done, ending, goal, here, hint, moments, move_request, newday, peek, phone, place, pressure, progress, promises, sanity, scene, state, sugg, suggest, threat, token, verdict。字段明细见 packages/contract/sse-events.json。⚠️ EventSource 用不了（只支持 GET），须 fetch + ReadableStream。"
           },
           "422": {
             "content": {
@@ -9194,6 +9196,38 @@
         "summary": "Confront",
         "tags": [
           "runs"
+        ],
+        "x-sse-events": [
+          "achievements",
+          "audit",
+          "beat",
+          "cast",
+          "choice",
+          "clock",
+          "dice",
+          "direct",
+          "done",
+          "ending",
+          "goal",
+          "here",
+          "hint",
+          "moments",
+          "move_request",
+          "newday",
+          "peek",
+          "phone",
+          "place",
+          "pressure",
+          "progress",
+          "promises",
+          "sanity",
+          "scene",
+          "state",
+          "sugg",
+          "suggest",
+          "threat",
+          "token",
+          "verdict"
         ]
       }
     },
@@ -11352,11 +11386,13 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "SSE 逐拍推流。每帧一行 `data: {...}`，空行分帧；帧内 `event` 字段区分类型，共 30 种：achievements, audit, beat, cast, choice, clock, dice, direct, done, ending, goal, here, hint, moments, move_request, newday, peek, phone, place, pressure, progress, promises, sanity, scene, state, sugg, suggest, threat, token, verdict。字段明细见 packages/contract/sse-events.json。⚠️ EventSource 用不了（只支持 GET），须 fetch + ReadableStream。"
           },
           "422": {
             "content": {
@@ -11372,6 +11408,38 @@
         "summary": "Play",
         "tags": [
           "runs"
+        ],
+        "x-sse-events": [
+          "achievements",
+          "audit",
+          "beat",
+          "cast",
+          "choice",
+          "clock",
+          "dice",
+          "direct",
+          "done",
+          "ending",
+          "goal",
+          "here",
+          "hint",
+          "moments",
+          "move_request",
+          "newday",
+          "peek",
+          "phone",
+          "place",
+          "pressure",
+          "progress",
+          "promises",
+          "sanity",
+          "scene",
+          "state",
+          "sugg",
+          "suggest",
+          "threat",
+          "token",
+          "verdict"
         ]
       }
     },
