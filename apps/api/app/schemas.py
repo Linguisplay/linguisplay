@@ -802,6 +802,14 @@ class ChooseIn(BaseModel):
     option_id: str  # the picked ChoiceOption.id of the run's pending choice
 
 
+class ChooseOut(BaseModel):
+    """/choose 的四个键。label 由客户端当玩家自己的下一句话演出来。"""
+    label: str
+    flag: Optional[str] = None
+    killed: Optional[str] = None     # fate 卡: 阵亡者名字
+    moved_to: Optional[str] = None   # fate 卡: 迁往的地点名
+
+
 class ConfrontIn(BaseModel):
     # 🃏 证据对峙: present an UNLOCKED fragment to the character its secret belongs to
     fragment_id: str

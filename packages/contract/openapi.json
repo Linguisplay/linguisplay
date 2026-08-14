@@ -1403,6 +1403,53 @@
         "title": "ChooseIn",
         "type": "object"
       },
+      "ChooseOut": {
+        "description": "/choose 的四个键。label 由客户端当玩家自己的下一句话演出来。",
+        "properties": {
+          "flag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flag"
+          },
+          "killed": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Killed"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "moved_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Moved To"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "title": "ChooseOut",
+        "type": "object"
+      },
       "CommunityStats": {
         "description": "剧本详情页的社区面板。与 Story 对象分开走 —— 社区数据不进 run 快照。",
         "properties": {
@@ -8986,7 +9033,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ChooseOut"
+                }
               }
             },
             "description": "Successful Response"
@@ -12072,7 +12121,7 @@
     },
     "/api/v1/stories": {
       "get": {
-        "description": "🧩 对齐包B 重构: 先在【轻列】(id/tags/updated_at) 上选完候选, 再按需吃重行。\ntags 是 JSON 列只能进程内筛, 但轻列全表也只是 id+标签, 不再像旧写法那样把\n每本的全部剧本 JSON 都灌进内存 (复审抓的最热端点性能坑, 这版连 tags 路径一起治)。\nsort=hot: 赞×3+游玩数; q: 标题/一句话/简介检索; featured: 运营精选位。",
+        "description": "🧩 对齐包B 重构: 先在【轻列】(id/tags/updated_at) 上选完候选, 再按需吃重行。\ntags 是 JSON 列只能进程内筛, 但轻列全表也只是 id+标签, 不再像旧写法那样把\n每本的全部剧本 JSON 都灌进内存 (复审抓的最热端点性能坑, 这版连 tags 路径一起治)。\nsort=hot: 赞×3+游玩数; q: 标题/一句话/简介检索; featured: 运营精选位。\ncursor: 传上一页的 next_cursor 翻下一页 (页大小 50, 翻完 next_cursor=null)。\n候选集本来就是每请求整表重算再排序, 游标就用偏移量 — 乱值明着 400,\n不许悄悄当第一页 (那会让前端的翻页 bug 永远查不出来)。",
         "operationId": "discover_api_v1_stories_get",
         "parameters": [
           {

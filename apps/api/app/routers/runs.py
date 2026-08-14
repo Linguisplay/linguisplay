@@ -26,7 +26,7 @@ from ..models import Persona as PersonaModel
 from ..models import Run as RunModel
 from ..models import Story as StoryModel
 from ..models import StoryMeta, StorySnapshot, User
-from ..schemas import (Beat, CalendarIn, ChooseIn, ConfrontIn, FollowIn, GoalIn, MarketBuyIn, MoveIn, NoteIn, PhoneSendIn, RenameIn,
+from ..schemas import (Beat, CalendarIn, ChooseIn, ChooseOut, ConfrontIn, FollowIn, GoalIn, MarketBuyIn, MoveIn, NoteIn, PhoneSendIn, RenameIn,
                        SocialCommentIn, SocialLikeIn, TransferIn,
                        PlayIn, RewindIn, Run, RunCreate, RunState, RunSummary, TTSIn, VerdictIn)
 from .stories import _to_secret, _to_story
@@ -2219,7 +2219,7 @@ def confront(run_id: str, body: ConfrontIn, user: User = Depends(current_user),
     return StreamingResponse(sse(), media_type="text/event-stream")
 
 
-@router.post("/{run_id}/choose")
+@router.post("/{run_id}/choose", response_model=ChooseOut)
 def choose(run_id: str, body: ChooseIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     """Answer the run's pending key-moment decision (VN 抉择). Effects are applied
     deterministically (flag / 好感 / relationship deltas); the picked label is returned so

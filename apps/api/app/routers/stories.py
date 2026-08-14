@@ -215,10 +215,20 @@ def discover(
     """🧩 对齐包B 重构: 先在【轻列】(id/tags/updated_at) 上选完候选, 再按需吃重行。
     tags 是 JSON 列只能进程内筛, 但轻列全表也只是 id+标签, 不再像旧写法那样把
     每本的全部剧本 JSON 都灌进内存 (复审抓的最热端点性能坑, 这版连 tags 路径一起治)。
-    sort=hot: 赞×3+游玩数; q: 标题/一句话/简介检索; featured: 运营精选位。"""
+    sort=hot: 赞×3+游玩数; q: 标题/一句话/简介检索; featured: 运营精选位。
+    cursor: 传上一页的 next_cursor 翻下一页 (页大小 50, 翻完 next_cursor=null)。
+    候选集本来就是每请求整表重算再排序, 游标就用偏移量 — 乱值明着 400,
+    不许悄悄当第一页 (那会让前端的翻页 bug 永远查不出来)。"""
     from datetime import datetime as _dt
 
     from sqlalchemy import func, or_
+    PAGE = 50
+    try:
+        offset = int(cursor or 0)
+    except ValueError:
+        raise HTTPException(400, "cursor 无效 — 传上一页返回的 next_cursor")
+    if offset < 0:
+        raise HTTPException(400, "cursor 无效 — 传上一页返回的 next_cursor")
     base = (db.query(StoryModel.id, StoryModel.trope_tags, StoryModel.updated_at)
             .filter(StoryModel.visibility == "public",
                     StoryModel.status == "published"))
@@ -241,10 +251,10 @@ def discover(
         likes, plays = social_counts(db, ids)
         ids.sort(key=lambda i: (likes.get(i, 0) * 3 + plays.get(i, 0), upd[i]),
                  reverse=True)
-        top = ids[:50]
+        top = ids[offset:offset + PAGE]
     else:
         ids.sort(key=lambda i: upd[i], reverse=True)
-        top = ids[:50]
+        top = ids[offset:offset + PAGE]
         likes, plays = social_counts(db, top)
     by_id = ({s.id: s for s in db.query(StoryModel)
               .filter(StoryModel.id.in_(top)).all()} if top else {})
@@ -273,7 +283,7 @@ def discover(
     return StoryCardPage(
         items=[_to_card(s, counts.get(s.id, 0), likes=likes.get(s.id, 0),
                         plays=plays.get(s.id, 0), author=_author(s)) for s in rows],
-        next_cursor=None)
+        next_cursor=str(offset + PAGE) if len(ids) > offset + PAGE else None)
 
 
 class CharBlobInput(BaseModel):
