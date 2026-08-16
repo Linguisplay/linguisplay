@@ -73,6 +73,31 @@ class MockLLM:
         if prompt.get("living_event"):
             return {"what": "去湖边走走", "slot": "夜", "day_offset": 1,
                     "invite": "明晚有空吗？想去湖边走走，你来。"}
+        # 🏜 问卷造沙盒孪生: 确定性修仙小世界 — 组装/形状闸/e2e 链路可测。
+        # 键面必须盖满 qwen.SANDBOX_WORLD_KEYS (合同测试执法)。
+        if prompt.get("sandbox_summary"):
+            return {"summary": "云脊山脉深处的问剑小城，宗门林立而灵脉将枯。"
+                               "外来的你在山门前醒来，怀里只有一块认不出来历的旧玉牌。"
+                               "三日后就是宗门大比，全城都在赌一个新面孔的命运。"}
+        if prompt.get("sandbox_world"):
+            return {"title": "问剑小城", "one_liner": "灵脉将枯的山城，剑还悬着。",
+                    "synopsis": "云脊山脉深处的问剑小城，三大宗门围着最后一条灵脉过活。"
+                                "大比在即，山门前多了一个来历不明的新面孔——你。",
+                    "world_long": "云脊山脉深处，问剑小城依灵脉而建。灵脉每月初一枯一分，"
+                                  "三大宗门表面共守、私下各挖各的。城中规矩：亥时宵禁，"
+                                  "佩剑者不查。三日后宗门大比，胜者入主灵脉井。",
+                    "world_facts": "灵脉每月初一枯一分；亥时宵禁；佩剑者免查。",
+                    "era": "架空古代", "tech_level": "ancient",
+                    "trope_tags": ["修仙", "宗门"],
+                    "locations": [
+                        {"name": "山门广场", "detail": "青石铺地，剑痕纵横", "exits": ["藏剑阁", "灵脉井"]},
+                        {"name": "藏剑阁", "detail": "一层浮尘，剑鞘空了一半", "exits": ["山门广场"]},
+                        {"name": "灵脉井", "detail": "井口结着薄霜", "exits": ["山门广场"]}],
+                    "style": "仿古典武侠白话：短句起势，动词见筋骨。节奏要求：每一轮必须"
+                             "有一件具体的事向前发生。忌华丽堆藻；忌现代词汇；忌心理独白连篇。"}
+        if prompt.get("gen_progression"):
+            return {"name": "剑心",
+                    "ranks": ["淬体", "凝气", "问剑", "御剑", "剑心通明", "化神"]}
         # ✍️ 引擎本起草孪生 (创作 UX A): 确定性骨架/秘密 — 组装+lint+降级链路可测。
         # 秘密里故意埋一个 act_min 越界 (=9), 让路由的夹逼/降级逻辑有靶子。
         if prompt.get("engine_skeleton"):

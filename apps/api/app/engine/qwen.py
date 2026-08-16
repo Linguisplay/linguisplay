@@ -21,6 +21,11 @@ from ..config import get_settings
 DASHSCOPE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
 DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
 
+# 🏜 问卷造沙盒: 世界铸造的输出键面 — mock 孪生与真 prompt 的共同合同,
+# 两边都以它为准 (历史实弹: 孪生漂移 = 测试绿真机歪)
+SANDBOX_WORLD_KEYS = ("title", "one_liner", "synopsis", "world_long", "world_facts",
+                      "era", "tech_level", "trope_tags", "locations", "style")
+
 _ANTI_ASSISTANT = (
     "你必须始终留在角色里：不要说自己是AI/助手/语言模型，不要解释规则，不要使用括号外的旁白说明。"
 )
@@ -5326,6 +5331,62 @@ class QwenLLM:
         except Exception:
             return {}
 
+    def _sandbox_summary(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🏜 问卷确认环: 答案 → 一段给创作者确认的世界概要 (可改可重摇)。"""
+        a = prompt.get("answers") or {}
+        lines = "\n".join(f"{k}：{v}" for k, v in a.items() if str(v).strip())
+        sys = ("根据问卷答案写一段 150~250 字的【世界概要】给创作者确认："
+               "这个世界是什么、此刻正在酝酿什么、主角开局的处境。"
+               "有画面感、有钩子；简体中文，只输出概要本身，不加任何说明。")
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model,
+                               "messages": [{"role": "system", "content": sys},
+                                            {"role": "user", "content": lines or "随便来一个"}],
+                               "max_tokens": 500, "temperature": 0.9},
+                              timeout=60, kind="sandbox_summary")
+            return {"summary": (resp.json()["choices"][0]["message"]["content"] or "").strip()}
+        except Exception:
+            return {}
+
+    def _sandbox_world(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """🏜 问卷造沙盒: answers + 创作者确认过的概要 → 世界件 (SANDBOX_WORLD_KEYS)。
+        概要是权威 — 玩家改过的字不许被生成物推翻。"""
+        import json as _json
+        a = prompt.get("answers") or {}
+        lines = "\n".join(f"{k}：{v}" for k, v in a.items() if str(v).strip())
+        summary = (prompt.get("summary") or "").strip()
+        sys = ("你为一个自由沙盒互动世界做设定铸造。只输出JSON："
+               '{"title":"世界名(≤10字)","one_liner":"一句话引子(≤30字)",'
+               '"synopsis":"给玩家看的简介(120~200字)",'
+               '"world_long":"世界设定正文(400~600字, 忠实扩写给定概要)",'
+               '"world_facts":"硬性物理事实(≤180字, 只写可观察事实, 分号隔开)",'
+               '"era":"年代感(≤20字)","tech_level":"modern|ancient|future 三选一",'
+               '"trope_tags":["2~4个题材标签, 每个≤6字"],'
+               '"locations":[{"name":"地名≤8字","detail":"一句白描≤40字",'
+               '"exits":["相邻地名"]}, 共3~4个, exits只许指向本列表里的地名],'
+               '"style":"文风卡：第一句写作者腔(该题材代表作的叙事口吻)，'
+               '中间写节奏要求，最后以「忌」字开头列3条忌用清单"}。'
+               "设定必须与概要一致，不得引入与概要冲突的重大设定。")
+        u = f"问卷：\n{lines}\n\n创作者确认过的世界概要（权威）：\n{summary}"
+        try:
+            resp = _post_chat(self._url, self._key,
+                              {"model": self._model,
+                               "messages": [{"role": "system", "content": sys},
+                                            {"role": "user", "content": u}],
+                               "max_tokens": 1800, "temperature": 0.6,
+                               "response_format": {"type": "json_object"}},
+                              timeout=60, kind="sandbox_world")
+            data = _json.loads(resp.json()["choices"][0]["message"]["content"] or "{}")
+            if not isinstance(data, dict):
+                return {}
+            # 合同收口: 缺键补空值, 键面永远 = SANDBOX_WORLD_KEYS
+            return {k: data.get(k) if data.get(k) is not None
+                    else ([] if k in ("trope_tags", "locations") else "")
+                    for k in SANDBOX_WORLD_KEYS}
+        except Exception:
+            return {}
+
     def _track_scene(self, prompt: dict[str, Any]) -> dict[str, Any]:
         """🎥 场记 (turn-end tracker pass): EXTRACT every present body's state from the
         prose that was just generated — the ledger follows the text instead of hoping
@@ -5829,6 +5890,10 @@ class QwenLLM:
             return self._track_scene(prompt)
         if prompt.get("gen_progression"):
             return self._gen_progression(prompt)
+        if prompt.get("sandbox_summary"):
+            return self._sandbox_summary(prompt)
+        if prompt.get("sandbox_world"):
+            return self._sandbox_world(prompt)
         if prompt.get("world_news"):
             return self._world_news(prompt)
         if prompt.get("absent_scene"):
