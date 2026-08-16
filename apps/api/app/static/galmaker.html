@@ -258,7 +258,7 @@ function wzRender() {
     if (q.chips2) h += "<div>" + q.chips2.map(c =>
       _chip(c, a[q.chipKey2] === c, `wzPick('${q.chipKey2}','${c}',false)`)).join("") + "</div>";
     if (q.free) h += q.area
-      ? `<textarea id="wzFree" style="margin-top:10px;min-height:90px" placeholder="${q.free}">${_wzEsc(a[q.k] && !q.chips ? a[q.k] : (q.chips && a[q.k] && !q.chips.includes(a[q.k]) ? a[q.k] : ""))}</textarea>`
+      ? `<textarea id="wzFree" maxlength="500" style="margin-top:10px;min-height:90px" placeholder="${q.free}">${_wzEsc(a[q.k] && !q.chips ? a[q.k] : (q.chips && a[q.k] && !q.chips.includes(a[q.k]) ? a[q.k] : ""))}</textarea>`
       : `<input id="wzFree" style="margin-top:10px" placeholder="${q.free}" value="${_wzEsc(a[q.k] && !q.chips ? a[q.k] : (q.chipKey && a[q.k]) || "")}">`;
     if (q.mature) h += `<label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:12px">
       <input type="checkbox" id="wzMature" style="width:auto" ${WD.mature ? "checked" : ""}> 🔞 含成人内容（18+）</label>`;
@@ -296,7 +296,7 @@ function wzRender() {
   } else if (pg.t === "sdone") {
     body.innerHTML = `<label style="font-size:15px;color:#e7eaf3;margin-top:14px">🏜 铸造</label>
       <div class="muted" style="font-size:12.5px;margin:4px 0 8px">${["题材", "年代感", "超凡体系"]
-        .map(k => WD.answers[k] ? `${k}·${WD.answers[k]}` : "").filter(Boolean).join("　")}${WD.answers["分级"] === "18+" ? "　🔞" : ""}</div>
+        .map(k => WD.answers[k] ? `${k}·${_wzEsc(WD.answers[k])}` : "").filter(Boolean).join("　")}${WD.answers["分级"] === "18+" ? "　🔞" : ""}</div>
       <label>世界名</label>
       <input id="wzTitle" maxlength="24" placeholder="给这个世界起个名字" value="${_wzEsc(WD.title || "")}">
       <div style="display:flex;gap:8px"><button onclick="wzSandboxBuild()">🏜 铸造这个世界</button></div>

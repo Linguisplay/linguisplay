@@ -480,6 +480,7 @@ def _assemble_sandbox(world: dict, chars: list[dict], prog: dict | None,
                   "advance": {"required_fragment_ids": [], "required_event_ids": [],
                               "affinity_min": 0}}],
         "locations": locs, "endings": [], "phone": phone, "sandbox": sandbox,
+        "mature": str(answers.get("分级") or "") == "18+",
         "tuning": {"_origin": "survey_sandbox"},
     }
 
@@ -783,6 +784,7 @@ def draft_sandbox(body: DraftSandboxIn, user: User = Depends(current_user),
                     characters=st.get("characters") or [], acts=st.get("acts") or [],
                     endings=[], locations=st.get("locations") or [],
                     phone=st.get("phone"), sandbox=st.get("sandbox"),
+                    mature=bool(st.get("mature")),
                     tuning=st.get("tuning") or {})
                 db2.add(row)
                 db2.commit()

@@ -112,6 +112,25 @@ def test_summary_quota_429(c):
     assert r.status_code == 429
 
 
+def test_mature_answer_rides_into_the_story_flag(c):
+    r = c.post("/api/v1/stories/draft_sandbox",
+               json={"answers": {**ANSWERS, "分级": "18+"}, "summary": SUMMARY})
+    assert r.status_code == 200, r.text
+    jid = r.json()["job"]
+    for _ in range(40):
+        st = c.get(f"/api/v1/stories/draft_sandbox/{jid}").json()
+        if st["status"] != "working":
+            break
+        time.sleep(0.2)
+    assert st["status"] == "done", st.get("error")
+    db = SessionLocal()
+    try:
+        assert db.get(Story, st["story_id"]).mature is True, \
+            "答了18+落库却是全年龄 — 引擎会拒绝兑现设定"
+    finally:
+        db.close()
+
+
 def test_quota_day_frame_is_utc():
     """配额日界必须与 created_at 同帧 (UTC) — 本地墙钟版在上海时区每天有 8 小时漏计窗。"""
     from datetime import datetime, timezone

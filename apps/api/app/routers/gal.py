@@ -196,7 +196,8 @@ def survey_patch(work_id: str, body: SurveyPatch,
         raise HTTPException(409, "这本已经开建了，问卷改不动了")
     sv = dict(g.get("survey") or {})
     if body.answers is not None:
-        sv["answers"] = {str(k)[:24]: str(v)[:200] for k, v in body.answers.items()}
+        sv["answers"] = {str(k)[:24]: str(v)[:500] for k, v in body.answers.items()}
+        # 500: 沙盒世界观是长答案, 三层口径对齐 (前端maxlength/此处/消费端)
     if body.step is not None:
         sv["step"] = max(0, int(body.step))
     if body.idea is not None:

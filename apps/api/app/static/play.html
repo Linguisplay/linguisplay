@@ -6251,7 +6251,8 @@ calmKick();
   try {
     await afterAuth();
     const _sid = new URLSearchParams(location.search).get("story");
-    if (_sid) chooseRole(_sid, "");
+    if (_sid) chooseRole(encodeURIComponent(_sid), "")
+      .catch(() => alert("这个世界打不开了——链接可能已失效"));
   } catch (e) {}
 })();
 </script>
