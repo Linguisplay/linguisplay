@@ -559,17 +559,9 @@ async function applyPick(vis){
 // ── ✍️ 新建 (Yi 定: 只有两种 — 剧本 与 沙盒剧本; 起草交给 AI 通道) ──
 function newStory(){ story=blankStory(); secrets=[]; openEditor(); }
 function newSandbox(){
-  const s = blankStory();
-  s.title="（沙盒本·改成你的世界名）"; s.one_liner="没有主线，世界自己会活。";
-  s.synopsis="（一句话：这是个什么样的世界，玩家以什么身份醒来）";
-  s.world_long="（写世界观：时代/地理/规矩/钱怎么挣——沙盒的一切从这里长出来）";
-  s.locations=[{id:"loc_start", name:"（出生点）", detail:"（玩家睁眼看到的第一个地方）", exits:[],
-     unlock:{act_min:0,affinity_min:0,required_fragment_ids:[]}, props:[]}];
-  s.characters=[];   // 沙盒可空群像 — 开局由引擎按世界观现铸
-  s.acts=[{index:1, title:"活下去", goal:"在这个世界站住脚", events:[],
-     advance:{required_fragment_ids:[],required_event_ids:[],affinity_min:0}}];
-  s.sandbox={enabled:true, start_money:50};
-  story=s; secrets=[]; openEditor();
+  // 🏜 2026-08-17 Yi 定: 空壳沙盒模板退役 — 新建沙盒 = 问卷制作器 (答完即玩)。
+  // 工坊仍是精修位: 铸出来的本回这里改。
+  location.href = "/maker?mode=sandbox";
 }
 async function editStory(id){
   // ?edit=1 = 要全量 (结局/幕内事件/角色小传)。不带这个参数拿到的是剧透盾删减版,

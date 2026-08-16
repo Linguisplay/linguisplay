@@ -238,6 +238,13 @@ async function wzInit(draftId) {
     WD.answers["造什么"] = "🎀 选项式 galgame";
     WD.step += 1;
   }
+  // 工坊「+新建沙盒剧本」直达 (?mode=sandbox): 第0题代答成沙盒, 直接落在题材题
+  if (new URLSearchParams(location.search).get("mode") === "sandbox"
+      && !WD.answers["造什么"]) {
+    WD.answers["造什么"] = "🏜 自由沙盒世界";
+    if (WD.step === 0) WD.step = 1;
+    wzSaveNow();
+  }
   wzRender();
 }
 const _chip = (word, on, click) =>
@@ -453,6 +460,8 @@ function setOut(o){
 setOut("gal");
 // ?draft=xx → 直达问卷续答 (书架「继续创作」的落点)
 if (new URLSearchParams(location.search).get("draft")) setMode("survey");
+// ?mode=sandbox → 直达沙盒问卷 (工坊「+新建沙盒剧本」的落点, 第0题在 wzInit 里代答)
+else if (new URLSearchParams(location.search).get("mode") === "sandbox") setMode("survey");
 async function build() {
   const go = document.getElementById("go");
   if (OUT === "engine") {   // 🧩 引擎本草稿: 走 /stories/draft_engine, 完成跳工坊
