@@ -163,6 +163,9 @@ const QS = [
     chips2: ["2个结局", "3个结局"], chipKey2: "结局数" },
 ];
 // ── 🏜 沙盒题集 (spec 2026-08-16): 主干6题 + 题材支线 (branch 按题材显隐, 纯前端) ──
+// 🛡 完整转义器 (审查修复): area:true 的 textarea 是标签内容位, 属性级 &quot; 转义堵不住 </textarea><img onerror=...>
+const _wzEsc = s => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;")
+  .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const MODEQ = { k: "造什么", q: "想造哪一种？",
   chips: ["🎀 选项式 galgame", "🏜 自由沙盒世界"] };
 const SQS_ALL = [
@@ -255,8 +258,8 @@ function wzRender() {
     if (q.chips2) h += "<div>" + q.chips2.map(c =>
       _chip(c, a[q.chipKey2] === c, `wzPick('${q.chipKey2}','${c}',false)`)).join("") + "</div>";
     if (q.free) h += q.area
-      ? `<textarea id="wzFree" style="margin-top:10px;min-height:90px" placeholder="${q.free}">${(a[q.k] && !q.chips ? a[q.k] : (q.chips && a[q.k] && !q.chips.includes(a[q.k]) ? a[q.k] : "")).replace(/"/g, "&quot;")}</textarea>`
-      : `<input id="wzFree" style="margin-top:10px" placeholder="${q.free}" value="${(a[q.k] && !q.chips ? a[q.k] : (q.chipKey && a[q.k]) || "").replace(/"/g, "&quot;")}">`;
+      ? `<textarea id="wzFree" style="margin-top:10px;min-height:90px" placeholder="${q.free}">${_wzEsc(a[q.k] && !q.chips ? a[q.k] : (q.chips && a[q.k] && !q.chips.includes(a[q.k]) ? a[q.k] : ""))}</textarea>`
+      : `<input id="wzFree" style="margin-top:10px" placeholder="${q.free}" value="${_wzEsc(a[q.k] && !q.chips ? a[q.k] : (q.chipKey && a[q.k]) || "")}">`;
     if (q.mature) h += `<label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:12px">
       <input type="checkbox" id="wzMature" style="width:auto" ${WD.mature ? "checked" : ""}> 🔞 含成人内容（18+）</label>`;
     body.innerHTML = h;
@@ -295,7 +298,7 @@ function wzRender() {
       <div class="muted" style="font-size:12.5px;margin:4px 0 8px">${["题材", "年代感", "超凡体系"]
         .map(k => WD.answers[k] ? `${k}·${WD.answers[k]}` : "").filter(Boolean).join("　")}${WD.answers["分级"] === "18+" ? "　🔞" : ""}</div>
       <label>世界名</label>
-      <input id="wzTitle" maxlength="24" placeholder="给这个世界起个名字" value="${(WD.title || "").replace(/"/g, "&quot;")}">
+      <input id="wzTitle" maxlength="24" placeholder="给这个世界起个名字" value="${_wzEsc(WD.title || "")}">
       <div style="display:flex;gap:8px"><button onclick="wzSandboxBuild()">🏜 铸造这个世界</button></div>
       <div class="muted" style="font-size:12px;margin-top:6px">铸好先只有你能玩；玩得满意，去工坊发布并把可见性改公开就能上大厅。</div>`;
     $id("wzNext").style.display = "none";
@@ -305,7 +308,7 @@ function wzRender() {
       <div class="muted" style="font-size:12.5px;margin:4px 0 8px">${["题材", "口味", "篇幅", "结局数", "画风", "文风"]
         .map(k => a[k] ? `${k}·${a[k]}` : "").filter(Boolean).join("　")}${WD.mature ? "　🔞" : ""}</div>
       <label>作品标题</label>
-      <input id="wzTitle" maxlength="24" placeholder="给它起个名字" value="${(WD.title || "").replace(/"/g, "&quot;")}">
+      <input id="wzTitle" maxlength="24" placeholder="给它起个名字" value="${_wzEsc(WD.title || "")}">
       <div style="display:flex;gap:8px">
         <button onclick="wzBuild()">🎀 开始建造成品本</button>
         <button class="ghost" onclick="wzEngine()">🧩 转成引擎本草稿</button>
@@ -376,15 +379,18 @@ async function wzSandboxBuild() {
     $id("wzBody").innerHTML = `<div class="muted" style="margin-top:12px">🏜 世界铸造中…（世界→人物→修为体系→自检）</div>`;
     const t = setInterval(async () => {
       try {
-        const r = await j(`/stories/draft_sandbox/${jb.job}`);
+        const r = await j(`/stories/draft_sandbox/${encodeURIComponent(jb.job)}`);
         if (r.status === "done") {
           clearInterval(t);
           $id("wzBody").innerHTML = `<div style="margin-top:12px">✅ 世界已经立起来了。
             <div style="display:flex;gap:8px;margin-top:10px">
-              <button onclick="location.href='/play?story=${r.story_id}'">▶️ 立刻踏入</button>
-              <button class="ghost" onclick="location.href='/studio?story=${r.story_id}'">🛠 先去工坊看看</button>
+              <button id="wzGoPlay">▶️ 立刻踏入</button>
+              <button class="ghost" id="wzGoStudio">🛠 先去工坊看看</button>
             </div>
             <div class="muted" style="font-size:12px;margin-top:6px">现在只有你能玩。满意了去工坊发布并把可见性改公开，就能上大厅。</div></div>`;
+          // 🛡 story_id 不裸拼进 onclick 字符串 (审查修复): 属性赋值走 encodeURIComponent
+          $id("wzGoPlay").onclick = () => location.href = "/play?story=" + encodeURIComponent(r.story_id);
+          $id("wzGoStudio").onclick = () => location.href = "/studio?story=" + encodeURIComponent(r.story_id);
         } else if (r.status === "error" || r.status === "gone") {
           clearInterval(t); alert("⚠️ " + (r.error || "任务丢了，重试一次")); wzRender();
         }
