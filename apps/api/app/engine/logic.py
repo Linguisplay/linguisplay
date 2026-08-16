@@ -688,3 +688,47 @@ def scrub_beats(beats: list[dict[str, Any]], absent_names: list[str],
         if text:
             out.append({**b, "text": text})
     return out
+
+
+def sanitize_sandbox(story: dict) -> list[str]:
+    """🏖 沙盒九键形状闸 (问卷起草管线用)。lint_story 对 sandbox 内容零校验 —
+    坏 progression/悬空 visitor 不是 error 是【静默失效】, 玩家问卷答完悄悄少一个
+    系统。这道闸确定性修剪: 烂零件摘掉, 不报错不打断。原地改, 返回修剪记录。"""
+    notes: list[str] = []
+    sb = story.get("sandbox")
+    if not isinstance(sb, dict):
+        return notes   # 引擎对非 dict 自己容错 (runtime.py:1106) — 不越权改
+    char_ids = {str(c.get("id")) for c in story.get("characters") or []}
+    loc_ids = {str(l.get("id")) for l in story.get("locations") or []}
+    prog = sb.get("progression")
+    ok = (isinstance(prog, dict) and str(prog.get("name") or "").strip()
+          and isinstance(prog.get("ranks"), list)
+          and 4 <= len(prog["ranks"]) <= 12
+          and all(isinstance(r, str) and 0 < len(r) <= 8 for r in prog["ranks"]))
+    if prog is not None and not ok:
+        sb.pop("progression", None)
+        notes.append("progression 形状不合规已摘除 (开局 ensure_progression 兜底)")
+    elif ok:
+        sb["progression"] = {"name": str(prog["name"]).strip()[:8],
+                             "ranks": [str(r) for r in prog["ranks"]]}
+    if sb.get("opening_visitor") and str(sb["opening_visitor"]) not in char_ids:
+        sb.pop("opening_visitor", None)
+        notes.append("opening_visitor 指向不存在的角色已摘除")
+    if sb.get("start_location") and str(sb["start_location"]) not in loc_ids:
+        sb.pop("start_location", None)
+        notes.append("start_location 不存在已摘除")
+    if sb.get("default_powers") is not None:
+        raw = sb["default_powers"] if isinstance(sb["default_powers"], list) else []
+        clean = [str(p).strip()[:40] for p in raw if str(p).strip()][:4]
+        if clean != sb["default_powers"]:
+            notes.append("default_powers 已修剪 (≤4条×≤40字)")
+        sb["default_powers"] = clean
+    if "start_money" in sb:
+        try:
+            sb["start_money"] = max(0, int(sb["start_money"]))
+        except (TypeError, ValueError):
+            sb["start_money"] = 100
+            notes.append("start_money 非法已回落 100")
+    if sb.get("currency") is not None:
+        sb["currency"] = str(sb["currency"]).strip()[:6] or "元"
+    return notes
