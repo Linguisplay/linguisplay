@@ -26,6 +26,9 @@ bug 与欠账不再散落在聊天里。规矩:报障当天入账,修完标 ✅ 
 | 16 | 08-10 | 现网反复出现 `CLIENT-JS [promise] undefined`（08-09 21:13 三连 + 08-10 02:16）— 某个 promise 用裸 reject/throw undefined，遥测 `String(e.reason)` 拿不到任何线索，来源钉不死 | 🔴 | play.html reportClientError 的 unhandledrejection 分支该补：reason 为空时上报 `document.visibilityState + runId + 最近一次动作名`；play.html 归手账会话在改，别混文件，等那边提交后跟一刀 |
 | 15 | 08-08 | 背景空镜铁律在 Seedream(Ark) 上是反效果 — Ark 无负词通道, `_generate_image_ark` 把负词折进正文, 铁律那墙「人、兽、猫狗、怪物」token 变成召唤 (樱见坂实弹: 运行时 `_bg_prompt` 出的六张背景**张张有人**, 固定 bg_seed 还把同一个女孩复制进六张; 七月弱提示词零生物 token 反而全空镜)。运行时三条背景路 (开档补图/游戏内重画/工坊) 全踩此雷 | 🔴 | runs.py `_bg_prompt` 铁律段 + qwen.py `_generate_image_ark` 折负词; 修法方向: ark 路生物负词不折正文, 铁律改「无人的空景」一句零 token 措辞, 生物压制靠 detail 消毒 (数据层 bg_style 已在樱见坂验证) |
 
+| 18 | 08-16 | galmaker 存量转义/裸拼群: wzEngine 轮询URL与 story_id 裸拼、done(gal成书站)摘要行 answers 直拼 innerHTML、wzOl 仅引号转义 — 沙盒向导本次已按 _wzEsc 内容级收口, 存量三处未动 | 🔴 | galmaker.html; 沙盒终审 08-16 裁定另案, 修法照抄 fb06c16/20d7c22 |
+| 19 | 08-16 | 沙盒问卷小欠账打包: 概要配额先扣后调(LLM 502 也烧一次)、_SANDBOX_SUM_QUOTA 进程内无回收重启清零(v1 认领)、造什么/题材中途切换旧答案残留混进 prompt 行、llm 合同测试只 hasattr 不验分发真通、test_quota_day_frame_is_utc 是镜像测试 UTC 午夜理论闪红 | 🟡 | stories.py draft_sandbox 一带 + galmaker.html + test_sandbox_llm_contract.py; 终审 Minor 打包 |
+
 ## 已修的 (本周实弹归因)
 
 | 修于 | 现象 | 归因一句话 |
