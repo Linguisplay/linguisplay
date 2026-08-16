@@ -61,3 +61,12 @@ def test_non_dict_sandbox_is_left_alone():
     s = {"characters": [], "locations": [], "sandbox": "corrupt"}
     assert sanitize_sandbox(s) == []
     assert s["sandbox"] == "corrupt"   # 老档实弹出现过字符串, 引擎自己会容错
+
+
+def test_non_dict_members_in_cast_or_locations_do_not_crash():
+    s = {"characters": ["corrupt", None, {"id": "ch_1"}],
+         "locations": [None, {"id": "loc_1"}],
+         "sandbox": {"enabled": True, "opening_visitor": "ch_1",
+                     "start_location": "loc_1"}}
+    sanitize_sandbox(s)   # 不许抛
+    assert s["sandbox"]["opening_visitor"] == "ch_1"

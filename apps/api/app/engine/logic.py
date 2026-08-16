@@ -698,8 +698,8 @@ def sanitize_sandbox(story: dict) -> list[str]:
     sb = story.get("sandbox")
     if not isinstance(sb, dict):
         return notes   # 引擎对非 dict 自己容错 (runtime.py:1106) — 不越权改
-    char_ids = {str(c.get("id")) for c in story.get("characters") or []}
-    loc_ids = {str(l.get("id")) for l in story.get("locations") or []}
+    char_ids = {str(c.get("id")) for c in story.get("characters") or [] if isinstance(c, dict)}
+    loc_ids = {str(loc.get("id")) for loc in story.get("locations") or [] if isinstance(loc, dict)}
     prog = sb.get("progression")
     ok = (isinstance(prog, dict) and str(prog.get("name") or "").strip()
           and isinstance(prog.get("ranks"), list)
