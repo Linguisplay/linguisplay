@@ -6245,9 +6245,15 @@ function calmKick() {
   document.addEventListener(ev, calmKick, { passive: true }));
 calmKick();
 
-// 🎬 会话自动恢复 (片场第二刀实弹: 页面从不试 /me, 带着有效 cookie 也要每次手点登录,
-// 自动化截图更是直接把登录卡叠在已加载的局上): 有会话直接进大厅, 没有才见登录卡
-(async () => { try { await afterAuth(); } catch (e) {} })();
+// 🎬 会话自动恢复 + 🏜 深链: /play?story=<id> 直接落到那本的开局卡
+// (私有沙盒不上大厅列表, owner 开自己的本走的是 runs.py:593 的放行)
+(async () => {
+  try {
+    await afterAuth();
+    const _sid = new URLSearchParams(location.search).get("story");
+    if (_sid) chooseRole(_sid, "");
+  } catch (e) {}
+})();
 </script>
 </body>
 </html>

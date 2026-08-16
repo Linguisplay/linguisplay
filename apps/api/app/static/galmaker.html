@@ -162,7 +162,42 @@ const QS = [
   { k: "篇幅", q: "篇幅与结局", chips: ["短篇·3章", "标准·4章", "长篇·5章"],
     chips2: ["2个结局", "3个结局"], chipKey2: "结局数" },
 ];
-const N_ART = QS.length, N_IDEA = QS.length + 1, N_OUTLINE = QS.length + 2, N_DONE = QS.length + 3;
+// ── 🏜 沙盒题集 (spec 2026-08-16): 主干6题 + 题材支线 (branch 按题材显隐, 纯前端) ──
+const MODEQ = { k: "造什么", q: "想造哪一种？",
+  chips: ["🎀 选项式 galgame", "🏜 自由沙盒世界"] };
+const SQS_ALL = [
+  { k: "题材", q: "想要一个什么题材的世界？",
+    chips: ["修仙", "都市异能", "西幻", "末世", "宫斗", "星际"], free: "或自己写一个题材" },
+  { k: "世界观", q: "用几句话描述这个世界（越具体越像你想的那样）",
+    free: "例：灵脉将枯的山城，三大宗门抢最后一口灵气", area: true },
+  { k: "年代感", q: "年代感？", free: "例：1899 清末 / 三千年后的星港 / 盛唐", skip: true },
+  { k: "超凡体系", q: "这个世界有超凡力量体系吗？叫什么？",
+    chips: ["没有"], free: "例：斗气 / 灵力 / 军衔 / 血统位阶", skip: true },
+  { k: "开局处境", q: "主角开局是什么处境？", free: "例：宗门大比前三天被逐出师门", skip: true },
+  { k: "金手指", q: "给主角 0~4 条金手指（一行一条，40 字内）",
+    free: "例：能看见他人头顶的死期", area: true, skip: true },
+  { k: "分级", q: "尺度", chips: ["全年龄", "18+"] },
+  { k: "境界命名风格", q: "境界名想要什么风格？", branch: "修仙",
+    chips: ["古典雅致", "杀伐直白"], free: "或自己定几个", skip: true },
+  { k: "宗门格局", q: "宗门格局？", branch: "修仙",
+    free: "例：三大宗门鼎立，散修如蚁", skip: true },
+  { k: "异能来源", q: "异能从哪来？", branch: "都市异能",
+    chips: ["觉醒", "契约", "科技改造", "血脉"], skip: true },
+  { k: "威胁类型", q: "末世的威胁是什么？", branch: "末世",
+    chips: ["丧尸", "天灾", "外星文明", "人心"], free: "或自己写", skip: true },
+  { k: "朝局", q: "眼下的朝局？", branch: "宫斗",
+    free: "例：皇帝病重，两宫争储", skip: true },
+];
+const wzSandbox = () => (WD.answers["造什么"] || "").includes("沙盒");
+function wzPages() {
+  if (wzSandbox()) {
+    const qs = SQS_ALL.filter(q => !q.branch || (WD.answers["题材"] || "") === q.branch);
+    return [{ t: "q", q: MODEQ }, ...qs.map(q => ({ t: "q", q })),
+            { t: "summary" }, { t: "sdone" }];
+  }
+  return [{ t: "q", q: MODEQ }, ...QS.map(q => ({ t: "q", q })),
+          { t: "art" }, { t: "idea" }, { t: "outline" }, { t: "done" }];
+}
 let WD = null;   // {id, answers, step, idea, outline, art, wsty, mature, title}
 let _wzT = null;
 function wzSaveNow(extra) {
@@ -195,42 +230,59 @@ async function wzInit(draftId) {
       : "⚠️ " + e.message;
     return;
   }
+  // 老草稿迁移: 「造什么」是后加的第 0 题 — 答过题却没答它的老 gal 草稿顺移一格
+  if (!WD.answers["造什么"] && WD.step > 0) {
+    WD.answers["造什么"] = "🎀 选项式 galgame";
+    WD.step += 1;
+  }
   wzRender();
 }
 const _chip = (word, on, click) =>
   `<button class="ghost" style="margin:4px 6px 0 0;padding:8px 14px${on ? ";border-color:#ffd479;color:#ffd479" : ""}" onclick="${click}">${word}</button>`;
 function wzPick(k, v, adv) { WD.answers[k] = v; wzSaveNow(); adv ? wzGo(1) : wzRender(); }
 function wzRender() {
-  const s = WD.step, body = $id("wzBody");
+  const pages = wzPages(), s = Math.min(WD.step, pages.length - 1), pg = pages[s];
+  const body = $id("wzBody");
+  WD.step = s;
   $id("wzPrev").style.visibility = s > 0 ? "visible" : "hidden";
-  $id("wzStep").textContent = `第 ${Math.min(s + 1, N_DONE + 1)} / ${N_DONE + 1} 步`;
+  $id("wzStep").textContent = `第 ${s + 1} / ${pages.length} 步`;
   $id("wzNext").style.display = "";
-  if (s < QS.length) {
-    const q = QS[s], a = WD.answers;
+  if (pg.t === "q") {
+    const q = pg.q, a = WD.answers;
     let h = `<label style="font-size:15px;color:#e7eaf3;margin-top:14px">${q.q}</label>`;
     if (q.chips) h += "<div>" + q.chips.map(c =>
       _chip(c, a[q.chipKey || q.k] === c, `wzPick('${q.chipKey || q.k}','${c}',${!q.free && !q.chips2 && !q.mature})`)).join("") + "</div>";
     if (q.chips2) h += "<div>" + q.chips2.map(c =>
       _chip(c, a[q.chipKey2] === c, `wzPick('${q.chipKey2}','${c}',false)`)).join("") + "</div>";
-    if (q.free) h += `<input id="wzFree" style="margin-top:10px" placeholder="${q.free}" value="${(a[q.k] && !q.chips ? a[q.k] : (q.chipKey && a[q.k]) || "").replace(/"/g, "&quot;")}">`;
+    if (q.free) h += q.area
+      ? `<textarea id="wzFree" style="margin-top:10px;min-height:90px" placeholder="${q.free}">${(a[q.k] && !q.chips ? a[q.k] : (q.chips && a[q.k] && !q.chips.includes(a[q.k]) ? a[q.k] : "")).replace(/"/g, "&quot;")}</textarea>`
+      : `<input id="wzFree" style="margin-top:10px" placeholder="${q.free}" value="${(a[q.k] && !q.chips ? a[q.k] : (q.chipKey && a[q.k]) || "").replace(/"/g, "&quot;")}">`;
     if (q.mature) h += `<label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:12px">
       <input type="checkbox" id="wzMature" style="width:auto" ${WD.mature ? "checked" : ""}> 🔞 含成人内容（18+）</label>`;
     body.innerHTML = h;
-    $id("wzNext").textContent = q.skip && !(a[q.k] || "").trim() ? "跳过 ›" : "下一步 ›";
-    const f = $id("wzFree"); if (f) f.onkeydown = e => { if (e.key === "Enter") wzGo(1); };
-  } else if (s === N_ART) {
+    $id("wzNext").textContent = q.skip && !(WD.answers[q.k] || "").trim() ? "跳过 ›" : "下一步 ›";
+    const f = $id("wzFree");
+    if (f && f.tagName === "INPUT") f.onkeydown = e => { if (e.key === "Enter") wzGo(1); };
+  } else if (pg.t === "art") {
     body.innerHTML = `<label style="font-size:15px;color:#e7eaf3;margin-top:14px">画风</label><div>`
       + ART.map(([n]) => _chip(n, WD.art === n, `WD.art=WD.answers['画风']='${n}';wzSaveNow();wzRender()`)).join("") + `</div>
       <label style="font-size:15px;color:#e7eaf3;margin-top:14px">文风</label><div>`
       + WSTY.map(([n]) => _chip(n, WD.wsty === n, `WD.wsty=WD.answers['文风']='${n}';wzSaveNow();wzRender()`)).join("") + `</div>`;
-  } else if (s === N_IDEA) {
+  } else if (pg.t === "idea") {
     body.innerHTML = `<label style="font-size:15px;color:#e7eaf3;margin-top:14px">📜 故事梗概——按你的回答写的，可以直接改</label>
       <textarea id="wzIdea" style="min-height:150px">${WD.idea || ""}</textarea>
       <button class="ghost" onclick="wzIdeaGen()">✨ ${WD.idea ? "按答案重写一版" : "生成梗概"}</button>
       <span class="muted" id="wzIdeaMsg" style="font-size:12px;margin-left:8px"></span>`;
     if (!WD.idea) wzIdeaGen();
     $id("wzNext").textContent = "就按这个梗概 ›";
-  } else if (s === N_OUTLINE) {
+  } else if (pg.t === "summary") {
+    body.innerHTML = `<label style="font-size:15px;color:#e7eaf3;margin-top:14px">🏔 世界概要——它是整个世界的地基，可以直接改</label>
+      <textarea id="wzIdea" style="min-height:150px">${WD.idea || ""}</textarea>
+      <button class="ghost" onclick="wzSummaryGen()">✨ ${WD.idea ? "按答案重铸一版" : "生成概要"}</button>
+      <span class="muted" id="wzIdeaMsg" style="font-size:12px;margin-left:8px"></span>`;
+    if (!WD.idea) wzSummaryGen();
+    $id("wzNext").textContent = "就按这个概要 ›";
+  } else if (pg.t === "outline") {
     const ol = WD.outline || [];
     body.innerHTML = `<label style="font-size:15px;color:#e7eaf3;margin-top:14px">📑 章节大纲——拓写跑偏整本报废，这一关值得把好</label>
       <div id="wzOl">${ol.map(x => `<input class="ol" style="margin-bottom:6px" value="${x.replace(/"/g, "&quot;")}">`).join("")}</div>
@@ -238,7 +290,16 @@ function wzRender() {
       <span class="muted" id="wzOlMsg" style="font-size:12px;margin-left:8px"></span>`;
     if (!ol.length) wzOutlineGen();
     $id("wzNext").textContent = "就按这个大纲 ›";
-  } else {
+  } else if (pg.t === "sdone") {
+    body.innerHTML = `<label style="font-size:15px;color:#e7eaf3;margin-top:14px">🏜 铸造</label>
+      <div class="muted" style="font-size:12.5px;margin:4px 0 8px">${["题材", "年代感", "超凡体系"]
+        .map(k => WD.answers[k] ? `${k}·${WD.answers[k]}` : "").filter(Boolean).join("　")}${WD.answers["分级"] === "18+" ? "　🔞" : ""}</div>
+      <label>世界名</label>
+      <input id="wzTitle" maxlength="24" placeholder="给这个世界起个名字" value="${(WD.title || "").replace(/"/g, "&quot;")}">
+      <div style="display:flex;gap:8px"><button onclick="wzSandboxBuild()">🏜 铸造这个世界</button></div>
+      <div class="muted" style="font-size:12px;margin-top:6px">铸好先只有你能玩；玩得满意，去工坊发布并把可见性改公开就能上大厅。</div>`;
+    $id("wzNext").style.display = "none";
+  } else {   // done (gal 成书站, 原样)
     const a = WD.answers;
     body.innerHTML = `<label style="font-size:15px;color:#e7eaf3;margin-top:14px">🎬 成书</label>
       <div class="muted" style="font-size:12.5px;margin:4px 0 8px">${["题材", "口味", "篇幅", "结局数", "画风", "文风"]
@@ -254,24 +315,28 @@ function wzRender() {
   }
 }
 function wzCollectFree() {
-  const s = WD.step;
-  if (s < QS.length) {
-    const q = QS[s], f = $id("wzFree");
+  const pg = wzPages()[WD.step] || {};
+  if (pg.t === "q") {
+    const q = pg.q, f = $id("wzFree");
     if (f && f.value.trim()) WD.answers[q.k] = f.value.trim();
     const m = $id("wzMature"); if (m) { WD.mature = m.checked; WD.answers["分级"] = m.checked ? "18+" : "全年龄"; }
   }
-  if (s === N_IDEA) { const t = $id("wzIdea"); if (t) WD.idea = t.value.trim(); }
-  if (s === N_OUTLINE) WD.outline = [...document.querySelectorAll("#wzOl .ol")].map(i => i.value.trim()).filter(Boolean);
+  if (pg.t === "idea" || pg.t === "summary") { const t = $id("wzIdea"); if (t) WD.idea = t.value.trim(); }
+  if (pg.t === "outline") WD.outline = [...document.querySelectorAll("#wzOl .ol")].map(i => i.value.trim()).filter(Boolean);
 }
 function wzGo(dir) {
   wzCollectFree();
-  if (dir > 0 && WD.step === N_IDEA && (WD.idea || "").length < 50) {
+  const pg = wzPages()[WD.step] || {};
+  if (dir > 0 && pg.t === "idea" && (WD.idea || "").length < 50) {
     $id("wzIdeaMsg").textContent = "梗概还太短——先生成或多写两句"; return;
   }
-  if (dir > 0 && WD.step === N_OUTLINE && (WD.outline || []).length < 2) {
+  if (dir > 0 && pg.t === "summary" && (WD.idea || "").length < 50) {
+    $id("wzIdeaMsg").textContent = "概要还太薄——它是整个世界的地基"; return;
+  }
+  if (dir > 0 && pg.t === "outline" && (WD.outline || []).length < 2) {
     $id("wzOlMsg").textContent = "至少要两章"; return;
   }
-  WD.step = Math.max(0, Math.min(N_DONE, WD.step + dir));
+  WD.step = Math.max(0, Math.min(wzPages().length - 1, WD.step + dir));
   wzSaveNow();
   wzRender();
 }
@@ -292,6 +357,40 @@ async function wzOutlineGen() {
     if (r.title && !WD.title) WD.title = r.title;
     WD.outline = r.outline || []; wzSaveNow(); wzRender();
   } catch (e) { $id("wzOlMsg").textContent = "⚠️ " + e.message; }
+}
+async function wzSummaryGen() {
+  wzCollectFree();
+  $id("wzIdeaMsg").textContent = "在铸了…（十几秒）";
+  try {
+    const r = await j("/stories/draft_sandbox/summary", { method: "POST",
+      body: JSON.stringify({ answers: WD.answers }) });
+    WD.idea = r.summary; wzSaveNow(); wzRender();   // 概要住 survey.idea 槽 — 断点续答白送
+  } catch (e) { $id("wzIdeaMsg").textContent = "⚠️ " + e.message; }
+}
+async function wzSandboxBuild() {
+  wzCollectFree();
+  WD.title = ($id("wzTitle") || {}).value || WD.title;
+  try {
+    const jb = await j("/stories/draft_sandbox", { method: "POST",
+      body: JSON.stringify({ answers: WD.answers, summary: WD.idea || "", title: WD.title }) });
+    $id("wzBody").innerHTML = `<div class="muted" style="margin-top:12px">🏜 世界铸造中…（世界→人物→修为体系→自检）</div>`;
+    const t = setInterval(async () => {
+      try {
+        const r = await j(`/stories/draft_sandbox/${jb.job}`);
+        if (r.status === "done") {
+          clearInterval(t);
+          $id("wzBody").innerHTML = `<div style="margin-top:12px">✅ 世界已经立起来了。
+            <div style="display:flex;gap:8px;margin-top:10px">
+              <button onclick="location.href='/play?story=${r.story_id}'">▶️ 立刻踏入</button>
+              <button class="ghost" onclick="location.href='/studio?story=${r.story_id}'">🛠 先去工坊看看</button>
+            </div>
+            <div class="muted" style="font-size:12px;margin-top:6px">现在只有你能玩。满意了去工坊发布并把可见性改公开，就能上大厅。</div></div>`;
+        } else if (r.status === "error" || r.status === "gone") {
+          clearInterval(t); alert("⚠️ " + (r.error || "任务丢了，重试一次")); wzRender();
+        }
+      } catch (e) { clearInterval(t); alert("⚠️ " + e.message); wzRender(); }
+    }, 2500);
+  } catch (e) { alert("⚠️ " + e.message); }
 }
 async function wzBuild() {
   wzCollectFree();
