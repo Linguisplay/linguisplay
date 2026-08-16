@@ -48,7 +48,9 @@ _PINS_OK = {("runtime.py", "char_position"),          # 唯一的读者 (级联�
 
 # schedule 字段本身的合法读者: 级联第 7 级 / 校验作者数据的剧本 linter / 起草空骨架
 _SCHEDULE_OK = {("runtime.py", "_char_home"), ("logic.py", "lint_story"),
-                ("stories.py", "draft_engine")}
+                ("stories.py", "draft_engine"),
+                # 🏜 问卷造沙盒: 与 draft_engine 同理 — 起草时清零作息防 LLM 私货
+                ("stories.py", "draft_sandbox")}
 
 
 def _py_files() -> list[Path]:
