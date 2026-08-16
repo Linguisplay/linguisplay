@@ -667,15 +667,27 @@ _SANDBOX_SUM_QUOTA: dict[str, int] = {}   # f"{uid}:{yyyymmdd}" → 当日概要
                                           # (进程内, 重启清零 — v1 接受)
 
 
+def _utc_today() -> str:
+    """配额闸的「今天」— 与 created_at 的存储基准 (去tz的UTC, models._now) 同帧。
+    别用本地墙钟: 上海时区每天 00:00~08:00 会把刚落库的本子漏出「今天」。"""
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y%m%d")
+
+
+def _utc_day_start():
+    from datetime import datetime, timezone
+    return (datetime.now(timezone.utc).replace(tzinfo=None)
+            .replace(hour=0, minute=0, second=0, microsecond=0))
+
+
 @router.post("/draft_sandbox/summary", response_model=SandboxSummaryOut)
 def draft_sandbox_summary(body: SandboxSurveyIn, user: User = Depends(current_user)):
     """🏜 确认环: 答案 → 一段世界概要, 创作者可改可重摇。重摇每日 10 次。"""
-    import time as _t
     answers = {str(k)[:24]: str(v)[:500] for k, v in (body.answers or {}).items()
                if str(v).strip()}
     if not answers:
         raise HTTPException(400, "先答几道题，概要才有的可写")
-    key = f"{user.id}:{_t.strftime('%Y%m%d')}"
+    key = f"{user.id}:{_utc_today()}"
     if _SANDBOX_SUM_QUOTA.get(key, 0) >= 10:
         raise HTTPException(429, "今天的重摇次数用完了——直接改文字也一样算数")
     _SANDBOX_SUM_QUOTA[key] = _SANDBOX_SUM_QUOTA.get(key, 0) + 1
@@ -695,13 +707,12 @@ def draft_sandbox(body: DraftSandboxIn, user: User = Depends(current_user),
     import threading
     import time as _t
     import uuid as _uuid
-    from datetime import datetime
     answers = {str(k)[:24]: str(v)[:500] for k, v in (body.answers or {}).items()
                if str(v).strip()}
     summary = (body.summary or "").strip()[:2000]
     if len(summary) < 50:
         raise HTTPException(400, "先生成并确认世界概要——它是整个世界的地基")
-    day0 = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    day0 = _utc_day_start()
     mine_today = (db.query(StoryModel)
                   .filter(StoryModel.owner_id == user.id,
                           StoryModel.created_at >= day0).all())

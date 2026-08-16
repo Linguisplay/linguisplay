@@ -110,3 +110,12 @@ def test_summary_quota_429(c):
     assert uidkey
     r = c.post("/api/v1/stories/draft_sandbox/summary", json={"answers": ANSWERS})
     assert r.status_code == 429
+
+
+def test_quota_day_frame_is_utc():
+    """配额日界必须与 created_at 同帧 (UTC) — 本地墙钟版在上海时区每天有 8 小时漏计窗。"""
+    from datetime import datetime, timezone
+    from app.routers import stories as stories_mod
+    assert stories_mod._utc_today() == datetime.now(timezone.utc).strftime("%Y%m%d")
+    d0 = stories_mod._utc_day_start()
+    assert d0.hour == 0 and d0.date() == datetime.now(timezone.utc).date()
