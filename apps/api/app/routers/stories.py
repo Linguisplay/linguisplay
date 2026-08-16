@@ -425,6 +425,60 @@ def _strip_all_gates(content: dict) -> None:
                         "affinity_min": 0}
 
 
+# ── 🏜 问卷造沙盒 (spec: docs/superpowers/specs/2026-08-16-survey-sandbox-maker-design.md) ──
+_SANDBOX_ECON = {  # 题材 → (货币, 开局钱): 确定性查表, 这种事不烧模型
+    "修仙": ("灵石", 20), "都市异能": ("元", 300), "西幻": ("金币", 30),
+    "末世": ("物资点", 50), "宫斗": ("两银", 20), "星际": ("星币", 200)}
+
+
+def _assemble_sandbox(world: dict, chars: list[dict], prog: dict | None,
+                      answers: dict, title_override: str = "") -> dict:
+    """世界件+角色+阶梯+问卷答案 → StoryInput 形状的沙盒 payload。
+    沙盒惯例: 单幕、endings=[] (沙盒没有出口)、私有落库。"""
+    locs = [{"id": f"loc_{i+1}", "name": str(l.get("name") or f"地点{i+1}")[:12],
+             "detail": str(l.get("detail") or "")[:80],
+             "exits": [str(x) for x in (l.get("exits") or [])],
+             "unlock": {"act_min": 0, "affinity_min": 0, "required_fragment_ids": []},
+             "props": []}
+            for i, l in enumerate((world.get("locations") or [])[:4])]
+    currency, money = _SANDBOX_ECON.get(str(answers.get("题材") or ""), ("元", 100))
+    powers = [str(p).strip()[:40] for p in str(answers.get("金手指") or "").splitlines()
+              if str(p).strip()][:4]
+    tech = str(world.get("tech_level") or "modern")
+    phone = ({"enabled": False} if tech == "ancient"
+             else {"enabled": True, "device": "终端" if tech == "future" else "手机"})
+    sandbox: dict = {"enabled": True, "real_time": True,
+                     "currency": currency, "start_money": money}
+    if powers:
+        sandbox["default_powers"] = powers
+    if prog and str((prog or {}).get("name") or "").strip() and prog.get("ranks"):
+        sandbox["progression"] = {"name": str(prog["name"]).strip()[:8],
+                                  "ranks": [str(r)[:8] for r in prog["ranks"]][:12]}
+    if chars:
+        sandbox["opening_visitor"] = chars[0]["id"]
+    if locs:
+        sandbox["start_location"] = locs[0]["id"]
+    era = str(world.get("era") or answers.get("年代感") or "").strip()[:60]
+    if era:
+        sandbox["era"] = era
+    return {
+        "title": (title_override or str(world.get("title") or "未命名沙盒"))[:24],
+        "language": "zh", "visibility": "private",
+        "one_liner": str(world.get("one_liner") or "")[:40],
+        "synopsis": str(world.get("synopsis") or "")[:400],
+        "world_long": str(world.get("world_long") or "")[:2000],
+        "world_facts": str(world.get("world_facts") or "")[:400],
+        "style": str(world.get("style") or "")[:600],
+        "trope_tags": [str(t)[:8] for t in (world.get("trope_tags") or [])[:4]],
+        "characters": chars,
+        "acts": [{"index": 1, "title": "自由行", "goal": "", "events": [],
+                  "advance": {"required_fragment_ids": [], "required_event_ids": [],
+                              "affinity_min": 0}}],
+        "locations": locs, "endings": [], "phone": phone, "sandbox": sandbox,
+        "tuning": {"_origin": "survey_sandbox"},
+    }
+
+
 @router.post("/draft_engine")
 def draft_engine(body: CharBlobInput, user: User = Depends(current_user)):
     """✍️ AI 起草引擎本: 立即返回 {job}; 轮询 GET /stories/draft_engine/{job}。
