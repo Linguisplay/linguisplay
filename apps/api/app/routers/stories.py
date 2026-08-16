@@ -15,7 +15,12 @@ from pydantic import BaseModel
 
 from ..schemas import (
     Character,
+    DraftJobOut,
+    DraftSandboxIn,
+    DraftSandboxStatus,
     PublishResult,
+    SandboxSummaryOut,
+    SandboxSurveyIn,
     Secret,
     SecretInput,
     Story,
@@ -650,6 +655,144 @@ def draft_engine_result(job_id: str, user: User = Depends(current_user)):
     job = _PARSE_JOBS.get(job_id)
     if not job or job.get("uid") != user.id:
         raise HTTPException(404, "任务不存在或已过期")
+    if job.get("status") == "working":
+        return {"status": "working"}
+    if job.get("status") == "error":
+        return {"status": "error", "error": job.get("error")}
+    return {"status": "done", "story_id": job.get("story_id")}
+
+
+# ── 🏜 问卷造沙盒 (答完即玩, 满意再公开) ─────────────────────
+_SANDBOX_SUM_QUOTA: dict[str, int] = {}   # f"{uid}:{yyyymmdd}" → 当日概要次数
+                                          # (进程内, 重启清零 — v1 接受)
+
+
+@router.post("/draft_sandbox/summary", response_model=SandboxSummaryOut)
+def draft_sandbox_summary(body: SandboxSurveyIn, user: User = Depends(current_user)):
+    """🏜 确认环: 答案 → 一段世界概要, 创作者可改可重摇。重摇每日 10 次。"""
+    import time as _t
+    answers = {str(k)[:24]: str(v)[:500] for k, v in (body.answers or {}).items()
+               if str(v).strip()}
+    if not answers:
+        raise HTTPException(400, "先答几道题，概要才有的可写")
+    key = f"{user.id}:{_t.strftime('%Y%m%d')}"
+    if _SANDBOX_SUM_QUOTA.get(key, 0) >= 10:
+        raise HTTPException(429, "今天的重摇次数用完了——直接改文字也一样算数")
+    _SANDBOX_SUM_QUOTA[key] = _SANDBOX_SUM_QUOTA.get(key, 0) + 1
+    from ..engine.llm import get_llm
+    out = get_llm().generate({"sandbox_summary": True, "answers": answers}) or {}
+    s = str(out.get("summary") or "").strip()
+    if len(s) < 30:
+        raise HTTPException(502, "这次没写出来——点重摇再试一次")
+    return {"summary": s[:2000]}
+
+
+@router.post("/draft_sandbox", response_model=DraftJobOut)
+def draft_sandbox(body: DraftSandboxIn, user: User = Depends(current_user),
+                  db: Session = Depends(get_db)):
+    """🏜 问卷 → 沙盒本: 立即返回 {job}; 轮询 GET /stories/draft_sandbox/{job}。
+    完成即私有可玩; 公开走工坊发布+可见性两道现有开关。每日 3 次。"""
+    import threading
+    import time as _t
+    import uuid as _uuid
+    from datetime import datetime
+    answers = {str(k)[:24]: str(v)[:500] for k, v in (body.answers or {}).items()
+               if str(v).strip()}
+    summary = (body.summary or "").strip()[:2000]
+    if len(summary) < 50:
+        raise HTTPException(400, "先生成并确认世界概要——它是整个世界的地基")
+    day0 = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    mine_today = (db.query(StoryModel)
+                  .filter(StoryModel.owner_id == user.id,
+                          StoryModel.created_at >= day0).all())
+    if sum(1 for s in mine_today
+           if (s.tuning or {}).get("_origin") == "survey_sandbox") >= 3:
+        raise HTTPException(429, "今天已经铸了 3 个世界——明天再来，或先把今天的打磨好")
+    if any(j.get("uid") == user.id and j.get("kind") == "sandbox"
+           and j.get("status") == "working" for j in _PARSE_JOBS.values()):
+        raise HTTPException(409, "有一个世界正在铸造中——等它完成再开新的")
+    jid = _uuid.uuid4().hex[:12]
+    _PARSE_JOBS[jid] = {"status": "working", "at": _t.time(), "uid": user.id,
+                        "kind": "sandbox"}
+    while len(_PARSE_JOBS) > _PARSE_CAP:
+        _PARSE_JOBS.pop(next(iter(_PARSE_JOBS)), None)
+    uid, utitle = user.id, (body.title or "").strip()[:24]
+
+    def _work():
+        import json as _json
+
+        from ..db import SessionLocal
+        from ..engine import logic as logic_mod
+        from ..engine.llm import get_llm
+        job = _PARSE_JOBS.get(jid)
+        try:
+            llm = get_llm()
+            world = llm.generate({"sandbox_world": True, "answers": answers,
+                                  "summary": summary}) or {}
+            if not (str(world.get("title") or "").strip()
+                    and len(str(world.get("world_long") or "")) >= 50):
+                raise ValueError("世界没铸出来——概要再具体一点试试")
+            cards = _sanitize_cards(llm.generate({
+                "char_from_text": True,
+                "text": (summary + "\n" + str(world.get("world_long") or ""))[:5000],
+                "world": str(world.get("world_long") or ""),
+                "language": "zh"}) or {})
+            chars = [{**c, "id": f"ch_{i+1}", "playable": False, "schedule": [],
+                      "ties": [], "items": c.get("items") or [],
+                      "bio_layers": c.get("bio_layers") or []}
+                     for i, c in enumerate(cards[:5])]
+            prog = None
+            wants = str(answers.get("超凡体系") or "").strip()
+            if wants and wants != "没有":
+                prog = llm.generate({"gen_progression": True,
+                                     "world": str(world.get("world_long") or "")[:800],
+                                     "title": str(world.get("title") or "")}) or None
+            payload = _assemble_sandbox(world, chars, prog, answers, utitle)
+            notes = logic_mod.sanitize_sandbox(payload)
+            data = StoryInput(**payload)
+            content = {"story": data.model_dump(), "secrets": []}
+            for _round in range(2):   # 沙盒无秘密, 走一遍以防万一 (dangling_exit 等)
+                errs = [i for i in logic_mod.lint_story(content)
+                        if i.get("severity") == "error"]
+                if not errs:
+                    break
+                _degrade_draft(content, errs)
+            db2 = SessionLocal()
+            try:
+                st = content["story"]
+                st["tuning"]["_draft_size"] = len(_json.dumps(content, ensure_ascii=False))
+                if notes:
+                    st["tuning"]["_sanitize_notes"] = notes[:6]
+                row = StoryModel(
+                    owner_id=uid, title=st["title"], language="zh",
+                    one_liner=st.get("one_liner"), synopsis=st.get("synopsis"),
+                    world_long=st.get("world_long"), world_facts=st.get("world_facts"),
+                    style=st.get("style") or "", trope_tags=st.get("trope_tags") or [],
+                    visibility="private",
+                    characters=st.get("characters") or [], acts=st.get("acts") or [],
+                    endings=[], locations=st.get("locations") or [],
+                    phone=st.get("phone"), sandbox=st.get("sandbox"),
+                    tuning=st.get("tuning") or {})
+                db2.add(row)
+                db2.commit()
+                sid = row.id
+            finally:
+                db2.close()
+            if job is not None:
+                job.update({"status": "done", "story_id": sid})
+        except Exception as e:
+            if job is not None:
+                job.update({"status": "error", "error": str(e)[:120] or "铸造失败"})
+
+    threading.Thread(target=_work, daemon=True).start()
+    return {"job": jid}
+
+
+@router.get("/draft_sandbox/{job_id}", response_model=DraftSandboxStatus)
+def draft_sandbox_result(job_id: str, user: User = Depends(current_user)):
+    job = _PARSE_JOBS.get(job_id)
+    if not job or job.get("uid") != user.id:
+        return {"status": "gone"}
     if job.get("status") == "working":
         return {"status": "working"}
     if job.get("status") == "error":

@@ -810,6 +810,30 @@ class ChooseOut(BaseModel):
     moved_to: Optional[str] = None   # fate 卡: 迁往的地点名
 
 
+class SandboxSurveyIn(BaseModel):
+    answers: dict = {}
+
+
+class DraftSandboxIn(BaseModel):
+    answers: dict = {}
+    summary: str = ""        # 确认环产物 (玩家改过的版本是权威)
+    title: Optional[str] = None
+
+
+class DraftJobOut(BaseModel):
+    job: str
+
+
+class DraftSandboxStatus(BaseModel):
+    status: str              # working | done | error | gone
+    story_id: Optional[str] = None
+    error: Optional[str] = None
+
+
+class SandboxSummaryOut(BaseModel):
+    summary: str
+
+
 class ConfrontIn(BaseModel):
     # 🃏 证据对峙: present an UNLOCKED fragment to the character its secret belongs to
     fragment_id: str
