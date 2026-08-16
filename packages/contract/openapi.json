@@ -1548,6 +1548,81 @@
         "title": "ContentLevelIn",
         "type": "object"
       },
+      "DraftJobOut": {
+        "properties": {
+          "job": {
+            "title": "Job",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job"
+        ],
+        "title": "DraftJobOut",
+        "type": "object"
+      },
+      "DraftSandboxIn": {
+        "properties": {
+          "answers": {
+            "default": {},
+            "title": "Answers",
+            "type": "object"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "title": "DraftSandboxIn",
+        "type": "object"
+      },
+      "DraftSandboxStatus": {
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "story_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Story Id"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "DraftSandboxStatus",
+        "type": "object"
+      },
       "Ending": {
         "properties": {
           "condition": {
@@ -3400,6 +3475,30 @@
           "persona_id"
         ],
         "title": "RunSummary",
+        "type": "object"
+      },
+      "SandboxSummaryOut": {
+        "properties": {
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary"
+        ],
+        "title": "SandboxSummaryOut",
+        "type": "object"
+      },
+      "SandboxSurveyIn": {
+        "properties": {
+          "answers": {
+            "default": {},
+            "title": "Answers",
+            "type": "object"
+          }
+        },
+        "title": "SandboxSurveyIn",
         "type": "object"
       },
       "Secret": {
@@ -12397,6 +12496,177 @@
           }
         ],
         "summary": "Draft Engine Result",
+        "tags": [
+          "stories"
+        ]
+      }
+    },
+    "/api/v1/stories/draft_sandbox": {
+      "post": {
+        "description": "🏜 问卷 → 沙盒本: 立即返回 {job}; 轮询 GET /stories/draft_sandbox/{job}。\n完成即私有可玩; 公开走工坊发布+可见性两道现有开关。每日 3 次。",
+        "operationId": "draft_sandbox_api_v1_stories_draft_sandbox_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftSandboxIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftJobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "未登录 / 会话失效。body 是 ErrorEnvelope。"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Draft Sandbox",
+        "tags": [
+          "stories"
+        ]
+      }
+    },
+    "/api/v1/stories/draft_sandbox/summary": {
+      "post": {
+        "description": "🏜 确认环: 答案 → 一段世界概要, 创作者可改可重摇。重摇每日 10 次。",
+        "operationId": "draft_sandbox_summary_api_v1_stories_draft_sandbox_summary_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SandboxSurveyIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxSummaryOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "未登录 / 会话失效。body 是 ErrorEnvelope。"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Draft Sandbox Summary",
+        "tags": [
+          "stories"
+        ]
+      }
+    },
+    "/api/v1/stories/draft_sandbox/{job_id}": {
+      "get": {
+        "operationId": "draft_sandbox_result_api_v1_stories_draft_sandbox__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftSandboxStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "未登录 / 会话失效。body 是 ErrorEnvelope。"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Draft Sandbox Result",
         "tags": [
           "stories"
         ]
