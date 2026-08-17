@@ -39,6 +39,12 @@ def test_md5_dedup_on_insert():
     assert artref.insert_ref(con, row) is False, "同 md5 二进 = 库要炸重"
 
 
+def test_require_tags_filter_locally():
+    """匿名 API 限 2 个查询标签 — 挤不下的条件必须本地能补刀。"""
+    assert artref.has_tags(POST, ["solo"]) is True
+    assert artref.has_tags(POST, ["solo", "suit"]) is False
+
+
 def test_pick_ext_only_images():
     assert artref.pick_ext("https://x/p/b.webp?q=1") == ".webp"
     assert artref.pick_ext("https://x/p/b.zip") == ""

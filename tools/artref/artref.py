@@ -81,6 +81,12 @@ def row_from_post(post: dict, min_score: int) -> dict | None:
     }
 
 
+def has_tags(post: dict, require: list[str]) -> bool:
+    """本地标签过滤: 匿名 API 限 2 个查询标签, 挤不下的条件在这里补刀。"""
+    have = set((post.get("tag_string_general") or "").split())
+    return all(t in have for t in require)
+
+
 def insert_ref(con: sqlite3.Connection, row: dict, note: str = "") -> bool:
     """入库 (md5 去重)。已有返回 False。"""
     have = con.execute("select 1 from refs where md5=?", (row["md5"],)).fetchone()
@@ -117,24 +123,34 @@ def _download(con: sqlite3.Connection, row: dict, note: str) -> bool:
         return True
 
 
-def crawl(tags: str, limit: int, min_score: int) -> None:
+def crawl(tags: str, limit: int, min_score: int, require: list[str] | None = None,
+          start_page: int = 1, max_pages: int = 20) -> None:
+    """匿名深页采集法: 最新页分数没长熟, 翻到几百页外(半年前)按 min_score 本地筛。
+    产出率约 1%/页, 慢但不求人; 快路是带 API key 的源 (等注册)。"""
     con = open_db()
-    added = seen = 0
-    for page in range(1, 21):
+    added = seen = fails = 0
+    for page in range(start_page, start_page + max_pages):
         if added >= limit:
             break
         q = urllib.parse.urlencode({"tags": tags, "limit": 100, "page": page})
         try:
             posts = _fetch(f"{API}?{q}")
+            fails = 0
         except Exception as e:
-            print(f"⚠️ 拉列表失败 (page {page}): {e}")
-            break
+            fails += 1
+            print(f"⚠️ 拉列表失败 (page {page}): {e}" + ("" if fails < 5 else " — 连败5页收工"))
+            if fails >= 5:
+                break
+            time.sleep(3)   # 深页 500 是间歇性的, 歇口气跳过这页
+            continue
         if not posts:
             break
         for p in posts:
             if added >= limit:
                 break
             seen += 1
+            if require and not has_tags(p, require):
+                continue
             row = row_from_post(p, min_score)
             if row and _download(con, row, note=f"crawl:{tags}"):
                 added += 1
@@ -207,9 +223,14 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="审美参考例库")
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("crawl")
-    c.add_argument("--tags", required=True, help='如 "1boy solo rating:general"')
+    c.add_argument("--tags", required=True,
+                   help='查询标签, 匿名限2个可数标签, 如 "1boy order:score"')
     c.add_argument("--limit", type=int, default=60)
     c.add_argument("--min-score", type=int, default=40)
+    c.add_argument("--require", default="",
+                   help='本地必含标签(空格分隔), 挤不进查询的条件放这里, 如 "solo"')
+    c.add_argument("--start-page", type=int, default=1, help="深页采集起始页")
+    c.add_argument("--max-pages", type=int, default=20)
     a = sub.add_parser("add")
     a.add_argument("urls", nargs="+")
     a.add_argument("--note", default="")
@@ -217,7 +238,8 @@ def main() -> None:
     sub.add_parser("stats")
     args = ap.parse_args()
     if args.cmd == "crawl":
-        crawl(args.tags, args.limit, args.min_score)
+        crawl(args.tags, args.limit, args.min_score, args.require.split() or None,
+              args.start_page, args.max_pages)
     elif args.cmd == "add":
         add(args.urls, args.note)
     elif args.cmd == "gallery":
