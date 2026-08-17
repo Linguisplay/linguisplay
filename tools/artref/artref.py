@@ -49,7 +49,57 @@ def open_db() -> sqlite3.Connection:
         local text,           -- img/ 下的文件名
         note text,
         added_at text)""")
+    # 🎯 品味库三列 (Yi: 库的单位是判断不是图): verdict love/reject/空=候选,
+    # facets 空格分隔的维度词, comment 一句为什么。幂等迁移。
+    cols = {row[1] for row in con.execute("pragma table_info(refs)")}
+    for col in ("verdict", "facets", "comment"):
+        if col not in cols:
+            con.execute(f"alter table refs add column {col} text default ''")
+    con.commit()
     return con
+
+
+def rate(con: sqlite3.Connection, md5: str, verdict: str,
+         facets: str = "", comment: str = "") -> bool:
+    """落一次判断。verdict 只认 love/reject/'' (清空回候选)。"""
+    if verdict not in ("love", "reject", ""):
+        return False
+    cur = con.execute(
+        "update refs set verdict=?, facets=?, comment=? where md5=?",
+        (verdict, facets.strip()[:200], comment.strip()[:300], md5))
+    con.commit()
+    return cur.rowcount > 0
+
+
+def taste_export() -> str:
+    """把全部判断蒸馏成 taste.md: 正面词表 + 忌清单 (按出现频次排序), 附代表例。"""
+    con = open_db()
+    import collections
+    pos: collections.Counter = collections.Counter()
+    neg: collections.Counter = collections.Counter()
+    pos_c, neg_c = [], []
+    for v, f, c, page in con.execute(
+            "select verdict, facets, comment, page from refs where verdict != ''"):
+        bag = pos if v == "love" else neg
+        for w in (f or "").split():
+            bag[w] += 1
+        if (c or "").strip():
+            (pos_c if v == "love" else neg_c).append((c.strip(), page))
+    n_love = con.execute("select count(*) from refs where verdict='love'").fetchone()[0]
+    n_rej = con.execute("select count(*) from refs where verdict='reject'").fetchone()[0]
+    lines = [f"# 🎯 品味库蒸馏 (❤️{n_love} / ❌{n_rej})",
+             "", "由品鉴台的判断聚合而来; 喂画风圣经与生图 prompt 用。", "",
+             "## 要 (按判断次数)"]
+    lines += [f"- {w} ×{n}" for w, n in pos.most_common()] or ["- (还没有正面判断)"]
+    lines += ["", "## 忌 (按判断次数)"]
+    lines += [f"- {w} ×{n}" for w, n in neg.most_common()] or ["- (还没有反例判断)"]
+    lines += ["", "## 好例评语"]
+    lines += [f"- {c}  ({p})" for c, p in pos_c[:30]] or ["- 无"]
+    lines += ["", "## 反例评语"]
+    lines += [f"- {c}  ({p})" for c, p in neg_c[:30]] or ["- 无"]
+    out = root() / "taste.md"
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return str(out)
 
 
 def pick_ext(url: str) -> str:
@@ -93,7 +143,8 @@ def insert_ref(con: sqlite3.Connection, row: dict, note: str = "") -> bool:
     if have:
         return False
     con.execute(
-        "insert into refs values (?,?,?,?,?,?,?,?,?,?,?)",
+        "insert into refs (md5,source,page,artist,tags,score,width,height,local,note,added_at)"
+        " values (?,?,?,?,?,?,?,?,?,?,?)",
         (row["md5"], row["source"], row["page"], row["artist"], row["tags"],
          row["score"], row["width"], row["height"], row.get("local") or "",
          note, time.strftime("%Y-%m-%d %H:%M")))
@@ -208,6 +259,121 @@ img{{width:100%;border-radius:6px}}figcaption{{font-size:11px;color:#889}}a{{col
     print(f"✓ {out} ({len(rows)} 张)")
 
 
+_FACETS = ["构图", "光影", "脸", "发", "服装质感", "氛围", "色彩", "笔触"]
+
+
+def serve(port: int = 8787) -> None:
+    """🎯 品鉴台: 本地网页一张张过图。← 淘汰 / → 收藏, 点维度, 写一句为什么。
+    判断直接落 SQLite; 判完自动出下一张 (未判定的先来)。"""
+    import http.server
+    import socketserver
+
+    con = open_db()
+
+    def queue() -> list[dict]:
+        rows = con.execute(
+            "select md5, local, artist, tags, score, page, verdict, facets, comment "
+            "from refs where local != '' order by (verdict != ''), added_at desc").fetchall()
+        keys = ("md5", "local", "artist", "tags", "score", "page",
+                "verdict", "facets", "comment")
+        return [dict(zip(keys, r)) for r in rows]
+
+    page_html = """<!doctype html><meta charset="utf-8"><title>品鉴台</title>
+<style>body{background:#14141c;color:#dde;font:15px/1.6 sans-serif;margin:0;display:flex;height:100vh}
+#stage{flex:1;display:flex;align-items:center;justify-content:center;background:#0d0d13}
+#stage img{max-width:100%;max-height:100vh}
+#side{width:340px;padding:18px;display:flex;flex-direction:column;gap:10px}
+button{background:#1e1e2a;color:#dde;border:1px solid #333;padding:8px 12px;border-radius:6px;cursor:pointer}
+button.on{border-color:#ffd479;color:#ffd479}
+#love{background:#2a3a1e}#reject{background:#3a1e1e}
+textarea{background:#1e1e2a;color:#dde;border:1px solid #333;min-height:70px;padding:8px}
+.muted{color:#889;font-size:12px}a{color:#8ea2ff}</style>
+<div id="stage"><img id="im"></div>
+<div id="side">
+  <div id="meta" class="muted"></div>
+  <div id="facets"></div>
+  <textarea id="cm" placeholder="一句为什么 (可空)"></textarea>
+  <div style="display:flex;gap:8px">
+    <button id="reject" onclick="judge('reject')">❌ 淘汰 (←)</button>
+    <button id="love" onclick="judge('love')">❤️ 收藏 (→)</button>
+    <button onclick="skip()">跳过 (↓)</button>
+  </div>
+  <div id="prog" class="muted"></div>
+  <div class="muted">键盘: ←❌ →❤️ ↓跳过 · 数字键 1~8 点维度 · 判断落库即生效</div>
+</div>
+<script>
+const FACETS = %FACETS%;
+let Q = [], i = 0, picked = new Set();
+function render(){
+  const it = Q[i]; if(!it){ document.getElementById('meta').textContent='都判完了 🎉'; return; }
+  document.getElementById('im').src = '/img/' + it.local;
+  document.getElementById('meta').innerHTML =
+    `[${it.score}] ${it.artist||'?'} · <a href="${it.page}" target="_blank">来源</a>` +
+    (it.verdict ? ` · 已判:${it.verdict==='love'?'❤️':'❌'}` : '');
+  picked = new Set((it.facets||'').split(' ').filter(Boolean));
+  document.getElementById('cm').value = it.comment || '';
+  document.getElementById('facets').innerHTML = FACETS.map((f,n) =>
+    `<button class="${picked.has(f)?'on':''}" onclick="tog('${f}')">${n+1} ${f}</button>`).join(' ');
+  document.getElementById('prog').textContent =
+    `第 ${i+1}/${Q.length} 张 · 待判 ${Q.filter(x=>!x.verdict).length}`;
+}
+function tog(f){ picked.has(f) ? picked.delete(f) : picked.add(f); render0(); }
+function render0(){ const it=Q[i]; it.facets=[...picked].join(' '); render(); }
+async function judge(v){
+  const it = Q[i]; if(!it) return;
+  it.verdict = v; it.facets = [...picked].join(' ');
+  it.comment = document.getElementById('cm').value;
+  await fetch('/rate', {method:'POST', body: JSON.stringify(it)});
+  skip();
+}
+function skip(){ i = Math.min(i+1, Q.length); render(); }
+document.addEventListener('keydown', e => {
+  if(e.target.tagName === 'TEXTAREA') return;
+  if(e.key === 'ArrowLeft') judge('reject');
+  else if(e.key === 'ArrowRight') judge('love');
+  else if(e.key === 'ArrowDown') skip();
+  else if(e.key >= '1' && e.key <= '8') tog(FACETS[+e.key-1]);
+});
+fetch('/queue').then(r=>r.json()).then(d=>{ Q=d; render(); });
+</script>"""
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def _send(self, body: bytes, ctype: str = "text/html; charset=utf-8"):
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            if self.path == "/":
+                self._send(page_html.replace("%FACETS%", json.dumps(_FACETS)).encode())
+            elif self.path == "/queue":
+                self._send(json.dumps(queue()).encode(), "application/json")
+            elif self.path.startswith("/img/"):
+                f = root() / "img" / pathlib.Path(self.path[5:]).name
+                if f.exists():
+                    self._send(f.read_bytes(), "image/jpeg")
+                else:
+                    self.send_error(404)
+            else:
+                self.send_error(404)
+
+        def do_POST(self):
+            if self.path != "/rate":
+                return self.send_error(404)
+            d = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            ok = rate(con, d.get("md5") or "", d.get("verdict") or "",
+                      d.get("facets") or "", d.get("comment") or "")
+            self._send(json.dumps({"ok": ok}).encode(), "application/json")
+
+        def log_message(self, *a):
+            pass
+
+    with socketserver.TCPServer(("127.0.0.1", port), H) as srv:
+        print(f"🎯 品鉴台开在 http://127.0.0.1:{port} — Ctrl+C 收摊")
+        srv.serve_forever()
+
+
 def stats() -> None:
     con = open_db()
     total = con.execute("select count(*) from refs").fetchone()[0]
@@ -236,6 +402,9 @@ def main() -> None:
     a.add_argument("--note", default="")
     sub.add_parser("gallery")
     sub.add_parser("stats")
+    s = sub.add_parser("serve", help="品鉴台 (本地网页判图)")
+    s.add_argument("--port", type=int, default=8787)
+    sub.add_parser("taste", help="判断蒸馏成 taste.md")
     args = ap.parse_args()
     if args.cmd == "crawl":
         crawl(args.tags, args.limit, args.min_score, args.require.split() or None,
@@ -246,6 +415,10 @@ def main() -> None:
         gallery()
     elif args.cmd == "stats":
         stats()
+    elif args.cmd == "serve":
+        serve(args.port)
+    elif args.cmd == "taste":
+        print("✓", taste_export())
 
 
 if __name__ == "__main__":

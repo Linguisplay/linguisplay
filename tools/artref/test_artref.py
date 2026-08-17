@@ -48,3 +48,37 @@ def test_require_tags_filter_locally():
 def test_pick_ext_only_images():
     assert artref.pick_ext("https://x/p/b.webp?q=1") == ".webp"
     assert artref.pick_ext("https://x/p/b.zip") == ""
+
+
+def test_rate_persists_and_rejects_bogus_verdict():
+    con = artref.open_db()
+    row = {**artref.row_from_post({**POST, "md5": "b" * 32,
+                                   "file_url": "https://x/b.jpg"}, 0), "local": "b.jpg"}
+    artref.insert_ref(con, row)
+    assert artref.rate(con, "b" * 32, "love", "脸 光影", "眼神光克制") is True
+    v, f, c = con.execute("select verdict, facets, comment from refs where md5=?",
+                          ("b" * 32,)).fetchone()
+    assert (v, f, c) == ("love", "脸 光影", "眼神光克制")
+    assert artref.rate(con, "b" * 32, "maybe") is False, "只认 love/reject/清空"
+    assert artref.rate(con, "no_such", "love") is False
+
+
+def test_taste_export_aggregates_by_frequency():
+    con = artref.open_db()
+    con.execute("update refs set verdict=''")   # 全套件共库: 先清别的用例的判断
+    con.commit()
+    for i, (v, f) in enumerate([("love", "脸 光影"), ("love", "脸"), ("reject", "塑料感")]):
+        md5 = f"c{i}" * 16
+        artref.insert_ref(con, {**artref.row_from_post(
+            {**POST, "md5": md5, "file_url": f"https://x/c{i}.jpg"}, 0), "local": "x.jpg"})
+        artref.rate(con, md5, v, f, "")
+    text = (artref.pathlib.Path(artref.taste_export())).read_text(encoding="utf-8")
+    assert "脸 ×2" in text and "光影 ×1" in text, "正面词表要按判断次数聚合"
+    assert "塑料感 ×1" in text, "反例词表同等值钱"
+
+
+def test_open_db_migration_is_idempotent():
+    artref.open_db().close()
+    con = artref.open_db()   # 二开不许因重复加列而炸
+    cols = {r[1] for r in con.execute("pragma table_info(refs)")}
+    assert {"verdict", "facets", "comment"} <= cols
