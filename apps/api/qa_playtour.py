@@ -166,6 +166,21 @@ def _judge(story, beats, turns_meta, state, suggestions, phone, mapv, feed):
                 elif len(t) > 40:
                     warns.append(f"句尾无标点: …{t[-18:]} (seq={b.get('seq')})")
 
+    # 🔇 被搭话零台词 = 红灯 (哑巴疫情 2026-08-17 复盘: 夜巡 08-13 起天天往
+    # metrics.jsonl 记 mute=1, 账本没人读, 烂了四天等玩家来骂 —— 账本不是警报,
+    # 判卷行才是每天真有人看的位置)。判据与 runtime.speechless_turn 同一把尺:
+    # 只有玩家【开口说话】(player 拍 type=dialogue) 的回合算数, do/think 沉默合法,
+    # 没有说话人的 dialogue 是解析失败的产物、不算开口。
+    pending_say, spoke = None, False
+    for b in beats + [{"author": "player", "type": "_end"}]:
+        if b.get("author") == "player":
+            if pending_say is not None and not spoke:
+                errs.append(f"被搭话零台词 (玩家拍 seq={pending_say})")
+            pending_say = b.get("seq") if b.get("type") == "dialogue" else None
+            spoke = False
+        elif b.get("type") == "dialogue" and (b.get("speaker_name") or "").strip():
+            spoke = True
+
     # 最后一回合的说话者必须在场 (画外音有专门通路, 对话拍不许)
     last_turn_speakers = {b.get("speaker_name") for b in beats[-8:]
                          if b.get("type") == "dialogue" and b.get("author") != "player"

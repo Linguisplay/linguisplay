@@ -3006,6 +3006,32 @@ def _parse_line_beats(text: str) -> list[dict[str, Any]] | None:
     return beats if matched else None
 
 
+def _merge_assistant_runs(hist: "list[dict[str, str]]") -> "list[dict[str, str]]":
+    """🔇 示范矫形 (哑巴疫情 2026-08-17; 08-07 前缀事故的第二层)。
+
+    历史从前是【一条 assistant 消息 = 恰好一行】—— 模型照这个形状学, 写一行旁白就
+    finish=stop (狗笼实弹, 流式/非流式都复现), 台词行永远轮不到出场; 哑拍落库又成为
+    下一拍的单行示范, 自我强化, 新局开场 15 条纯旁白 = 出生带病。~08-13 起 deepseek
+    服务端更贴范例、更不服从「写3~6行」, 这个一直存在的形状矛盾翻了车。
+
+    修法与 08-07 同一条家法 (示范必须长得跟要求的输出一样), 只是矫的层不同:
+    那次矫每一行的【前缀】, 这次矫每一条消息的【行数】—— 把窗口切完后连续的
+    assistant 条目合并成一条多行消息。铁律:
+      · 只动消息边界, 不动一个字 (内容变了就是另一种污染)
+      · 在 history_window 之后合并 — 窗口口径(玩家回合)/记忆切点/判官读的
+        都是合并前的原始条目, 两把尺的老坑不再挖
+      · 确定性合并 → 旧回合的合并段逐字不变, 前缀缓存的块状边界照旧吃满"""
+    out: list[dict[str, str]] = []
+    for m in hist:
+        if m.get("role") == "assistant" and out and out[-1].get("role") == "assistant":
+            out[-1] = {"role": "assistant",
+                       "content": (out[-1].get("content") or "") + "\n"
+                       + (m.get("content") or "")}
+        else:
+            out.append(dict(m))
+    return out
+
+
 def _turn_messages(prompt: dict[str, Any], system: str, speaker: str) -> list[dict[str, str]]:
     """Assemble the message stream for one turn (history, cued user line, depth anchor,
     same-turn said lines, re-anchor, optional guard correction). Extracted from generate()
@@ -3043,7 +3069,7 @@ def _turn_messages(prompt: dict[str, Any], system: str, speaker: str) -> list[di
                     and not str(m.get("content", "")).startswith(("（画外引导",
                                                                   "(Off-stage direction"))
                     else m for m in hist]
-        messages += hist
+        messages += _merge_assistant_runs(hist)   # 🔇 示范矫形, 见函数原委
     # observe/intro/transition is a one-off narration; nudge with a neutral cue
     if en:
         cue = ("(The story opens.)" if intro else
@@ -5559,6 +5585,63 @@ class QwenLLM:
         detail = " ".join(lines[1:])[:160 if en else 120] if len(lines) > 1 else ""
         return {"name": name, "detail": detail}
 
+    def _ensure_primary_line(self, messages: list[dict[str, str]],
+                             prompt: dict[str, Any], speaker: str,
+                             prose: str, beats: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """🔇 机械保证 (哑巴疫情 2026-08-17, Yi 拍板): say 通道被直接搭话, 这一拍却
+        一行台词都没有 → 门口补一枪【只要台词行】。三条设计铁律:
+          · 约束不进正常路的提示词 — 堵死出口模型会翻墙 (邀约锁的教训);
+            健康拍零新增调用零行为差, 保险只在出险时掏钱
+          · 已流出的旁白一个字不撕 — 守卫开枪「字被撕掉重打」的旧病不许复发,
+            台词只【追加】在旁白之后 (正好是健康拍的自然顺序)
+          · member 的「无」/do/think 的沉默/旁观局照旧合法, 轮不到这里
+        开火率本身是健康读口 (metrics llm kind=respeak / kind=render), 正常趋零 —
+        频繁开火说明底下的路又坏了, 该修路, 不该让保险硬撑着装没事。"""
+        if (prompt.get("channel") or "say") != "say" or prompt.get("group_mode") \
+                or prompt.get("observer"):
+            return beats
+        if any(b.get("type") == "dialogue" and (b.get("speaker_name") or "").strip()
+               and (b.get("text") or "").strip() for b in beats or []):
+            return beats
+        try:
+            directive = (
+                f"你上一拍只写了旁白就停了笔，戏还差最后一步：{speaker}被当面搭话，"
+                f"这一拍必须开口。紧接着已写的最后一句往下，只输出一行台词，格式：\n"
+                f"{speaker}：「说的话」\n"
+                f"贴{speaker}的人设与此刻的情绪写，冷淡、敷衍、拒答都行；"
+                "不写旁白，不解释，不重复已写过的句子。")
+            body = {"model": self._model,
+                    "messages": messages
+                    + ([{"role": "assistant", "content": prose}]
+                       if (prose or "").strip() else [])
+                    + [{"role": "system", "content": directive}],
+                    "max_tokens": 120, "temperature": 0.7}
+            if str(self._model or "").startswith("deepseek-v4"):
+                body["thinking"] = {"type": "disabled"}
+            resp = _post_chat(self._url, self._key, body, timeout=30, kind="respeak")
+            txt = (resp.json()["choices"][0]["message"].get("content") or "").strip()
+            line = None
+            parsed = _parse_line_beats(txt)
+            if parsed is not None:
+                # 有行前缀: 只认台词行; 全是旁白行 = 补枪也没肯开口, 不硬造
+                for b in parsed:
+                    if b.get("type") == "dialogue" and (b.get("text") or "").strip():
+                        line = {"type": "dialogue", "speaker_name": speaker,
+                                "text": b["text"]}
+                        break
+            elif txt:
+                # 裸台词抢救: 补枪自己忘了打前缀, 原病不许在保险里复发
+                t = txt.splitlines()[0].strip()
+                t = re.sub(r"^[（(][^）)]*[）)]", "", t).strip()
+                t = t.strip("「」“”\"' ").strip()
+                if t:
+                    line = {"type": "dialogue", "speaker_name": speaker, "text": t}
+            if line:
+                return list(beats or []) + [line]
+        except Exception:
+            pass  # 保险自己坏了不许炸回合 — 最坏退回旁白照走 (今天的样子)
+        return beats
+
     def plan_and_render(self, prompt: dict[str, Any], settle=None):
         """两拍合同 (docs/plan-render.md)。拍1 plan_turn：函数调用，只裁决＋出分镜，低温快包；
         拍2 render：照分镜写纯散文，stream=true 逐 token 流出。渲染拍不产生任何状态，所以
@@ -5608,7 +5691,10 @@ class QwenLLM:
             except Exception:
                 plan = None
         if plan is None:
-            yield ("final", self.generate(prompt))
+            directed = self.generate(prompt)
+            directed["beats"] = self._ensure_primary_line(
+                messages, prompt, speaker, "", directed.get("beats") or [])
+            yield ("final", directed)
             return
 
         # ── 🧾 缝：引擎先判，再把回执交给演员 (整改 P0 2026-08-08) ──
@@ -5677,9 +5763,12 @@ class QwenLLM:
             yield ("final", plan)
             return
         if not beats:
-            yield ("final", self.generate(prompt))
+            directed = self.generate(prompt)
+            directed["beats"] = self._ensure_primary_line(
+                messages, prompt, speaker, "", directed.get("beats") or [])
+            yield ("final", directed)
             return
-        plan["beats"] = beats
+        plan["beats"] = self._ensure_primary_line(messages, prompt, speaker, text, beats)
         ending = plan.get("ending")
         if isinstance(ending, dict) and not str(ending.get("reason") or "").strip():
             ending["reason"] = text[:200]  # the plan judged it before the prose existed
