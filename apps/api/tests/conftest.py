@@ -47,6 +47,15 @@ def _schema_is_always_there():
 
 
 @pytest.fixture(autouse=True)
+def _auth_throttle_clean():
+    """🔐 撞库防线的滚动窗口是进程内字典 — 全套件一个进程跑几百次注册/登录,
+    不清账的话闸会把无辜用例当撞库拦下 (test_auth_bruteforce 自己在用例内制造流量)。"""
+    from app.routers import auth as _auth
+    _auth._LOGIN_FAILS.clear()
+    _auth._SIGNUP_HITS.clear()
+
+
+@pytest.fixture(autouse=True)
 def _fictional_clock_default(monkeypatch):
     monkeypatch.setitem(runtime.DEFAULT_TUNING, "real_clock", 0)
     # 剧组戏眼同理: 生产全舰开, 测试世界默认关 (spy LLM 的 prompts[0] 执法点生态), 剧组测试显式开旗

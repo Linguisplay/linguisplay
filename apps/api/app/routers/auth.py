@@ -1,6 +1,7 @@
+import time as _time_mod
 from datetime import datetime, time
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -12,6 +13,22 @@ from ..security import hash_password, is_adult, make_session_token, verify_passw
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 settings = get_settings()
+
+# 🔐 撞库防线 (2026-08-19 上线准备): SSH 一周挨 2.9 万次暴破, HTTP 登录口公开后
+# 只会更多。同邮箱 15 分钟 5 次密码错误锁窗 (成功清零); 同 IP 每小时 10 次注册
+# (刷小号绕每日配额的路顺手堵上)。进程内字典足矣 — 单进程部署, 重启清零可接受。
+_FAIL_WINDOW, _FAIL_MAX = 15 * 60, 5
+_LOGIN_FAILS: dict[str, list[float]] = {}
+_SIGNUP_WINDOW, _SIGNUP_MAX = 3600, 10
+_SIGNUP_HITS: dict[str, list[float]] = {}
+
+
+def _over_limit(bucket: dict[str, list[float]], key: str,
+                window: int, cap: int) -> bool:
+    """滚动窗口计数: 顺手把过期时间戳扫掉, 字典不会无限长胖。"""
+    now = _time_mod.time()
+    bucket[key] = [t for t in bucket.get(key, []) if now - t < window]
+    return len(bucket[key]) >= cap
 
 
 def _set_session_cookie(response: Response, user_id: str) -> None:
@@ -27,7 +44,12 @@ def _set_session_cookie(response: Response, user_id: str) -> None:
 
 
 @router.post("/signup", status_code=201, response_model=SessionUser)
-def signup(body: SignupIn, response: Response, db: Session = Depends(get_db)):
+def signup(body: SignupIn, request: Request, response: Response,
+           db: Session = Depends(get_db)):
+    ip = request.client.host if request.client else "?"
+    if _over_limit(_SIGNUP_HITS, ip, _SIGNUP_WINDOW, _SIGNUP_MAX):
+        raise HTTPException(429, "注册太频繁了，过一会儿再来")
+    _SIGNUP_HITS.setdefault(ip, []).append(_time_mod.time())
     if not body.accepted_tos:
         raise HTTPException(422, "must accept Terms of Service")
     dob_dt = datetime.combine(body.dob, time.min)
@@ -65,9 +87,15 @@ def signup(body: SignupIn, response: Response, db: Session = Depends(get_db)):
 
 @router.post("/login", response_model=SessionUser)
 def login(body: LoginIn, response: Response, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == body.email.lower()).first()
+    key = body.email.lower()
+    # 锁的是「尝试」不是「密码对错」— 窗口内连对的密码也得等, 不给暴破者反馈信号
+    if _over_limit(_LOGIN_FAILS, key, _FAIL_WINDOW, _FAIL_MAX):
+        raise HTTPException(429, "尝试次数太多，15 分钟后再试")
+    user = db.query(User).filter(User.email == key).first()
     if not user or not verify_password(body.password, user.password_hash):
+        _LOGIN_FAILS.setdefault(key, []).append(_time_mod.time())
         raise HTTPException(401, "invalid email or password")
+    _LOGIN_FAILS.pop(key, None)
     _set_session_cookie(response, user.id)
     return SessionUser(id=user.id, email=user.email, display_name=user.display_name)
 
