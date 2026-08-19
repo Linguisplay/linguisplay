@@ -4,7 +4,7 @@ import json
 import os
 import tempfile
 import time as _time_mod
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import uuid
 
@@ -58,6 +58,33 @@ _TURN_ACTIVE: set = set()
 _TURN_GUARD = _imgthreading.Lock()
 # ▶ drive 防刷 (⚖️ 无点击不推进): run_id → 上一次接受观剧拍的时刻 (脚本空转拦截)
 _DRIVE_LAST: dict = {}
+
+# 💸 每日配额 (上线成本防线, 2026-08-18): 公开注册后 say/think 没有任何日上限,
+# 一个脚本就能无上限烧 LLM 账单。北京钟当天玩家拍计数 — UTC 帧会在零点前后
+# 把中国玩家的「一天」劈成两半 (#19 沙盒配额那课)。
+_BJ_TZ = timezone(timedelta(hours=8))
+
+
+def _quota_day_start(now: datetime) -> datetime:
+    """北京时间「今天 00:00」折回 UTC — Beat.created_at 存的是 UTC, 同钟才可比。"""
+    bj = now.astimezone(_BJ_TZ)
+    return bj.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+
+
+def _charge_daily_quota(user: User, db: Session) -> None:
+    """额度花完就在门口拦住 (429), 不烧 LLM 不落拍。0 = 闸不存在。"""
+    quota = get_settings().daily_turn_quota
+    if not quota:
+        return
+    from sqlalchemy import func
+    spent = (db.query(func.count(BeatModel.id))
+             .join(RunModel, BeatModel.run_id == RunModel.id)
+             .filter(RunModel.owner_id == user.id,
+                     BeatModel.author == "player",
+                     BeatModel.created_at >= _quota_day_start(datetime.now(timezone.utc)))
+             .scalar() or 0)
+    if spent >= quota:
+        raise HTTPException(429, "今天的回合额度用完了，北京时间零点刷新，明天再来吧")
 # 🔒 跨进程回合锁: _TURN_ACTIVE 只在本进程有效 — uvicorn 开多 worker 后两个 /play
 # 会各自过闸并发碾档。flock 把「一局同时只有一回合」钉在主机级; 进程被杀锁自动释放。
 _TURN_LOCK_DIR = os.path.join(tempfile.gettempdir(), "linguisplay-turnlocks")
@@ -1016,6 +1043,8 @@ def play(
     r = _own_run(run_id, user, db)
     if (r.state or {}).get("ended"):
         raise HTTPException(409, "这局已经结束了，开一局新的吧")
+    # 💸 每日配额闸 (上线成本防线): 在任何 LLM/落拍之前把超额请求拦在门口
+    _charge_daily_quota(user, db)
     # ▶ drive 防刷 (⚖️ 无点击不推进): 观剧拍零输入, 一段脚本就能空转无人值守地刷剧情
     # 刷账单 — 服务端强制两拍最小间隔, 不信任客户端的节流
     if body.channel == "drive":

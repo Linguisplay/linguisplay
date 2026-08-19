@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     # 值守刷剧情刷账单 — 服务端强制两拍之间的最小间隔秒数 (DRIVE_MIN_SECONDS)
     drive_min_seconds: int = 5
 
+    # 💸 每用户每日回合配额 (上线成本防线, 2026-08-18): 0 = 不设限 (开发默认)。
+    # 上线时在 .env 设 DAILY_TURN_QUOTA=300 之类; 口径 = 北京时间当天该用户名下
+    # 所有局的玩家拍 (author='player'), 超了 /play 429, 零点翻篇。
+    daily_turn_quota: int = 0
+
     # Logic backstop: after the addressed character's turn is generated, a deterministic guard
     # verifies it against the live scene (no absent character walks in, no locked secret leaks)
     # and regenerates once if broken. On by default; set LOGIC_GUARD=0 to disable.
